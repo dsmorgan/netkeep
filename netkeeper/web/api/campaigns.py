@@ -47,6 +47,7 @@ from netkeeper.models import (
     CAMPAIGN_NAME_MAX_LENGTH,
     Campaign,
     CampaignStatus,
+    CampaignStep,
     EnrollmentStatus,
     MessageStatus,
     StepCondition,
@@ -209,6 +210,9 @@ class StepOut(BaseModel):
     """The id of the user who adopted it."""
     template_adopted_from_version: int | None = None
     """The version the step used before that adoption."""
+    budget: str | None = None
+    """The LinkedIn budget the step spends: ``li_messages_auto`` for an ``auto_send`` step
+    while auto-send is on, ``li_prefills`` for any other LinkedIn step; null for email."""
 
 
 class CampaignOut(BaseModel):
@@ -418,7 +422,7 @@ def _summary_out(row: service.CampaignSummary) -> CampaignSummaryOut:
     )
 
 
-def _campaign_out(detail: service.CampaignDetail) -> CampaignOut:
+def _campaign_out(detail: service.CampaignDetail, settings: Settings) -> CampaignOut:
     c: Campaign = detail.campaign
     return CampaignOut(
         id=c.id,
@@ -454,6 +458,7 @@ def _campaign_out(detail: service.CampaignDetail) -> CampaignOut:
                 template_adopted_at=s.step.template_adopted_at,
                 template_adopted_by=s.step.template_adopted_by,
                 template_adopted_from_version=s.step.template_adopted_from_version,
+                budget=_budget(s.step, settings),
             )
             for s in detail.steps
         ],
@@ -475,7 +480,12 @@ def _campaign_out(detail: service.CampaignDetail) -> CampaignOut:
 
 def _detail(session: Session, user: User, campaign_id: int, request: Request) -> CampaignOut:
     detail = service.campaign_status(session, user, campaign_id, now=utcnow())
-    return _campaign_out(detail)
+    return _campaign_out(detail, _settings(request, session, user))
+
+
+def _budget(step: CampaignStep, settings: Settings) -> str | None:
+    action = linkedin_steps.step_budget(step, settings)
+    return None if action is None else action.value
 
 
 @router.get("/campaigns", operation_id="list_campaigns")

@@ -15,6 +15,7 @@ No test here touches a browser, LinkedIn, or the network.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -576,11 +577,23 @@ def test_the_outlook_would_send_the_step_the_handler_then_claims(
     assert seen.enrollment_id == first
 
 
-def test_a_passed_due_time_is_read_as_now(lane: Lane) -> None:
+def test_a_due_time_just_passed_is_read_as_now(lane: Lane) -> None:
+    lane.enroll(contact=dict(CONTACT))
+    _scheduled(lane, due=NOW - timedelta(minutes=5))
+    seen = look(lane, now=NOW)
+    assert seen.next_fire == NOW - timedelta(minutes=5) and seen.checked_at == NOW
+    assert not seen.catch_up and seen.catch_up_latest is None
+
+
+def test_a_due_time_an_interval_old_is_read_as_the_scheduler_s_catch_up(lane: Lane) -> None:
     lane.enroll(contact=dict(CONTACT))
     _scheduled(lane, due=NOW - timedelta(hours=1))
     seen = look(lane, now=NOW)
-    assert seen.next_fire == NOW - timedelta(hours=1) and seen.checked_at == NOW
+    # poll_and_fire defers it once, 5 to 20 minutes out, rather than firing it now.
+    assert seen.catch_up
+    assert seen.checked_at == NOW + timedelta(minutes=5)
+    assert seen.catch_up_latest == NOW + timedelta(minutes=20)
+    assert "the check is overdue" in auto_send_outlook.describe(seen, _utc)
 
 
 # --- the outlook and the handler, on the same fixtures -------------------------------------
@@ -779,7 +792,11 @@ def _status(*args: str) -> str:
 
 def test_schedule_status_says_auto_send_is_off(cli_db: Any) -> None:
     output = _status()
-    assert "auto-send: off; auto-send is off ([campaigns] linkedin_auto_send" in output
+    assert (
+        "auto-send: off ([campaigns] linkedin_auto_send in config.toml), so nothing sends on its"
+        " own"
+    ) in output
+    assert "auto-send is off" not in output  # said once, not twice
 
 
 def test_schedule_status_gives_the_next_check_and_the_last(cli_db: Any, tmp_path: Any) -> None:
@@ -830,7 +847,7 @@ def test_schedule_status_gives_the_next_check_and_the_last(cli_db: Any, tmp_path
         )
     output = _status("--config", str(config))
     assert (
-        "  last check: 2026-09-29 14:00 UTC: sent nothing, heat is at its skip threshold"
+        "  last check: 2026-09-29 14:00 UTC: sent nothing, heat is at or over its skip threshold"
     ) in output
 
 
@@ -878,3 +895,219 @@ def test_the_words_carry_the_times() -> None:
     assert last(scheduler.LastFire(at=NOW, reason="linkedin_inbox_stale"), _utc) == (
         "14:00: sent nothing, linkedin inbox stale"
     )
+
+
+# --- the sending hours: the outlook's copy of the claim's call, held to it ---------------
+
+
+def _hours(enabled: bool) -> Callable[[Lane], None]:
+    from netkeeper.services import sending_hours
+
+    def write(lane: Lane) -> None:
+        lane.write(
+            lambda s, u: sending_hours.write(
+                s,
+                u,
+                enabled=enabled,
+                days=["Mon", "Tue", "Wed", "Thu", "Fri"],
+                start="08:00",
+                end="09:00",
+            )
+        )
+
+    return write
+
+
+#: (sending hours, the step's due time, the outlook's wait, the claim's logged reason).
+HOURS: dict[str, tuple[bool, datetime, Wait | None, str | None]] = {
+    "closed": (True, NOW, Wait.SENDING_HOURS, "outside_sending_hours"),
+    "any time, due today": (False, NOW, None, None),
+    # Yesterday 18:00: "any time" spills it to today's 18:00, still ahead of 14:00.
+    "any time, spilled": (False, NOW - timedelta(hours=20), Wait.SPILLED, "spilled_to_next_day"),
+}
+
+
+@pytest.mark.parametrize("name", list(HOURS))
+async def test_the_outlook_holds_a_step_exactly_when_the_claim_does(
+    lane: Lane, caplog: pytest.LogCaptureFixture, name: str
+) -> None:
+    enabled, due, wait, words = HOURS[name]
+    lane.enroll(contact=dict(CONTACT), next_action_at=due)
+    _scheduled(lane)
+    _hours(enabled)(lane)
+    seen = look(lane)
+    assert seen.wait is wait
+    if wait is not None:
+        assert seen.until is not None and seen.until > NOW
+    fired = await fire(lane, caplog)
+    assert fired.words == words
+    assert (fired.outcome is None) is (wait is None)
+
+
+def test_the_shared_hold_is_the_claim_s_call() -> None:
+    """``sending_hours_hold`` passes what the claim passes to ``schedule.hold``."""
+    import inspect
+
+    claim = inspect.getsource(linkedin_steps._Claimer.claim)
+    shared = inspect.getsource(linkedin_steps.sending_hours_hold)
+    for argument in (
+        "slots=slots",
+        "hours=hours",
+        "starts_at=campaign.starts_at if campaign.start_chosen else None",
+        "first_step=enrollment.current_step is None",
+    ):
+        assert argument in claim and argument in shared
+    assert "Skip.OUTSIDE_SENDING_HOURS if hours.enabled else Skip.SPILLED" in claim
+
+
+# --- every reason maps, with no default ---------------------------------------------------
+
+
+def test_every_refusal_the_claim_gives_about_the_user_maps() -> None:
+    from netkeeper.services.campaign_guards import ChannelReason
+
+    browser = {
+        ChannelReason.BROWSER_UNKNOWN,
+        ChannelReason.BROWSER_UNHEALTHY,
+        ChannelReason.BROWSER_OUT_OF_BUDGET,
+    }
+    from_claim = {
+        linkedin_steps.Refusal.PREFILL_OPEN,
+        linkedin_steps.Refusal.OUTSIDE_ACTIVE_HOURS,
+        linkedin_steps.Refusal.BAD_ACTIVE_HOURS,
+        linkedin_steps.Refusal.INBOX_STALE,
+    }
+    assert set(auto_send_outlook.REFUSALS) == browser | from_claim
+    # Every browser reason the LinkedIn guard can give is among them.
+    from netkeeper.models import TemplateChannel
+    from netkeeper.services.campaign_guards import ChannelState, check_channel
+
+    given = set()
+    for ok in (None, True, False):
+        for left in (None, 0, 3):
+            given |= set(
+                check_channel(
+                    TemplateChannel.LINKEDIN, ChannelState(browser_ok=ok, browser_budget_left=left)
+                )
+            )
+    assert given <= set(auto_send_outlook.REFUSALS)
+
+
+def test_every_gate_reason_an_auto_send_fire_meets_maps(lane: Lane) -> None:
+    import inspect
+
+    source = inspect.getsource(scheduler.gate_skip_reason)
+    # The breakers name their kinds; the rest apply to every kind, auto-send included.
+    general = {"disarmed", "paused", "session_flagged", "heat"}
+    for reason in general:
+        assert f'return "{reason}"' in source
+    assert set(auto_send_outlook.GATE) == general
+
+
+def test_an_unmapped_refusal_raises_rather_than_guessing() -> None:
+    with pytest.raises(KeyError):
+        auto_send_outlook.REFUSALS["something_new"]
+
+
+# --- the step's budget --------------------------------------------------------------------
+
+
+def test_each_step_names_the_budget_it_spends() -> None:
+    from netkeeper.models import TemplateChannel
+
+    def step(channel: TemplateChannel, mode: StepMode) -> CampaignStep:
+        return CampaignStep(channel=channel, mode=mode)
+
+    li, email = TemplateChannel.LINKEDIN, TemplateChannel.EMAIL
+    assert linkedin_steps.step_budget(step(li, StepMode.AUTO_SEND), AUTO) is (
+        ActionClass.LI_MESSAGES_AUTO
+    )
+    assert linkedin_steps.step_budget(step(li, StepMode.AUTO_SEND), OFF) is ActionClass.LI_PREFILLS
+    assert linkedin_steps.step_budget(step(li, StepMode.PREFILL), AUTO) is ActionClass.LI_PREFILLS
+    assert linkedin_steps.step_budget(step(email, StepMode.SEND), AUTO) is None
+
+
+# --- the schedule's controls never wait on the display -------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/api/v1/linkedin/schedule/disarm", None),
+        ("/api/v1/linkedin/schedule/pause", None),
+        ("/api/v1/linkedin/schedule/unpause", None),
+        ("/api/v1/linkedin/schedule/arm", {"confirm": True}),
+    ],
+)
+async def test_a_broken_outlook_never_stops_a_schedule_control(
+    client: Any,
+    running_app: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    path: str,
+    body: Any,
+) -> None:
+    from netkeeper.services.linkedin_accounts import schedule_paused, scheduled_runs_armed
+    from netkeeper.web.security import CLIENT_HEADER, CLIENT_HEADER_VALUE
+
+    factory = running_app.state.session_factory
+    with session_scope(factory, write=True) as session:
+        user = session.scalars(select(User).where(User.kind == UserKind.LOCAL)).one()
+        arm_scheduled_runs(session, user, now=NOW)
+        if path.endswith("unpause"):
+            pause_schedule(session, user, now=NOW)
+
+    def broken(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("a contact named Somebody broke it")
+
+    monkeypatch.setattr(auto_send_outlook, "outlook", broken)
+    if path.endswith("/arm"):
+        with session_scope(factory, write=True) as session:
+            user = session.scalars(select(User).where(User.kind == UserKind.LOCAL)).one()
+            disarm_scheduled_runs(session, user)
+    with caplog.at_level(logging.WARNING):
+        response = await client.post(path, json=body, headers={CLIENT_HEADER: CLIENT_HEADER_VALUE})
+    assert response.status_code == 200, response.text
+    assert response.json()["auto_send"] is None
+    # Only the exception's type is logged, never its words.
+    assert "RuntimeError" in caplog.text and "Somebody" not in caplog.text
+    with session_scope(factory) as session:
+        user = session.scalars(select(User).where(User.kind == UserKind.LOCAL)).one()
+        account = ensure_account(session, user).id
+        armed = scheduled_runs_armed(session, user, account)
+        paused = schedule_paused(session, user, account)
+    expected = {
+        "disarm": (False, False),
+        "pause": (True, True),
+        "unpause": (True, False),
+        "arm": (True, False),
+    }[path.rsplit("/", 1)[1]]
+    assert (armed, paused) == expected
+
+
+async def test_a_broken_outlook_leaves_the_schedule_readable(
+    client: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(auto_send_outlook, "outlook", broken)
+    response = await client.get("/api/v1/linkedin/schedule")
+    assert response.status_code == 200 and response.json()["auto_send"] is None
+
+
+async def test_the_campaign_says_which_budget_each_step_spends(
+    client: Any, running_app: Any
+) -> None:
+    import factories
+
+    from netkeeper.models import TemplateChannel
+
+    with session_scope(running_app.state.session_factory, write=True) as session:
+        user = session.scalars(select(User).where(User.kind == UserKind.LOCAL)).one()
+        campaign = factories.make_campaign(
+            session, user, channels=(TemplateChannel.LINKEDIN, TemplateChannel.EMAIL)
+        )
+        campaign_id = campaign.id
+    steps = (await client.get(f"/api/v1/campaigns/{campaign_id}")).json()["steps"]
+    assert [step["budget"] for step in steps] == ["li_prefills", None]

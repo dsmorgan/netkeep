@@ -475,6 +475,41 @@ def ready_by_step(
     return {position: n for position, n in rows}
 
 
+def sending_hours_hold(
+    enrollment: Enrollment,
+    campaign: Campaign,
+    due: datetime,
+    now: datetime,
+    *,
+    slots: schedule.Suggested,
+    hours: schedule.SendingHours,
+) -> datetime | None:
+    """When the sending hours let ``enrollment``'s step, due at ``due``, go; ``None`` for
+    now (:func:`netkeeper.campaigns.schedule.hold`, #338). The ready list and the
+    auto-send outlook ask this; the claim makes the same call itself, and a test holds the
+    two together. Pure."""
+    return schedule.hold(
+        due,
+        now,
+        slots=slots,
+        hours=hours,
+        starts_at=campaign.starts_at if campaign.start_chosen else None,
+        first_step=enrollment.current_step is None,
+    )
+
+
+def step_budget(step: CampaignStep, settings: Settings) -> budgets.ActionClass | None:
+    """The LinkedIn budget a step spends: ``li_messages_auto`` for an ``auto_send`` step
+    while ``[campaigns] linkedin_auto_send`` is on (the scheduler claims it,
+    :func:`claim_auto_send`), ``li_prefills`` for any other LinkedIn step (a person
+    prefills it, :func:`claim_prefill`), and ``None`` for an email step. Pure."""
+    if step.channel is not TemplateChannel.LINKEDIN:
+        return None
+    if step.mode is StepMode.AUTO_SEND and settings.campaigns.linkedin_auto_send:
+        return budgets.ActionClass.LI_MESSAGES_AUTO
+    return budgets.ActionClass.LI_PREFILLS
+
+
 def ready_to_prefill(
     session: Session,
     user: User,
@@ -510,14 +545,7 @@ def ready_to_prefill(
         held = (
             None
             if hours is None or slots is None
-            else schedule.hold(
-                due,
-                now,
-                slots=slots,
-                hours=hours,
-                starts_at=campaign.starts_at if campaign.start_chosen else None,
-                first_step=enrollment.current_step is None,
-            )
+            else sending_hours_hold(enrollment, campaign, due, now, slots=slots, hours=hours)
         )
         ready.append(ReadyPrefill(enrollment, campaign, step, contact, due, held))
     return ready, total or 0

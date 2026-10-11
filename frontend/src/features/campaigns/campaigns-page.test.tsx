@@ -663,18 +663,23 @@ describe('a campaign with a LinkedIn step (#383)', () => {
   }
 
   it.each([
-    ['prefill' as const, false, 'your LinkedIn budget: 12 prefills a day'],
-    ['auto_send' as const, true, 'your LinkedIn budget: 8 auto-sent messages a day'],
-    ['auto_send' as const, false, 'your LinkedIn budget: 12 prefills a day'],
+    ['prefill' as const, 'li_prefills', false, 'your LinkedIn budget: 12 prefills a day'],
+    [
+      'auto_send' as const,
+      'li_messages_auto',
+      true,
+      'your LinkedIn budget: 8 auto-sent messages a day',
+    ],
+    ['auto_send' as const, 'li_prefills', false, 'your LinkedIn budget: 12 prefills a day'],
   ])(
-    'gives a LinkedIn-only campaign the LinkedIn budget as its cap (%s, auto-send %s)',
-    async (mode, on, text) => {
+    'gives a LinkedIn-only campaign the budget the API names as its cap (%s, %s)',
+    async (mode, budget, on, text) => {
       mockFetch(
         campaignBackend(
           {
             campaign: campaign({
               status: 'active',
-              steps: [{ ...LINKEDIN_STEP, mode }],
+              steps: [{ ...LINKEDIN_STEP, mode, budget }],
               mailbox_id: null,
             }),
             review: review(),

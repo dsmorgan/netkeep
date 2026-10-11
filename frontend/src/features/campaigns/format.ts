@@ -217,31 +217,23 @@ export function lastContactText(contact: SkippedContact): string {
   return `${when} by ${CHANNEL_LABELS[channel] ?? channel}`
 }
 
-/** The day limits of the LinkedIn budgets a LinkedIn-only campaign spends. */
-export interface LinkedInDayLimits {
-  /** `li_prefills`: prefills you start. */
-  prefills: number | null
-  /** `li_messages_auto`: messages auto-send sends. */
-  autoSends: number | null
-}
-
 /**
- * A LinkedIn-only campaign's daily cap: the LinkedIn budget each of its steps spends. A
- * prefill step spends `li_prefills`; an auto-send step spends `li_messages_auto` while
- * auto-send is on, and `li_prefills` otherwise, since you then prefill it yourself.
+ * A LinkedIn-only campaign's daily cap: the LinkedIn budgets its steps spend, as the API
+ * names them for each step (`budget`), with today's limit from `GET /linkedin/budget`.
  */
 export function linkedInCapText(
-  modes: readonly StepMode[],
-  autoSendOn: boolean,
-  limits: LinkedInDayLimits | null,
+  stepBudgets: readonly (string | null | undefined)[],
+  limits: ReadonlyMap<string, number> | null,
 ): string {
-  const auto = autoSendOn && modes.includes('auto_send')
-  const prefill = modes.some((mode) => mode !== 'auto_send') || !autoSendOn
-  const count = (limit: number | null | undefined, what: string) =>
-    limit === null || limit === undefined ? what : `${limit} ${what}`
-  const parts = [
-    ...(prefill ? [count(limits?.prefills, 'prefills')] : []),
-    ...(auto ? [count(limits?.autoSends, 'auto-sent messages')] : []),
-  ]
+  const names: Record<string, string> = {
+    li_prefills: 'prefills',
+    li_messages_auto: 'auto-sent messages',
+  }
+  const spent = [...new Set(stepBudgets.filter((b): b is string => typeof b === 'string'))]
+  const parts = spent.map((budget) => {
+    const what = names[budget] ?? budget.replace(/_/g, ' ')
+    const limit = limits?.get(budget)
+    return limit === undefined ? what : `${limit} ${what}`
+  })
   return `your LinkedIn budget: ${parts.join(' and ')} a day`
 }

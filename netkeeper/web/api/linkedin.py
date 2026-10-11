@@ -48,6 +48,7 @@ and a same-origin check, spec 14.2).
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated, Final
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -128,6 +129,8 @@ from netkeeper.web.schemas import (
     SessionFlagClearIn,
     TodaysVisitsOut,
 )
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/linkedin", tags=["linkedin"])
 
@@ -592,6 +595,10 @@ def _auto_send_out(request: Request, session: Session, user: User) -> AutoSendOu
         hold_reason=seen.hold_reason,
         inbox_age_hours=seen.inbox_age_hours,
         inbox_limit_hours=seen.inbox_limit_hours,
+        spacing_min_minutes=auto_send_outlook.SPACING_MIN_MINUTES,
+        spacing_max_minutes=auto_send_outlook.SPACING_MAX_MINUTES,
+        catch_up=seen.catch_up,
+        catch_up_latest=seen.catch_up_latest,
         last_fire=(
             None
             if last is None
@@ -618,8 +625,19 @@ def _schedule_out(request: Request, session: SessionDep, user: User) -> Schedule
             )
             for kind, schedule in SERVED_SCHEDULES.items()
         ],
-        auto_send=_auto_send_out(request, session, user),
+        auto_send=_auto_send_or_none(request, session, user),
     )
+
+
+def _auto_send_or_none(request: Request, session: Session, user: User) -> AutoSendOutlookOut | None:
+    """The outlook, or ``None`` when it cannot be read. It is a display: a fault in it must
+    never fail the schedule's arm, disarm, pause or unpause, which return this too. Only
+    the exception's type is logged."""
+    try:
+        return _auto_send_out(request, session, user)
+    except Exception as exc:
+        log.warning("auto-send outlook unavailable: %s", type(exc).__name__)
+        return None
 
 
 @router.get("/schedule", operation_id="get_linkedin_schedule")
@@ -644,6 +662,7 @@ def arm_schedule(
     now = utcnow()
     arm_scheduled_runs(session, user, now=now)
     seed_served_schedule(session, user, _settings(request, session, user), now=now)
+    session.commit()  # the change stands before anything is read back for display
     return _schedule_out(request, session, user)
 
 
@@ -651,6 +670,7 @@ def arm_schedule(
 def disarm_schedule(request: Request, user: CurrentUser, session: SessionDep) -> ScheduleOut:
     """Stop scheduled LinkedIn runs from firing. A run already going is not cancelled."""
     disarm_scheduled_runs(session, user)
+    session.commit()  # the change stands before anything is read back for display
     return _schedule_out(request, session, user)
 
 
@@ -665,6 +685,7 @@ def pause_linkedin_schedule(
     once. The pause survives a restart of ``netkeeper serve``.
     """
     pause_schedule(session, user, now=utcnow())
+    session.commit()  # the change stands before anything is read back for display
     return _schedule_out(request, session, user)
 
 
@@ -674,6 +695,7 @@ def unpause_linkedin_schedule(
 ) -> ScheduleOut:
     """Let scheduled runs start again; each kind waits for its next due time."""
     unpause_schedule(session, user)
+    session.commit()  # the change stands before anything is read back for display
     return _schedule_out(request, session, user)
 
 
