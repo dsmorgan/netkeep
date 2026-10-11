@@ -60,7 +60,14 @@ from netkeeper.models import Contact, SyncRun, SyncRunKind, SyncRunStatus, SyncR
 from netkeeper.models.base import utcnow
 from netkeeper.paths import data_dir
 from netkeeper.scoping import get_scoped_contact, scoped_contacts
-from netkeeper.services import budgets, enrich_plan, run_contacts, run_diagnostics, runs
+from netkeeper.services import (
+    auto_send_outlook,
+    budgets,
+    enrich_plan,
+    run_contacts,
+    run_diagnostics,
+    runs,
+)
 from netkeeper.services import heat as heat_rows
 from netkeeper.services import posture as posture_service
 from netkeeper.services.browser_launch import (
@@ -93,12 +100,14 @@ from netkeeper.services.scheduler import SERVED_SCHEDULES, stored_due
 from netkeeper.services.visit_budget import todays_visits
 from netkeeper.web.deps import CurrentUser, SessionDep, Tasks, effective_settings, file_settings
 from netkeeper.web.schemas import (
+    AutoSendOutlookOut,
     BrowserHealthOut,
     BrowserLaunchOut,
     BudgetOut,
     BudgetStatusOut,
     HeatClearIn,
     HeatOut,
+    LastFireOut,
     LinkedInStatusOut,
     PeriodBudgetOut,
     PinIn,
@@ -566,6 +575,31 @@ def unpin_contact(contact_id: int, user: CurrentUser, session: SessionDep) -> li
 # --- scheduled runs: armed or not ---------------------------------------------------
 
 
+def _auto_send_out(request: Request, session: Session, user: User) -> AutoSendOutlookOut:
+    settings = file_settings(request)
+    seen = auto_send_outlook.outlook(session, user, now=utcnow(), settings=settings)
+    last = seen.last_fire
+    return AutoSendOutlookOut(
+        on=settings.campaigns.linkedin_auto_send,
+        next_fire=seen.next_fire,
+        checked_at=seen.checked_at,
+        would_send=seen.would_send,
+        wait=None if seen.wait is None else seen.wait.value,
+        until=seen.until,
+        enrollment_id=seen.enrollment_id,
+        spacing_earliest=seen.spacing_earliest,
+        spacing_latest=seen.spacing_latest,
+        hold_reason=seen.hold_reason,
+        inbox_age_hours=seen.inbox_age_hours,
+        inbox_limit_hours=seen.inbox_limit_hours,
+        last_fire=(
+            None
+            if last is None
+            else LastFireOut(at=last.at, run_id=last.run_id, reason=last.reason)
+        ),
+    )
+
+
 def _schedule_out(request: Request, session: SessionDep, user: User) -> ScheduleOut:
     account = find_account(session, user)
     account_id = account_id_for(session, user)
@@ -584,6 +618,7 @@ def _schedule_out(request: Request, session: SessionDep, user: User) -> Schedule
             )
             for kind, schedule in SERVED_SCHEDULES.items()
         ],
+        auto_send=_auto_send_out(request, session, user),
     )
 
 

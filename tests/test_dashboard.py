@@ -371,6 +371,7 @@ async def test_next_fires_endpoint_names_the_contact_and_nothing_more(
         "contact_id": ids[2],
         "contact_name": "Fic Person",
         "ready_to_prefill": False,
+        "auto_send": False,
     }
     assert datetime.fromisoformat(item["due"]) == due
     assert "fic@example.test" not in response.text
