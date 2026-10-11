@@ -467,6 +467,11 @@ def _snap_to_active_hours(
     return pacing.next_window_start(due, tz, start=start)
 
 
+#: :func:`_snap_to_active_hours` under a public name, for a reader that shows the due
+#: time the scheduler would store (the auto-send outlook's catch-up window).
+snap_to_active_hours: Final = _snap_to_active_hours
+
+
 # --- the pure decision: restored, catching up, or fresh ---------------------
 
 
