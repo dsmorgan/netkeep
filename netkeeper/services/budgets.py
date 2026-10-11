@@ -50,7 +50,7 @@ import enum
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, tzinfo
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from typing import Final, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -322,6 +322,17 @@ def status(
     day = PeriodBudget(count=day_count, limit=limits.day)
     week = _week_budget(session, user, account_id, action, period, limits)
     return BudgetSnapshot(action=action, day=day, week=week)
+
+
+def day_resets_at(user: User, now: datetime) -> datetime:
+    """When the day's counters start again: the next local midnight after ``now``, in
+    ``user.timezone``, as an aware UTC instant. Pure."""
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+    zone = _zone(user)
+    local = now.astimezone(zone)
+    midnight = datetime.combine(local.date() + timedelta(days=1), time(0), tzinfo=zone)
+    return midnight.astimezone(UTC)
 
 
 def consume(

@@ -15,7 +15,7 @@ from typing import Annotated, Final
 
 from fastapi import APIRouter, Query
 
-from netkeeper.models import Contact
+from netkeeper.models import Contact, StepMode
 from netkeeper.models.base import utcnow
 from netkeeper.services import campaign_engine
 from netkeeper.services import dashboard as service
@@ -63,6 +63,7 @@ def list_next_fires(
                 contact_id=fire.contact.id,
                 contact_name=_name(fire.contact),
                 ready_to_prefill=fire.ready_to_prefill(now),
+                auto_send=fire.step is not None and fire.step.mode is StepMode.AUTO_SEND,
             )
             for fire in fires
         ],

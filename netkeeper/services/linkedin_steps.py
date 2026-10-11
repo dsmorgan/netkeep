@@ -784,6 +784,55 @@ def channel_state(
     return ChannelState(browser_ok=browser_ok, browser_budget_left=min(left))
 
 
+@dataclass(frozen=True, slots=True)
+class UserRefusal:
+    """Why every claim for the user is refused now, whatever the enrollment: the
+    reasons and, when one needs it, a line for a person."""
+
+    reasons: tuple[str, ...]
+    detail: str | None = None
+
+
+def user_refusal(
+    session: Session, user: User, *, now: datetime, settings: Settings, auto: bool
+) -> UserRefusal | None:
+    """The claim's last checks, about the user and the browser rather than the step, in
+    the claim's order: an open prefill, active hours, the channel (the session flag, heat,
+    the logged-in evidence, and the ``li_prefills`` budget, or ``li_messages_auto`` for an
+    auto-send claim, with ``profile_visits``), then the inbox poll (#417). ``None`` when
+    none refuses. Read-only: every claim runs it, and the auto-send outlook reads it."""
+    open_prefill = _open_prefill(session, user, now)
+    if open_prefill is not None:
+        return UserRefusal((Refusal.PREFILL_OPEN,), _open_detail(open_prefill))
+    try:
+        runs.refuse_if_outside_active_hours(settings.linkedin, now=now)
+    except runs.OutsideActiveHours as exc:
+        return UserRefusal((Refusal.OUTSIDE_ACTIVE_HOURS,), str(exc))
+    except runs.RunError as exc:
+        return UserRefusal((Refusal.BAD_ACTIVE_HOURS,), str(exc))
+    channel = check_channel(
+        TemplateChannel.LINKEDIN,
+        channel_state(
+            session,
+            user,
+            now=now,
+            settings=settings,
+            action=(
+                budgets.ActionClass.LI_MESSAGES_AUTO if auto else budgets.ActionClass.LI_PREFILLS
+            ),
+        ),
+    )
+    if channel:
+        return UserRefusal(tuple(r.value for r in channel))
+    # Last, so it only ever adds a refusal (#417): LinkedIn replies are not being
+    # read, so a prefill could go to someone who already answered. It waits; a
+    # complete inbox poll releases it, and nothing is changed on the enrollment.
+    stale = inbox_hold.claim_hold(session, user, now=now)
+    if stale is not None:
+        return UserRefusal((Refusal.INBOX_STALE,), stale)
+    return None
+
+
 class _Claimer:
     """One claim: see :func:`claim_prefill`."""
 
@@ -929,38 +978,10 @@ class _Claimer:
         if not verdict.eligible:
             return self._excluded(enrollment, verdict.reasons, slots, hours)
 
-        # The user and the browser: one open prefill, active hours, the channel.
-        open_prefill = _open_prefill(session, user, now)
-        if open_prefill is not None:
-            return self.refuse(enrollment, Refusal.PREFILL_OPEN, detail=_open_detail(open_prefill))
-        try:
-            runs.refuse_if_outside_active_hours(self.settings.linkedin, now=now)
-        except runs.OutsideActiveHours as exc:
-            return self.refuse(enrollment, Refusal.OUTSIDE_ACTIVE_HOURS, detail=str(exc))
-        except runs.RunError as exc:
-            return self.refuse(enrollment, Refusal.BAD_ACTIVE_HOURS, detail=str(exc))
-        channel = check_channel(
-            TemplateChannel.LINKEDIN,
-            channel_state(
-                session,
-                user,
-                now=now,
-                settings=self.settings,
-                action=(
-                    budgets.ActionClass.LI_MESSAGES_AUTO
-                    if self.auto
-                    else budgets.ActionClass.LI_PREFILLS
-                ),
-            ),
-        )
-        if channel:
-            return self.refuse(enrollment, *(r.value for r in channel))
-        # Last, so it only ever adds a refusal (#417): LinkedIn replies are not being
-        # read, so a prefill could go to someone who already answered. It waits; a
-        # complete inbox poll releases it, and nothing is changed on the enrollment.
-        stale = inbox_hold.claim_hold(session, user, now=now)
-        if stale is not None:
-            return self.refuse(enrollment, Refusal.INBOX_STALE, detail=stale)
+        # The user and the browser: one open prefill, active hours, the channel, the inbox.
+        refused = user_refusal(session, user, now=now, settings=self.settings, auto=self.auto)
+        if refused is not None:
+            return self.refuse(enrollment, *refused.reasons, detail=refused.detail)
 
         return self._claim(campaign, enrollment, step, latest, slots)
 
@@ -1134,6 +1155,70 @@ def _interrupted_auto_send(session: Session, user: User, *, now: datetime) -> in
     return None
 
 
+class AutoSendStop(enum.StrEnum):
+    """Why :func:`claim_auto_send` claims nothing before it looks at any step."""
+
+    OFF = "auto_send_off"
+    HELD = "held"
+    INTERRUPTED = "interrupted"
+    """An auto-send stopped mid-run with no hold written: the claim writes the hold."""
+    HEAT = "heat"
+    BUDGET_SPENT = "budget_spent"
+
+
+@dataclass(frozen=True, slots=True)
+class AutoSendPrecheck:
+    """What stopped an auto-send claim early. ``run_id`` is the interrupted run's."""
+
+    stop: AutoSendStop
+    account_id: int = 0
+    run_id: int | None = None
+
+
+def auto_send_precheck(
+    session: Session, user: User, *, now: datetime, settings: Settings
+) -> AutoSendPrecheck | None:
+    """:func:`claim_auto_send`'s checks before it reads a step, in its order: the flag,
+    the hold, an interrupted auto-send, heat at its skip threshold, and today's
+    ``li_messages_auto`` budget. ``None`` when none stops it. Read-only: the claim writes
+    the hold an interrupted auto-send needs, and the auto-send outlook reads this too."""
+    if not settings.campaigns.linkedin_auto_send:
+        return AutoSendPrecheck(AutoSendStop.OFF)
+    account_id = account_id_for(session, user)
+    if auto_send_hold(session, user, account_id) is not None:
+        return AutoSendPrecheck(AutoSendStop.HELD, account_id)
+    interrupted = _interrupted_auto_send(session, user, now=now)
+    if interrupted is not None:
+        return AutoSendPrecheck(AutoSendStop.INTERRUPTED, account_id, interrupted)
+    # A hot account or a spent day would only abort the run: claim nothing (#458 review).
+    if heat_service.should_skip(
+        session, user, account_id, now=now, settings=settings.linkedin.heat
+    ):
+        return AutoSendPrecheck(AutoSendStop.HEAT, account_id)
+    spent = budgets.status(
+        session,
+        user,
+        account_id,
+        budgets.ActionClass.LI_MESSAGES_AUTO,
+        now=now,
+        settings=settings.linkedin.budget,
+    ).day
+    if spent.count >= spent.limit:
+        return AutoSendPrecheck(AutoSendStop.BUDGET_SPENT, account_id)
+    return None
+
+
+def auto_send_ready_statement(user: User, now: datetime) -> Select[Enrollment]:
+    """The enrollments an auto-send claim tries, in its order: only ``auto_send`` steps,
+    oldest due first, so a long queue of prefill steps never hides one (#458 review)."""
+    return (
+        _ready_statement(user, now, None)
+        .where(CampaignStep.mode == StepMode.AUTO_SEND)
+        .order_by(Enrollment.next_action_at, Enrollment.id)
+        .limit(READY_PAGE_MAX)
+    )
+
+
 def claim_auto_send(
     session: Session,
     user: User,
@@ -1153,46 +1238,20 @@ def claim_auto_send(
     engine._require_writer(session, "claim_auto_send")
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("now must be timezone-aware")
-    if not settings.campaigns.linkedin_auto_send:
+    stopped = auto_send_precheck(session, user, now=now, settings=settings)
+    if stopped is not None:
+        if stopped.stop is AutoSendStop.INTERRUPTED and stopped.run_id is not None:
+            # A process that went away mid-run wrote no hold: write it now (#458 final review).
+            hold_auto_send(
+                session,
+                user,
+                stopped.account_id,
+                reason=AUTO_SEND_HOLD_INTERRUPTED,
+                now=now,
+                run_id=stopped.run_id,
+            )
         return None
-    account_id = account_id_for(session, user)
-    if auto_send_hold(session, user, account_id) is not None:
-        return None
-    interrupted = _interrupted_auto_send(session, user, now=now)
-    if interrupted is not None:
-        # A process that went away mid-run wrote no hold: write it now (#458 final review).
-        hold_auto_send(
-            session,
-            user,
-            account_id,
-            reason=AUTO_SEND_HOLD_INTERRUPTED,
-            now=now,
-            run_id=interrupted,
-        )
-        return None
-    # A hot account or a spent day would only abort the run: claim nothing (#458 review).
-    if heat_service.should_skip(
-        session, user, account_id, now=now, settings=settings.linkedin.heat
-    ):
-        return None
-    spent = budgets.status(
-        session,
-        user,
-        account_id,
-        budgets.ActionClass.LI_MESSAGES_AUTO,
-        now=now,
-        settings=settings.linkedin.budget,
-    ).day
-    if spent.count >= spent.limit:
-        return None
-    # Only auto_send steps, oldest due first, so a long queue of prefill steps never
-    # hides one (#458 review).
-    enrollments = session.scalars(
-        _ready_statement(user, now, None)
-        .where(CampaignStep.mode == StepMode.AUTO_SEND)
-        .order_by(Enrollment.next_action_at, Enrollment.id)
-        .limit(READY_PAGE_MAX)
-    ).all()
+    enrollments = session.scalars(auto_send_ready_statement(user, now)).all()
     last: PrefillClaim | None = None
     for enrollment in enrollments:
         last = _Claimer(session, user, now, settings, start_run, auto=True).claim(enrollment.id)

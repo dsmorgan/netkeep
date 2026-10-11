@@ -639,6 +639,78 @@ def stored_due(session: Session, user: User, account_id: int, kind: JobKind) -> 
     return None if state is None else state.due
 
 
+# --- the last fire's outcome (#505) -----------------------------------------------------
+
+_LAST_FIRE_PREFIX: Final = "scheduler.last_fire"
+
+
+@dataclass(frozen=True, slots=True)
+class LastFire:
+    """How a kind's last fire ended: when, the run it started, or why it started none.
+
+    ``reason`` is the gate's skip reason (``"heat"``, ``"paused"`` ...) or the handler's
+    own fixed words. Kept next to the due times in ``settings_kv``, so ``netkeeper linkedin
+    schedule status`` (another process) reads it too. Only the auto-send kind writes one."""
+
+    at: datetime
+    run_id: int | None = None
+    reason: str | None = None
+
+
+def _last_fire_key(account_id: int, kind: JobKind) -> str:
+    return f"{_LAST_FIRE_PREFIX}.{account_id}.{kind.value}"
+
+
+def last_fire(session: Session, user: User, account_id: int, kind: JobKind) -> LastFire | None:
+    """The last fire's outcome, or ``None`` when none is stored or it cannot be read.
+    Read-only."""
+    raw = get_setting(session, user, _last_fire_key(account_id, kind))
+    if not isinstance(raw, dict):
+        return None
+    try:
+        at = datetime.fromisoformat(str(raw["at"]))
+    except (KeyError, ValueError):
+        return None
+    run_id = raw.get("run_id")
+    reason = raw.get("reason")
+    return LastFire(
+        at=at,
+        run_id=run_id if isinstance(run_id, int) and not isinstance(run_id, bool) else None,
+        reason=reason if isinstance(reason, str) else None,
+    )
+
+
+def store_last_fire(
+    session: Session, user: User, account_id: int, kind: JobKind, fire: LastFire
+) -> None:
+    """Keep ``fire`` as the kind's last fire. Needs a writer session."""
+    _require_writer(session, "scheduler.store_last_fire")
+    set_setting(
+        session,
+        user,
+        _last_fire_key(account_id, kind),
+        {"at": fire.at.isoformat(), "run_id": fire.run_id, "reason": fire.reason},
+    )
+
+
+def note_last_fire(
+    session_factory: sessionmaker[Session],
+    user_id: int,
+    account_id: int,
+    kind: JobKind,
+    fire: LastFire,
+) -> None:
+    """:func:`store_last_fire` in a writer session of its own, after the fire decided.
+    A note that cannot be written is logged and dropped: it never changes the fire."""
+    try:
+        with session_scope(session_factory, write=True) as session:
+            user = session.get(User, user_id)
+            if user is not None:
+                store_last_fire(session, user, account_id, kind, fire)
+    except Exception:
+        log.exception("scheduler: could not note the last %s fire", kind.value)
+
+
 def _require_writer(session: Session, where: str) -> None:
     if not is_writer(session):
         raise RuntimeError(
@@ -1046,6 +1118,61 @@ def _defer_as_catchup(
     return due
 
 
+def gate_skip_reason(
+    session: Session,
+    user: User,
+    account_id: int,
+    kind: JobKind,
+    *,
+    now: datetime,
+    heat_settings: HeatGate = DEFAULT_HEAT_SETTINGS,
+    armed: ArmGate = DEFAULT_ARM_GATE,
+) -> str | None:
+    """Why the gate skips a due ``kind`` fire at ``now``, or ``None`` when it fires: the
+    checks :func:`poll_and_fire` makes, in its order. Read-only: the auto-send outlook
+    reads it too."""
+    if not isinstance(armed, Arming) and not armed(session, user, account_id):
+        return "disarmed"
+    if schedule_paused(session, user, account_id):
+        # A person paused the schedule (#324): skipped like a disarmed fire,
+        # so the cadence moves on and unpausing owes no backlog of runs.
+        return "paused"
+    if session_flag(session, user) is not None:
+        # A checkpoint or a login wall: the run would refuse anyway (spec 9.7),
+        # so no run is recorded and nothing is attached (#175 review, F3).
+        return "session_flagged"
+    if isinstance(heat_settings, HeatSettings) and heat_service.should_skip(
+        session, user, account_id, now=now, settings=heat_settings
+    ):
+        return "heat"
+    if kind in _ROUTE_BREAKER_KINDS and route_breaker.tripped(session, user, account_id):
+        # Two connections runs in a row ended route_changed (#189 item 1): a wall
+        # served in place raises no heat and sets no flag, so this is what stops
+        # a scheduled sync from loading it again at every interval.
+        return "route_changed_breaker"
+    if kind in _ROUTE_BREAKER_KINDS and route_breaker.answer_lost_tripped(
+        session, user, account_id
+    ):
+        # Three runs of one connections kind in a row ended answer_lost (#199):
+        # the page's answers keep arriving unreadable, which moves neither heat
+        # nor the route-changed breaker, so this stops scheduled runs spending
+        # page views.
+        return "answer_lost_breaker"
+    if kind is JobKind.ENRICH and route_breaker.contact_info_tripped(session, user, account_id):
+        # Three enrichment runs in a row stopped on lost Contact info bodies
+        # (#424): the body tap is not working, so scheduled runs stop clicking.
+        return "contact_info_breaker"
+    if kind is JobKind.INBOX and route_breaker.inbox_tripped(session, user, account_id):
+        # Two inbox polls in a row ended route_changed (#437): the messaging page
+        # changed shape, and a poll every interval would only load it again.
+        return "inbox_route_changed_breaker"
+    if kind is JobKind.INBOX and route_breaker.inbox_owner_tripped(session, user, account_id):
+        # Two inbox polls in a row ended owner_mismatch (#443): the mailbox is not
+        # this account's, and each poll would load the page and write nothing.
+        return "inbox_owner_breaker"
+    return None
+
+
 async def poll_and_fire(
     session_factory: sessionmaker[Session],
     user: User,
@@ -1151,50 +1278,15 @@ async def poll_and_fire(
             is_catchup = state.is_catchup
             was_reoffer = state.resume_due is not None
             fired_before = state.fired_once
-            skipped_reason: str | None = None
-            if not isinstance(armed, Arming) and not armed(session, user, account_id):
-                skipped_reason = "disarmed"
-            elif schedule_paused(session, user, account_id):
-                # A person paused the schedule (#324): skipped like a disarmed fire,
-                # so the cadence moves on and unpausing owes no backlog of runs.
-                skipped_reason = "paused"
-            elif session_flag(session, user) is not None:
-                # A checkpoint or a login wall: the run would refuse anyway (spec 9.7),
-                # so no run is recorded and nothing is attached (#175 review, F3).
-                skipped_reason = "session_flagged"
-            elif isinstance(heat_settings, HeatSettings) and heat_service.should_skip(
-                session, user, account_id, now=now, settings=heat_settings
-            ):
-                skipped_reason = "heat"
-            elif kind in _ROUTE_BREAKER_KINDS and route_breaker.tripped(session, user, account_id):
-                # Two connections runs in a row ended route_changed (#189 item 1): a wall
-                # served in place raises no heat and sets no flag, so this is what stops
-                # a scheduled sync from loading it again at every interval.
-                skipped_reason = "route_changed_breaker"
-            elif kind in _ROUTE_BREAKER_KINDS and route_breaker.answer_lost_tripped(
-                session, user, account_id
-            ):
-                # Three runs of one connections kind in a row ended answer_lost (#199):
-                # the page's answers keep arriving unreadable, which moves neither heat
-                # nor the route-changed breaker, so this stops scheduled runs spending
-                # page views.
-                skipped_reason = "answer_lost_breaker"
-            elif kind is JobKind.ENRICH and route_breaker.contact_info_tripped(
-                session, user, account_id
-            ):
-                # Three enrichment runs in a row stopped on lost Contact info bodies
-                # (#424): the body tap is not working, so scheduled runs stop clicking.
-                skipped_reason = "contact_info_breaker"
-            elif kind is JobKind.INBOX and route_breaker.inbox_tripped(session, user, account_id):
-                # Two inbox polls in a row ended route_changed (#437): the messaging page
-                # changed shape, and a poll every interval would only load it again.
-                skipped_reason = "inbox_route_changed_breaker"
-            elif kind is JobKind.INBOX and route_breaker.inbox_owner_tripped(
-                session, user, account_id
-            ):
-                # Two inbox polls in a row ended owner_mismatch (#443): the mailbox is not
-                # this account's, and each poll would load the page and write nothing.
-                skipped_reason = "inbox_owner_breaker"
+            skipped_reason = gate_skip_reason(
+                session,
+                user,
+                account_id,
+                kind,
+                now=now,
+                heat_settings=heat_settings,
+                armed=armed,
+            )
             next_due = record_fired(
                 session,
                 user,
@@ -1215,6 +1307,16 @@ async def poll_and_fire(
         return None
     due, is_catchup, was_reoffer, fired_before, skipped_reason, next_due = claimed
     fired = skipped_reason is None
+    if not fired and kind is JobKind.AUTO_SEND:
+        # The gate skipped it, so no handler says how it ended (#505): this does.
+        await off_loop(
+            note_last_fire,
+            session_factory,
+            user.id,
+            account_id,
+            kind,
+            LastFire(at=now, reason=skipped_reason),
+        )
     if fired:
         handler = registry[kind]
         ctx = JobContext(

@@ -44,6 +44,7 @@ Nothing here imports the browser: the worker arrives as a
 from __future__ import annotations
 
 import dataclasses
+import enum
 import logging
 import random
 from collections.abc import Callable
@@ -83,7 +84,9 @@ from netkeeper.services.scheduler import (
     JobKind,
     JobOutcome,
     JobRegistry,
+    LastFire,
     build_scheduler,
+    note_last_fire,
     seed_missing_kinds,
     served_schedules,
     stored_due,
@@ -239,6 +242,34 @@ def auto_send_spacing_left(session: Session, user: User, now: datetime) -> timed
     :data:`~netkeeper.services.scheduler.AUTO_SEND_SPACING_MIN` and
     :data:`~netkeeper.services.scheduler.AUTO_SEND_SPACING_MAX` minutes, less the time
     since it started. Zero when there is none, or the spacing has passed. Read-only."""
+    spacing = auto_send_spacing(session, user)
+    if spacing is None:
+        return timedelta(0)
+    return max(spacing.ends_at - now, timedelta(0))
+
+
+@dataclass(frozen=True, slots=True)
+class Spacing:
+    """The spacing after the newest ``message_send`` run: when that run started, and when
+    the spacing drawn for it ends. It always ends between :data:`AUTO_SEND_SPACING_MIN`
+    and :data:`AUTO_SEND_SPACING_MAX` minutes after ``started_at``."""
+
+    run_id: int
+    started_at: datetime
+    ends_at: datetime
+
+    @property
+    def earliest(self) -> datetime:
+        return self.started_at + timedelta(minutes=AUTO_SEND_SPACING_MIN)
+
+    @property
+    def latest(self) -> datetime:
+        return self.started_at + timedelta(minutes=AUTO_SEND_SPACING_MAX)
+
+
+def auto_send_spacing(session: Session, user: User) -> Spacing | None:
+    """The spacing :func:`auto_send_spacing_left` counts down, or ``None`` when no
+    ``message_send`` run exists. Read-only."""
     last = session.scalars(
         scoped(user, SyncRun)
         .where(SyncRun.kind == SyncRunKind.MESSAGE_SEND)
@@ -246,10 +277,50 @@ def auto_send_spacing_left(session: Session, user: User, now: datetime) -> timed
         .limit(1)
     ).first()
     if last is None:
-        return timedelta(0)
+        return None
     # Seeded by the run's id, so one run's spacing is the same at every heartbeat.
     minutes = random.Random(last.id).uniform(AUTO_SEND_SPACING_MIN, AUTO_SEND_SPACING_MAX)  # noqa: S311 -- pacing
-    return max(last.started_at + timedelta(minutes=minutes) - now, timedelta(0))
+    return Spacing(last.id, last.started_at, last.started_at + timedelta(minutes=minutes))
+
+
+#: The auto-send handler's words for a fire with ``[campaigns] linkedin_auto_send`` off.
+AUTO_SEND_OFF_WORDS: Final = "auto-send is off"
+
+
+class FireStop(enum.Enum):
+    """Why the auto-send handler stops before its claim (:func:`auto_send_fire_check`)."""
+
+    PAUSED = "paused"
+    DISARMED = "disarmed"
+    HELD = "held"
+    SPACING = "spacing"
+
+
+@dataclass(frozen=True, slots=True)
+class FireCheck:
+    """What :func:`auto_send_fire_check` found: the stop, or none and the time it read."""
+
+    stop: FireStop | None
+    now: datetime | None = None
+
+
+def auto_send_fire_check(
+    session: Session, user: User, account_id: int, *, clock: Callable[[], datetime]
+) -> FireCheck:
+    """The auto-send handler's own checks before its claim, in its order: the pause, the
+    arming, the hold, then the spacing after the last ``message_send`` run. ``clock`` is
+    read once, only when the spacing is checked; the handler claims at that time.
+    Read-only: the handler and the auto-send outlook both run it."""
+    if schedule_paused(session, user, account_id):
+        return FireCheck(FireStop.PAUSED)
+    if not scheduled_runs_armed(session, user, account_id):
+        return FireCheck(FireStop.DISARMED)
+    if auto_send_hold(session, user, account_id) is not None:
+        return FireCheck(FireStop.HELD)
+    now = clock()
+    if auto_send_spacing_left(session, user, now) > timedelta(0):
+        return FireCheck(FireStop.SPACING, now)
+    return FireCheck(None, now)
 
 
 def _auto_send_handler(
@@ -265,20 +336,22 @@ def _auto_send_handler(
     def claim(ctx: JobContext) -> int | str:
         """The claimed run's id, or why nothing was claimed, in fixed words."""
         if not settings.campaigns.linkedin_auto_send:
-            return "auto-send is off"
+            return AUTO_SEND_OFF_WORDS
         with session_scope(factory, write=True) as session:
             user = session.get(User, ctx.user_id)
             if user is None:
                 return "no such user"
-            if schedule_paused(session, user, ctx.account_id):
+            check = auto_send_fire_check(session, user, ctx.account_id, clock=clock)
+            if check.stop is FireStop.PAUSED:
                 raise _SchedulePaused
-            if not scheduled_runs_armed(session, user, ctx.account_id):
+            if check.stop is FireStop.DISARMED:
                 raise runs.ScheduledRunsDisarmed("scheduled runs are disarmed")
-            if auto_send_hold(session, user, ctx.account_id) is not None:
+            if check.stop is FireStop.HELD:
                 return "auto-send is held until the open message bubbles are closed"
-            now = clock()
-            if auto_send_spacing_left(session, user, now) > timedelta(0):
+            if check.stop is FireStop.SPACING:
                 return "the spacing since the last auto-send has not passed"
+            assert check.now is not None
+            now = check.now
             # The Settings page's values (#343), read at each claim like every other reader.
             in_force = ui_settings.resolve(session, user, settings)
             claimed = claim_auto_send(session, user, now=now, settings=in_force)
@@ -288,18 +361,32 @@ def _auto_send_handler(
                 return ", ".join(claimed.reasons)
             return claimed.run_id
 
+    async def note(
+        ctx: JobContext, *, run_id: int | None = None, reason: str | None = None
+    ) -> None:
+        # After the decision, in a session of its own (#505): what `schedule status` and the
+        # dashboard show as the last check. It never changes what the fire did.
+        fire = LastFire(at=clock(), run_id=run_id, reason=reason)
+        await off_loop(note_last_fire, factory, ctx.user_id, ctx.account_id, ctx.kind, fire)
+
     async def handle(ctx: JobContext) -> JobOutcome | None:
         try:
             claimed = await off_loop(claim, ctx)
         except _SchedulePaused:
             log.info("scheduled auto-send not started: the schedule is paused")
+            await note(ctx, reason=JobOutcome.PAUSED_AFTER_GATE.value)
             return JobOutcome.PAUSED_AFTER_GATE
         except runs.ScheduledRunsDisarmed:
             log.error("scheduled auto-send reached a disarmed account past the arm gate")
+            await note(ctx, reason=JobOutcome.DISARMED_AFTER_GATE.value)
             return JobOutcome.DISARMED_AFTER_GATE
         if isinstance(claimed, str):
             log.info("scheduled auto-send claimed nothing: %s", claimed)
+            if claimed != AUTO_SEND_OFF_WORDS:
+                # With the flag off the handler opens no session at all, so it notes nothing.
+                await note(ctx, reason=claimed)
             return JobOutcome.NOTHING_TO_SEND
+        await note(ctx, run_id=claimed)
         task_id, result = submit_run(tasks, executor, claimed, ctx.user_id)
         await tasks.wait(task_id)
         if result() is runs.RunOutcome.RETRY_LATER:

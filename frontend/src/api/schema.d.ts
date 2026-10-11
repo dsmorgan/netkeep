@@ -3609,6 +3609,54 @@ export interface components {
              */
             since: string;
         };
+        /**
+         * AutoSendOutlookOut
+         * @description When the next auto-send goes out, or why it waits (#505). Read-only.
+         *
+         *     ``on`` is ``[campaigns] linkedin_auto_send``. ``next_fire`` is the auto-send job's next
+         *     due time; ``checked_at`` is the time the checks were read for (``next_fire``, or now
+         *     once that has passed). ``wait`` is null when that fire would claim a step, and
+         *     ``enrollment_id`` is then the one it tries first; otherwise it names the first check
+         *     that stops it: ``auto_send_off``, ``not_scheduled``, ``disarmed``, ``paused``,
+         *     ``session_flagged``, ``heat``, ``held``, ``spacing``, ``budget_spent``,
+         *     ``no_step_due``, ``bad_sending_hours``, ``sending_hours``, ``prefill_open``,
+         *     ``outside_active_hours``, ``bad_active_hours``, ``not_logged_in``,
+         *     ``browser_unhealthy``, ``out_of_budget`` or ``inbox_stale``. ``until`` is when the
+         *     wait can end, when a check says so. ``spacing_earliest`` and ``spacing_latest`` bound
+         *     the spacing after the last LinkedIn message run (20 to 45 minutes); ``until`` is its
+         *     exact end. ``hold_reason`` is the hold's own words. ``inbox_age_hours`` is null when no
+         *     inbox poll has completed. No field names a contact or holds a message.
+         */
+        AutoSendOutlookOut: {
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            /** Enrollment Id */
+            enrollment_id: number | null;
+            /** Hold Reason */
+            hold_reason: string | null;
+            /** Inbox Age Hours */
+            inbox_age_hours: number | null;
+            /** Inbox Limit Hours */
+            inbox_limit_hours: number | null;
+            last_fire: components["schemas"]["LastFireOut"] | null;
+            /** Next Fire */
+            next_fire: string | null;
+            /** On */
+            on: boolean;
+            /** Spacing Earliest */
+            spacing_earliest: string | null;
+            /** Spacing Latest */
+            spacing_latest: string | null;
+            /** Until */
+            until: string | null;
+            /** Wait */
+            wait: string | null;
+            /** Would Send */
+            would_send: boolean;
+        };
         /** AutoSendResumeIn */
         AutoSendResumeIn: {
             /**
@@ -5740,6 +5788,22 @@ export interface components {
             within_days?: number | null;
         };
         /**
+         * LastFireOut
+         * @description How the auto-send job's last fire ended: when, the run it started, or why it
+         *     started none (the scheduler's skip reason, or the handler's own fixed words).
+         */
+        LastFireOut: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Reason */
+            reason: string | null;
+            /** Run Id */
+            run_id: number | null;
+        };
+        /**
          * LastTryOut
          * @description What the latest prefill of a step did, when it typed nothing (#445). No message
          *     text.
@@ -6278,6 +6342,11 @@ export interface components {
          *     prefill it (P4-09); the tick never fires it.
          */
         NextFireOut: {
+            /**
+             * Auto Send
+             * @default false
+             */
+            auto_send: boolean;
             /** Campaign Id */
             campaign_id: number;
             /** Campaign Name */
@@ -7147,6 +7216,7 @@ export interface components {
             armed: boolean;
             /** Armed At */
             armed_at: string | null;
+            auto_send: components["schemas"]["AutoSendOutlookOut"];
             /** Jobs */
             jobs: components["schemas"]["ScheduledJobOut"][];
             /** Paused */

@@ -651,6 +651,154 @@
         "title": "AutoSendHoldOut",
         "type": "object"
       },
+      "AutoSendOutlookOut": {
+        "description": "When the next auto-send goes out, or why it waits (#505). Read-only.\n\n``on`` is ``[campaigns] linkedin_auto_send``. ``next_fire`` is the auto-send job's next\ndue time; ``checked_at`` is the time the checks were read for (``next_fire``, or now\nonce that has passed). ``wait`` is null when that fire would claim a step, and\n``enrollment_id`` is then the one it tries first; otherwise it names the first check\nthat stops it: ``auto_send_off``, ``not_scheduled``, ``disarmed``, ``paused``,\n``session_flagged``, ``heat``, ``held``, ``spacing``, ``budget_spent``,\n``no_step_due``, ``bad_sending_hours``, ``sending_hours``, ``prefill_open``,\n``outside_active_hours``, ``bad_active_hours``, ``not_logged_in``,\n``browser_unhealthy``, ``out_of_budget`` or ``inbox_stale``. ``until`` is when the\nwait can end, when a check says so. ``spacing_earliest`` and ``spacing_latest`` bound\nthe spacing after the last LinkedIn message run (20 to 45 minutes); ``until`` is its\nexact end. ``hold_reason`` is the hold's own words. ``inbox_age_hours`` is null when no\ninbox poll has completed. No field names a contact or holds a message.",
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "enrollment_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enrollment Id"
+          },
+          "hold_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hold Reason"
+          },
+          "inbox_age_hours": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inbox Age Hours"
+          },
+          "inbox_limit_hours": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inbox Limit Hours"
+          },
+          "last_fire": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LastFireOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "next_fire": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Fire"
+          },
+          "on": {
+            "title": "On",
+            "type": "boolean"
+          },
+          "spacing_earliest": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spacing Earliest"
+          },
+          "spacing_latest": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spacing Latest"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          },
+          "wait": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wait"
+          },
+          "would_send": {
+            "title": "Would Send",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "on",
+          "next_fire",
+          "checked_at",
+          "would_send",
+          "wait",
+          "until",
+          "enrollment_id",
+          "spacing_earliest",
+          "spacing_latest",
+          "hold_reason",
+          "inbox_age_hours",
+          "inbox_limit_hours",
+          "last_fire"
+        ],
+        "title": "AutoSendOutlookOut",
+        "type": "object"
+      },
       "AutoSendResumeIn": {
         "properties": {
           "confirm": {
@@ -7306,6 +7454,45 @@
         "title": "LastContacted",
         "type": "object"
       },
+      "LastFireOut": {
+        "description": "How the auto-send job's last fire ended: when, the run it started, or why it\nstarted none (the scheduler's skip reason, or the handler's own fixed words).",
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          }
+        },
+        "required": [
+          "at",
+          "run_id",
+          "reason"
+        ],
+        "title": "LastFireOut",
+        "type": "object"
+      },
       "LastTryOut": {
         "description": "What the latest prefill of a step did, when it typed nothing (#445). No message\ntext.",
         "properties": {
@@ -8721,6 +8908,11 @@
       "NextFireOut": {
         "description": "One campaign step the minute tick will consider at ``due`` (spec 11.4).\n\nThe contact is named and nothing more: no address, no message text. ``due``\nin the past means the next tick's. ``step_position`` is null only for an\nenrollment with no next step, which the tick completes rather than sends.\n``ready_to_prefill`` marks a LinkedIn step: once due, it waits for a person to\nprefill it (P4-09); the tick never fires it.",
         "properties": {
+          "auto_send": {
+            "default": false,
+            "title": "Auto Send",
+            "type": "boolean"
+          },
           "campaign_id": {
             "title": "Campaign Id",
             "type": "integer"
@@ -10891,6 +11083,9 @@
             ],
             "title": "Armed At"
           },
+          "auto_send": {
+            "$ref": "#/components/schemas/AutoSendOutlookOut"
+          },
           "jobs": {
             "items": {
               "$ref": "#/components/schemas/ScheduledJobOut"
@@ -10925,7 +11120,8 @@
           "paused",
           "paused_at",
           "scheduler_running",
-          "jobs"
+          "jobs",
+          "auto_send"
         ],
         "title": "ScheduleOut",
         "type": "object"

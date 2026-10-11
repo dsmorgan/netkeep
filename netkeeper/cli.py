@@ -84,6 +84,7 @@ from netkeeper.models import (
 from netkeeper.paths import CONFIG_ENV, data_dir
 from netkeeper.scoping import install_scope_guard, scoped
 from netkeeper.services import (
+    auto_send_outlook,
     budgets,
     campaign_engine,
     campaign_guards,
@@ -2200,6 +2201,9 @@ def linkedin_schedule_status(ctx: typer.Context) -> None:
             inbox = route_breaker.inbox_state(session, user, account_id)
             owner = route_breaker.inbox_owner_state(session, user, account_id)
             owner_fix = inbox_apply.owner_mismatch_fix(session, user)
+            auto_send = auto_send_outlook.outlook(
+                session, user, now=datetime.now(UTC), settings=settings
+            )
     finally:
         engine.dispose()
     if armed_at is None:
@@ -2229,6 +2233,29 @@ def linkedin_schedule_status(ctx: typer.Context) -> None:
     typer.echo(_streak_line("inbox owner breaker", "owner_mismatch", owner, kind=SyncRunKind.INBOX))
     if owner.tripped:
         typer.echo(f"  to fix the mailbox mismatch: {owner_fix}")
+    for line in _auto_send_lines(auto_send, on=settings.campaigns.linkedin_auto_send):
+        typer.echo(line)
+
+
+def _utc(value: datetime) -> str:
+    return f"{value:%Y-%m-%d %H:%M} UTC"
+
+
+def _auto_send_lines(seen: auto_send_outlook.AutoSendOutlook, *, on: bool) -> list[str]:
+    """`schedule status`'s auto-send lines (#505): the next check, what it would do, and
+    how the last one ended. One line while auto-send is off."""
+    if not on:
+        return [f"auto-send: off; {auto_send_outlook.describe(seen, _utc)}"]
+    lines = [
+        "auto-send: on"
+        + ("" if seen.next_fire is None else f"; next check {_utc(seen.next_fire)}"),
+        f"  next check: {auto_send_outlook.describe(seen, _utc)}",
+    ]
+    if seen.last_fire is not None:
+        lines.append(f"  last check: {auto_send_outlook.describe_last(seen.last_fire, _utc)}")
+    else:
+        lines.append("  last check: none recorded yet")
+    return lines
 
 
 def _streak_line(
