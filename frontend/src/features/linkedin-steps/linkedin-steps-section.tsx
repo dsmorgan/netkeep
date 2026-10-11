@@ -33,7 +33,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { campaignKeys } from '@/features/campaigns/api'
 import { formatWhen } from '@/features/campaigns/format'
 import { Callout, ErrorNote, LoadingNote } from '@/features/crm/controls'
-import { linkedinKeys, runQuery } from '@/features/linkedin/api'
+import { linkedinKeys, runQuery, scheduleQuery } from '@/features/linkedin/api'
 import { stopReasonLabel, summarizeFields } from '@/features/linkedin/fields'
 import { cn } from '@/lib/utils'
 
@@ -54,14 +54,16 @@ import {
 } from './api'
 import {
   AUTO_SEND_STEP_OFF,
-  AUTO_SEND_STEP_ON,
   AUTO_SENT_STALE,
   ONE_AT_A_TIME,
+  PREFILL_IT_YOURSELF,
   REVIEW_AND_SEND,
   ageText,
+  autoSendStepText,
   openPrefill,
   reasonText,
   waitingState,
+  type AutoSendOutlook,
   type WaitingState,
 } from './format'
 import {
@@ -174,6 +176,9 @@ export function LinkedInQueueCard({ campaignId, run }: { campaignId?: number; ru
   const ready = useQuery(readyQuery(campaignId ?? null))
   const options = useQuery(stepOptionsQuery)
   const autoSendOn = options.data?.auto_send === true
+  // When the next auto-send check would send, or why it waits: the dashboard's own read.
+  const schedule = useQuery({ ...scheduleQuery, enabled: autoSendOn })
+  const outlook = schedule.data?.auto_send ?? null
   // Every campaign's: one open prefill anywhere holds the slot.
   const waiting = useQuery(waitingQuery())
   const invalidate = useInvalidateSteps()
@@ -273,6 +278,8 @@ export function LinkedInQueueCard({ campaignId, run }: { campaignId?: number; ru
                   key={item.enrollment_id}
                   item={item}
                   autoSendOn={autoSendOn}
+                  outlook={outlook}
+                  now={now}
                   showCampaign={campaignId === undefined}
                   disabled={blocked || held(item, now)}
                   onPrefill={() => start.mutate({ enrollmentId: item.enrollment_id })}
@@ -309,12 +316,16 @@ function held(item: ReadyItem | TryAgainItem, now: Date): boolean {
 function ReadyRow({
   item,
   autoSendOn,
+  outlook,
+  now,
   showCampaign,
   disabled,
   onPrefill,
 }: {
   item: ReadyItem
   autoSendOn: boolean
+  outlook: AutoSendOutlook | null
+  now: Date
   showCampaign: boolean
   disabled: boolean
   onPrefill: () => void
@@ -351,7 +362,9 @@ function ReadyRow({
             {autoSendOn ? 'Auto-send' : 'Auto-send step'}
           </Badge>
           <span className="text-muted-foreground">
-            {autoSendOn ? AUTO_SEND_STEP_ON : AUTO_SEND_STEP_OFF}
+            {autoSendOn
+              ? `${autoSendStepText(outlook, item, now)} ${PREFILL_IT_YOURSELF}`
+              : AUTO_SEND_STEP_OFF}
           </span>
         </span>
       )}

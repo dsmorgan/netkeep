@@ -18,7 +18,7 @@ import logging
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from campaign_fakes import NOW
@@ -135,7 +135,7 @@ def _account(lane: Lane) -> int:
 def _hold(lane: Lane) -> str | None:
     account = _account(lane)
     raw = lane.read(lambda s, u: get_setting(s, u, f"linkedin.auto_send.hold.{account}"))
-    return None if raw is None else str(raw["reason"])
+    return str(raw["reason"]) if isinstance(raw, dict) else None
 
 
 async def fire(
@@ -148,7 +148,7 @@ async def fire(
     """Run the auto-send handler once at ``at``, as the scheduler would."""
     executor, tasks = _Executor(), _Tasks()
     handler = scheduled_runs._auto_send_handler(
-        lane.factory, executor, tasks, settings, clock=lambda: at
+        lane.factory, executor, cast(Any, tasks), settings, clock=lambda: at
     )
     ctx = scheduler.JobContext(lane.user_id, _account(lane), scheduler.JobKind.AUTO_SEND, at, False)
     before = {run.id for run in lane.runs()}

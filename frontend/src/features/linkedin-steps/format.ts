@@ -2,6 +2,8 @@
  * Words for the LinkedIn step screens (#383): why a prefill was refused, and how
  * long a prefilled message has waited.
  */
+import { formatWhen } from '@/features/campaigns/format'
+import type { Schedule } from '@/features/linkedin/types'
 import { WHY_IT_MATTERS, type LintRule } from '@/features/templates/lint'
 
 import type { WaitingItem } from './api'
@@ -10,9 +12,11 @@ export const ONE_AT_A_TIME = 'One prefill at a time: send or discard the open on
 export { TYPING } from './prefill-copy'
 export const REVIEW_AND_SEND = 'Review it in Chrome and click Send yourself.'
 
-/** An `auto_send` step in the queue (ADR 0008), with auto-send on or off in config.toml. */
-export const AUTO_SEND_STEP_ON =
-  'Auto-send: netkeeper sends it on its own schedule. You can still prefill it yourself.'
+/**
+ * An `auto_send` step in the queue, with auto-send on or off in config.toml. With it on,
+ * the row says when the step goes ({@link autoSendStepText}), then this.
+ */
+export const PREFILL_IT_YOURSELF = 'You can still prefill it yourself.'
 export const AUTO_SEND_STEP_OFF =
   'Auto-send step, but auto-send is off in config.toml, so it waits for you to prefill it.'
 
@@ -141,4 +145,106 @@ export function threadUrl(urn: string | null): string | null {
   const id = match?.[1] ?? match?.[2]
   if (id === undefined || id === '') return null
   return `https://www.linkedin.com/messaging/thread/${encodeURIComponent(id)}/`
+}
+
+// --- when an auto-send step goes out, or why it waits ---------------------------------------
+
+/** The next auto-send check, from `GET /linkedin/schedule` (`auto_send`). */
+export type AutoSendOutlook = Schedule['auto_send']
+
+/**
+ * Why the next auto-send check would send nothing, in plain words: one sentence, or its
+ * start when the time it ends follows. The backend's `Wait` codes
+ * (`netkeeper/services/auto_send_outlook.py`); a code not here is shown spaced out.
+ */
+export const AUTO_SEND_WAIT_TEXT: Readonly<Record<string, string>> = {
+  auto_send_off: 'Auto-send is off in config.toml.',
+  not_scheduled:
+    "The auto-send check isn't scheduled yet. netkeeper serve schedules it when it starts.",
+  disarmed: 'Scheduled runs are off, so the auto-send check sends nothing.',
+  paused: 'Scheduled runs are paused, so the auto-send check sends nothing.',
+  session_flagged:
+    "The LinkedIn session is flagged (a checkpoint or a login wall). Nothing runs until it's cleared.",
+  heat: 'Heat is over its threshold',
+  held: 'Auto-send is held',
+  spacing: 'It waits out the spacing after the last LinkedIn message run',
+  budget_spent: "Today's auto-send budget is spent",
+  no_step_due: 'No auto-send step is due.',
+  bad_sending_hours: "Your sending hours can't be read. Fix them in Settings.",
+  sending_hours: 'Your sending hours hold every due auto-send step',
+  prefill_open: 'Another prefill is open. Send or discard it first.',
+  outside_active_hours: "It's outside your LinkedIn active hours",
+  bad_active_hours: "Your LinkedIn active hours can't be read. Fix them in config.toml.",
+  not_logged_in: 'Nothing says the LinkedIn session is logged in. Run a preflight first.',
+  browser_unhealthy: 'The LinkedIn session is flagged or heat is too high.',
+  out_of_budget: "Today's LinkedIn budget for messages or profile visits is spent",
+  inbox_stale: "The LinkedIn inbox hasn't been read recently",
+}
+
+/** How the time a wait ends reads after its words. */
+const UNTIL_TEXT: Readonly<Record<string, string>> = {
+  heat: 'It cools by',
+  budget_spent: 'It resets at',
+  out_of_budget: 'It resets at',
+  sending_hours: 'They open at',
+  outside_active_hours: 'They next open at',
+}
+
+function hours(value: number): string {
+  return `${value.toFixed(1)} hours`
+}
+
+/**
+ * Why the next auto-send check would send nothing, with the time the wait ends where
+ * the check knows it. Times are local, in the page's format. `null` when it would send.
+ */
+export function autoSendWaitText(outlook: AutoSendOutlook): string | null {
+  const wait = outlook.wait
+  if (wait === null) return null
+  const words = AUTO_SEND_WAIT_TEXT[wait] ?? `${wait.replace(/_/g, ' ')}.`
+  if (wait === 'held') {
+    return outlook.hold_reason === null ? `${words}.` : `${words}: ${outlook.hold_reason}.`
+  }
+  if (wait === 'spacing' && outlook.until !== null) {
+    const bounds =
+      outlook.spacing_earliest !== null && outlook.spacing_latest !== null
+        ? ` The spacing is 20 to 45 minutes, so it ends between ${formatWhen(outlook.spacing_earliest)} and ${formatWhen(outlook.spacing_latest)}.`
+        : ''
+    return `${words}. It ends at ${formatWhen(outlook.until)}.${bounds}`
+  }
+  if (wait === 'inbox_stale') {
+    if (outlook.inbox_age_hours === null) return `${words}: no inbox poll has completed yet.`
+    const limit =
+      outlook.inbox_limit_hours === null
+        ? ''
+        : `, and the limit is ${hours(outlook.inbox_limit_hours)}`
+    return `${words}: the last complete poll was ${hours(outlook.inbox_age_hours)} ago${limit}.`
+  }
+  if (words.endsWith('.')) return words
+  if (outlook.until !== null) {
+    return `${words}. ${UNTIL_TEXT[wait] ?? 'Until'} ${formatWhen(outlook.until)}.`
+  }
+  return `${words}.`
+}
+
+/**
+ * One auto-send step: when it goes out on its own, or why it waits. `due` is the step's
+ * due time, and `now` the time to compare it with. Auto-send must be on.
+ */
+export function autoSendStepText(
+  outlook: AutoSendOutlook | null | undefined,
+  step: { enrollment_id: number; due: string },
+  now: Date,
+): string {
+  if (outlook === null || outlook === undefined) return 'Sends on its own.'
+  if (outlook.wait === null) {
+    if (outlook.enrollment_id === step.enrollment_id) {
+      return `Sends on its own at the next auto-send check, ${formatWhen(outlook.checked_at)}.`
+    }
+    return 'Sends on its own after the auto-send steps due before it, one at a time.'
+  }
+  if (new Date(step.due).getTime() > now.getTime()) {
+    return 'Sends on its own once it is due.'
+  }
+  return `Sends on its own, but waits. ${autoSendWaitText(outlook)}`
 }

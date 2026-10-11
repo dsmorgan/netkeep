@@ -68,6 +68,38 @@ export const BROWSER_HEALTH: BrowserHealth = {
   running_run_id: null,
 }
 
+/** The auto-send outlook with auto-send off: what `GET /linkedin/schedule` says by default. */
+export const AUTO_SEND_OFF_OUTLOOK: Schedule['auto_send'] = {
+  on: false,
+  next_fire: null,
+  checked_at: '2026-09-23T14:00:00Z',
+  would_send: false,
+  wait: 'auto_send_off',
+  until: null,
+  enrollment_id: null,
+  spacing_earliest: null,
+  spacing_latest: null,
+  hold_reason: null,
+  inbox_age_hours: null,
+  inbox_limit_hours: null,
+  last_fire: null,
+}
+
+/** An outlook with auto-send on; it would send unless `overrides` say why it waits. */
+export function autoSendOutlook(
+  overrides: Partial<Schedule['auto_send']> = {},
+): Schedule['auto_send'] {
+  return {
+    ...AUTO_SEND_OFF_OUTLOOK,
+    on: true,
+    next_fire: '2026-09-23T14:10:00Z',
+    checked_at: '2026-09-23T14:10:00Z',
+    would_send: overrides.wait === undefined || overrides.wait === null,
+    wait: null,
+    ...overrides,
+  }
+}
+
 export const SCHEDULE_DISARMED: Schedule = {
   armed: false,
   armed_at: null,
@@ -78,6 +110,7 @@ export const SCHEDULE_DISARMED: Schedule = {
     { kind: 'connections_incremental', interval_hours: 24, next_due: '2026-09-24T08:00:00Z' },
     { kind: 'enrich', interval_hours: 6, next_due: '2026-09-23T14:00:00Z' },
   ],
+  auto_send: AUTO_SEND_OFF_OUTLOOK,
 }
 
 export const SCHEDULE_ARMED: Schedule = {

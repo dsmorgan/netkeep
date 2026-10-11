@@ -21,7 +21,9 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Callout, EmptyState, ErrorNote, LoadingNote } from '@/features/crm/controls'
 import { listsQuery } from '@/features/crm/api'
+import { budgetQuery, scheduleQuery } from '@/features/linkedin/api'
 import { readyQuery, stepOptionsQuery } from '@/features/linkedin-steps/api'
+import { autoSendStepText } from '@/features/linkedin-steps/format'
 import { LinkedInStepsSection } from '@/features/linkedin-steps/linkedin-steps-section'
 import { sendingHoursQuery } from '@/features/settings/api'
 import { stepTimeWarning } from '@/features/settings/sending-hours'
@@ -64,6 +66,7 @@ import {
   countsText,
   formatStart,
   formatWhen,
+  linkedInCapText,
   timingText,
   toLocalInput,
 } from './format'
@@ -135,6 +138,7 @@ function Overview({ campaign }: { campaign: Campaign }) {
     },
   })
   const canToggle = campaign.status === 'active' || campaign.status === 'paused'
+  const linkedIn = useLinkedInFacts(campaign)
 
   return (
     <Card>
@@ -155,11 +159,12 @@ function Overview({ campaign }: { campaign: Campaign }) {
                 : formatStart(campaign.starts_at),
             ],
             ['Next send', formatWhen(campaign.next_action_at)],
-            ['Daily cap', campaign.daily_cap ?? 'the mailbox’s'],
+            ['Daily cap', campaign.daily_cap ?? linkedIn.cap ?? 'the mailbox’s'],
             ['Recent-contact guard', `${campaign.contacted_within_days_guard} days`],
             ['Approved', formatWhen(campaign.approved_at)],
           ]}
         />
+        {linkedIn.late !== null && <p className="text-muted-foreground">{linkedIn.late}</p>}
         {canToggle && (
           <div className="flex items-center gap-2">
             <Button
@@ -183,6 +188,51 @@ function Overview({ campaign }: { campaign: Campaign }) {
       </CardContent>
     </Card>
   )
+}
+
+/**
+ * What the overview says about a campaign's LinkedIn steps. `late`: once the next send's
+ * time has passed and its LinkedIn step hasn't gone, when it can go or why it waits; null
+ * otherwise. `cap`: for a LinkedIn-only campaign with no cap of its own, the LinkedIn
+ * budget that applies; null otherwise.
+ */
+function useLinkedInFacts(campaign: Campaign): { late: string | null; cap: string | null } {
+  const linkedin = campaign.steps.filter((step) => step.channel === 'linkedin')
+  const onLinkedIn = linkedin.length > 0
+  const linkedInOnly = onLinkedIn && linkedin.length === campaign.steps.length
+  const options = useQuery({ ...stepOptionsQuery, enabled: onLinkedIn })
+  const ready = useQuery({ ...readyQuery(campaign.id), enabled: onLinkedIn })
+  const schedule = useQuery({ ...scheduleQuery, enabled: onLinkedIn })
+  const budget = useQuery({ ...budgetQuery, enabled: linkedInOnly && campaign.daily_cap === null })
+  const autoSendOn = options.data?.auto_send === true
+
+  let cap: string | null = null
+  if (linkedInOnly && campaign.daily_cap === null) {
+    const limit = (action: string) =>
+      budget.data?.budgets.find((row) => row.action === action)?.day.limit ?? null
+    cap = linkedInCapText(
+      linkedin.map((step) => step.mode),
+      autoSendOn,
+      budget.isSuccess
+        ? { prefills: limit('li_prefills'), autoSends: limit('li_messages_auto') }
+        : null,
+    )
+  }
+
+  const now = new Date()
+  const next = campaign.next_action_at
+  const first = ready.data?.items[0]
+  let late: string | null = null
+  if (next !== null && new Date(next).getTime() <= now.getTime() && first !== undefined) {
+    if (first.auto_send && autoSendOn) {
+      late = `Not sent yet. ${autoSendStepText(schedule.data?.auto_send ?? null, first, now)}`
+    } else if (first.held_until !== null && new Date(first.held_until).getTime() > now.getTime()) {
+      late = `Not sent yet. Your sending hours hold it until ${formatWhen(first.held_until)}.`
+    } else {
+      late = 'Not sent yet. It waits for you to prefill it in the LinkedIn queue.'
+    }
+  }
+  return { late, cap }
 }
 
 /**

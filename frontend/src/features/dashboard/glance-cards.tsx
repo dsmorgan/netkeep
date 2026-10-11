@@ -6,6 +6,11 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { budgetQuery, heatQuery, scheduleQuery, statusQuery } from '@/features/linkedin/api'
+import {
+  autoSendStepText,
+  autoSendWaitText,
+  type AutoSendOutlook,
+} from '@/features/linkedin-steps/format'
 import { SchedulePause } from '@/features/linkedin/schedule-pause'
 import { RUN_STATUS_CLASSES, formatWhen, stopReasonLabel } from '@/features/linkedin/fields'
 import {
@@ -92,9 +97,13 @@ function formatDay(iso: string): string {
   return parsed.toLocaleDateString(undefined, { dateStyle: 'medium' })
 }
 
-function stepText(fire: NextFire): string {
+function stepText(fire: NextFire, autoSendOn: boolean): string {
   const step = fire.step_position === null ? 'no step left' : `step ${fire.step_position}`
-  // A LinkedIn step never sends on its own: once due, it waits for you to prefill it (P4-09).
+  // An auto-send step sends on its own while auto-send is on; the line under it says when.
+  if (autoSendOn && fire.auto_send === true) {
+    return `${fire.campaign_name} · ${step} · LinkedIn, sends on its own`
+  }
+  // Any other LinkedIn step never sends on its own: once due, it waits for you to prefill it.
   const prefill = fire.ready_to_prefill ? ' · LinkedIn, ready to prefill' : ''
   return `${fire.campaign_name} · ${step}${prefill}`
 }
@@ -104,6 +113,11 @@ function stepText(fire: NextFire): string {
 /** The next campaign steps the minute tick will consider (`next_action_at`, spec 11.4). */
 export function NextSendsCard() {
   const fires = useQuery(nextFiresQuery)
+  // When the next auto-send check sends an auto-send step, or why it waits.
+  const schedule = useQuery(scheduleQuery)
+  const outlook = schedule.data?.auto_send ?? null
+  const autoSendOn = outlook?.on === true
+  const fetchedAt = new Date(fires.dataUpdatedAt)
 
   return (
     <GlanceCard title="Next campaign sends">
@@ -131,7 +145,12 @@ export function NextSendsCard() {
                     {fire.contact_name || 'Unnamed contact'}
                   </Link>
                 </span>
-                <span className="text-xs text-muted-foreground">{stepText(fire)}</span>
+                <span className="text-xs text-muted-foreground">{stepText(fire, autoSendOn)}</span>
+                {autoSendOn && fire.auto_send === true && (
+                  <span className="text-xs text-muted-foreground">
+                    {autoSendStepText(outlook, fire, fetchedAt)}
+                  </span>
+                )}
               </li>
             ))}
           </ol>
@@ -178,6 +197,7 @@ export function NextLinkedInRunCard() {
           <LinkedInJobs
             jobs={schedule.data.jobs}
             schedulerRunning={schedule.data.scheduler_running}
+            autoSend={schedule.data.auto_send ?? null}
           />
           <SchedulePause schedule={schedule.data} />
         </>
@@ -186,14 +206,23 @@ export function NextLinkedInRunCard() {
   )
 }
 
+/** The auto-send check's row in the schedule: its kind, which no other job has. */
+const AUTO_SEND_CHECK = 'auto_send'
+
 function LinkedInJobs({
   jobs,
   schedulerRunning,
+  autoSend,
 }: {
   jobs: { kind: string; next_due: string | null }[]
   schedulerRunning: boolean
+  autoSend: AutoSendOutlook | null
 }) {
-  const due = jobs
+  // With auto-send on, its check is a row like any job's, with what it would do under it.
+  const check = autoSend?.on === true ? autoSend : null
+  const rows =
+    check === null ? jobs : [...jobs, { kind: AUTO_SEND_CHECK, next_due: check.next_fire }]
+  const due = rows
     .filter((job): job is { kind: string; next_due: string } => job.next_due !== null)
     .sort((a, b) => a.next_due.localeCompare(b.next_due))
 
@@ -208,17 +237,38 @@ function LinkedInJobs({
         <Muted>No run is scheduled yet.</Muted>
       ) : (
         <ol className="flex flex-col gap-1">
-          {due.map((job) => (
-            <li key={job.kind}>
-              <span className="font-medium tabular-nums">{formatWhen(job.next_due)}</span>
-              {' — '}
-              {kindLabel(job.kind)}
-            </li>
-          ))}
+          {due.map((job) =>
+            job.kind === AUTO_SEND_CHECK && check !== null ? (
+              <li key={job.kind} className="flex flex-col">
+                <span>
+                  <span className="font-medium tabular-nums">{formatWhen(job.next_due)}</span>
+                  {' — '}
+                  Auto-send check
+                </span>
+                <span className="text-xs text-muted-foreground">{autoSendCheckText(check)}</span>
+              </li>
+            ) : (
+              <li key={job.kind}>
+                <span className="font-medium tabular-nums">{formatWhen(job.next_due)}</span>
+                {' — '}
+                {kindLabel(job.kind)}
+              </li>
+            ),
+          )}
         </ol>
+      )}
+      {check !== null && check.next_fire === null && (
+        <p>
+          Auto-send check: <span className="text-muted-foreground">{autoSendCheckText(check)}</span>
+        </p>
       )}
     </>
   )
+}
+
+/** What the next auto-send check would do: send a step, or why it waits. */
+function autoSendCheckText(outlook: AutoSendOutlook): string {
+  return autoSendWaitText(outlook) ?? 'It sends the oldest due auto-send step.'
 }
 
 // --- is anything unhealthy --------------------------------------------------------------
