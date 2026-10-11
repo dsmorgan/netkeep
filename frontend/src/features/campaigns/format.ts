@@ -216,3 +216,32 @@ export function lastContactText(contact: SkippedContact): string {
   if (channel === null || channel === undefined) return when
   return `${when} by ${CHANNEL_LABELS[channel] ?? channel}`
 }
+
+/** The day limits of the LinkedIn budgets a LinkedIn-only campaign spends. */
+export interface LinkedInDayLimits {
+  /** `li_prefills`: prefills you start. */
+  prefills: number | null
+  /** `li_messages_auto`: messages auto-send sends. */
+  autoSends: number | null
+}
+
+/**
+ * A LinkedIn-only campaign's daily cap: the LinkedIn budget each of its steps spends. A
+ * prefill step spends `li_prefills`; an auto-send step spends `li_messages_auto` while
+ * auto-send is on, and `li_prefills` otherwise, since you then prefill it yourself.
+ */
+export function linkedInCapText(
+  modes: readonly StepMode[],
+  autoSendOn: boolean,
+  limits: LinkedInDayLimits | null,
+): string {
+  const auto = autoSendOn && modes.includes('auto_send')
+  const prefill = modes.some((mode) => mode !== 'auto_send') || !autoSendOn
+  const count = (limit: number | null | undefined, what: string) =>
+    limit === null || limit === undefined ? what : `${limit} ${what}`
+  const parts = [
+    ...(prefill ? [count(limits?.prefills, 'prefills')] : []),
+    ...(auto ? [count(limits?.autoSends, 'auto-sent messages')] : []),
+  ]
+  return `your LinkedIn budget: ${parts.join(' and ')} a day`
+}

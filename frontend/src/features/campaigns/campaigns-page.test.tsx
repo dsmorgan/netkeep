@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest'
 import { jsonResponse, mockFetch } from '@/test/fetch'
 import { renderApp } from '@/test/render'
 
+import { formatWhen } from '@/features/campaigns/format'
+import { SCHEDULE_ARMED, autoSendOutlook } from '@/features/linkedin/test-support'
 import { mailbox } from '@/features/mailboxes/test-support'
 
 import {
@@ -622,6 +624,140 @@ describe('a campaign with a LinkedIn step (#383)', () => {
 
     expect(await screen.findByText(text)).toBeVisible()
     expect(screen.getByText('Auto-send')).toBeVisible()
+  })
+
+  const LINKEDIN_ROUTES = {
+    'GET /api/v1/campaigns/linkedin/waiting': () => jsonResponse({ items: [], total: 0 }),
+    'GET /api/v1/linkedin/status': () =>
+      jsonResponse({
+        session_flag: null,
+        session_flagged_at: null,
+        heat_tripped: false,
+        armed: true,
+        schedule_paused: false,
+        running_run_id: null,
+        can_start_runs: true,
+      }),
+    'GET /api/v1/linkedin/budget': () =>
+      jsonResponse({
+        budgets: [
+          { action: 'li_prefills', day: { count: 2, limit: 12, remaining: 10 }, week: null },
+          { action: 'li_messages_auto', day: { count: 0, limit: 8, remaining: 8 }, week: null },
+        ],
+      }),
+  }
+
+  function readyItem(overrides: Record<string, unknown> = {}) {
+    return {
+      enrollment_id: 31,
+      campaign_id: 5,
+      campaign_name: 'Autumn reconnect',
+      step_position: 1,
+      contact_id: 41,
+      contact_name: 'Rosalind Quillfeather',
+      due: '2020-01-02T15:00:00Z',
+      held_until: null,
+      auto_send: false,
+      ...overrides,
+    }
+  }
+
+  it.each([
+    ['prefill' as const, false, 'your LinkedIn budget: 12 prefills a day'],
+    ['auto_send' as const, true, 'your LinkedIn budget: 8 auto-sent messages a day'],
+    ['auto_send' as const, false, 'your LinkedIn budget: 12 prefills a day'],
+  ])(
+    'gives a LinkedIn-only campaign the LinkedIn budget as its cap (%s, auto-send %s)',
+    async (mode, on, text) => {
+      mockFetch(
+        campaignBackend(
+          {
+            campaign: campaign({
+              status: 'active',
+              steps: [{ ...LINKEDIN_STEP, mode }],
+              mailbox_id: null,
+            }),
+            review: review(),
+          },
+          {
+            ...LINKEDIN_ROUTES,
+            'GET /api/v1/campaigns/linkedin/ready': () =>
+              jsonResponse({ items: [], total: 0, by_step: {} }),
+            'GET /api/v1/campaigns/linkedin/options': () => jsonResponse({ auto_send: on }),
+            'GET /api/v1/linkedin/schedule': () => jsonResponse(SCHEDULE_ARMED),
+          },
+        ),
+      )
+      await renderApp('/campaigns/5')
+
+      expect(await screen.findByText(text)).toBeVisible()
+      expect(screen.queryByText('the mailbox’s')).toBeNull()
+    },
+  )
+
+  it('says when a passed auto-send step can go, or why it waits', async () => {
+    const until = '2099-01-02T15:40:00Z'
+    mockFetch(
+      campaignBackend(
+        {
+          campaign: campaign({
+            status: 'active',
+            steps: [{ ...LINKEDIN_STEP, mode: 'auto_send' as const }],
+            mailbox_id: null,
+            next_action_at: '2020-01-02T15:00:00Z',
+          }),
+          review: review(),
+        },
+        {
+          ...LINKEDIN_ROUTES,
+          'GET /api/v1/campaigns/linkedin/ready': () =>
+            jsonResponse({ items: [readyItem({ auto_send: true })], total: 1, by_step: {} }),
+          'GET /api/v1/campaigns/linkedin/options': () => jsonResponse({ auto_send: true }),
+          'GET /api/v1/linkedin/schedule': () =>
+            jsonResponse({
+              ...SCHEDULE_ARMED,
+              auto_send: autoSendOutlook({ wait: 'outside_active_hours', until }),
+            }),
+        },
+      ),
+    )
+    await renderApp('/campaigns/5')
+
+    expect(
+      await screen.findByText(
+        `Not sent yet. Sends on its own, but waits. It's outside your LinkedIn active hours. They next open at ${formatWhen(until)}.`,
+      ),
+    ).toBeVisible()
+  })
+
+  it('says a passed prefill step waits for you', async () => {
+    mockFetch(
+      campaignBackend(
+        {
+          campaign: campaign({
+            status: 'active',
+            steps: [LINKEDIN_STEP],
+            mailbox_id: null,
+            next_action_at: '2020-01-02T15:00:00Z',
+          }),
+          review: review(),
+        },
+        {
+          ...LINKEDIN_ROUTES,
+          'GET /api/v1/campaigns/linkedin/ready': () =>
+            jsonResponse({ items: [readyItem()], total: 1, by_step: {} }),
+          'GET /api/v1/campaigns/linkedin/options': () => jsonResponse({ auto_send: false }),
+          'GET /api/v1/linkedin/schedule': () => jsonResponse(SCHEDULE_ARMED),
+        },
+      ),
+    )
+    await renderApp('/campaigns/5')
+
+    expect(
+      await screen.findByText(
+        'Not sent yet. It waits for you to prefill it in the LinkedIn queue.',
+      ),
+    ).toBeVisible()
   })
 
   it('shows no LinkedIn counts or queue for an email-only campaign', async () => {

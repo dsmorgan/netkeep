@@ -16,7 +16,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { EventStreamContext } from '@/features/events/event-stream-context'
 import {
+  SCHEDULE_ARMED,
   STATUS_CLEAR,
+  autoSendOutlook,
   backend,
   run,
   type Call,
@@ -24,15 +26,19 @@ import {
 } from '@/features/linkedin/test-support'
 import { FakeEventSource, resetFakeEventSource } from '@/test/fake-event-source'
 import { jsonResponse, mockFetch } from '@/test/fetch'
+import { formatWhen } from '@/features/campaigns/format'
 
 import type { ReadyItem, ReadyPage, TryAgainItem, WaitingItem, WaitingPage } from './api'
 import {
   AUTO_SEND_STEP_OFF,
-  AUTO_SEND_STEP_ON,
+  AUTO_SEND_WAIT_TEXT,
   AUTO_SENT_STALE,
   ONE_AT_A_TIME,
+  PREFILL_IT_YOURSELF,
   REVIEW_AND_SEND,
   ageText,
+  autoSendStepText,
+  autoSendWaitText,
   reasonText,
   threadUrl,
 } from './format'
@@ -417,9 +423,58 @@ describe('the LinkedIn queue', () => {
     })
     const row = await screen.findByRole('listitem', { name: 'Rosalind Quillfeather, step 1' })
     expect(within(row).getByText('Auto-send')).toBeVisible()
-    expect(row).toHaveTextContent(AUTO_SEND_STEP_ON)
+    expect(row).toHaveTextContent('Sends on its own.')
+    expect(row).toHaveTextContent(PREFILL_IT_YOURSELF)
     // A person can still prefill it; that never clicks Send.
     expect(within(row).getByRole('button', { name: 'Prefill Rosalind Quillfeather' })).toBeEnabled()
+  })
+
+  it('says when the next auto-send check sends the step', async () => {
+    const outlook = autoSendOutlook({ enrollment_id: 31 })
+    renderSection({
+      'GET /api/v1/campaigns/linkedin/options': () => jsonResponse({ auto_send: true }),
+      'GET /api/v1/linkedin/schedule': () =>
+        jsonResponse({ ...SCHEDULE_ARMED, auto_send: outlook }),
+      'GET /api/v1/campaigns/linkedin/ready': () =>
+        jsonResponse(
+          readyPage([
+            readyItem({ auto_send: true }),
+            readyItem({ auto_send: true, enrollment_id: 32, contact_name: 'Bartholomew Finch' }),
+          ]),
+        ),
+    })
+    const first = await screen.findByRole('listitem', { name: 'Rosalind Quillfeather, step 1' })
+    await waitFor(() =>
+      expect(first).toHaveTextContent(
+        `Sends on its own at the next auto-send check, ${formatWhen(outlook.checked_at)}.`,
+      ),
+    )
+    const second = screen.getByRole('listitem', { name: 'Bartholomew Finch, step 1' })
+    expect(second).toHaveTextContent(
+      'Sends on its own after the auto-send steps due before it, one at a time.',
+    )
+  })
+
+  it('says why an auto-send step waits', async () => {
+    const outlook = autoSendOutlook({
+      wait: 'spacing',
+      until: '2026-09-23T14:40:00Z',
+      spacing_earliest: '2026-09-23T14:25:00Z',
+      spacing_latest: '2026-09-23T14:50:00Z',
+    })
+    renderSection({
+      'GET /api/v1/campaigns/linkedin/options': () => jsonResponse({ auto_send: true }),
+      'GET /api/v1/linkedin/schedule': () =>
+        jsonResponse({ ...SCHEDULE_ARMED, auto_send: outlook }),
+      'GET /api/v1/campaigns/linkedin/ready': () =>
+        jsonResponse(readyPage([readyItem({ auto_send: true })])),
+    })
+    const row = await screen.findByRole('listitem', { name: 'Rosalind Quillfeather, step 1' })
+    await waitFor(() =>
+      expect(row).toHaveTextContent(
+        `Sends on its own, but waits. It waits out the spacing after the last LinkedIn message run. It ends at ${formatWhen('2026-09-23T14:40:00Z')}.`,
+      ),
+    )
   })
 
   it('says an auto-send step waits for a prefill while the flag is off', async () => {
@@ -1414,5 +1469,56 @@ describe('Try again (#445)', () => {
     for (const reason of ['try_again_needed', 'nothing_to_retry', 'confirm_no_bubble']) {
       expect(reasonText(reason)).not.toBe(reason.replace(/_/g, ' '))
     }
+  })
+})
+
+describe('the auto-send outlook in words', () => {
+  it('has words for every reason, with no issue or decision numbers', () => {
+    for (const wait of Object.keys(AUTO_SEND_WAIT_TEXT)) {
+      const text = autoSendWaitText(autoSendOutlook({ wait }))
+      expect(text).toMatch(/\.$/)
+      expect(text).not.toMatch(/#\d|ADR/)
+    }
+  })
+
+  it('names the hold, the inbox poll, and when a wait ends', () => {
+    expect(
+      autoSendWaitText(
+        autoSendOutlook({ wait: 'held', hold_reason: 'a tab is left open in Chrome' }),
+      ),
+    ).toBe('Auto-send is held: a tab is left open in Chrome.')
+    expect(
+      autoSendWaitText(
+        autoSendOutlook({ wait: 'inbox_stale', inbox_age_hours: 8, inbox_limit_hours: 6.83 }),
+      ),
+    ).toBe(
+      "The LinkedIn inbox hasn't been read recently: the last complete poll was 8.0 hours ago, and the limit is 6.8 hours.",
+    )
+    expect(autoSendWaitText(autoSendOutlook({ wait: 'inbox_stale' }))).toBe(
+      "The LinkedIn inbox hasn't been read recently: no inbox poll has completed yet.",
+    )
+    const until = '2026-09-24T00:00:00Z'
+    expect(autoSendWaitText(autoSendOutlook({ wait: 'budget_spent', until }))).toBe(
+      `Today's auto-send budget is spent. It resets at ${formatWhen(until)}.`,
+    )
+    expect(autoSendWaitText(autoSendOutlook({ wait: 'outside_active_hours', until }))).toBe(
+      `It's outside your LinkedIn active hours. They next open at ${formatWhen(until)}.`,
+    )
+    expect(autoSendWaitText(autoSendOutlook({ wait: 'heat', until }))).toBe(
+      `Heat is over its threshold. It cools by ${formatWhen(until)}.`,
+    )
+    expect(autoSendWaitText(autoSendOutlook({ wait: 'sending_hours', until }))).toBe(
+      `Your sending hours hold every due auto-send step. They open at ${formatWhen(until)}.`,
+    )
+    expect(autoSendWaitText(autoSendOutlook())).toBeNull()
+  })
+
+  it('says a step not due yet goes once it is due', () => {
+    const now = new Date('2026-09-23T14:00:00Z')
+    const step = { enrollment_id: 9, due: '2026-09-23T18:00:00Z' }
+    expect(autoSendStepText(autoSendOutlook({ wait: 'no_step_due' }), step, now)).toBe(
+      'Sends on its own once it is due.',
+    )
+    expect(autoSendStepText(null, step, now)).toBe('Sends on its own.')
   })
 })

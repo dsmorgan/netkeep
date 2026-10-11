@@ -366,8 +366,11 @@ def _auto_send_handler(
     ) -> None:
         # After the decision, in a session of its own (#505): what `schedule status` and the
         # dashboard show as the last check. It never changes what the fire did.
-        fire = LastFire(at=clock(), run_id=run_id, reason=reason)
-        await off_loop(note_last_fire, factory, ctx.user_id, ctx.account_id, ctx.kind, fire)
+        try:
+            fire = LastFire(at=clock(), run_id=run_id, reason=reason)
+            await off_loop(note_last_fire, factory, ctx.user_id, ctx.account_id, ctx.kind, fire)
+        except Exception:
+            log.exception("scheduled auto-send: could not note the last fire")
 
     async def handle(ctx: JobContext) -> JobOutcome | None:
         try:
@@ -386,8 +389,8 @@ def _auto_send_handler(
                 # With the flag off the handler opens no session at all, so it notes nothing.
                 await note(ctx, reason=claimed)
             return JobOutcome.NOTHING_TO_SEND
-        await note(ctx, run_id=claimed)
         task_id, result = submit_run(tasks, executor, claimed, ctx.user_id)
+        await note(ctx, run_id=claimed)
         await tasks.wait(task_id)
         if result() is runs.RunOutcome.RETRY_LATER:
             return JobOutcome.RETRY_LATER

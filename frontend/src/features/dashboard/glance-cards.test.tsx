@@ -11,6 +11,8 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { formatWhen } from '@/features/linkedin/fields'
+import { autoSendOutlook } from '@/features/linkedin/test-support'
 import { jsonResponse, mockFetch } from '@/test/fetch'
 
 import {
@@ -103,6 +105,11 @@ function fire(overrides: Record<string, unknown> = {}) {
 }
 
 const SCHEDULE = '/api/v1/linkedin/schedule'
+
+/** An armed schedule with no jobs, for the cards that read only its auto-send outlook. */
+function scheduleWith(overrides: Record<string, unknown> = {}) {
+  return { armed: true, armed_at: null, scheduler_running: true, jobs: [], ...overrides }
+}
 const STATUS = '/api/v1/linkedin/status'
 const RUNS = '/api/v1/linkedin/runs'
 const BUDGET = '/api/v1/linkedin/budget'
@@ -218,6 +225,65 @@ describe('NextSendsCard', () => {
     expect(items[2]).toHaveTextContent('Autumn hello · step 2 · LinkedIn, ready to prefill')
     expect(body.getByText('and 2 more')).toBeInTheDocument()
   })
+
+  it('says an auto-send step sends on its own, and when', async () => {
+    const outlook = autoSendOutlook({ enrollment_id: 3 })
+    renderCard(NextSendsCard, {
+      [PATH]: json({
+        items: [
+          fire({
+            enrollment_id: 3,
+            due: PAST,
+            channel: 'linkedin',
+            ready_to_prefill: true,
+            auto_send: true,
+          }),
+        ],
+        total: 1,
+      }),
+      [SCHEDULE]: json(scheduleWith({ auto_send: outlook })),
+    })
+    const body = await card('Next campaign sends')
+    expect(await body.findByText(/LinkedIn, sends on its own/)).toBeInTheDocument()
+    expect(
+      await body.findByText(
+        `Sends on its own at the next auto-send check, ${formatWhen(outlook.checked_at)}.`,
+      ),
+    ).toBeInTheDocument()
+    expect(body.queryByText(/ready to prefill/)).not.toBeInTheDocument()
+  })
+
+  it('says why an auto-send step waits', async () => {
+    const until = '2099-01-03T00:00:00Z'
+    renderCard(NextSendsCard, {
+      [PATH]: json({
+        items: [fire({ due: PAST, channel: 'linkedin', ready_to_prefill: true, auto_send: true })],
+        total: 1,
+      }),
+      [SCHEDULE]: json(
+        scheduleWith({ auto_send: autoSendOutlook({ wait: 'budget_spent', until }) }),
+      ),
+    })
+    const body = await card('Next campaign sends')
+    expect(
+      await body.findByText(
+        `Sends on its own, but waits. Today's auto-send budget is spent. It resets at ${formatWhen(until)}.`,
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('keeps ready to prefill for an auto-send step while auto-send is off', async () => {
+    renderCard(NextSendsCard, {
+      [PATH]: json({
+        items: [fire({ due: PAST, channel: 'linkedin', ready_to_prefill: true, auto_send: true })],
+        total: 1,
+      }),
+      [SCHEDULE]: json(scheduleWith()),
+    })
+    const body = await card('Next campaign sends')
+    expect(await body.findByText(/LinkedIn, ready to prefill/)).toBeInTheDocument()
+    expect(body.queryByText(/sends on its own/i)).not.toBeInTheDocument()
+  })
 })
 
 // --- next LinkedIn run -------------------------------------------------------------------
@@ -331,6 +397,48 @@ describe('NextLinkedInRunCard', () => {
     fireEvent.click(await body.findByRole('button', { name: 'Pause schedule' }))
     expect(await body.findByText(/no new scheduled run starts/)).toBeInTheDocument()
     expect(seen).toContain(`${SCHEDULE}/pause`)
+  })
+
+  it('lists the auto-send check with its time and what it would do', async () => {
+    const outlook = autoSendOutlook({ next_fire: '2099-02-01T09:00:00Z' })
+    renderCard(NextLinkedInRunCard, { [SCHEDULE]: json(schedule({ auto_send: outlook })) })
+    const body = await card('Next LinkedIn run')
+    const items = await body.findAllByRole('listitem')
+    expect(items.map((item) => item.textContent)).toEqual([
+      expect.stringContaining('Incremental connections sync'),
+      expect.stringContaining('Auto-send check'),
+      expect.stringContaining('Full connections sync'),
+    ])
+    expect(items[1]).toHaveTextContent(formatWhen('2099-02-01T09:00:00Z'))
+    expect(items[1]).toHaveTextContent('It sends the oldest due auto-send step.')
+  })
+
+  it('says in plain words why the auto-send check would send nothing', async () => {
+    const until = '2099-02-01T10:00:00Z'
+    const outlook = autoSendOutlook({ next_fire: '2099-02-01T09:00:00Z', wait: 'heat', until })
+    renderCard(NextLinkedInRunCard, { [SCHEDULE]: json(schedule({ auto_send: outlook })) })
+    const body = await card('Next LinkedIn run')
+    expect(
+      await body.findByText(`Heat is over its threshold. It cools by ${formatWhen(until)}.`),
+    ).toBeInTheDocument()
+  })
+
+  it('says when the auto-send check is not scheduled yet', async () => {
+    const outlook = autoSendOutlook({ next_fire: null, wait: 'not_scheduled' })
+    renderCard(NextLinkedInRunCard, { [SCHEDULE]: json(schedule({ auto_send: outlook })) })
+    const body = await card('Next LinkedIn run')
+    expect(await body.findByText(/isn't scheduled yet/)).toBeInTheDocument()
+  })
+
+  it('leaves the auto-send check out while auto-send is off', async () => {
+    renderCard(NextLinkedInRunCard, {
+      [SCHEDULE]: json(
+        schedule({ auto_send: autoSendOutlook({ on: false, wait: 'auto_send_off' }) }),
+      ),
+    })
+    const body = await card('Next LinkedIn run')
+    await body.findAllByRole('listitem')
+    expect(body.queryByText(/Auto-send check/)).not.toBeInTheDocument()
   })
 })
 
