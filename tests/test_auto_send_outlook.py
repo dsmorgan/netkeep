@@ -963,44 +963,75 @@ def test_the_shared_hold_is_the_claim_s_call() -> None:
 # --- every reason maps, with no default ---------------------------------------------------
 
 
+def _attributes(function: Any, owner: str) -> set[str]:
+    """Every ``<owner>.<NAME>`` the function's source names."""
+    import ast
+    import inspect
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
+    return {
+        node.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == owner
+    }
+
+
 def test_every_refusal_the_claim_gives_about_the_user_maps() -> None:
+    """Read from the code: every ``Refusal`` member ``user_refusal`` names, and every
+    ``ChannelReason`` the LinkedIn guard names. A new one fails here until it is mapped."""
+    from netkeeper.services import campaign_guards
     from netkeeper.services.campaign_guards import ChannelReason
 
+    refusals = {
+        linkedin_steps.Refusal[name] for name in _attributes(linkedin_steps.user_refusal, "Refusal")
+    }
     browser = {
-        ChannelReason.BROWSER_UNKNOWN,
-        ChannelReason.BROWSER_UNHEALTHY,
-        ChannelReason.BROWSER_OUT_OF_BUDGET,
+        ChannelReason[name] for name in _attributes(campaign_guards._browser, "ChannelReason")
     }
-    from_claim = {
-        linkedin_steps.Refusal.PREFILL_OPEN,
-        linkedin_steps.Refusal.OUTSIDE_ACTIVE_HOURS,
-        linkedin_steps.Refusal.BAD_ACTIVE_HOURS,
-        linkedin_steps.Refusal.INBOX_STALE,
-    }
-    assert set(auto_send_outlook.REFUSALS) == browser | from_claim
-    # Every browser reason the LinkedIn guard can give is among them.
+    assert refusals and browser
+    assert set(auto_send_outlook.REFUSALS) == refusals | browser
+    # And the guard is the one the claim asks for LinkedIn.
     from netkeeper.models import TemplateChannel
-    from netkeeper.services.campaign_guards import ChannelState, check_channel
 
-    given = set()
-    for ok in (None, True, False):
-        for left in (None, 0, 3):
-            given |= set(
-                check_channel(
-                    TemplateChannel.LINKEDIN, ChannelState(browser_ok=ok, browser_budget_left=left)
-                )
-            )
-    assert given <= set(auto_send_outlook.REFUSALS)
+    assert campaign_guards._CHANNEL_GUARDS[TemplateChannel.LINKEDIN.value] is (
+        campaign_guards._browser
+    )
 
 
-def test_every_gate_reason_an_auto_send_fire_meets_maps(lane: Lane) -> None:
+def test_every_gate_reason_an_auto_send_fire_meets_maps() -> None:
+    """Read from the code: each ``return "<reason>"`` in ``gate_skip_reason``. A branch
+    that does not name a kind applies to auto-send and must be mapped; a branch that names
+    one must name a kind other than auto-send. A new reason fails one or the other."""
+    import ast
     import inspect
+    import textwrap
 
-    source = inspect.getsource(scheduler.gate_skip_reason)
-    # The breakers name their kinds; the rest apply to every kind, auto-send included.
-    general = {"disarmed", "paused", "session_flagged", "heat"}
-    for reason in general:
-        assert f'return "{reason}"' in source
+    tree = ast.parse(textwrap.dedent(inspect.getsource(scheduler.gate_skip_reason)))
+    function = tree.body[0]
+    assert isinstance(function, ast.FunctionDef)
+    general: set[str] = set()
+    for node in function.body:
+        if not isinstance(node, ast.If):
+            continue
+        [ret] = [n for n in node.body if isinstance(n, ast.Return)]
+        assert isinstance(ret.value, ast.Constant) and isinstance(ret.value.value, str)
+        names = {n.id for n in ast.walk(node.test) if isinstance(n, ast.Name)}
+        if "kind" not in names:
+            general.add(ret.value.value)
+            continue
+        kinds = {
+            n.attr
+            for n in ast.walk(node.test)
+            if isinstance(n, ast.Attribute)
+            and isinstance(n.value, ast.Name)
+            and n.value.id == "JobKind"
+        }
+        assert kinds or "_ROUTE_BREAKER_KINDS" in names, ast.unparse(node.test)
+        assert "AUTO_SEND" not in kinds, ast.unparse(node.test)
+    assert scheduler.JobKind.AUTO_SEND not in scheduler._ROUTE_BREAKER_KINDS
     assert set(auto_send_outlook.GATE) == general
 
 
@@ -1111,3 +1142,91 @@ async def test_the_campaign_says_which_budget_each_step_spends(
         campaign_id = campaign.id
     steps = (await client.get(f"/api/v1/campaigns/{campaign_id}")).json()["steps"]
     assert [step["budget"] for step in steps] == ["li_prefills", None]
+
+
+# --- the sending hours, with a chosen start and a later step --------------------------------
+
+
+def _chosen_start(at: datetime) -> Callable[[Lane], None]:
+    def choose(lane: Lane) -> None:
+        def write(session: Session, user: User) -> None:
+            from netkeeper.models import Campaign
+            from netkeeper.scoping import get_scoped
+
+            campaign = get_scoped(session, user, Campaign, lane.campaign_id)
+            assert campaign is not None
+            campaign.starts_at = at
+            campaign.start_chosen = True
+
+        lane.write(write)
+
+    return choose
+
+
+#: (a chosen start or none, the step's current position, the outlook's wait, the claim's
+#: logged reason). Sending hours are closed at NOW (08:00 to 09:00, NOW is 14:00).
+STARTS: dict[str, tuple[datetime | None, int | None, Wait | None, str | None]] = {
+    # Step 1 on its campaign's chosen start day goes whatever the hour.
+    "first step, started today": (NOW - timedelta(hours=1), None, None, None),
+    # The exemption is the start's day only.
+    "first step, started yesterday": (
+        NOW - timedelta(days=1),
+        None,
+        Wait.SENDING_HOURS,
+        "outside_sending_hours",
+    ),
+    # A later step never has it.
+    "later step, started today": (
+        NOW - timedelta(hours=1),
+        1,
+        Wait.SENDING_HOURS,
+        "outside_sending_hours",
+    ),
+    "first step, no chosen start": (None, None, Wait.SENDING_HOURS, "outside_sending_hours"),
+}
+
+
+@pytest.mark.parametrize("name", list(STARTS))
+async def test_a_chosen_start_and_a_later_step_hold_alike(
+    lane: Lane, caplog: pytest.LogCaptureFixture, name: str
+) -> None:
+    start, current, wait, words = STARTS[name]
+    lane.enroll(contact=dict(CONTACT), current_step=current)
+    if start is not None:
+        _chosen_start(start)(lane)
+    _scheduled(lane)
+    _hours(True)(lane)
+    assert look(lane).wait is wait
+    fired = await fire(lane, caplog)
+    assert fired.words == words
+    assert (fired.outcome is None) is (wait is None)
+
+
+# --- the catch-up window, in active hours ---------------------------------------------------
+
+
+def test_a_catch_up_outside_active_hours_waits_for_them(lane: Lane) -> None:
+    lane.enroll(contact=dict(CONTACT))
+    _scheduled(lane, due=NOW - timedelta(hours=1))
+    seen = look(lane, settings=MORNING, now=NOW)
+    # 14:05 and 14:20 are outside 08:00 to 10:00: the scheduler stores the window's start.
+    opens = datetime(2026, 9, 30, 8, 0, tzinfo=NOW.tzinfo)
+    assert seen.catch_up and seen.checked_at == opens and seen.catch_up_latest == opens
+
+
+# --- schedule status keeps every line when the outlook fails --------------------------------
+
+
+def test_schedule_status_survives_a_broken_outlook(
+    cli_db: Any, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    def broken(*args: Any, **kwargs: Any) -> Any:
+        raise KeyError("Somebody")
+
+    monkeypatch.setattr(auto_send_outlook, "outlook", broken)
+    with caplog.at_level(logging.WARNING):
+        output = _status()
+    assert "auto-send outlook unavailable" in output
+    assert "disarmed: `netkeeper serve` fires no scheduled LinkedIn run" in output
+    assert "route-changed breaker" in output and "inbox owner breaker" in output
+    assert "KeyError" in caplog.text and "Somebody" not in caplog.text

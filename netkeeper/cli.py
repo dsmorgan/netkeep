@@ -2201,9 +2201,7 @@ def linkedin_schedule_status(ctx: typer.Context) -> None:
             inbox = route_breaker.inbox_state(session, user, account_id)
             owner = route_breaker.inbox_owner_state(session, user, account_id)
             owner_fix = inbox_apply.owner_mismatch_fix(session, user)
-            auto_send = auto_send_outlook.outlook(
-                session, user, now=datetime.now(UTC), settings=settings
-            )
+            auto_send = _auto_send_or_none(session, user, settings)
     finally:
         engine.dispose()
     if armed_at is None:
@@ -2233,8 +2231,23 @@ def linkedin_schedule_status(ctx: typer.Context) -> None:
     typer.echo(_streak_line("inbox owner breaker", "owner_mismatch", owner, kind=SyncRunKind.INBOX))
     if owner.tripped:
         typer.echo(f"  to fix the mailbox mismatch: {owner_fix}")
-    for line in _auto_send_lines(auto_send, on=settings.campaigns.linkedin_auto_send):
-        typer.echo(line)
+    if auto_send is None:
+        typer.echo("auto-send outlook unavailable")
+    else:
+        for line in _auto_send_lines(auto_send, on=settings.campaigns.linkedin_auto_send):
+            typer.echo(line)
+
+
+def _auto_send_or_none(
+    session: Session, user: User, settings: Settings
+) -> auto_send_outlook.AutoSendOutlook | None:
+    """The auto-send outlook, or ``None`` when it cannot be read. It is a display: a fault
+    in it never hides the rest of `schedule status`. Only the exception's type is logged."""
+    try:
+        return auto_send_outlook.outlook(session, user, now=datetime.now(UTC), settings=settings)
+    except Exception as exc:
+        log.warning("auto-send outlook unavailable: %s", type(exc).__name__)
+        return None
 
 
 def _utc(value: datetime) -> str:

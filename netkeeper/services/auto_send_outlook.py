@@ -74,6 +74,7 @@ from netkeeper.services.scheduled_runs import (
 )
 from netkeeper.services.scheduler import (
     AUTO_SEND_INTERVAL,
+    AUTO_SEND_SCHEDULE,
     AUTO_SEND_SPACING_MAX,
     AUTO_SEND_SPACING_MIN,
     CATCHUP_MAX_MINUTES,
@@ -82,6 +83,7 @@ from netkeeper.services.scheduler import (
     LastFire,
     gate_skip_reason,
     last_fire,
+    snap_to_active_hours,
     stored_due,
 )
 
@@ -184,8 +186,13 @@ def outlook(session: Session, user: User, *, now: datetime, settings: Settings) 
     # The scheduler's hot path (poll_and_fire): a due time lapsed by a whole interval is
     # deferred as one catch-up fire, 5 to 20 minutes out, never fired at once.
     catch_up = next_fire is not None and now - next_fire >= AUTO_SEND_INTERVAL
+    catch_up_latest: datetime | None = None
     if catch_up:
-        at = now + timedelta(minutes=CATCHUP_MIN_MINUTES)
+        # As _defer_as_catchup does: the jittered time, snapped into active hours.
+        at = _snapped(session, user, settings, now + timedelta(minutes=CATCHUP_MIN_MINUTES))
+        catch_up_latest = _snapped(
+            session, user, settings, now + timedelta(minutes=CATCHUP_MAX_MINUTES)
+        )
     last = last_fire(session, user, account_id, JobKind.AUTO_SEND)
 
     blank = AutoSendOutlook(
@@ -194,7 +201,7 @@ def outlook(session: Session, user: User, *, now: datetime, settings: Settings) 
         wait=None,
         last_fire=last,
         catch_up=catch_up,
-        catch_up_latest=now + timedelta(minutes=CATCHUP_MAX_MINUTES) if catch_up else None,
+        catch_up_latest=catch_up_latest,
     )
 
     def waits(wait: Wait | None, **fields: object) -> AutoSendOutlook:
@@ -306,6 +313,23 @@ def _first_unheld(
             return enrollment, None
         soonest = held if soonest is None else min(soonest, held)
     return None, soonest
+
+
+def _snapped(session: Session, user: User, settings: Settings, due: datetime) -> datetime:
+    """``due`` as the scheduler stores a catch-up fire: snapped into the user's active
+    hours (the scheduler's own window and helper). A window that does not parse leaves it
+    as it is; the claim's check then says so."""
+    try:
+        start, end = active_window(ui_settings.resolve(session, user, settings))
+    except ValueError:
+        return due
+    return snap_to_active_hours(
+        due,
+        user.timezone,
+        start=start,
+        end=end,
+        respect_active_hours=AUTO_SEND_SCHEDULE.respect_active_hours,
+    )
 
 
 def _window_opens(settings: Settings, at: datetime) -> datetime | None:
