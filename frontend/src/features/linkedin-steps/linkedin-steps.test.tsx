@@ -1505,12 +1505,46 @@ describe('the auto-send outlook in words', () => {
       `It's outside your LinkedIn active hours. They next open at ${formatWhen(until)}.`,
     )
     expect(autoSendWaitText(autoSendOutlook({ wait: 'heat', until }))).toBe(
-      `Heat is over its threshold. It cools by ${formatWhen(until)}.`,
+      `Heat is at or over its threshold. It cools by ${formatWhen(until)}.`,
     )
     expect(autoSendWaitText(autoSendOutlook({ wait: 'sending_hours', until }))).toBe(
       `Your sending hours hold every due auto-send step. They open at ${formatWhen(until)}.`,
     )
     expect(autoSendWaitText(autoSendOutlook())).toBeNull()
+  })
+
+  it('says a spilled step waits for its own time of day', () => {
+    const until = '2026-09-24T18:00:00Z'
+    expect(autoSendWaitText(autoSendOutlook({ wait: 'spilled', until }))).toBe(
+      `Your sending hours are any time, so each due auto-send step waits for its own time of day. The first goes at ${formatWhen(until)}.`,
+    )
+  })
+
+  it('takes the spacing bounds from the API', () => {
+    const text = autoSendWaitText(
+      autoSendOutlook({
+        wait: 'spacing',
+        until: '2026-09-23T14:40:00Z',
+        spacing_earliest: '2026-09-23T14:25:00Z',
+        spacing_latest: '2026-09-23T14:50:00Z',
+        spacing_min_minutes: 15,
+        spacing_max_minutes: 40,
+      }),
+    )
+    expect(text).toContain('The spacing is 15 to 40 minutes')
+  })
+
+  it('gives an overdue check its catch-up window, never "now"', () => {
+    const outlook = autoSendOutlook({
+      enrollment_id: 9,
+      catch_up: true,
+      checked_at: '2026-09-23T14:05:00Z',
+      catch_up_latest: '2026-09-23T14:20:00Z',
+    })
+    const step = { enrollment_id: 9, due: '2026-09-23T12:00:00Z' }
+    expect(autoSendStepText(outlook, step, new Date('2026-09-23T14:00:00Z'))).toBe(
+      `Sends on its own at the next auto-send check, between ${formatWhen('2026-09-23T14:05:00Z')} and ${formatWhen('2026-09-23T14:20:00Z')}.`,
+    )
   })
 
   it('says a step not due yet goes once it is due', () => {

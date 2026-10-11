@@ -3611,7 +3611,7 @@ export interface components {
         };
         /**
          * AutoSendOutlookOut
-         * @description When the next auto-send goes out, or why it waits (#505). Read-only.
+         * @description When the next auto-send goes out, or why it waits. Read-only.
          *
          *     ``on`` is ``[campaigns] linkedin_auto_send``. ``next_fire`` is the auto-send job's next
          *     due time; ``checked_at`` is the time the checks were read for (``next_fire``, or now
@@ -3619,15 +3619,22 @@ export interface components {
          *     ``enrollment_id`` is then the one it tries first; otherwise it names the first check
          *     that stops it: ``auto_send_off``, ``not_scheduled``, ``disarmed``, ``paused``,
          *     ``session_flagged``, ``heat``, ``held``, ``spacing``, ``budget_spent``,
-         *     ``no_step_due``, ``bad_sending_hours``, ``sending_hours``, ``prefill_open``,
+         *     ``no_step_due``, ``bad_sending_hours``, ``sending_hours``, ``spilled``, ``prefill_open``,
          *     ``outside_active_hours``, ``bad_active_hours``, ``not_logged_in``,
          *     ``browser_unhealthy``, ``out_of_budget`` or ``inbox_stale``. ``until`` is when the
          *     wait can end, when a check says so. ``spacing_earliest`` and ``spacing_latest`` bound
-         *     the spacing after the last LinkedIn message run (20 to 45 minutes); ``until`` is its
-         *     exact end. ``hold_reason`` is the hold's own words. ``inbox_age_hours`` is null when no
-         *     inbox poll has completed. No field names a contact or holds a message.
+         *     the spacing after the last LinkedIn message run (``spacing_min_minutes`` to
+         *     ``spacing_max_minutes`` after it); ``until`` is its exact end. ``hold_reason`` is the
+         *     hold's own words. ``inbox_age_hours`` is null when no inbox poll has completed.
+         *     ``catch_up`` is true when the due time passed a whole interval ago: the scheduler then
+         *     runs the check once, between ``checked_at`` and ``catch_up_latest``. No field names a
+         *     contact or holds a message.
          */
         AutoSendOutlookOut: {
+            /** Catch Up */
+            catch_up: boolean;
+            /** Catch Up Latest */
+            catch_up_latest: string | null;
             /**
              * Checked At
              * Format: date-time
@@ -3650,6 +3657,10 @@ export interface components {
             spacing_earliest: string | null;
             /** Spacing Latest */
             spacing_latest: string | null;
+            /** Spacing Max Minutes */
+            spacing_max_minutes: number;
+            /** Spacing Min Minutes */
+            spacing_min_minutes: number;
             /** Until */
             until: string | null;
             /** Wait */
@@ -7216,7 +7227,7 @@ export interface components {
             armed: boolean;
             /** Armed At */
             armed_at: string | null;
-            auto_send: components["schemas"]["AutoSendOutlookOut"];
+            auto_send: components["schemas"]["AutoSendOutlookOut"] | null;
             /** Jobs */
             jobs: components["schemas"]["ScheduledJobOut"][];
             /** Paused */
@@ -7520,6 +7531,8 @@ export interface components {
         StepMode: "draft" | "send" | "prefill" | "auto_send";
         /** StepOut */
         StepOut: {
+            /** Budget */
+            budget?: string | null;
             channel: components["schemas"]["TemplateChannel"];
             condition: components["schemas"]["StepCondition"];
             /** Delay Days */

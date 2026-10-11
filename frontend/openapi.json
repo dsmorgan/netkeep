@@ -652,8 +652,24 @@
         "type": "object"
       },
       "AutoSendOutlookOut": {
-        "description": "When the next auto-send goes out, or why it waits (#505). Read-only.\n\n``on`` is ``[campaigns] linkedin_auto_send``. ``next_fire`` is the auto-send job's next\ndue time; ``checked_at`` is the time the checks were read for (``next_fire``, or now\nonce that has passed). ``wait`` is null when that fire would claim a step, and\n``enrollment_id`` is then the one it tries first; otherwise it names the first check\nthat stops it: ``auto_send_off``, ``not_scheduled``, ``disarmed``, ``paused``,\n``session_flagged``, ``heat``, ``held``, ``spacing``, ``budget_spent``,\n``no_step_due``, ``bad_sending_hours``, ``sending_hours``, ``prefill_open``,\n``outside_active_hours``, ``bad_active_hours``, ``not_logged_in``,\n``browser_unhealthy``, ``out_of_budget`` or ``inbox_stale``. ``until`` is when the\nwait can end, when a check says so. ``spacing_earliest`` and ``spacing_latest`` bound\nthe spacing after the last LinkedIn message run (20 to 45 minutes); ``until`` is its\nexact end. ``hold_reason`` is the hold's own words. ``inbox_age_hours`` is null when no\ninbox poll has completed. No field names a contact or holds a message.",
+        "description": "When the next auto-send goes out, or why it waits. Read-only.\n\n``on`` is ``[campaigns] linkedin_auto_send``. ``next_fire`` is the auto-send job's next\ndue time; ``checked_at`` is the time the checks were read for (``next_fire``, or now\nonce that has passed). ``wait`` is null when that fire would claim a step, and\n``enrollment_id`` is then the one it tries first; otherwise it names the first check\nthat stops it: ``auto_send_off``, ``not_scheduled``, ``disarmed``, ``paused``,\n``session_flagged``, ``heat``, ``held``, ``spacing``, ``budget_spent``,\n``no_step_due``, ``bad_sending_hours``, ``sending_hours``, ``spilled``, ``prefill_open``,\n``outside_active_hours``, ``bad_active_hours``, ``not_logged_in``,\n``browser_unhealthy``, ``out_of_budget`` or ``inbox_stale``. ``until`` is when the\nwait can end, when a check says so. ``spacing_earliest`` and ``spacing_latest`` bound\nthe spacing after the last LinkedIn message run (``spacing_min_minutes`` to\n``spacing_max_minutes`` after it); ``until`` is its exact end. ``hold_reason`` is the\nhold's own words. ``inbox_age_hours`` is null when no inbox poll has completed.\n``catch_up`` is true when the due time passed a whole interval ago: the scheduler then\nruns the check once, between ``checked_at`` and ``catch_up_latest``. No field names a\ncontact or holds a message.",
         "properties": {
+          "catch_up": {
+            "title": "Catch Up",
+            "type": "boolean"
+          },
+          "catch_up_latest": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catch Up Latest"
+          },
           "checked_at": {
             "format": "date-time",
             "title": "Checked At",
@@ -753,6 +769,14 @@
             ],
             "title": "Spacing Latest"
           },
+          "spacing_max_minutes": {
+            "title": "Spacing Max Minutes",
+            "type": "integer"
+          },
+          "spacing_min_minutes": {
+            "title": "Spacing Min Minutes",
+            "type": "integer"
+          },
           "until": {
             "anyOf": [
               {
@@ -794,6 +818,10 @@
           "hold_reason",
           "inbox_age_hours",
           "inbox_limit_hours",
+          "spacing_min_minutes",
+          "spacing_max_minutes",
+          "catch_up",
+          "catch_up_latest",
           "last_fire"
         ],
         "title": "AutoSendOutlookOut",
@@ -11084,7 +11112,14 @@
             "title": "Armed At"
           },
           "auto_send": {
-            "$ref": "#/components/schemas/AutoSendOutlookOut"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AutoSendOutlookOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "jobs": {
             "items": {
@@ -11810,6 +11845,17 @@
       },
       "StepOut": {
         "properties": {
+          "budget": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget"
+          },
           "channel": {
             "$ref": "#/components/schemas/TemplateChannel"
           },

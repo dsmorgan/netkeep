@@ -2062,7 +2062,7 @@ class LastFireOut(BaseModel):
 
 
 class AutoSendOutlookOut(BaseModel):
-    """When the next auto-send goes out, or why it waits (#505). Read-only.
+    """When the next auto-send goes out, or why it waits. Read-only.
 
     ``on`` is ``[campaigns] linkedin_auto_send``. ``next_fire`` is the auto-send job's next
     due time; ``checked_at`` is the time the checks were read for (``next_fire``, or now
@@ -2070,13 +2070,16 @@ class AutoSendOutlookOut(BaseModel):
     ``enrollment_id`` is then the one it tries first; otherwise it names the first check
     that stops it: ``auto_send_off``, ``not_scheduled``, ``disarmed``, ``paused``,
     ``session_flagged``, ``heat``, ``held``, ``spacing``, ``budget_spent``,
-    ``no_step_due``, ``bad_sending_hours``, ``sending_hours``, ``prefill_open``,
+    ``no_step_due``, ``bad_sending_hours``, ``sending_hours``, ``spilled``, ``prefill_open``,
     ``outside_active_hours``, ``bad_active_hours``, ``not_logged_in``,
     ``browser_unhealthy``, ``out_of_budget`` or ``inbox_stale``. ``until`` is when the
     wait can end, when a check says so. ``spacing_earliest`` and ``spacing_latest`` bound
-    the spacing after the last LinkedIn message run (20 to 45 minutes); ``until`` is its
-    exact end. ``hold_reason`` is the hold's own words. ``inbox_age_hours`` is null when no
-    inbox poll has completed. No field names a contact or holds a message.
+    the spacing after the last LinkedIn message run (``spacing_min_minutes`` to
+    ``spacing_max_minutes`` after it); ``until`` is its exact end. ``hold_reason`` is the
+    hold's own words. ``inbox_age_hours`` is null when no inbox poll has completed.
+    ``catch_up`` is true when the due time passed a whole interval ago: the scheduler then
+    runs the check once, between ``checked_at`` and ``catch_up_latest``. No field names a
+    contact or holds a message.
     """
 
     on: bool
@@ -2091,6 +2094,10 @@ class AutoSendOutlookOut(BaseModel):
     hold_reason: str | None
     inbox_age_hours: float | None
     inbox_limit_hours: float | None
+    spacing_min_minutes: int
+    spacing_max_minutes: int
+    catch_up: bool
+    catch_up_latest: datetime | None
     last_fire: LastFireOut | None
 
 
@@ -2112,8 +2119,9 @@ class ScheduleOut(BaseModel):
     paused_at: datetime | None
     scheduler_running: bool
     jobs: list[ScheduledJobOut]
-    auto_send: AutoSendOutlookOut
-    """The auto-send job's outlook (#505): read whether auto-send is on or not."""
+    auto_send: AutoSendOutlookOut | None
+    """The auto-send job's outlook, whether auto-send is on or not. Null when it could not
+    be read: a display, it never stops the schedule's controls."""
 
 
 class ScheduleArmIn(BaseModel):
@@ -2458,8 +2466,8 @@ class NextFireOut(BaseModel):
     contact_name: str
     ready_to_prefill: bool = False
     auto_send: bool = False
-    """The step's mode is ``auto_send`` (ADR 0008): while auto-send is on, the scheduler
-    sends it, and ``/linkedin/schedule``'s ``auto_send`` says when or why it waits."""
+    """The step's mode is ``auto_send``: while auto-send is on, the scheduler sends it, and
+    ``/linkedin/schedule``'s ``auto_send`` says when or why it waits."""
 
 
 class NextFirePage(BaseModel):

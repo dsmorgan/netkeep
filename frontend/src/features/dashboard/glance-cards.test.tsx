@@ -419,8 +419,32 @@ describe('NextLinkedInRunCard', () => {
     renderCard(NextLinkedInRunCard, { [SCHEDULE]: json(schedule({ auto_send: outlook })) })
     const body = await card('Next LinkedIn run')
     expect(
-      await body.findByText(`Heat is over its threshold. It cools by ${formatWhen(until)}.`),
+      await body.findByText(`Heat is at or over its threshold. It cools by ${formatWhen(until)}.`),
     ).toBeInTheDocument()
+  })
+
+  it('shows an overdue check at its catch-up window, not its old time', async () => {
+    const outlook = autoSendOutlook({
+      next_fire: '2020-01-01T09:00:00Z',
+      catch_up: true,
+      checked_at: '2099-02-01T09:05:00Z',
+      catch_up_latest: '2099-02-01T09:20:00Z',
+    })
+    renderCard(NextLinkedInRunCard, { [SCHEDULE]: json(schedule({ auto_send: outlook })) })
+    const body = await card('Next LinkedIn run')
+    const row = (await body.findAllByRole('listitem')).find((item) =>
+      item.textContent?.includes('Auto-send check'),
+    )
+    expect(row).toHaveTextContent(formatWhen('2099-02-01T09:05:00Z'))
+    expect(row).not.toHaveTextContent(formatWhen('2020-01-01T09:00:00Z'))
+    expect(row).toHaveTextContent("It's overdue, so it runs once between")
+  })
+
+  it('reads nothing when the outlook is unavailable', async () => {
+    renderCard(NextLinkedInRunCard, { [SCHEDULE]: json(schedule({ auto_send: null })) })
+    const body = await card('Next LinkedIn run')
+    await body.findAllByRole('listitem')
+    expect(body.queryByText(/Auto-send check/)).not.toBeInTheDocument()
   })
 
   it('says when the auto-send check is not scheduled yet', async () => {

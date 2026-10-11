@@ -41,7 +41,7 @@ from __future__ import annotations
 import enum
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
-from datetime import datetime, time
+from datetime import datetime, timedelta
 from typing import Final
 
 from sqlalchemy.orm import Session
@@ -53,6 +53,7 @@ from netkeeper.models import Campaign, Enrollment, User
 from netkeeper.scoping import get_scoped
 from netkeeper.services import budgets, inbox_hold, sending_hours, ui_settings
 from netkeeper.services import campaign_engine as engine
+from netkeeper.services.campaign_guards import ChannelReason
 from netkeeper.services.linkedin_accounts import account_id_for
 from netkeeper.services.linkedin_steps import (
     AUTO_SEND_HOLD_INTERRUPTED,
@@ -61,11 +62,22 @@ from netkeeper.services.linkedin_steps import (
     auto_send_hold,
     auto_send_precheck,
     auto_send_ready_statement,
+    sending_hours_hold,
     user_refusal,
 )
 from netkeeper.services.posture import heat_status
-from netkeeper.services.scheduled_runs import FireStop, auto_send_fire_check, auto_send_spacing
+from netkeeper.services.scheduled_runs import (
+    FireStop,
+    active_window,
+    auto_send_fire_check,
+    auto_send_spacing,
+)
 from netkeeper.services.scheduler import (
+    AUTO_SEND_INTERVAL,
+    AUTO_SEND_SPACING_MAX,
+    AUTO_SEND_SPACING_MIN,
+    CATCHUP_MAX_MINUTES,
+    CATCHUP_MIN_MINUTES,
     JobKind,
     LastFire,
     gate_skip_reason,
@@ -89,6 +101,8 @@ class Wait(enum.StrEnum):
     NO_STEP_DUE = "no_step_due"
     BAD_SENDING_HOURS = "bad_sending_hours"
     SENDING_HOURS = "sending_hours"
+    SPILLED = "spilled"
+    """Sending hours are "any time", and the step waits for its own time of day."""
     PREFILL_OPEN = "prefill_open"
     OUTSIDE_ACTIVE_HOURS = "outside_active_hours"
     BAD_ACTIVE_HOURS = "bad_active_hours"
@@ -98,19 +112,22 @@ class Wait(enum.StrEnum):
     INBOX_STALE = "inbox_stale"
 
 
-#: The claim's refusal codes about the user, as waits.
-_REFUSALS: Final[dict[str, Wait]] = {
+#: Every refusal :func:`~netkeeper.services.linkedin_steps.user_refusal` can give, as a
+#: wait. Indexed, never read with a default: a refusal missing here raises, and a test
+#: holds every one the claim can give.
+REFUSALS: Final[dict[str, Wait]] = {
     Refusal.PREFILL_OPEN: Wait.PREFILL_OPEN,
     Refusal.OUTSIDE_ACTIVE_HOURS: Wait.OUTSIDE_ACTIVE_HOURS,
     Refusal.BAD_ACTIVE_HOURS: Wait.BAD_ACTIVE_HOURS,
-    "browser_unknown": Wait.NOT_LOGGED_IN,
-    "browser_unhealthy": Wait.BROWSER_UNHEALTHY,
-    "browser_out_of_budget": Wait.OUT_OF_BUDGET,
+    ChannelReason.BROWSER_UNKNOWN: Wait.NOT_LOGGED_IN,
+    ChannelReason.BROWSER_UNHEALTHY: Wait.BROWSER_UNHEALTHY,
+    ChannelReason.BROWSER_OUT_OF_BUDGET: Wait.OUT_OF_BUDGET,
     Refusal.INBOX_STALE: Wait.INBOX_STALE,
 }
 
-#: The scheduler gate's skip reasons an auto-send fire can meet, as waits.
-_GATE: Final[dict[str, Wait]] = {
+#: The scheduler gate's skip reasons an auto-send fire can meet, as waits. Indexed, like
+#: :data:`REFUSALS`.
+GATE: Final[dict[str, Wait]] = {
     "disarmed": Wait.DISARMED,
     "paused": Wait.PAUSED,
     "session_flagged": Wait.SESSION_FLAGGED,
@@ -124,7 +141,10 @@ class AutoSendOutlook:
 
     ``next_fire`` is the job's stored due time (``None`` when it has none);
     ``checked_at`` is the time the checks were read for: ``next_fire``, or now once that
-    has passed. ``wait`` is ``None`` when the fire would claim a step, and
+    has passed. A due time a whole interval or more in the past is downtime the scheduler
+    defers as one catch-up fire, 5 to 20 minutes after it notices (``catch_up``): the
+    checks are then read for the earliest of those, and ``catch_up_latest`` is the
+    latest. ``wait`` is ``None`` when the fire would claim a step, and
     ``enrollment_id`` is then the one it tries first. ``until`` is when the wait can end,
     where a check says so: active hours open, the spacing ends, the budget resets, heat
     cools, the sending hours open. ``spacing_earliest`` and ``spacing_latest`` bound the
@@ -146,6 +166,8 @@ class AutoSendOutlook:
     inbox_limit_hours: float | None = None
     detail: str | None = None
     last_fire: LastFire | None = None
+    catch_up: bool = False
+    catch_up_latest: datetime | None = None
 
     @property
     def would_send(self) -> bool:
@@ -159,9 +181,21 @@ def outlook(session: Session, user: User, *, now: datetime, settings: Settings) 
     account_id = account_id_for(session, user)
     next_fire = stored_due(session, user, account_id, JobKind.AUTO_SEND)
     at = next_fire if next_fire is not None and next_fire > now else now
+    # The scheduler's hot path (poll_and_fire): a due time lapsed by a whole interval is
+    # deferred as one catch-up fire, 5 to 20 minutes out, never fired at once.
+    catch_up = next_fire is not None and now - next_fire >= AUTO_SEND_INTERVAL
+    if catch_up:
+        at = now + timedelta(minutes=CATCHUP_MIN_MINUTES)
     last = last_fire(session, user, account_id, JobKind.AUTO_SEND)
 
-    blank = AutoSendOutlook(next_fire=next_fire, checked_at=at, wait=None, last_fire=last)
+    blank = AutoSendOutlook(
+        next_fire=next_fire,
+        checked_at=at,
+        wait=None,
+        last_fire=last,
+        catch_up=catch_up,
+        catch_up_latest=now + timedelta(minutes=CATCHUP_MAX_MINUTES) if catch_up else None,
+    )
 
     def waits(wait: Wait | None, **fields: object) -> AutoSendOutlook:
         return replace(blank, wait=wait, **fields)  # type: ignore[arg-type]
@@ -179,7 +213,7 @@ def outlook(session: Session, user: User, *, now: datetime, settings: Settings) 
     if skipped is not None:
         if skipped == "heat":
             return waits(Wait.HEAT, until=_heat_resumes(session, user, account_id, at, settings))
-        return waits(_GATE.get(skipped, Wait.DISARMED), detail=skipped)
+        return waits(GATE[skipped], detail=skipped)
 
     # 3. The handler's own checks.
     check = auto_send_fire_check(session, user, account_id, clock=lambda: at)
@@ -226,12 +260,14 @@ def outlook(session: Session, user: User, *, now: datetime, settings: Settings) 
         return waits(Wait.BAD_SENDING_HOURS, detail=str(exc))
     candidate, opens = _first_unheld(session, user, enrollments, at, slots, hours)
     if candidate is None:
-        return waits(Wait.SENDING_HOURS, until=opens)
+        # The claim's own reason: the sending hours, or the spill when they are "any time".
+        held = Wait.SENDING_HOURS if hours.enabled else Wait.SPILLED
+        return waits(held, until=opens)
 
     # 6. The claim's checks about the user and the browser.
     refused = user_refusal(session, user, now=at, settings=in_force, auto=True)
     if refused is not None:
-        wait = _REFUSALS.get(refused.reasons[0], Wait.BROWSER_UNHEALTHY)
+        wait = REFUSALS[refused.reasons[0]]
         if wait is Wait.OUTSIDE_ACTIVE_HOURS:
             return waits(wait, until=_window_opens(in_force, at), detail=refused.detail)
         if wait is Wait.INBOX_STALE:
@@ -265,14 +301,7 @@ def _first_unheld(
         campaign = get_scoped(session, user, Campaign, enrollment.campaign_id)
         if due is None or campaign is None:
             continue
-        held = schedule.hold(
-            due,
-            at,
-            slots=slots,
-            hours=hours,
-            starts_at=campaign.starts_at if campaign.start_chosen else None,
-            first_step=enrollment.current_step is None,
-        )
+        held = sending_hours_hold(enrollment, campaign, due, at, slots=slots, hours=hours)
         if held is None:
             return enrollment, None
         soonest = held if soonest is None else min(soonest, held)
@@ -280,11 +309,11 @@ def _first_unheld(
 
 
 def _window_opens(settings: Settings, at: datetime) -> datetime | None:
-    """When ``[linkedin] active_hours`` next open after ``at``; ``None`` for hours that
-    do not parse."""
+    """When ``[linkedin] active_hours`` next open after ``at``, read with the scheduler's
+    own parser; ``None`` for hours that do not parse."""
     try:
-        start = time.fromisoformat(settings.linkedin.active_hours[0])
-    except (ValueError, IndexError):
+        start, _ = active_window(settings)
+    except ValueError:
         return None
     return pacing.next_window_start(at, settings.linkedin.timezone, start=start)
 
@@ -299,6 +328,10 @@ def _heat_resumes(
 # --- in words, for `netkeeper linkedin schedule status` -------------------------------------
 
 TimeFormat = Callable[[datetime], str]
+
+#: The spacing's bounds in whole minutes, as the API and the words give them.
+SPACING_MIN_MINUTES: Final = round(AUTO_SEND_SPACING_MIN)
+SPACING_MAX_MINUTES: Final = round(AUTO_SEND_SPACING_MAX)
 
 #: Each wait in plain words; ``{until}`` is filled in where the wait has an end.
 WORDS: Final[dict[Wait, str]] = {
@@ -315,13 +348,16 @@ WORDS: Final[dict[Wait, str]] = {
         "the LinkedIn session is flagged (a checkpoint or a login wall), so nothing runs"
         " until it's cleared"
     ),
-    Wait.HEAT: "heat is at its skip threshold",
+    Wait.HEAT: "heat is at or over its skip threshold",
     Wait.HELD: "auto-send is held",
     Wait.SPACING: "it waits out the spacing after the last LinkedIn message run",
     Wait.BUDGET_SPENT: "today's auto-send budget (li_messages_auto) is spent",
     Wait.NO_STEP_DUE: "no auto-send step is due",
     Wait.BAD_SENDING_HOURS: "your sending hours can't be read; fix them in Settings",
     Wait.SENDING_HOURS: "your sending hours hold every due auto-send step",
+    Wait.SPILLED: (
+        "your sending hours are any time, so each due auto-send step waits for its own time of day"
+    ),
     Wait.PREFILL_OPEN: "another prefill is open: send or discard it first",
     Wait.OUTSIDE_ACTIVE_HOURS: "it's outside your LinkedIn active hours",
     Wait.BAD_ACTIVE_HOURS: "your LinkedIn active hours can't be read; fix them in config.toml",
@@ -348,6 +384,12 @@ _LAST_REASONS: Final[dict[str, str]] = {
 def describe(seen: AutoSendOutlook, when: TimeFormat) -> str:
     """The outlook in one line: what the next check would do, and when a wait ends."""
     if seen.wait is None:
+        if seen.catch_up and seen.catch_up_latest is not None:
+            return (
+                "it would send the oldest due auto-send step; the check is overdue, so the"
+                f" scheduler runs it once between {when(seen.checked_at)} and"
+                f" {when(seen.catch_up_latest)}"
+            )
         return "it would send the oldest due auto-send step"
     words = WORDS[seen.wait]
     if seen.wait is Wait.HELD and seen.hold_reason is not None:
@@ -359,8 +401,8 @@ def describe(seen: AutoSendOutlook, when: TimeFormat) -> str:
         bounds = ""
         if seen.spacing_earliest is not None and seen.spacing_latest is not None:
             bounds = (
-                f" (20 to 45 minutes after that run: between {when(seen.spacing_earliest)}"
-                f" and {when(seen.spacing_latest)})"
+                f" ({SPACING_MIN_MINUTES} to {SPACING_MAX_MINUTES} minutes after that run:"
+                f" between {when(seen.spacing_earliest)} and {when(seen.spacing_latest)})"
             )
         return f"{words}; it ends at {when(seen.until)}{bounds}"
     if seen.wait is Wait.INBOX_STALE:
@@ -374,6 +416,7 @@ def describe(seen: AutoSendOutlook, when: TimeFormat) -> str:
             Wait.BUDGET_SPENT: "it resets at",
             Wait.OUT_OF_BUDGET: "it resets at",
             Wait.SENDING_HOURS: "until",
+            Wait.SPILLED: "the first goes at",
             Wait.OUTSIDE_ACTIVE_HOURS: "they next open at",
         }.get(seen.wait, "until")
         return f"{words}; {ends} {when(seen.until)}"

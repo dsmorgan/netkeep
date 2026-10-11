@@ -510,10 +510,16 @@ def user_active_hours(factory: sessionmaker[Session], base: Settings) -> ActiveH
             if fresh is None:
                 raise LookupError(f"no user {user.id}")
             in_force = ui_settings.resolve(session, fresh, base)
-        start, end = (time.fromisoformat(value) for value in in_force.linkedin.active_hours)
-        return start, end
+        return active_window(in_force)
 
     return hours
+
+
+def active_window(settings: Settings) -> tuple[time, time]:
+    """``[linkedin] active_hours`` as the scheduler reads them at each heartbeat. Raises
+    :class:`ValueError` for a window that does not parse."""
+    start, end = (time.fromisoformat(value) for value in settings.linkedin.active_hours)
+    return start, end
 
 
 def seed_served_schedule(

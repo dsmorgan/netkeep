@@ -2245,7 +2245,10 @@ def _auto_send_lines(seen: auto_send_outlook.AutoSendOutlook, *, on: bool) -> li
     """`schedule status`'s auto-send lines (#505): the next check, what it would do, and
     how the last one ended. One line while auto-send is off."""
     if not on:
-        return [f"auto-send: off; {auto_send_outlook.describe(seen, _utc)}"]
+        return [
+            "auto-send: off ([campaigns] linkedin_auto_send in config.toml), so nothing sends"
+            " on its own"
+        ]
     lines = [
         "auto-send: on"
         + ("" if seen.next_fire is None else f"; next check {_utc(seen.next_fire)}"),

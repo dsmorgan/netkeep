@@ -208,14 +208,12 @@ function useLinkedInFacts(campaign: Campaign): { late: string | null; cap: strin
 
   let cap: string | null = null
   if (linkedInOnly && campaign.daily_cap === null) {
-    const limit = (action: string) =>
-      budget.data?.budgets.find((row) => row.action === action)?.day.limit ?? null
+    const limits = budget.isSuccess
+      ? new Map(budget.data.budgets.map((row) => [row.action, row.day.limit]))
+      : null
     cap = linkedInCapText(
-      linkedin.map((step) => step.mode),
-      autoSendOn,
-      budget.isSuccess
-        ? { prefills: limit('li_prefills'), autoSends: limit('li_messages_auto') }
-        : null,
+      linkedin.map((step) => step.budget),
+      limits,
     )
   }
 

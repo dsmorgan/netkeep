@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { budgetQuery, heatQuery, scheduleQuery, statusQuery } from '@/features/linkedin/api'
 import {
+  autoSendCheckWhen,
   autoSendStepText,
   autoSendWaitText,
   type AutoSendOutlook,
@@ -108,13 +109,19 @@ function stepText(fire: NextFire, autoSendOn: boolean): string {
   return `${fire.campaign_name} · ${step}${prefill}`
 }
 
+/**
+ * The LinkedIn schedule, refetched each minute like the other dashboard reads, so the
+ * auto-send check's time and reason never go stale on an open page.
+ */
+const dashboardScheduleQuery = { ...scheduleQuery, refetchInterval: 60_000 }
+
 // --- what happens next ------------------------------------------------------------------
 
 /** The next campaign steps the minute tick will consider (`next_action_at`, spec 11.4). */
 export function NextSendsCard() {
   const fires = useQuery(nextFiresQuery)
   // When the next auto-send check sends an auto-send step, or why it waits.
-  const schedule = useQuery(scheduleQuery)
+  const schedule = useQuery(dashboardScheduleQuery)
   const outlook = schedule.data?.auto_send ?? null
   const autoSendOn = outlook?.on === true
   const fetchedAt = new Date(fires.dataUpdatedAt)
@@ -169,7 +176,7 @@ export function NextSendsCard() {
  * running, it offers the pause.
  */
 export function NextLinkedInRunCard() {
-  const schedule = useQuery(scheduleQuery)
+  const schedule = useQuery(dashboardScheduleQuery)
 
   return (
     <GlanceCard title="Next LinkedIn run">
@@ -220,8 +227,9 @@ function LinkedInJobs({
 }) {
   // With auto-send on, its check is a row like any job's, with what it would do under it.
   const check = autoSend?.on === true ? autoSend : null
-  const rows =
-    check === null ? jobs : [...jobs, { kind: AUTO_SEND_CHECK, next_due: check.next_fire }]
+  // An overdue check runs once in the scheduler's catch-up window, not at its old time.
+  const checkAt = check === null ? null : check.catch_up ? check.checked_at : check.next_fire
+  const rows = check === null ? jobs : [...jobs, { kind: AUTO_SEND_CHECK, next_due: checkAt }]
   const due = rows
     .filter((job): job is { kind: string; next_due: string } => job.next_due !== null)
     .sort((a, b) => a.next_due.localeCompare(b.next_due))
@@ -268,7 +276,10 @@ function LinkedInJobs({
 
 /** What the next auto-send check would do: send a step, or why it waits. */
 function autoSendCheckText(outlook: AutoSendOutlook): string {
-  return autoSendWaitText(outlook) ?? 'It sends the oldest due auto-send step.'
+  const overdue = outlook.catch_up
+    ? ` It's overdue, so it runs once ${autoSendCheckWhen(outlook)}.`
+    : ''
+  return `${autoSendWaitText(outlook) ?? 'It sends the oldest due auto-send step.'}${overdue}`
 }
 
 // --- is anything unhealthy --------------------------------------------------------------

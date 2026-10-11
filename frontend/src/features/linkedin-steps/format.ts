@@ -150,7 +150,7 @@ export function threadUrl(urn: string | null): string | null {
 // --- when an auto-send step goes out, or why it waits ---------------------------------------
 
 /** The next auto-send check, from `GET /linkedin/schedule` (`auto_send`). */
-export type AutoSendOutlook = Schedule['auto_send']
+export type AutoSendOutlook = NonNullable<Schedule['auto_send']>
 
 /**
  * Why the next auto-send check would send nothing, in plain words: one sentence, or its
@@ -165,13 +165,15 @@ export const AUTO_SEND_WAIT_TEXT: Readonly<Record<string, string>> = {
   paused: 'Scheduled runs are paused, so the auto-send check sends nothing.',
   session_flagged:
     "The LinkedIn session is flagged (a checkpoint or a login wall). Nothing runs until it's cleared.",
-  heat: 'Heat is over its threshold',
+  heat: 'Heat is at or over its threshold',
   held: 'Auto-send is held',
   spacing: 'It waits out the spacing after the last LinkedIn message run',
   budget_spent: "Today's auto-send budget is spent",
   no_step_due: 'No auto-send step is due.',
   bad_sending_hours: "Your sending hours can't be read. Fix them in Settings.",
   sending_hours: 'Your sending hours hold every due auto-send step',
+  spilled:
+    'Your sending hours are any time, so each due auto-send step waits for its own time of day',
   prefill_open: 'Another prefill is open. Send or discard it first.',
   outside_active_hours: "It's outside your LinkedIn active hours",
   bad_active_hours: "Your LinkedIn active hours can't be read. Fix them in config.toml.",
@@ -187,6 +189,7 @@ const UNTIL_TEXT: Readonly<Record<string, string>> = {
   budget_spent: 'It resets at',
   out_of_budget: 'It resets at',
   sending_hours: 'They open at',
+  spilled: 'The first goes at',
   outside_active_hours: 'They next open at',
 }
 
@@ -208,7 +211,7 @@ export function autoSendWaitText(outlook: AutoSendOutlook): string | null {
   if (wait === 'spacing' && outlook.until !== null) {
     const bounds =
       outlook.spacing_earliest !== null && outlook.spacing_latest !== null
-        ? ` The spacing is 20 to 45 minutes, so it ends between ${formatWhen(outlook.spacing_earliest)} and ${formatWhen(outlook.spacing_latest)}.`
+        ? ` The spacing is ${outlook.spacing_min_minutes} to ${outlook.spacing_max_minutes} minutes, so it ends between ${formatWhen(outlook.spacing_earliest)} and ${formatWhen(outlook.spacing_latest)}.`
         : ''
     return `${words}. It ends at ${formatWhen(outlook.until)}.${bounds}`
   }
@@ -239,7 +242,7 @@ export function autoSendStepText(
   if (outlook === null || outlook === undefined) return 'Sends on its own.'
   if (outlook.wait === null) {
     if (outlook.enrollment_id === step.enrollment_id) {
-      return `Sends on its own at the next auto-send check, ${formatWhen(outlook.checked_at)}.`
+      return `Sends on its own at the next auto-send check, ${autoSendCheckWhen(outlook)}.`
     }
     return 'Sends on its own after the auto-send steps due before it, one at a time.'
   }
@@ -247,4 +250,15 @@ export function autoSendStepText(
     return 'Sends on its own once it is due.'
   }
   return `Sends on its own, but waits. ${autoSendWaitText(outlook)}`
+}
+
+/**
+ * When the next auto-send check runs: its time, or, when it is overdue a whole interval,
+ * the window the scheduler runs its one catch-up in.
+ */
+export function autoSendCheckWhen(outlook: AutoSendOutlook): string {
+  if (outlook.catch_up && outlook.catch_up_latest !== null) {
+    return `between ${formatWhen(outlook.checked_at)} and ${formatWhen(outlook.catch_up_latest)}`
+  }
+  return formatWhen(outlook.checked_at)
 }

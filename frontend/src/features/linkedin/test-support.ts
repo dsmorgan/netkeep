@@ -68,8 +68,10 @@ export const BROWSER_HEALTH: BrowserHealth = {
   running_run_id: null,
 }
 
+type Outlook = NonNullable<Schedule['auto_send']>
+
 /** The auto-send outlook with auto-send off: what `GET /linkedin/schedule` says by default. */
-export const AUTO_SEND_OFF_OUTLOOK: Schedule['auto_send'] = {
+export const AUTO_SEND_OFF_OUTLOOK: Outlook = {
   on: false,
   next_fire: null,
   checked_at: '2026-09-23T14:00:00Z',
@@ -82,13 +84,15 @@ export const AUTO_SEND_OFF_OUTLOOK: Schedule['auto_send'] = {
   hold_reason: null,
   inbox_age_hours: null,
   inbox_limit_hours: null,
+  spacing_min_minutes: 20,
+  spacing_max_minutes: 45,
+  catch_up: false,
+  catch_up_latest: null,
   last_fire: null,
 }
 
 /** An outlook with auto-send on; it would send unless `overrides` say why it waits. */
-export function autoSendOutlook(
-  overrides: Partial<Schedule['auto_send']> = {},
-): Schedule['auto_send'] {
+export function autoSendOutlook(overrides: Partial<Outlook> = {}): Outlook {
   return {
     ...AUTO_SEND_OFF_OUTLOOK,
     on: true,
