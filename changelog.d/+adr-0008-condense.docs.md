@@ -1,0 +1,1 @@
+ADR 0008 condensed from 3,500 words to under 900, with the decision and its reasoning kept and the design detail left to the code and architecture.md section 11.6; its status is Accepted (PR #458 merged on 2026-10-07).
