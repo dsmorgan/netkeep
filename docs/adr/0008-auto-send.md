@@ -31,7 +31,7 @@ The rules that make this acceptable:
 6. **Separate budget, same heat rule.** An auto-send spends `li_messages_auto` and never `li_prefills`. Heat pauses auto-send outright at the skip threshold; it never shrinks the budget. A run that typed nothing and clicked nothing refunds its unit; once a key or the Send click was attempted, nothing is refunded.
 7. **Pinned by tests.** `tests/test_browser_safety.py` lists the three new inputs, pins that `click_send` is reachable only from `PagePrefill.prefill` with a `SendPermit` (built in one place, after the budget consume), and allows the literal `"Send"` in exactly one locator. Each gate has a mutation test.
 
-The spacing, dwell, and budget numbers, and the exact locator rules, live in the code and in [architecture.md](../architecture.md) section 11.6, not here.
+The gates in the order the code checks them, the proof-of-send and close rules, the hold's exact triggers, the refunds, and the pins are in [How netkeeper drives a LinkedIn page](../linkedin-browser-inputs.md#auto-send). The numbers are in [architecture.md](../architecture.md) section 11.6 and `budgets.py`.
 
 ## Consequences
 
