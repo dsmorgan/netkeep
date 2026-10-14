@@ -132,6 +132,8 @@ The answer is small (about 36 KB, ten model rows). One row holds a `div` with a 
 
 After the sections, a `p` with `Connected since` and the date as text.
 
+Each value is a link element (`$L<n>`) whose `action` is one `Navigate` → `NavigateToUrl` (`urlValue.url`), with `openInNewTab`, `urlType`, and `presentation` fields, and whose `children` are the text shown. The #149 capture's profile shared a website and an email and no phone, so the section names for the phone, address, birthday, and messaging rows are still unverified; by analogy they are probably `contact-phone` and so on, and the fixtures use `contact-phone` for that reason, marked invented. The CP8c rendering below confirms the phone and birthday rows exist and what they show. The first live enrichment (#203) met a `contact-instant-message` section; the capture holds no instance of it, and the CRM has no field for a messaging handle, so it is recognized and not read.
+
 ### The overlay as rendered
 
 The CP8c captures (#484, #519) showed the overlay on the page:
@@ -145,8 +147,6 @@ The CP8c captures (#484, #519) showed the overlay on the page:
   - Connected since reads `<Mon> <D>, <YYYY>`.
 
 Enrichment doesn't read this DOM. It reads the overlay's network answer (`parse_contact_info`), as the rest of this note describes.
-
-Each value is a link element (`$L<n>`) whose `action` is one `Navigate` → `NavigateToUrl` (`urlValue.url`), with `openInNewTab`, `urlType`, and `presentation` fields, and whose `children` are the text shown. The #149 capture's profile shared a website and an email and no phone, so the section names for the phone, address, birthday, and messaging rows are still unverified; by analogy they are probably `contact-phone` and so on, and the fixtures use `contact-phone` for that reason, marked invented. The CP8c rendering above confirms the phone and birthday rows exist and what they show. The first live enrichment (#203) met a `contact-instant-message` section; the capture holds no instance of it, and the CRM has no field for a messaging handle, so it is recognized and not read.
 
 ## What enrichment reads, and what it assumes
 
