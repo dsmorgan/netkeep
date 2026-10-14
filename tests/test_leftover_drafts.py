@@ -279,15 +279,28 @@ def test_flagged_first_then_discarded_and_ended_then_tests_then_replies(session:
     ]
 
 
+def test_a_reply_draft_for_a_do_not_contact_contact_is_flagged_not_low_priority(
+    session: Session,
+) -> None:
+    user = factories.make_user(session)
+    campaign = _campaign(session, user, _box(session, user))
+    _draft(session, campaign, enrollment=EnrollmentStatus.REPLIED, do_not_contact=True)
+
+    [row] = _list(session, user)
+
+    assert (row.kind, row.warning, row.low_priority) == (K.ENDED, W.DO_NOT_CONTACT, False)
+
+
 def test_a_long_list_says_there_is_more(session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(service, "MESSAGES_MAX", 2)
     user = factories.make_user(session)
     campaign = _campaign(session, user, _box(session, user))
-    for _ in range(2):
-        _draft(session, campaign, enrollment=EnrollmentStatus.REMOVED)
+    # The flagged draft is the oldest, so only the query's order puts it in the page.
+    flagged = _draft(session, campaign, enrollment=EnrollmentStatus.BOUNCED)
+    _draft(session, campaign, enrollment=EnrollmentStatus.REMOVED)
     assert service.leftover_drafts(session, user).more is False
 
-    flagged = _draft(session, campaign, enrollment=EnrollmentStatus.BOUNCED)
+    _draft(session, campaign, enrollment=EnrollmentStatus.REMOVED)
     found = service.leftover_drafts(session, user)
 
     assert found.more is True

@@ -44,7 +44,7 @@ The Gmail page lists the leftover drafts (#543). See [The cleanup list](#the-cle
 
 - **Today:** when two merged contacts both have an enrollment in one campaign, the outranked enrollment's unsent messages are marked `discarded` (`netkeeper/crm/identity.py:1520-1532`; the statuses are at `identity.py:1388-1395`). Only the status changes, so the message keeps its `gmail_draft_id`, and the Gmail draft stays in Drafts. The drafts poll tracks only `drafted` messages (`netkeeper/services/campaign_engine.py:2301-2308`), so netkeeper stops watching that draft, and if you send it anyway, the send may go unrecorded.
 - **Trash?** Yes, it's a candidate. netkeeper made the draft, nothing will send it, and sending it would repeat a step the surviving enrollment holds. Trash, not delete, because you may have edited it.
-- **By hand:** yes. The merge preview says the discarded drafts stay in Gmail, and the Gmail page lists them under Leftover drafts (#543). A discarded draft you send is recorded `sent` (#544), and one you delete loses its draft id, so either drops off the list.
+- **By hand:** yes. The merge preview says the discarded drafts stay in Gmail, and the Gmail page lists them under Leftover drafts (#543). Once #544's fix (PR #545) is in, a discarded draft you send is recorded `sent`, and one you delete loses its draft id, so either drops off this list.
 
 ### 2. A detected reply ends the enrollment
 

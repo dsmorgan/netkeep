@@ -4,8 +4,9 @@ netkeeper deletes nothing in Gmail (ADR 0003, ADR 0009), so a draft it stops nee
 stays in your Drafts. This lists them, from ``docs/gmail-deletes.md``'s cleanup list:
 
 - **Discarded:** a ``discarded`` message that still has a ``gmail_draft_id`` (case 1:
-  a contact merge sets only the status). A discarded draft you send is recorded
-  ``sent``, and one you delete loses its draft id (#544), so either drops off.
+  a contact merge sets only the status). Once #544's fix (PR #545) is in, a
+  discarded draft you send is recorded ``sent``, and one you delete loses its
+  draft id, so either drops off this list.
 - **Ended:** a ``drafted`` message whose enrollment ended (cases 2 to 6). A draft
   left after a reply is low priority: you may want to send it as your answer.
 - **Waiting:** a ``drafted`` message on a live enrollment, listed only when it is

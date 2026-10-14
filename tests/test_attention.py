@@ -372,6 +372,20 @@ def test_a_draft_waiting_for_an_opted_out_contact_raises_the_gmail_flag(world: W
     assert world.read().flags.gmail is None
 
 
+def test_a_flagged_discarded_draft_raises_the_gmail_flag(world: World) -> None:
+    with world.write() as (session, user):
+        message = _email_draft(session, user, EnrollmentStatus.OPTED_OUT)
+        message.status = MessageStatus.DISCARDED
+    assert world.read().flags.gmail == service.DRAFT_FLAGGED
+
+
+def test_a_flagged_message_with_no_gmail_draft_leaves_the_gmail_flag_down(world: World) -> None:
+    with world.write() as (session, user):
+        message = _email_draft(session, user, EnrollmentStatus.OPTED_OUT)
+        message.gmail_draft_id = None
+    assert world.read().flags.gmail is None
+
+
 def test_resuming_auto_send_clears_the_dashboard_flag(world: World) -> None:
     with world.write() as (session, user):
         account = ensure_account(session, user).id
