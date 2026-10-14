@@ -6810,6 +6810,8 @@ export interface components {
             queued: number;
             /** Refusal */
             refusal: string | null;
+            /** Scheduled */
+            scheduled: number;
             /** Step Id */
             step_id: number;
         };

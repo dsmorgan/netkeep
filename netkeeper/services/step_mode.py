@@ -110,6 +110,9 @@ class ModePreview:
     nothing."""
     queued: int
     """Enrollments queued for the step now: on a switch to Auto-send, they keep Prefill."""
+    scheduled: int
+    """Enrollments waiting for the step but not queued yet (due later, or waiting on an
+    earlier step): on a switch to Auto-send, they are sent on their own."""
     kept_prefill: int
     """Enrollments that keep the step as a prefill from an earlier switch, still waiting."""
     claimed: int
@@ -191,13 +194,10 @@ def _no_message_for(step: CampaignStep) -> ColumnElement[bool]:
     )
 
 
-def _queued_clauses(
-    user: User, step: CampaignStep, steps: list[CampaignStep], now: datetime
+def _waiting_clauses(
+    step: CampaignStep, steps: list[CampaignStep]
 ) -> tuple[ColumnElement[bool], ...]:
-    """SQL: queued for ``step`` now. A live enrollment whose next step is ``step``, with no
-    message of it, that is due, or parked for it with a reason on file (Try again, blocked
-    by its template). One parked waiting on an earlier step's message has no reason on
-    file and is not queued for this one."""
+    """SQL: a live enrollment whose next step is ``step``, with no message of it yet."""
     earlier = [s.position for s in steps if s.position < step.position]
     previous = max(earlier) if earlier else None
     return (
@@ -207,9 +207,39 @@ def _queued_clauses(
         if previous is None
         else Enrollment.current_step == previous,
         _no_message_for(step),
+    )
+
+
+def _due_or_parked(now: datetime) -> ColumnElement[bool]:
+    """SQL: due by ``now``, or parked for its step with a reason on file (Try again,
+    blocked by its template). One parked waiting on an earlier step's message has no
+    reason on file."""
+    return or_(
+        Enrollment.next_action_at <= now,
+        and_(Enrollment.next_action_at.is_(None), Enrollment.not_sent_error.is_not(None)),
+    )
+
+
+def _queued_clauses(
+    step: CampaignStep, steps: list[CampaignStep], now: datetime
+) -> tuple[ColumnElement[bool], ...]:
+    """SQL: queued for ``step`` now: waiting for it (:func:`_waiting_clauses`), and due or
+    parked for it (:func:`_due_or_parked`)."""
+    return (*_waiting_clauses(step, steps), _due_or_parked(now))
+
+
+def _scheduled_clauses(
+    step: CampaignStep, steps: list[CampaignStep], now: datetime
+) -> tuple[ColumnElement[bool], ...]:
+    """SQL: enrolled and waiting for ``step``, but not queued for it yet: due later, or
+    parked on an earlier step's message. On a switch to Auto-send these are sent on
+    their own when they reach it."""
+    # The complement of _due_or_parked written out: NOT over a NULL comparison is NULL.
+    return (
+        *_waiting_clauses(step, steps),
         or_(
-            Enrollment.next_action_at <= now,
-            and_(Enrollment.next_action_at.is_(None), Enrollment.not_sent_error.is_not(None)),
+            Enrollment.next_action_at > now,
+            and_(Enrollment.next_action_at.is_(None), Enrollment.not_sent_error.is_(None)),
         ),
     )
 
@@ -265,7 +295,8 @@ def preview(
         position=step.position,
         mode=step.mode,
         auto_send_on=auto_send_on,
-        queued=_count(session, user, *_queued_clauses(user, step, steps, now)),
+        queued=_count(session, user, *_queued_clauses(step, steps, now)),
+        scheduled=_count(session, user, *_scheduled_clauses(step, steps, now)),
         kept_prefill=kept_prefill(session, user, step),
         claimed=_messages(session, user, step, MessageStatus.SCHEDULED),
         prefilled=_messages(session, user, step, MessageStatus.PREFILLED),
@@ -316,7 +347,7 @@ def switch(
         # Work already queued keeps Prefill; only enrollments that reach the step later
         # are auto-sent. Never a due time, a message or a run: nothing sends from here.
         for enrollment in session.scalars(
-            scoped(user, Enrollment).where(*_queued_clauses(user, step, steps, now))
+            scoped(user, Enrollment).where(*_queued_clauses(step, steps, now))
         ):
             enrollment.prefill_kept_step_id = step.id
             kept += 1

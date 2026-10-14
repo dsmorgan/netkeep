@@ -128,7 +128,12 @@ function AutoSendConfirm({
             {p.queued === 0
               ? 'No contacts are waiting for this step now.'
               : `${contacts(p.queued)} already waiting for this step ${p.queued === 1 ? 'stays' : 'stay'} on Prefill: you prefill ${p.queued === 1 ? 'it' : 'them'} as before.`}{' '}
-            Contacts who reach this step later are sent on their own.
+          </p>
+          <p className="text-foreground">
+            {p.scheduled === 0
+              ? 'No other contacts are scheduled for this step yet.'
+              : `${contacts(p.scheduled)} already scheduled for this step will be sent on ${p.scheduled === 1 ? 'its' : 'their'} own.`}{' '}
+            Contacts who reach this step later are sent on their own too.
           </p>
           {p.prefilled > 0 && (
             <p>

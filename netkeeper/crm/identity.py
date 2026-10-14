@@ -41,7 +41,7 @@ import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Final, Literal, assert_never
+from typing import Any, Final, Literal, assert_never
 from urllib.parse import unquote, urlsplit
 
 from sqlalchemy import func
@@ -51,6 +51,7 @@ from netkeeper.crm import do_not_send
 from netkeeper.crm.provenance import PROVENANCE_ORDER, may_overwrite, record_synced_value
 from netkeeper.db import is_writer
 from netkeeper.models import (
+    CampaignStep,
     Contact,
     ContactAlias,
     ContactChild,
@@ -1492,6 +1493,11 @@ def _merge_campaign_rows(session: Session, user: User, survivor: Contact, loser:
         ):
             state["status"] = EnrollmentStatus.PAUSED
         state["replied_at"] = winner.replied_at or other.replied_at
+        # A step kept as a prefill (#536) survives the merge from either row: losing it
+        # would let the auto-send claim take a contact queued before the switch.
+        kept.prefill_kept_step_id = _kept_prefill_mark(
+            session, user, (winner.prefill_kept_step_id, other.prefill_kept_step_id), state
+        )
         outranked.append(other.id)
         if state["status"] not in LIVE_AFTER_MERGE:
             outranked.append(winner.id)
@@ -1546,6 +1552,28 @@ def _merge_campaign_rows(session: Session, user: User, survivor: Contact, loser:
             "moved %d campaign messages from contact %d to %d", len(messages), loser.id, survivor.id
         )
     session.flush()
+
+
+def _kept_prefill_mark(
+    session: Session, user: User, marks: tuple[int | None, int | None], state: dict[str, Any]
+) -> int | None:
+    """Which step a combined enrollment keeps as a prefill (#536): either row's mark, and
+    when they name different steps, the one that is the merged row's next step (the
+    lowest position after ``current_step``), else the winner's. A mark only ever sends
+    less, so one is never dropped while either row has one."""
+    present = [m for m in dict.fromkeys(marks) if m is not None]
+    if len(present) < 2:
+        return present[0] if present else None
+    after = state["current_step"] or 0
+    positions = dict(
+        session.execute(
+            scoped(user, CampaignStep)
+            .with_only_columns(CampaignStep.id, CampaignStep.position)
+            .where(CampaignStep.id.in_(present))
+        ).all()
+    )
+    ahead = [m for m in present if positions.get(m, 0) > after]
+    return min(ahead, key=lambda m: positions[m]) if ahead else present[0]
 
 
 _TIE_RANK: Final[Mapping[EnrollmentStatus, int]] = {

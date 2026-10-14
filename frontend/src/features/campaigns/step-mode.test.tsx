@@ -33,6 +33,7 @@ function preview(overrides: Partial<StepModePreview> = {}): StepModePreview {
     mode: 'prefill',
     auto_send_on: true,
     queued: 2,
+    scheduled: 3,
     kept_prefill: 0,
     claimed: 0,
     prefilled: 1,
@@ -126,6 +127,11 @@ describe('switching a LinkedIn step mode', () => {
     expect(await within(dialog).findByText(CONFIRM_TEXT)).toBeVisible()
     expect(
       await within(dialog).findByText(/2 contacts already waiting for this step stay on Prefill/),
+    ).toBeVisible()
+    expect(
+      within(dialog).getByText(
+        /3 contacts already scheduled for this step will be sent on their own/,
+      ),
     ).toBeVisible()
     expect(within(dialog).getByText(/1 message already typed into LinkedIn/)).toBeVisible()
     expect(within(dialog).getByText(/Switching sends nothing by itself/)).toBeVisible()

@@ -12,9 +12,9 @@ switch is recorded. Two changes:
   whether ``[campaigns] linkedin_auto_send`` was on. Never message text.
 
 No existing data changes. No step has switched yet, so no enrollment keeps one, and
-the history starts empty. A downgrade drops both; any step a switch left on
-``auto_send`` stays on it, and the enrollments that kept it as a prefill then follow
-the step's mode, as before this migration.
+the history starts empty. A downgrade first sets every ``auto_send`` step that any
+enrollment keeps as a prefill back to ``prefill``, so dropping the column can never make
+a kept contact auto-sendable, and then drops both. Other ``auto_send`` steps stay on it.
 
 Revision ID: 0044
 Revises: 0043
@@ -87,6 +87,15 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Without the column a kept contact would follow its step's mode: put any step that
+    # a contact keeps as a prefill back on prefill first, which only ever sends less.
+    op.execute(
+        sa.text(
+            "UPDATE campaign_steps SET mode = 'prefill' WHERE mode = 'auto_send'"
+            " AND EXISTS (SELECT 1 FROM enrollments e"
+            "  WHERE e.prefill_kept_step_id = campaign_steps.id)"
+        )
+    )
     op.drop_table(TABLE)
     with op.batch_alter_table(ENROLLMENTS) as batch:
         batch.drop_constraint(STEP_FK, type_="foreignkey")
