@@ -165,6 +165,7 @@ class SyncRunReport:
             "complete": self.result.complete,
             "shortfall": self.result.shortfall,
             "hidden": self.result.hidden,
+            "rescued_not_whole": self.result.rescued_not_whole,
             "seen": pages.seen,
             "created": pages.created,
             "updated": pages.updated,

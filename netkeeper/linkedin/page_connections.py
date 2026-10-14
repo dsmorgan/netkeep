@@ -137,6 +137,7 @@ from netkeeper.linkedin.flagship import (
     parse_pagination_request,
     rehydration_payload,
 )
+from netkeeper.linkedin.flight import is_whole, parse_flight
 from netkeeper.linkedin.observe import (
     FAILURE_REDIRECT,
     FAILURE_UNREADABLE,
@@ -269,6 +270,9 @@ class PageConnections:
         self._last_bytes: int | None = None
         #: Answers read from the body tap's streamed copy instead (#200).
         self._rescued = 0
+        #: Of those, the ones :func:`~netkeeper.linkedin.flight.is_whole` did not find
+        #: whole (#525 review): logged and counted, not yet enforced.
+        self._rescued_not_whole = 0
         self._url = ""
 
     @property
@@ -324,9 +328,14 @@ class PageConnections:
                 connections=selected, start=start, count=count, total=self._total
             ),
             lost=self._report(),
-            # #515: the list's end is proven and this slice holds its last card.
+            # #515: the list's end is proven and this slice holds its last card. A
+            # short Ok slice already implies ``_ended``: _read_until stops short of
+            # ``start + count`` cards only once the end is proven (any other stop is
+            # sticky and never handed over as a short slice), so this flag adds no
+            # new way to end -- it only spares the job one more, empty unit.
             ended=self._ended and len(self._cards) <= start + count,
             hidden=self._hidden,
+            rescued_not_whole=self._rescued_not_whole,
         )
 
     def _failure(self) -> ObservationFailed | AnswerLost:
@@ -691,6 +700,22 @@ class PageConnections:
             return False
         self._lost = None
         self._rescued += 1
+        # #525 review: the checks above rest on the captured layout (cards inline in
+        # row 0). The flight structure check enrichment enforces (page_profiles) is
+        # only reported here until live runs show a real rescued copy passes it.
+        try:
+            whole = is_whole(
+                parse_flight(pending.streamed, endpoint=self.endpoint), endpoint=self.endpoint
+            )
+        except RouteChanged:
+            whole = False
+        if not whole:
+            self._rescued_not_whole += 1
+        log.info(
+            "connections: rescued answer at start %d: whole by flight check: %s",
+            pending.start,
+            "yes" if whole else "no",
+        )
         log.info(
             "connections: the page's answer for start %d was read from the copy streamed"
             " as it arrived (%d bytes); nothing was lost",
