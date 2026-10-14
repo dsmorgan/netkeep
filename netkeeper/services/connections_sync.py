@@ -174,6 +174,8 @@ class SyncRunReport:
             "reconnected": pages.reconnected,
             "cards_created": pages.cards_created,
             "confirmed_by_urn": pages.confirmed_by_urn,
+            "snapshots": pages.snapshots,
+            "field_changes": dict(pages.field_changes),
             "aging": None
             if self.aging is None
             else {

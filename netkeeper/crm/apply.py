@@ -85,6 +85,8 @@ from sqlalchemy.orm import Session
 
 from netkeeper.crm.history import awaiting_reply_triage
 from netkeeper.crm.identity import (
+    JOB_FIELD_KEYS,
+    Applied,
     Candidate,
     IncomingContact,
     IncomingEmail,
@@ -93,7 +95,7 @@ from netkeeper.crm.identity import (
     IncomingPosition,
     Matched,
     New,
-    apply,
+    apply_detailed,
     resolve,
     resolve_survivor,
 )
@@ -173,6 +175,17 @@ CARD_HEADLINE_MAX_CHARS: Final = 500
 _CARD_SLUG: Final = re.compile(r"[^\s/?#]{1,100}")
 
 
+def no_field_changes() -> dict[str, int]:
+    """A zero for each job field's change count (#518), in :data:`JOB_FIELD_KEYS` order."""
+    return dict.fromkeys(JOB_FIELD_KEYS.values(), 0)
+
+
+def _count_changes(field_changes: dict[str, int], applied: Applied) -> None:
+    for name in applied.changed:
+        key = JOB_FIELD_KEYS[name]
+        field_changes[key] = field_changes.get(key, 0) + 1
+
+
 @dataclass(slots=True)
 class PageCounts:
     """What mapping pages did, summed over a run.
@@ -204,6 +217,11 @@ class PageCounts:
     were not real connections before this sync either, so :func:`age_unseen`'s
     "existed before the sync" set leaves them out the way it leaves out
     ``created_contact_ids`` (:attr:`new_connection_ids`).
+
+    ``snapshots`` counts the ``contact_snapshot`` rows these pages wrote, and
+    ``field_changes`` how many times each job field's stored value changed from a
+    non-empty one, keyed by :data:`~netkeeper.crm.identity.JOB_FIELD_KEYS` (#518):
+    counts only, so a run can show how often a headline moved.
     """
 
     seen: int = 0
@@ -218,6 +236,8 @@ class PageCounts:
     cards_created: int = 0
     confirmed_by_urn: int = 0
     confirmed_contact_ids: set[int] = field(default_factory=set)
+    snapshots: int = 0
+    field_changes: dict[str, int] = field(default_factory=no_field_changes)
 
     @property
     def new_connection_ids(self) -> frozenset[int]:
@@ -342,7 +362,9 @@ def apply_page(
                 first_before = target.first_name if target is not None else ""
                 preferred_before = target.preferred_name if target is not None else ""
                 try:
-                    written = apply(session, user, incoming, resolution, snapshot=not unconfirmed)
+                    applied = apply_detailed(
+                        session, user, incoming, resolution, snapshot=not unconfirmed
+                    )
                 except ValueError:
                     # apply() checks before its first write, so the row is untouched.
                     # The error names the slug; the log does not need it.
@@ -353,6 +375,9 @@ def apply_page(
                         user.id,
                     )
                 else:
+                    written = applied.contact
+                    counts.snapshots += int(applied.snapshot)
+                    _count_changes(counts.field_changes, applied)
                     if isinstance(resolution, New):
                         counts.created += 1
                         counts.created_contact_ids.add(written.id)
@@ -726,7 +751,9 @@ class HarvestResult(enum.StrEnum):
 class HarvestCounts:
     """What mapping harvests did, summed over a run, one count per :class:`HarvestResult`.
 
-    ``snapshots`` counts the ``contact_snapshot`` rows the applied harvests wrote.
+    ``snapshots`` counts the ``contact_snapshot`` rows the applied harvests wrote, and
+    ``field_changes`` how many times each job field's stored value changed from a
+    non-empty one, as :attr:`PageCounts.field_changes` does for a sync (#518).
     """
 
     applied: int = 0
@@ -741,6 +768,7 @@ class HarvestCounts:
     #: held no email and no phone (#207 review), or a profile saved without Contact
     #: info because its answer's body was lost (#405).
     kept_due: int = 0
+    field_changes: dict[str, int] = field(default_factory=no_field_changes)
 
     def add(self, result: HarvestResult) -> None:
         setattr(self, result.value, getattr(self, result.value) + 1)
@@ -871,9 +899,8 @@ def apply_harvest(
         counts.add(HarvestResult.UNREADABLE)
         return HarvestResult.UNREADABLE
     incoming = _harvested(details, info, harvest.observed_at)
-    before = len(contact.snapshots)
     try:
-        apply(session, user, incoming, Matched(contact.id, "urn"))
+        applied = apply_detailed(session, user, incoming, Matched(contact.id, "urn"))
     except ValueError:
         # apply() checks before its first write, so the contact is untouched.
         # The error names the slug; the log does not need it.
@@ -886,7 +913,8 @@ def apply_harvest(
         session.flush()
         counts.add(HarvestResult.CONFLICT)
         return HarvestResult.CONFLICT
-    counts.snapshots += len(contact.snapshots) - before
+    counts.snapshots += int(applied.snapshot)
+    _count_changes(counts.field_changes, applied)
     if harvest.contact_info_lost:
         log.info(
             "enrichment: contact %d of user %d kept due: its profile was saved, and its"

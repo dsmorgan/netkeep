@@ -39,6 +39,7 @@ from netkeeper.crm.exports import ExportError, ExportFormat, ExportPreset, expor
 from netkeeper.crm.filters import FilterError, FilterTree, SortKey, parse_filter, parse_sort
 from netkeeper.crm.history import ImportReport, import_workbook
 from netkeeper.crm.history_workbook import WorkbookError, read_workbook
+from netkeeper.crm.identity import JOB_FIELD_KEYS
 from netkeeper.crm.inbox_apply import clear_short_first_poll, forget_owner
 from netkeeper.crm.lists import ListCount, find_list, list_lists, list_views, member_counts
 from netkeeper.crm.self_contact import ensure_self_contact
@@ -93,6 +94,7 @@ from netkeeper.services import (
     campaign_results,
     campaign_review,
     enrich_plan,
+    field_changes,
     history_scan,
     keychain,
     linkedin_steps,
@@ -2109,6 +2111,51 @@ def linkedin_run(run_id: Annotated[int, typer.Argument(help="The run to show.")]
         engine.dispose()
     for line in lines:
         typer.echo(line)
+
+
+@linkedin_app.command("field-changes")
+def linkedin_field_changes(
+    run_ids: Annotated[
+        list[int],
+        typer.Option("--run", help="A run to count; give --run once for each run."),
+    ],
+) -> None:
+    """Count each run's snapshots and job-field changes, and headline flip-flops. Reads only.
+
+    Prints counts only, never a name (#518). A flip-flop is a contact whose headline
+    went back, in a later run, to a value it held before an earlier run changed it.
+    """
+    engine = make_engine(database_url())
+    try:
+        factory = make_session_factory(engine)
+        install_scope_guard(factory)
+        with session_scope(factory) as session:
+            user = _local_user_or_exit(session)
+            try:
+                report = field_changes.field_changes(session, user, run_ids)
+            except runs.RunNotFound as exc:
+                typer.echo(f"error: {exc}", err=True)
+                raise typer.Exit(code=1) from exc
+    finally:
+        engine.dispose()
+    keys = tuple(JOB_FIELD_KEYS.values())
+    typer.echo(
+        _format_table(
+            ("RUN", "KIND", "STARTED (UTC)", "SNAPSHOTS", *(key.upper() for key in keys)),
+            [
+                (
+                    str(item.run_id),
+                    item.kind,
+                    f"{item.started_at:%Y-%m-%d %H:%M}",
+                    str(item.snapshots),
+                    *(str(item.field_changes[key]) for key in keys),
+                )
+                for item in report.runs
+            ],
+        ),
+        nl=False,
+    )
+    typer.echo(f"headline flip-flops: {report.headline_flip_flops}")
 
 
 @linkedin_app.command("cancel")
