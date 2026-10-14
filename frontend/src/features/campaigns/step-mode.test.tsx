@@ -6,6 +6,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
+import { AUTO_SEND_STEP_OFF } from '@/features/linkedin-steps/format'
 import { jsonResponse, mockFetch } from '@/test/fetch'
 import { renderApp } from '@/test/render'
 
@@ -185,7 +186,7 @@ describe('switching a LinkedIn step mode', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Switch to Auto-send' }))
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
     // The step row says it waits for a prefill while auto-send is off.
-    expect(await screen.findByText('off in config.toml: waits for you to prefill')).toBeVisible()
+    expect(await screen.findByText(AUTO_SEND_STEP_OFF)).toBeVisible()
   })
 
   it('cannot be confirmed when the switch is refused', async () => {
