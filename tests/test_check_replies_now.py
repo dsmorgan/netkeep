@@ -120,6 +120,8 @@ async def test_check_now_sets_the_flag_and_never_opens_gmail(
     assert datetime.fromisoformat(after["last_at"]) == polled
     assert status["mailboxes"][0]["state"] == "due"
     assert all(item["requested"] is False for item in status["items"] if item is not after)
+    # #510: the same press runs the drafts check, with its Message-ID check, too.
+    assert sender.drafts_poll_requested_at(user_id) is not None
 
 
 async def test_check_now_needs_the_csrf_header(

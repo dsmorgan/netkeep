@@ -319,3 +319,38 @@ def test_disarm_undoes_both_steps(
     assert _mailbox(cli_db, mailbox_id).arm is None
     assert runner.invoke(cli, ["gmail", "disarm", "nobody@example.com"]).exit_code == 1
     assert runner.invoke(cli, ["gmail", "arm", "nobody@example.com", "--yes"]).exit_code == 1
+
+
+def test_status_shows_each_step_to_arming_to_send(
+    cli_db: sessionmaker[Session], memory_keyring: MemoryKeyring
+) -> None:
+    """#510: the same steps the Settings page shows, with why the check waits."""
+    mailbox_id = _connected(cli_db)
+    first = runner.invoke(cli, ["gmail", "status"])
+    assert first.exit_code == 0, first.output
+    assert f"{FAKE_EMAIL}: arming to send" in first.output
+    assert "1. armed for drafts: not yet" in first.output
+    assert "2. netkeeper found its own draft: arm it for drafts first" in first.output
+    assert "3. arm to send: not yet" in first.output
+
+    runner.invoke(cli, ["gmail", "arm", FAKE_EMAIL, "--yes"])
+    armed = runner.invoke(cli, ["gmail", "status"]).output
+    assert "1. armed for drafts: done" in armed
+    assert "waiting: no draft yet" in armed
+
+    with session_scope(cli_db, write=True) as session:
+        row = session.scalars(unscoped(select(Mailbox).where(Mailbox.id == mailbox_id))).one()
+        row.status = MailboxStatus.REAUTH_REQUIRED
+    assert "waiting: the mailbox needs you to sign in again" in (
+        runner.invoke(cli, ["gmail", "status"]).output
+    )
+
+    with session_scope(cli_db, write=True) as session:
+        user = session.scalars(select(User)).one()
+        row = session.scalars(unscoped(select(Mailbox).where(Mailbox.id == mailbox_id))).one()
+        row.status = MailboxStatus.OK
+        mailbox_service.record_message_id_verified(session, user, mailbox_id, now=utcnow())
+    ready = runner.invoke(cli, ["gmail", "status"]).output
+    assert "2. netkeeper found its own draft: done" in ready
+    assert "3. arm to send: ready: `netkeeper gmail arm --send`" in ready
+    assert _mailbox(cli_db, mailbox_id).arm is MailboxArm.DRAFT  # status never arms

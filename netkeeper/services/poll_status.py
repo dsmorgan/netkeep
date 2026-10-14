@@ -21,8 +21,11 @@ store, never by running one:
   ("Check now", #409): the check is then ``due`` and ``requested`` until the next
   tick starts the poll, and :func:`replies_check_refused` says when they cannot.
 - **Gmail drafts** (spec 11.5): every :data:`~netkeeper.services.campaign_sender.DRAFTS_POLL_EVERY`,
-  only while a campaign draft waits in an armed mailbox. Its last run is kept only
-  in the running sender's memory (:meth:`GmailSender.drafts_polled_at`).
+  only while a campaign draft waits in an armed mailbox, or the Message-ID check
+  still has a draft to search for (a test draft, or a draft seen sent, #510). Its
+  last run is kept only in the running sender's memory
+  (:meth:`GmailSender.drafts_polled_at`). "Check now" makes it ``due`` and
+  ``requested`` too, until the next tick runs it.
 - **LinkedIn**: each kind the scheduler serves, from its stored due time
   (:func:`~netkeeper.services.scheduler.stored_due`), and its last completed run.
   The gates are the scheduler's own, in its order: disarmed, paused, the session
@@ -73,7 +76,7 @@ from netkeeper.models import (
 from netkeeper.scoping import scoped
 from netkeeper.services import campaign_review as review
 from netkeeper.services import heat as heat_service
-from netkeeper.services import inbox_hold, route_breaker, runs
+from netkeeper.services import inbox_hold, message_id_check, route_breaker, runs
 from netkeeper.services.campaign_sender import DRAFTS_POLL_EVERY
 from netkeeper.services.linkedin_accounts import (
     find_account,
@@ -205,6 +208,8 @@ class Serving:
     replies_requested_at: datetime | None = None
     """When the "Check now" that waits for the next tick was asked for
     (:meth:`GmailSender.request_replies_poll`); None when none waits."""
+    drafts_requested_at: datetime | None = None
+    """The same for the drafts poll (:meth:`GmailSender.request_drafts_poll`, #510)."""
 
 
 def poll_status(
@@ -433,12 +438,18 @@ def _gmail_drafts(
         return replace(base, state=gate[0], reason=gate[1])
     ready = [m.id for m in mailboxes if m.arm is not None and m.status is MailboxStatus.OK]
     test_drafts = [c for c in review.test_drafts_to_verify(session, user) if c.mailbox_id in ready]
-    if _waiting_drafts(session, user, ready) == 0 and not test_drafts:
+    sent_drafts = [
+        c
+        for c in message_id_check.sent_drafts_to_verify(session, user, now=now)
+        if c.mailbox_id in ready
+    ]
+    if _waiting_drafts(session, user, ready) == 0 and not test_drafts and not sent_drafts:
         return replace(
             base, state=CheckState.IDLE, reason="No draft is waiting to be sent or checked"
         )
-    state, next_at = _next(serving.drafts_polled_at, every, now)
-    return replace(base, state=state, next_at=next_at)
+    requested_at = serving.drafts_requested_at
+    state, next_at = _next(serving.drafts_polled_at, every, now, requested=requested_at is not None)
+    return replace(base, state=state, next_at=next_at, requested_at=requested_at)
 
 
 # --- LinkedIn -------------------------------------------------------------------------

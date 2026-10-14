@@ -38,12 +38,14 @@ from netkeeper.campaigns import gmail_oauth
 from netkeeper.db import session_scope
 from netkeeper.models import Mailbox, MailboxStatus, User
 from netkeeper.models.base import utcnow
-from netkeeper.services import keychain
+from netkeeper.services import keychain, message_id_check
 from netkeeper.services import mailboxes as service
+from netkeeper.services.campaign_sender import GmailSender
 from netkeeper.services.events import Event, EventBus
 from netkeeper.web.deps import AuthProvider, CurrentUser, SessionDep, effective_settings, read_only
 from netkeeper.web.schemas import (
     MailboxArmIn,
+    MailboxArmStepsOut,
     MailboxOut,
     MailboxStatusOut,
     OAuthClientIn,
@@ -98,6 +100,13 @@ def _publish(request: Request, event: Event) -> None:
     from_thread.run_sync(bus.publish, event)
 
 
+def _gmail_sender(request: Request) -> GmailSender | None:
+    """The running campaign engine's Gmail sender; None outside ``serve``."""
+    engine = request.app.state.campaign_engine
+    sender = None if engine is None else engine.sender
+    return sender if isinstance(sender, GmailSender) else None
+
+
 def _status_event(mailbox: Mailbox) -> Event:
     return service.status_event(mailbox.id, mailbox.user_id, mailbox.status, mailbox.status_reason)
 
@@ -109,31 +118,57 @@ def list_mailboxes(session: SessionDep, user: CurrentUser) -> list[Mailbox]:
 
 
 @router.get("/mailboxes/status", responses=NO_KEYCHAIN)
-def mailbox_status(session: SessionDep, user: CurrentUser) -> MailboxStatusOut:
-    """Whether a client is set, every mailbox, and whether any needs re-authorizing."""
-    return _status(session, user)
+def mailbox_status(request: Request, session: SessionDep, user: CurrentUser) -> MailboxStatusOut:
+    """Whether a client is set, every mailbox, whether any needs re-authorizing, and how
+    far each connected one is on the way to arming to send."""
+    return _status(request, session, user)
 
 
 @router.put("/mailboxes/oauth/client", responses={**INVALID, **NO_KEYCHAIN})
 @read_only  # writes the Keychain, never the database
 def set_oauth_client(
-    body: OAuthClientIn, session: SessionDep, user: CurrentUser
+    body: OAuthClientIn, request: Request, session: SessionDep, user: CurrentUser
 ) -> MailboxStatusOut:
     """Store the OAuth client's ID and secret in the Keychain; answers the status after."""
     with translate_errors():
         service.save_client(user, gmail_oauth.validate_client(body.client_id, body.client_secret))
-    return _status(session, user)
+    return _status(request, session, user)
 
 
-def _status(session: Session, user: User) -> MailboxStatusOut:
+def _arm_steps(
+    session: Session, user: User, mailbox: Mailbox, sender: GmailSender | None
+) -> MailboxArmStepsOut:
+    steps = message_id_check.arm_steps(session, user, mailbox, now=utcnow())
+    return MailboxArmStepsOut(
+        mailbox_id=steps.mailbox_id,
+        armed_for_drafts=steps.armed_for_drafts,
+        armed_to_send=steps.armed_to_send,
+        verified_at=steps.verified_at,
+        waiting=steps.waiting,
+        checked_at=steps.checked_at,
+        check_requested_at=None if sender is None else sender.drafts_poll_requested_at(user.id),
+        checks_running=sender is not None,
+        can_arm_send=steps.can_arm_send,
+        next_step=steps.next_step,
+        test_campaign_id=steps.test_campaign_id,
+    )
+
+
+def _status(request: Request, session: Session, user: User) -> MailboxStatusOut:
     with translate_errors():
         client = service.load_client(user.id)
     rows = service.list_mailboxes(session, user)
+    sender = _gmail_sender(request)
     return MailboxStatusOut(
         client_configured=client is not None,
         client_id=None if client is None else client.client_id,
         mailboxes=[MailboxOut.model_validate(row) for row in rows],
         reauth_required=any(row.status is MailboxStatus.REAUTH_REQUIRED for row in rows),
+        arm_steps=[
+            _arm_steps(session, user, row, sender)
+            for row in rows
+            if row.status is not MailboxStatus.DISABLED
+        ],
     )
 
 
@@ -222,11 +257,21 @@ def oauth_callback(
 @router.post("/mailboxes/{mailbox_id}/check", responses={**NOT_FOUND, **NO_KEYCHAIN})
 @read_only  # the check opens its own writer after Google answers, never during
 def check_mailbox(mailbox_id: int, request: Request, user: CurrentUser) -> MailboxOut:
-    """Refresh the token now, as the background poll does; answers the mailbox after."""
+    """Refresh the token now, as the background poll does; answers the mailbox after.
+
+    While ``serve`` runs and the mailbox is armed and ``ok``, it also asks for the
+    drafts check, with its Message-ID check, at the next tick (#510). That never calls
+    Gmail here: the tick runs the check, gated as usual."""
     factory: sessionmaker[Session] = request.app.state.session_factory
     result = service.check_mailbox(factory, user.id, mailbox_id, endpoints=_endpoints(request))
     if result is None:
         raise HTTPException(status_code=404, detail=f"no mailbox {mailbox_id}")
+    sender = _gmail_sender(request)
+    if sender is not None and result.status is MailboxStatus.OK:
+        with session_scope(factory) as session:
+            armed = service.armed(session, user, mailbox_id) is not None
+        if armed:
+            sender.request_drafts_poll(user.id)
     if result.changed:
         _publish(
             request,

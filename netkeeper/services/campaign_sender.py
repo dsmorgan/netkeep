@@ -101,11 +101,22 @@ touches only a mailbox a person armed (:func:`netkeeper.services.mailboxes.arm`)
   its claim is given back (``not_sent``). No ``messages.send``, ever.
 - **The Message-ID check**: until one has passed, each drafts poll of an armed
   mailbox searches by Message-ID for its newest test drafts (the review's test of a
-  step on a mailbox armed for drafts only, #304) and for its oldest waiting
-  campaign draft. Found, the mailbox is recorded verified, which arming for send
-  requires: the first live check that Gmail keeps the Message-ID netkeeper sets,
-  which reconcile depends on. A test draft is only searched for: it is never a
-  campaign message, and netkeeper never touches it otherwise.
+  step on a mailbox armed for drafts only, #304), for its oldest waiting campaign
+  draft, and for the campaign drafts it saw sent (#510): the drafts this poll saw
+  sent, then the newest few seen sent before
+  (:func:`~netkeeper.services.message_id_check.sent_drafts_to_verify`). A sent draft
+  keeps the Message-ID it was made with, so one the person sent before any poll found
+  it still counts, and so does one Gmail's search had not caught up with when the
+  poll saw it sent. A search that finds a message under netkeeper's own Message-ID,
+  in any folder, records the mailbox verified, which arming for send requires: the
+  first live check that Gmail keeps the Message-ID netkeeper sets, which reconcile
+  depends on. A search that finds nothing records when it looked
+  (``message_id_checked_at``). A test draft is only searched for: it is never a
+  campaign message, and netkeeper never touches it otherwise. Nothing here arms a
+  mailbox: arming to send stays a person's action.
+- **Check now**: a person's "Check now" (:meth:`GmailSender.request_drafts_poll`)
+  brings the drafts poll, and the Message-ID check with it, forward to the next tick,
+  as it does the reply poll.
 
 netkeeper deletes nothing in Gmail (ADR 0003). A draft whose message a merge
 discarded stays in Gmail for the person (#273, question 2).
@@ -160,6 +171,7 @@ from netkeeper.services import campaign_engine as engine
 from netkeeper.services import campaign_replies as replies
 from netkeeper.services import campaign_review as review
 from netkeeper.services import mailboxes as mailbox_service
+from netkeeper.services import message_id_check
 from netkeeper.services.campaign_engine import Firing, SendOutcome, SendResult, Tracked
 from netkeeper.services.mailboxes import MailboxNotFound, MailboxNotReady, open_gmail
 
@@ -174,6 +186,10 @@ DRAFTS_POLL_EVERY: Final = timedelta(minutes=10)
 """How often the drafts poll (and the discarded-draft pass) looks at Gmail, per user.
 A draft seen sent is dated by Gmail's internal date, so the poll's delay never moves
 the next step; it only decides how soon the step is scheduled."""
+
+MESSAGE_ID_CHECKS_MAX: Final = 5
+"""At most this many campaign drafts one Message-ID check of a mailbox searches for (#510):
+the oldest waiting, the ones the poll saw sent, then the newest seen sent before."""
 
 FIND_MAX: Final = 10
 """At most this many messages a ``rfc822msgid:`` search reads. One is the usual answer."""
@@ -322,6 +338,8 @@ class GmailSender:
         # A person's "Check now" (#409), per user: when it was first asked for. The lock
         # makes a press's check-and-set one step, since requests run on worker threads.
         self._replies_requested: dict[int, datetime] = {}
+        # The same for the drafts poll (#510), so "Check now" runs the Message-ID check.
+        self._drafts_requested: dict[int, datetime] = {}
         self._requests_lock = threading.Lock()
         self._label_ids: dict[tuple[int, str], str] = {}
 
@@ -400,6 +418,22 @@ class GmailSender:
                 return False
             self._replies_requested[user_id] = self._clock()
             return True
+
+    def request_drafts_poll(self, user_id: int) -> bool:
+        """Run ``user_id``'s drafts poll, with its Message-ID check, on the next tick, not
+        at the end of :data:`DRAFTS_POLL_EVERY` (#510). True when this asked; False when a
+        request was already waiting. Like :meth:`request_replies_poll`, it only sets a
+        flag: the poll runs in :meth:`reconcile`, gated on arming and mailbox readiness as
+        every other poll is."""
+        with self._requests_lock:
+            if user_id in self._drafts_requested:
+                return False
+            self._drafts_requested[user_id] = self._clock()
+            return True
+
+    def drafts_poll_requested_at(self, user_id: int) -> datetime | None:
+        """When the waiting drafts "Check now" was first asked for; None when none waits."""
+        return self._drafts_requested.get(user_id)
 
     def drafts_polled_at(self, user_id: int) -> datetime | None:
         """When this process last ran ``user_id``'s drafts poll; None before the first.
@@ -696,11 +730,18 @@ class GmailSender:
                 if mailbox is not None and mailbox.arm is not None:
                     unverified[mailbox_id] = mailbox.message_id_verified_at is None
             test_drafts = review.test_drafts_to_verify(session, user)
+            # Only ever on an armed mailbox not verified yet (#510).
+            sent_drafts = message_id_check.sent_drafts_to_verify(session, user, now=now)
+        for check in sent_drafts:
+            unverified[check.mailbox_id] = True
         last = self._drafts_polled.get(user_id)
-        poll = last is None or now - last >= self._drafts_every
+        with self._requests_lock:
+            requested = self._drafts_requested.pop(user_id, None) is not None
+        poll = requested or last is None or now - last >= self._drafts_every
         drafts = work.drafts if poll else ()
         checks = test_drafts if poll else ()
-        if drafts or checks:
+        sent = sent_drafts if poll else ()
+        if drafts or checks or sent:
             self._drafts_polled[user_id] = now
         run = _Reconcile(self, factory, user_id, settings, now)
         # Test drafts first (#304): a mailbox verified by one skips the campaign draft's
@@ -716,7 +757,10 @@ class GmailSender:
             mine = [c for c in checks if c.mailbox_id == mailbox_id]
             if run.verify_test_drafts(gmail, mailbox_id, mine) and mailbox_id in unverified:
                 unverified[mailbox_id] = False
-        for mailbox_id in sorted({t.mailbox_id for t in (*work.leftovers, *drafts)}):
+        # A mailbox with only sent drafts to search for is opened only while still unverified.
+        searching = {c.mailbox_id for c in sent if unverified.get(c.mailbox_id)}
+        busy = {t.mailbox_id for t in (*work.leftovers, *drafts)} | searching
+        for mailbox_id in sorted(busy):
             if mailbox_id not in unverified:
                 continue
             try:
@@ -726,9 +770,11 @@ class GmailSender:
                 continue
             run.mailbox(
                 gmail,
+                mailbox_id,
                 [t for t in work.leftovers if t.mailbox_id == mailbox_id],
                 [t for t in drafts if t.mailbox_id == mailbox_id],
                 verify=unverified[mailbox_id],
+                sent=[c for c in sent if c.mailbox_id == mailbox_id],
             )
         self._poll_replies(factory, user_id, now)
 
@@ -849,38 +895,53 @@ class _Reconcile:
     def mailbox(
         self,
         gmail: Gmail,
+        mailbox_id: int,
         leftovers: Collection[Tracked],
         drafts: Collection[Tracked],
         *,
         verify: bool = False,
+        sent: Collection[message_id_check.SentDraftCheck] = (),
     ) -> None:
         for tracked in leftovers:
             self.guarded(tracked, self.leftover, gmail, tracked)
-        if not drafts:
+        seen_sent: list[Tracked] = []
+        if drafts:
+            try:
+                listed = gmail.list_drafts(purpose=f"drafts poll for user {self.user_id}")
+            except GmailError as exc:
+                log.warning("the drafts poll could not list drafts (%s); it waits", exc.code)
+            else:
+                present = {d.id: d for d in listed}
+                by_message = {d.message.id: d for d in listed}
+                for tracked in drafts:
+                    if self.guarded(tracked, self.draft, gmail, tracked, present, by_message):
+                        seen_sent.append(tracked)
+        if not verify:
             return
-        if verify:
+        # The oldest draft still waiting, then the drafts this poll saw sent, then those
+        # seen sent before (#510). Each keeps the Message-ID netkeeper made it with.
+        wanted: dict[int, str] = {}
+        if drafts:
             oldest = min(drafts, key=lambda t: t.message_id)
-            self.guarded(oldest, self.verify, gmail, oldest)
-        try:
-            listed = gmail.list_drafts(purpose=f"drafts poll for user {self.user_id}")
-        except GmailError as exc:
-            log.warning("the drafts poll could not list drafts (%s); it waits", exc.code)
-            return
-        present = {d.id: d for d in listed}
-        by_message = {d.message.id: d for d in listed}
-        for tracked in drafts:
-            self.guarded(tracked, self.draft, gmail, tracked, present, by_message)
+            wanted[oldest.message_id] = oldest.rfc822_message_id
+        for tracked in sorted(seen_sent, key=lambda t: t.message_id):
+            wanted.setdefault(tracked.message_id, tracked.rfc822_message_id)
+        for check in sent:
+            wanted.setdefault(check.message_id, check.rfc822_message_id)
+        if wanted:
+            self.verify(gmail, mailbox_id, list(wanted.items())[:MESSAGE_ID_CHECKS_MAX])
 
     @staticmethod
-    def guarded[*Ts](tracked: Tracked, fn: Callable[[*Ts], None], *args: *Ts) -> None:
+    def guarded[*Ts, R](tracked: Tracked, fn: Callable[[*Ts], R], *args: *Ts) -> R | None:
         try:
-            fn(*args)
+            return fn(*args)
         except GmailError as exc:  # left as it is for the next tick
             log.warning(
                 "message %d could not be looked up in Gmail (%s); it waits",
                 tracked.message_id,
                 exc.code,
             )
+            return None
 
     @staticmethod
     def purpose(tracked: Tracked, what: str) -> str:
@@ -938,22 +999,37 @@ class _Reconcile:
         else:
             log.info("message %d is a Gmail draft not listed yet; it waits", tracked.message_id)
 
-    def verify(self, gmail: Gmail, tracked: Tracked) -> None:
-        """Search for a draft by the Message-ID netkeeper set; found, the mailbox is
-        verified and can be armed for send (#277). Not found is not a failure: Gmail's
-        search can lag, and the next poll tries again."""
-        purpose = self.purpose(tracked, "Message-ID check of")
-        if find_by_message_id(gmail, tracked.rfc822_message_id, purpose=purpose) is None:
-            log.info(
-                "mailbox %d: draft message %d not found by its Message-ID yet",
-                tracked.mailbox_id,
-                tracked.message_id,
-            )
-            return
-        now, mailbox_id = self.now, tracked.mailbox_id
-        self.write(
-            lambda s, u: mailbox_service.record_message_id_verified(s, u, mailbox_id, now=now)
-        )
+    def verify(self, gmail: Gmail, mailbox_id: int, wanted: Collection[tuple[int, str]]) -> None:
+        """Search for campaign drafts, waiting or sent, by the Message-ID netkeeper set
+        (``(message id, Message-ID)`` pairs), in order, until one is found; found, the
+        mailbox is verified and a person can arm it for send (#277, #510). The search
+        must find netkeeper's own Message-ID: a message Gmail sent under one of its own
+        making is not found. Not found is not a failure: Gmail's search can lag, and the
+        next poll tries again. A Gmail error stops the check and records nothing."""
+        found = False
+        for message_id, rfc822 in wanted:
+            purpose = f"Message-ID check of message {message_id}"
+            try:
+                found = find_by_message_id(gmail, rfc822, purpose=purpose) is not None
+            except GmailError as exc:
+                log.warning(
+                    "message %d could not be looked up in Gmail (%s); the Message-ID check waits",
+                    message_id,
+                    exc.code,
+                )
+                return
+            if found:
+                break
+        now = self.now
+
+        def record(session: Session, user: User) -> None:
+            message_id_check.record_checked(session, user, mailbox_id, now=now)
+            if found:
+                mailbox_service.record_message_id_verified(session, user, mailbox_id, now=now)
+
+        if not found:
+            log.info("mailbox %d: no campaign draft found by its Message-ID yet", mailbox_id)
+        self.write(record)
 
     def verify_test_drafts(
         self, gmail: Gmail, mailbox_id: int, checks: Collection[review.TestDraftCheck]
@@ -981,11 +1057,19 @@ class _Reconcile:
         if found is None:
             log.info("mailbox %d: no test draft found by its Message-ID yet", mailbox_id)
             ids = [c.test_send_id for c in checks]
-            self.write(lambda s, u: review.record_test_drafts_not_found(s, u, ids, now=now))
+
+            def not_found(session: Session, user: User) -> None:
+                review.record_test_drafts_not_found(session, user, ids, now=now)
+                message_id_check.record_checked(session, user, mailbox_id, now=now)
+
+            self.write(not_found)
             return False
-        self.write(
-            lambda s, u: mailbox_service.record_message_id_verified(s, u, mailbox_id, now=now)
-        )
+
+        def verified(session: Session, user: User) -> None:
+            message_id_check.record_checked(session, user, mailbox_id, now=now)
+            mailbox_service.record_message_id_verified(session, user, mailbox_id, now=now)
+
+        self.write(verified)
         return True
 
     def draft(
@@ -994,16 +1078,17 @@ class _Reconcile:
         tracked: Tracked,
         present: Mapping[str, Draft],
         by_message: Mapping[str, Draft],
-    ) -> None:
+    ) -> bool:
+        """Settle one tracked draft. True when it was seen sent."""
         if tracked.gmail_draft_id in present:
             if tracked.marked_missing or tracked.seen_scheduled:
                 self.write(lambda s, u: engine.settle_draft_present(s, u, tracked.message_id))
-            return
+            return False
         purpose = self.purpose(tracked, "drafts poll for")
         sent = self.sent_in_thread(gmail, tracked, purpose)
         if sent is None:
             self.not_seen_sent(gmail, tracked, by_message, purpose)
-            return
+            return False
         settings, at = self.settings, engine.seen_sent_at(tracked, sent.internal_date)
         self.write(
             lambda s, u: _settled_sent(
@@ -1024,6 +1109,7 @@ class _Reconcile:
             )
         )
         self.label(gmail, tracked, sent.id, purpose)
+        return True
 
     def not_seen_sent(
         self, gmail: Gmail, tracked: Tracked, by_message: Mapping[str, Draft], purpose: str

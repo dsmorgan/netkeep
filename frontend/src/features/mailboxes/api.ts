@@ -14,6 +14,7 @@ import type { components } from '@/api/schema'
 
 export type Mailbox = components['schemas']['MailboxOut']
 export type MailboxStatus = components['schemas']['MailboxStatusOut']
+export type MailboxArmSteps = components['schemas']['MailboxArmStepsOut']
 
 export const mailboxKeys = {
   all: ['mailboxes'] as const,

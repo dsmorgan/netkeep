@@ -117,6 +117,9 @@ class Mailbox(UserOwned, TimestampMixin, Base):
     send_armed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     armed_by: Mapped[str | None] = mapped_column(String(MAILBOX_ARMED_BY_MAX_LENGTH))
     message_id_verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # When the drafts check last searched Gmail for one of its drafts by Message-ID and
+    # got an answer, found or not (#510; 0043). A failed search records nothing.
+    message_id_checked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     # The reply poll's place in Gmail's history (P3-08; 0025): the ``historyId`` the
     # next ``history.list`` starts from. NULL until the first poll sets a baseline.
     history_id: Mapped[int | None] = mapped_column(BigInteger)

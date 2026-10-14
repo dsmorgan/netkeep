@@ -6,7 +6,7 @@ import { EventStreamContext } from '@/features/events/event-stream-context'
 import { FakeEventSource } from '@/test/fake-event-source'
 import { jsonResponse, mockFetch } from '@/test/fetch'
 
-import type { Mailbox, MailboxStatus } from './api'
+import type { Mailbox, MailboxArmSteps, MailboxStatus } from './api'
 
 export interface Call {
   method: string
@@ -29,6 +29,7 @@ export function mailbox(overrides: Partial<Mailbox> = {}): Mailbox {
     send_armed_at: null,
     armed_by: null,
     message_id_verified_at: null,
+    message_id_checked_at: null,
     created_at: '2026-09-20T12:00:00Z',
     updated_at: '2026-09-26T12:00:00Z',
     ...overrides,
@@ -42,6 +43,25 @@ export function status(overrides: Partial<MailboxStatus> = {}): MailboxStatus {
     client_id: '1234-fake.apps.googleusercontent.com',
     mailboxes,
     reauth_required: mailboxes.some((row) => row.status === 'reauth_required'),
+    arm_steps: [],
+    ...overrides,
+  }
+}
+
+/** A mailbox's way to arming to send (#510): armed for drafts, nothing found yet. */
+export function armSteps(overrides: Partial<MailboxArmSteps> = {}): MailboxArmSteps {
+  return {
+    mailbox_id: 3,
+    armed_for_drafts: true,
+    armed_to_send: false,
+    verified_at: null,
+    waiting: 'no_draft',
+    checked_at: null,
+    check_requested_at: null,
+    checks_running: true,
+    can_arm_send: false,
+    next_step: 'send_test',
+    test_campaign_id: null,
     ...overrides,
   }
 }
