@@ -296,7 +296,7 @@ async def test_a_zero_budget_visits_nobody() -> None:
 
 async def test_an_empty_plan_ends_at_once() -> None:
     result, _, _ = await _run(_spec(()), FakeBrowser.of(PROFILES))
-    assert (result.reason, result.visits) == (StopReason.END_OF_PLAN, 0)
+    assert (result.reason, result.visits) == (StopReason.NOTHING_DUE, 0)
 
 
 # --- spec 9.7: stop on the first answer that is not Ok ----------------------------------

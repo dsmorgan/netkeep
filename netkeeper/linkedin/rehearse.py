@@ -381,7 +381,7 @@ async def rehearse(
 
     stopped = (
         None
-        if result.reason is StopReason.END_OF_PLAN
+        if result.reason in (StopReason.END_OF_PLAN, StopReason.NOTHING_DUE)
         else result.reason.value
         + (f" ({result.outcome.value})" if result.outcome is not None else "")
     )

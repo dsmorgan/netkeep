@@ -136,6 +136,10 @@ LINKEDIN_ORIGIN: Final = "https://www.linkedin.com"
 class StopReason(enum.StrEnum):
     """Why a run stopped. Only :attr:`END_OF_PLAN` means every target was visited."""
 
+    NOTHING_DUE = "nothing_due"
+    """The plan was empty before any visit (#465): no contact was due. A clean, completed
+    ending, like :attr:`END_OF_PLAN`; it opened no tab and made no visit."""
+
     END_OF_PLAN = "end_of_plan"
     """Every target in the spec was visited (a not-found profile counts as visited)."""
 
@@ -966,6 +970,8 @@ async def run_enrichment(
 
     if planned < len(spec.targets):
         return await stop(StopReason.VISIT_BUDGET)
+    if not spec.targets:
+        return await stop(StopReason.NOTHING_DUE)
     return await stop(StopReason.END_OF_PLAN)
 
 

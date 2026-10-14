@@ -456,6 +456,7 @@ async def _ignore(harvest: object) -> None:
 #: add streaks, listed in STREAK_STOPS); unlisted, it adds none.
 ADDS_STREAKS: dict[StopReason, bool] = {
     StopReason.END_OF_PLAN: True,
+    StopReason.NOTHING_DUE: True,  # no visits, so no streak moves; a clean end
     StopReason.VISIT_BUDGET: True,
     StopReason.BUDGET: True,
     StopReason.INACTIVE: True,

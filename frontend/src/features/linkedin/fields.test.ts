@@ -56,7 +56,24 @@ describe('formatFields', () => {
     const byLabel = Object.fromEntries(fields.map((f) => [f.label, f.value]))
     expect(byLabel.Stopped).toBe('—')
     expect(byLabel.Cancelled).toBe('yes')
-    expect(byLabel.Plan).toBe('{"a":1}')
+    expect(byLabel['Plan A']).toBe('1')
+  })
+
+  it('renders a nested count object as labeled rows, not JSON (#465)', () => {
+    const fields = formatFields({
+      planned: 0,
+      harvests: { applied: 0, not_found: 2, nested: { deep_count: 4 } },
+      empty: {},
+      list: [1, 2],
+    })
+    expect(fields).toEqual([
+      { label: 'Planned', value: '0' },
+      { label: 'Empty', value: '—' },
+      { label: 'Harvests Not Found', value: '2' },
+      { label: 'Harvests Applied', value: '0' },
+      { label: 'Harvests Nested Deep Count', value: '4' },
+      { label: 'List', value: '[1,2]' },
+    ])
   })
 })
 

@@ -123,7 +123,11 @@ _FLAG_OUTCOMES = frozenset({Outcome.CHECKPOINT, Outcome.LOGGED_OUT})
 
 #: How an enrichment run reaches its own end: every target visited, or the visits
 #: it was allowed made. A budget, a cancel, or the window closing is a gate's stop.
-_NATURAL_ENDS = frozenset({StopReason.END_OF_PLAN, StopReason.VISIT_BUDGET})
+_NATURAL_ENDS = frozenset({StopReason.END_OF_PLAN, StopReason.VISIT_BUDGET, StopReason.NOTHING_DUE})
+
+
+#: The stops that record a run as completed: every target visited, or none was due.
+_COMPLETED_ENDS = frozenset({StopReason.END_OF_PLAN, StopReason.NOTHING_DUE})
 
 
 def contact_info_read_again(result: EnrichResult) -> bool:
@@ -603,7 +607,7 @@ async def enrich_contacts(
                     run_id,
                     status=(
                         SyncRunStatus.COMPLETED
-                        if result.reason is StopReason.END_OF_PLAN
+                        if result.reason in _COMPLETED_ENDS
                         else SyncRunStatus.ABORTED
                     ),
                     now=clock(),
@@ -624,7 +628,13 @@ async def enrich_contacts(
 #: checkpoint, a throttle, a sign-out, a route that changed, lost answers), after
 #: which the run's pages are suspect.
 STREAK_STOPS: Final = frozenset(
-    {StopReason.END_OF_PLAN, StopReason.VISIT_BUDGET, StopReason.BUDGET, StopReason.INACTIVE}
+    {
+        StopReason.END_OF_PLAN,
+        StopReason.NOTHING_DUE,
+        StopReason.VISIT_BUDGET,
+        StopReason.BUDGET,
+        StopReason.INACTIVE,
+    }
 )
 
 

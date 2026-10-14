@@ -70,7 +70,7 @@ the scheduler (and the worker's second check) then skip every scheduled
 enrichment fire as ``"contact_info_breaker"``. Connections runs are never
 skipped for it, and it never skips enrichment for a connections
 streak: the two read different endpoints. The streak clears when an enrichment
-run reaches its own end (``end_of_plan`` or ``visit_budget``) after reading and
+run reaches its own end (``end_of_plan``, ``nothing_due`` or ``visit_budget``) after reading and
 parsing at least one Contact info answer (:func:`record_contact_info`),
 whatever its trigger, so a manual run that reads Contact info again clears it;
 :func:`reset` clears it with the others. Every other ending (a budget stop, a
@@ -354,8 +354,8 @@ def record_contact_info(
 
     ``answer_lost`` (the Contact info caps stopped the run, or it reached its own end
     with two or more clicks and every one lost) extends the streak by one.
-    ``clean_end`` (the run reached its own end, ``end_of_plan`` or ``visit_budget``,
-    and read and parsed at least one Contact info answer) clears it, whatever the
+    ``clean_end`` (the run reached its own end, ``end_of_plan``, ``nothing_due`` or
+    ``visit_budget``, and read and parsed at least one Contact info answer) clears it, whatever the
     trigger: that is how a manual run shows the overlay can be read again. Neither
     leaves the count where it was, and a corrupt row stays as it is (still read as
     tripped).

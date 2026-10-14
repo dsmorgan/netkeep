@@ -861,6 +861,7 @@ STOP_REASON_TEXT: Final[Mapping[str, str]] = {
     "caught_up": "caught up with connections it already knew",
     "page_budget": "read the pages it was allowed",
     "end_of_plan": "visited every profile in its plan",
+    "nothing_due": "no contact was due for a visit",
     "visit_budget": "made the visits it was allowed",
     "budget": "today's or this week's budget is spent",
     "inactive": "outside active hours",
