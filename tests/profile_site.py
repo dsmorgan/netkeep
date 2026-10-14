@@ -21,6 +21,7 @@ reports, never fetched.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
@@ -34,6 +35,7 @@ from flagship_pages import (
     Website,
     contact_info_payload,
     document_html,
+    missing_profile_payload,
     profile_payload,
 )
 from flagship_site import SHELL, FakeCdpSession, FakeResponse
@@ -91,7 +93,9 @@ class ProfilePage:
 
     ``landing`` is ``"document"`` (the screen in the HTML), ``"screen"`` (an HTML shell,
     then the screen request), ``"shell"`` (a shell and no screen: a wall served in
-    place), ``"404"``, ``"status:<n>"`` (the document answers ``n``), or a url the tab
+    place), ``"missing"`` (LinkedIn's missing-profile page, #514: a ``200`` document
+    whose flight is ``screen``, or :func:`flagship_pages.missing_profile_payload`),
+    ``"404"``, ``"status:<n>"`` (the document answers ``n``), or a url the tab
     lands on instead (a wall, a feed). ``redirect_to`` is a slug the document redirects
     to. ``components`` answer the first scroll, each with its request body.
     ``controls`` is how many Contact info controls the page has; ``href`` their href.
@@ -145,10 +149,17 @@ class ProfilePage:
     #: A url the document answers a redirect to that the tab never follows (#198
     #: review, H1: a 3xx to a wall, then the navigation hangs).
     redirect_location: str | None = None
-    #: #405: the document's HTML verbatim, in place of one built from the screen.
+    #: #405: the document's HTML verbatim, in place of one built from the screen. With
+    #: ``landing="screen"`` (#514), in place of the shell before the screen request.
     document: str | None = None
     #: #405: reading the Contact info control raises this (not a lost tab).
     control_error: Exception | None = None
+    #: #514: where the page's own script moves the tab once its answers arrived, before
+    #: ``goto`` returns (``tab_on_load``), or ``tab_after_load_s`` after it returns
+    #: (``tab_after_load``), the way the missing-profile page moves to ``/404/``.
+    tab_on_load: str | None = None
+    tab_after_load: str | None = None
+    tab_after_load_s: float = 0.01
 
     def screen_body(self) -> bytes:
         if self.screen is not None:
@@ -386,14 +397,23 @@ class ProfileSite(FakeContext):
             location = {"location": page.redirect_location}
             self._send(tab, "GET", url, 302, b"", "document", headers=location)
             return
+        self._move_after_load(tab, page)
         landing = page.landing
-        if landing not in ("document", "screen", "shell", "404") and not landing.startswith(
-            "status:"
-        ):
+        if landing not in (
+            "document",
+            "screen",
+            "shell",
+            "404",
+            "missing",
+        ) and not landing.startswith("status:"):
             tab._url = landing
             tab.profile = None
             return
-        if landing == "404":
+        if landing == "missing":
+            flight = page.screen if page.screen is not None else missing_profile_payload()
+            html = document_html(flight).encode("utf-8")
+            self._send(tab, "GET", url, 200, html, "document", body_error=self._lose_screen(page))
+        elif landing == "404":
             self._send(tab, "GET", url, 404, b"<html>This page doesn't exist</html>", "document")
         elif landing.startswith("status:"):
             self._send(tab, "GET", url, int(landing.split(":")[1]), SHELL, "document")
@@ -403,7 +423,10 @@ class ProfileSite(FakeContext):
             ).encode("utf-8")
             self._send(tab, "GET", url, 200, html, "document", body_error=self._lose_screen(page))
         else:
-            self._send(tab, "GET", url, 200, SHELL, "document")
+            shell = (
+                SHELL if page.document is None or landing != "screen" else page.document.encode()
+            )
+            self._send(tab, "GET", url, 200, shell, "document")
             if landing == "screen":
                 screen_url = f"{self.origin}/flagship-web{urlsplit(url).path}"
                 self._send(
@@ -416,6 +439,20 @@ class ProfileSite(FakeContext):
                     "{}",
                     body_error=self._lose_screen(page),
                 )
+        if page.tab_on_load is not None:
+            tab._url = page.tab_on_load
+
+    def _move_after_load(self, tab: ProfileTab, page: ProfilePage) -> None:
+        """Schedule the page's own move of the tab after ``goto`` returns (#514)."""
+        if page.tab_after_load is None:
+            return
+        moved_to = page.tab_after_load
+
+        def move() -> None:
+            if not tab._closed and tab.profile is page:
+                tab._url = moved_to
+
+        asyncio.get_running_loop().call_later(page.tab_after_load_s, move)
 
     def _lose_screen(self, page: ProfilePage) -> Exception | None:
         if page.screen_error is None or page.screen_lost_times <= 0:

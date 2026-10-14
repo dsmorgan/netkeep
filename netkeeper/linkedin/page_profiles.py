@@ -35,13 +35,22 @@ profile screen, is an unreadable visit too, and two of those in a row stop the r
 
 **What each answer means.** The profile's document answering ``404`` is spec 9.7's
 ``NotFound`` for the contact; the in-app screen request answering ``404`` is only an
-unreadable visit. A redirect is judged by where it points: a wall is that
-wall, another profile is followed by the tab's own url, anything else is unreadable. A
-throttle or a wall on any answer the visit reads stops the run. Any other non-``200``
-answer for the profile itself stops the run as ``RouteChanged``; for a lazy card it is
-skipped (one card failing is not the profile); for the overlay it makes the visit
-unreadable, never ``NotFound`` (nothing in the capture says how LinkedIn answers an
-overlay for a missing profile). A ``200`` whose body could not be kept because it was
+unreadable visit. LinkedIn's missing-profile page is ``NotFound`` too (#514, captured
+2026-10-14): the document answers ``200`` with a flight that has no top card and names
+the missing-profile page, and the page's own script then moves the tab to ``/404/``. A
+document whose flight has no top card is never accepted as the screen; the landing
+keeps waiting, reading the tab's address again (and nothing else) once that document
+has arrived. The visit is ``NotFound`` only when the tab's path is exactly ``/404/`` on
+the origin, the tab landed on the slug asked for (or on ``/404/`` itself), no screen was
+accepted or lost, and no redirect was followed. The flight alone is never enough, and
+the address alone is never enough: any other path, or ``/404/`` after a profile screen
+or a redirect, is unreadable as before. A redirect is judged by where it points: a wall
+is that wall, another profile is followed by the tab's own url, anything else is
+unreadable. A throttle or a wall on any answer the visit reads stops the run. Any other
+non-``200`` answer for the profile itself stops the run as ``RouteChanged``; for a lazy
+card it is skipped (one card failing is not the profile); for the overlay it makes the
+visit unreadable, never ``NotFound`` (nothing in the capture says how LinkedIn answers
+an overlay for a missing profile). A ``200`` whose body could not be kept because it was
 too large or too slow is the observation failing, not LinkedIn answering:
 :class:`~netkeeper.linkedin.observe.ObservationFailed` ends the run.
 
@@ -119,9 +128,12 @@ from netkeeper.linkedin.flagship_profile import (
     COMPONENT_ENDPOINT,
     COMPONENT_PATH,
     CONTACT_INFO_ENDPOINT,
+    MISSING_PAGE_PATH,
     PROFILE_ENDPOINT,
     PROFILE_PAGE_PREFIX,
     PROFILE_SCREEN_PREFIX,
+    has_top_card,
+    is_missing_page,
     parse_contact_info,
     parse_navigation_request,
     parse_profile,
@@ -155,6 +167,10 @@ LAZY_WAIT_S: Final = 2.0
 
 #: How long to wait for the overlay's answer after the click. The captured one took 0.8 s.
 OVERLAY_WAIT_S: Final = 10.0
+
+#: How often, once LinkedIn's missing-profile document arrived, the landing wait reads the
+#: tab's address again (#514). The page's own script moves it about 100 ms after ``load``.
+MISSING_PAGE_POLL_S: Final = 0.25
 
 #: Answers other than lazy cards the landing reads looking for the profile's screen
 #: before it gives up: a page that keeps answering without one is not a profile.
@@ -226,6 +242,10 @@ class PageProfiles:
         #: The fixed phrase for this visit's profile screen, when one arrived but
         #: its body could not be read (#197); ``None`` otherwise.
         self._lost_screen: str | None = None
+        #: Whether this visit's own document, for the slug asked for, answered ``200``
+        #: with LinkedIn's missing-profile flight: no top card, and its page key or
+        #: route (#514). Never enough alone to read ``NotFound``.
+        self._missing_document = False
         self._page: PageLike | None = None
 
     @property
@@ -269,6 +289,10 @@ class PageProfiles:
         self._page = page
         blocked = self._land_where(page.url)
         if blocked is not None:
+            if blocked.cause is UnreadableCause.LANDED_OFF_PROFILE and self._at_missing_page(
+                page.url
+            ):
+                return await self._landed_on_missing_page(blocked)
             return blocked
         return await self._read_screen()
 
@@ -373,17 +397,15 @@ class PageProfiles:
         deadline = loop.time() + self._landing_wait_s
         answers = 0
         while answers < MAX_LANDING_ANSWERS:
-            response = await observation.next(max(deadline - loop.time(), 0.0))
+            remaining = max(deadline - loop.time(), 0.0)
+            wait = min(remaining, MISSING_PAGE_POLL_S) if self._missing_document else remaining
+            response = await observation.next(wait)
             if response is None:
-                if self._lost_screen is not None:
-                    return self._screen_lost()
-                log.warning("enrichment: the profile page loaded, but no profile screen arrived")
-                return Answer(
-                    Outcome.ROUTE_CHANGED,
-                    self._url,
-                    unparsed=True,
-                    cause=UnreadableCause.NO_PROFILE_SCREEN,
-                )
+                if wait < remaining and not self._at_missing_page(self._tab_url()):
+                    # #514: the missing-profile document arrived; the page's own script
+                    # moves the tab soon after. Read its address again, nothing more.
+                    continue
+                return self._no_screen("the profile page loaded, but no profile screen arrived")
             path = _path(response.url)
             if path in (_path(COMPONENT_PATH), _path(NAVIGATION_PATH)):
                 # Before this profile's screen, a lazy card can only be the last page's,
@@ -443,6 +465,23 @@ class PageProfiles:
                     # served in place. The HTML is never searched for wall paths (#188
                     # M1); if no screen follows, the visit is unreadable.
                     continue
+                try:
+                    profile = has_top_card(payload)
+                    missing = not profile and is_missing_page(payload)
+                except RouteChanged:
+                    return Answer(
+                        Outcome.ROUTE_CHANGED,
+                        self._url,
+                        unparsed=True,
+                        cause=UnreadableCause.PROFILE_SHAPE_UNKNOWN,
+                    )
+                if not profile:
+                    # #514: a flight with no top card is not the profile's screen (the
+                    # missing-profile page answers 200 with one). Keep waiting, as for
+                    # a document with no screen; where the tab is then decides.
+                    if missing and slug is not None and same_slug(slug, self._requested):
+                        self._missing_document = True
+                    continue
             else:
                 payload = response.body
             if not same_slug(self._slug, self._requested) and not any(
@@ -459,12 +498,66 @@ class PageProfiles:
                 )
             self._screen = payload
             return Answer(Outcome.OK, self._url)
+        return self._no_screen(f"{answers} answers arrived, none the profile screen")
+
+    def _no_screen(self, why: str) -> Answer[None]:
+        """The landing wait ended with no screen: lost, missing (#514), or unreadable."""
         if self._lost_screen is not None:
             return self._screen_lost()
-        log.warning("enrichment: %d answers arrived, none the profile screen", answers)
+        missing = self._not_found_here(self._tab_url())
+        if missing is not None:
+            return missing
+        log.warning("enrichment: %s", why)
         return Answer(
             Outcome.ROUTE_CHANGED, self._url, unparsed=True, cause=UnreadableCause.NO_PROFILE_SCREEN
         )
+
+    async def _landed_on_missing_page(self, off_profile: Answer[None]) -> Answer[None]:
+        """The tab was already at the missing-profile path when ``goto`` returned (#514).
+
+        The landing reads this visit's answers as for the profile asked for. Only a
+        missing-profile document, with no screen accepted and no redirect followed, makes
+        it ``NotFound``; a stop (a wall, a throttle, a status that stops the run) is
+        that stop. Anything else, a profile screen included, is ``off_profile``, as before.
+        """
+        self._slug = self._requested
+        self._path = urlsplit(self.profile_url(self._requested)).path
+        answer = await self._read_screen()
+        if answer.outcome is Outcome.OK or (
+            answer.outcome is Outcome.ROUTE_CHANGED and answer.unparsed
+        ):
+            return off_profile
+        return answer
+
+    def _not_found_here(self, url: str) -> Answer[None] | None:
+        """Spec 9.7's ``NotFound`` from LinkedIn's missing-profile page (#514), or ``None``.
+
+        Every condition must hold: the tab's path is exactly :data:`MISSING_PAGE_PATH` on
+        the origin; the tab landed on the slug asked for, or on that path itself; this
+        visit's own document for that slug answered ``200`` with the missing-profile
+        flight; no profile screen was accepted, none was lost, and no redirect was
+        followed during this visit.
+        """
+        if (
+            self._screen is not None
+            or self._lost_screen is not None
+            or self._redirects
+            or not same_slug(self._slug, self._requested)
+            or not self._missing_document
+            or not self._at_missing_page(url)
+        ):
+            return None
+        log.info("enrichment: the profile does not exist (LinkedIn's missing-profile page)")
+        return Answer(Outcome.NOT_FOUND, masked(url))
+
+    def _at_missing_page(self, url: str) -> bool:
+        """Whether ``url`` is exactly the missing-profile path on the origin (#514)."""
+        return self._on_origin(url) and urlsplit(url).path == MISSING_PAGE_PATH
+
+    def _tab_url(self) -> str:
+        """The tab's address now, read again with no input to the page."""
+        assert self._page is not None
+        return self._page.url
 
     async def _navigation_timed_out(self) -> Answer[None]:
         """The profile's navigation never finished loading (#197): an unreadable visit.
@@ -809,6 +902,11 @@ class PageProfiles:
             return blocked
         slug = profile_slug(urlsplit(url).path) if self._on_origin(url) else None
         if slug is None or not same_slug(slug, self._slug):
+            # #514: a screen was accepted by now, so this returns None here. It is
+            # called anyway so that one rule decides NotFound wherever the tab is read.
+            missing = self._not_found_here(url)
+            if missing is not None:
+                return missing
             log.warning("enrichment: the tab left the profile during the visit")
             return Answer(
                 Outcome.ROUTE_CHANGED,
