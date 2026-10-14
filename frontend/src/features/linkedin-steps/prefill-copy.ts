@@ -212,8 +212,8 @@ const BEFORE_CLICK: readonly Rule[] = [
   },
   {
     match:
-      'a message bubble is already open in Chrome, minimized ones included; close it, then try again',
-    text: "A message bubble was already open in Chrome, perhaps minimized, so netkeeper didn't click Message. Close it, then try again. Closing a bubble deletes any draft in it.",
+      'a message bubble is already open in this or another LinkedIn tab in the netkeeper Chrome window, minimized ones included; close it, then try again',
+    text: "A message bubble was already open in this or another LinkedIn tab in the netkeeper Chrome window, perhaps minimized, so netkeeper didn't click Message. Close it, then try again. Closing a bubble deletes any draft in it.",
     bubble: 'closed',
   },
   {

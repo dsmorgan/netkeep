@@ -617,8 +617,14 @@ REFUSALS = {
     "two_composers": "another message composer is on the page",
     # #444: minimized bubbles keep their composers, hidden; decision 3, read before the
     # click, refuses them and a leftover open bubble with no click.
-    "minimized": "a message bubble is already open in Chrome, minimized ones included",
-    "leftover": "a message bubble is already open in Chrome, minimized ones included",
+    "minimized": (
+        "a message bubble is already open in this or another LinkedIn tab in the netkeeper"
+        " Chrome window, minimized ones included"
+    ),
+    "leftover": (
+        "a message bubble is already open in this or another LinkedIn tab in the netkeeper"
+        " Chrome window, minimized ones included"
+    ),
     # #475: another element's ::after over every control covers them; no click.
     "pseudo_cover": MESSAGE_NOT_ON_SCREEN,
     # #481: a card linking the contact and someone else refuses before any key.

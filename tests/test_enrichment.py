@@ -1399,7 +1399,7 @@ async def test_a_lost_answer_is_an_unreadable_visit_named_on_the_run(
     assert (report.heat_raised, report.session_flagged) == (False, False)
     run = _last_run(session_factory, user_id)
     assert run.notes == f"unreadable answers: visit 2: {_LOST}."
-    assert run.counts_json is not None and run.counts_json["lost"] == 1
+    assert run.counts_json is not None and run.counts_json["lost_visits"] == 1
     assert run.error is None
     mateo = _contact(session_factory, user_id, ids[102])
     assert (mateo.last_enriched_at, mateo.li_enrich_attempted_at) == (None, NOW)
@@ -1412,7 +1412,7 @@ async def test_a_run_with_no_lost_answer_has_no_note(
     user_id, _ = _setup(session_factory, people)
     await _enrich(session_factory, user_id, FakeBrowser.of(people))
     run = _last_run(session_factory, user_id)
-    assert run.notes is None and run.counts_json is not None and run.counts_json["lost"] == 0
+    assert run.notes is None and run.counts_json is not None and run.counts_json["lost_visits"] == 0
 
 
 # --- #207 review: Contact info read from a streamed copy ----------------------------------------

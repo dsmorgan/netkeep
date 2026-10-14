@@ -176,7 +176,16 @@ def _contacts(session: Session, user: User, ids: set[int]) -> dict[int, Contact]
     }
 
 
+_CONNECTIONS_KINDS: Final = frozenset(
+    {SyncRunKind.CONNECTIONS_FULL, SyncRunKind.CONNECTIONS_INCREMENTAL}
+)
+
+
 def _lost(run: SyncRun) -> tuple[LostAnswerReason, ...]:
+    # #517: only a connections run keeps a list of lost answers under ``lost``. An
+    # enrichment run from before the rename holds a count there, which is not read.
+    if run.kind not in _CONNECTIONS_KINDS:
+        return ()
     rows: list[LostAnswerReason] = []
     for item in _record(run, "lost"):
         if not isinstance(item, dict):

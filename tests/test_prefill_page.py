@@ -952,7 +952,8 @@ def test_the_bubble_check_words_are_pinned() -> None:
 
 def test_the_bubble_already_open_words_are_pinned() -> None:
     assert browser_module.BUBBLE_ALREADY_OPEN == (
-        "a message bubble is already open in Chrome, minimized ones included;"
+        "a message bubble is already open in this or another LinkedIn tab in the netkeeper"
+        " Chrome window, minimized ones included;"
         " close it, then try again"
     )
 
@@ -1559,6 +1560,18 @@ async def test_the_outcome_says_whether_the_chip_was_checked(h1: str, checked: b
     ran = await prefill(site)
     assert ran.kind is MessageOutcomeKind.PREFILLED
     assert ran.result.outcome.recipient_name_checked is checked
+
+
+async def test_a_skipped_chip_check_logs_once_in_fixed_words(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    profile = profile_message_controls_html(ZEPHYRINE).replace(f"<h1>{ZEPHYRINE.name}</h1>", "")
+    site = MessagingSite(ZEPHYRINE, profile_html=profile, bubble=Bubble(ZEPHYRINE, None))
+    with caplog.at_level("INFO", logger="netkeeper.linkedin.page_messaging"):
+        await prefill(site)
+    lines = [r.getMessage() for r in caplog.records if "name checked" in r.getMessage()]
+    assert lines == ["prefill: recipient name checked: skipped (no single profile heading)"]
+    assert ZEPHYRINE.name.casefold() not in caplog.text.casefold()
 
 
 async def test_an_existing_conversation_has_no_chip_to_check() -> None:

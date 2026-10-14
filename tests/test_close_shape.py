@@ -686,6 +686,38 @@ async def test_at_most_four_close_controls_are_described() -> None:
     assert "(only the first 4 close buttons are described)" in shape.lines()
 
 
+async def test_a_button_named_with_message_text_is_never_printed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#517: a message's own buttons are named for its text ("Options for the message from
+    <NAME>: <MESSAGE>"). The shape, the refusal and the logs count them and never print
+    one. The message here is invented."""
+    message = "Zibberwock quartz meeting moved to Thursday"
+    options = (
+        f"<button>Options for the message from {PERSON.name}: {message}</button>"
+        f"<button aria-label='Delete the message: {message}'>x</button>"
+    )
+
+    def add(html: str) -> str:
+        old = _close_button(OTHER.name)
+        assert old in html
+        return html.replace(old, old + options)
+
+    html = _bubble(_rename_close(OTHER.name))
+    shape = await shape_of(add(html))
+    assert shape.by_prefix == 1
+    site = MessagingSite(PERSON)
+    tab = _tab(site, add(html))
+    dialog = tab.get_by_role("dialog", name="Messaging", exact=True, include_hidden=True)
+    with caplog.at_level(logging.DEBUG):
+        refusal = await browser._close_refusal(
+            NO_ONE_CLOSE_CONTROL, cast(Any, tab), cast(Any, dialog)
+        )
+    printed = "\n".join([shape.describe(), *shape.lines(), refusal, caplog.text]).casefold()
+    for part in (message, "zibberwock", "quartz", "options for the message", "delete the message"):
+        assert part.casefold() not in printed
+
+
 # --- the refusal ------------------------------------------------------------------------------
 
 

@@ -17,7 +17,7 @@ import pytest
 from campaign_fakes import NOW
 from inbox_fakes import FIXTURE_NOTE
 from messaging_dom import Bubble, MessagingSite, MessagingTab
-from messaging_pages import ZEPHYRINE, conversation_urn
+from messaging_pages import ZEPHYRINE, conversation_urn, profile_message_controls_html
 from run_fakes import fake_provider
 from sqlalchemy.orm import Session, sessionmaker
 from test_linkedin_steps import LINKEDIN, Lane, make_lane
@@ -181,6 +181,17 @@ async def test_a_prefill_types_the_message_and_records_it_from_the_typing_start(
         "message_click_target": "unchecked",
         "message_click_failure": None,
     }
+
+
+async def test_a_skipped_chip_check_is_recorded_in_the_run_checks(lane: Lane) -> None:
+    profile = profile_message_controls_html(ZEPHYRINE).replace(f"<h1>{ZEPHYRINE.name}</h1>", "")
+    site = MessagingSite(ZEPHYRINE, profile_html=profile, bubble=Bubble(ZEPHYRINE, None))
+    f = Fixture(lane, site)
+    assert await f.execute() is runs.RunOutcome.DONE
+    counts = f.run().counts_json
+    assert counts is not None and counts["recipient_name_checked"] is False
+    assert counts["checks"] == ["recipient name checked: skipped (no single profile heading)"]
+    assert ZEPHYRINE.name not in str(counts)
 
 
 async def test_a_lapsed_claim_opens_nothing_and_spends_nothing(lane: Lane) -> None:

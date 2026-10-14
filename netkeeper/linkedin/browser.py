@@ -809,7 +809,8 @@ def _clear(box: Mapping[str, float], hit: Mapping[str, float] | None) -> bool:
 
 #: The refusal, before the click, when a message bubble is already on the page (#444).
 BUBBLE_ALREADY_OPEN: Final = (
-    "a message bubble is already open in Chrome, minimized ones included; close it, then try again"
+    "a message bubble is already open in this or another LinkedIn tab in the netkeeper Chrome"
+    " window, minimized ones included; close it, then try again"
 )
 #: The refusal, before the click, when that check couldn't read the page (#444).
 BUBBLE_UNREADABLE: Final = "whether a message bubble is open could not be read"
@@ -4548,13 +4549,17 @@ class BrowserRun:
                 return "no message composer is on the page"
             # Hidden ones count: a minimized bubble keeps its composer (#444).
             return (
-                "another message composer is on the page, in an open or minimized bubble;"
+                "another message composer is on the page, in an open or minimized bubble,"
+                " in this or another LinkedIn tab in the netkeeper Chrome window;"
                 " close the other bubbles"
             )
         dialogs = tab.get_by_role(BUBBLE_ROLE, name=BUBBLE_NAME, exact=True, include_hidden=True)
         dialog_count = await dialogs.count()
         if dialog_count > 1:
-            return "another message bubble is on the page, open or minimized; close the others"
+            return (
+                "another message bubble is on the page, open or minimized, in this or another"
+                " LinkedIn tab in the netkeeper Chrome window; close the others"
+            )
         heading = tab.get_by_role(
             NEW_MESSAGE_ROLE, name=NEW_MESSAGE_NAME, exact=True, include_hidden=True
         )

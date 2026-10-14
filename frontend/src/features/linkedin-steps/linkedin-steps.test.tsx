@@ -1096,7 +1096,7 @@ describe('every recorded phrase has words (S1 drift guard)', () => {
       'no Message control is on screen with nothing over it; close or move what covers it',
       'whether a message bubble is open could not be read',
       'whether a message bubble is open could not be read',
-      'a message bubble is already open in Chrome, minimized ones included; close it, then try again',
+      'a message bubble is already open in this or another LinkedIn tab in the netkeeper Chrome window, minimized ones included; close it, then try again',
     ]) {
       expect(prefillReason(phrase).bubble).toBe('closed')
     }
@@ -1175,9 +1175,9 @@ describe('prefill refusal reasons in plain words', () => {
     'recipient_name_mismatch',
     'recipient_name_unreadable',
     'no message composer is on the page',
-    'a message bubble is already open in Chrome, minimized ones included; close it, then try again',
-    'another message composer is on the page, in an open or minimized bubble; close the other bubbles',
-    'another message bubble is on the page, open or minimized; close the others',
+    'a message bubble is already open in this or another LinkedIn tab in the netkeeper Chrome window, minimized ones included; close it, then try again',
+    'another message composer is on the page, in an open or minimized bubble, in this or another LinkedIn tab in the netkeeper Chrome window; close the other bubbles',
+    'another message bubble is on the page, open or minimized, in this or another LinkedIn tab in the netkeeper Chrome window; close the others',
     'no Message control is on screen with nothing over it; close or move what covers it',
     "the conversation's bubble is not open",
     'the page shows a new-message bubble, not the conversation',
