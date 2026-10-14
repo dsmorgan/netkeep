@@ -1106,6 +1106,54 @@ describe('inline lint', () => {
     expect(body.value.slice(body.selectionStart, body.selectionEnd)).toBe('{{ compnay }}')
   })
 
+  it('offers Add to dictionary on a spelling warning, then lints again (#522)', async () => {
+    const added: string[] = []
+    const spelling: LintIssue = {
+      rule: 'spelling',
+      severity: 'warning',
+      part: 'body',
+      message: '"Zorbly" may be misspelled',
+      field: 'Zorbly',
+      line: 1,
+    }
+    const seen = mockApi(
+      routes([template({ body: 'Hi {{ first_name }}, Zorbly here' })], {
+        'POST /api/v1/templates/lint': () => jsonResponse(added.length > 0 ? [] : [spelling]),
+        'POST /api/v1/templates/dictionary': ({ body }) => {
+          added.push(...(body as { words: string[] }).words)
+          return jsonResponse(added.map((word) => word.toLowerCase()))
+        },
+      }),
+    )
+    await renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: 'reconnect' }))
+    const bodyLint = await screen.findByRole('list', { name: 'Body lint' }, WAIT)
+    expect(within(bodyLint).getByText('Warning')).toBeInTheDocument()
+    expect(within(bodyLint).getByText(/Why it matters: A misspelled word/)).toBeInTheDocument()
+    expect(screen.queryByText(/a campaign can't use this template/)).not.toBeInTheDocument()
+
+    fireEvent.click(within(bodyLint).getByRole('button', { name: 'Add Zorbly to dictionary' }))
+    await waitFor(() => expect(screen.queryByRole('list', { name: 'Body lint' })).toBeNull(), WAIT)
+    expect(requestsTo(seen, 'POST', '/api/v1/templates/dictionary').map((r) => r.body)).toEqual([
+      { words: ['Zorbly'] },
+    ])
+    expect(await screen.findByText('No lint issues.', {}, WAIT)).toBeInTheDocument()
+  })
+
+  it('spellchecks the subject and body in English, not the name or the chips', async () => {
+    mockApi(routes([template()]))
+    await renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: 'reconnect' }))
+    for (const label of ['Subject', 'Body']) {
+      const field = await screen.findByLabelText(label)
+      expect(field).toHaveAttribute('spellcheck', 'true')
+      expect(field).toHaveAttribute('lang', 'en')
+    }
+    expect(screen.getByLabelText('Name')).toHaveAttribute('spellcheck', 'false')
+    const chip = await screen.findByRole('button', { name: 'Insert {{ first_name }}' }, WAIT)
+    expect(chip).toHaveAttribute('spellcheck', 'false')
+  })
+
   it('does not say a warning blocks activation', async () => {
     mockApi(
       routes([template({ body: BODY })], {

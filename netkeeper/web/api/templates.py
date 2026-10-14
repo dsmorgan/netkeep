@@ -19,8 +19,10 @@ from netkeeper.campaigns import templates as service
 from netkeeper.campaigns.render import LintIssue, TemplateRenderError
 from netkeeper.models import Template
 from netkeeper.scoping import get_scoped_contact
+from netkeeper.services import user_dictionary
 from netkeeper.web.deps import CurrentUser, SessionDep, read_only
 from netkeeper.web.schemas import (
+    DictionaryWordsIn,
     LintIssueOut,
     MergeFieldOut,
     MergeFieldsOut,
@@ -121,16 +123,59 @@ def create_template(
 
 @router.post("/templates/lint", operation_id="lint_template", responses=INVALID)
 @read_only
-def lint_template(body: TemplateLintIn, request: Request, user: CurrentUser) -> list[LintIssueOut]:
-    """Lint a template's text without saving it, as a save of it would.
+def lint_template(
+    body: TemplateLintIn, request: Request, user: CurrentUser, session: SessionDep
+) -> list[LintIssueOut]:
+    """Lint a template's text without saving it, as a save of it would, plus a spelling
+    warning for each word that may be misspelled (#522).
 
     The editor calls this as you type, so a lint error shows before you save. It
-    stores nothing and reads no rows; ``user`` is there so the route authenticates
-    like every other.
+    stores nothing. Spelling warnings are checked against your dictionary, so they are
+    never stored with a saved template's lint, and they never block anything.
     """
     with translate_errors():
         issues = service.lint_draft(body.channel, body.subject, body.body)
+        issues += service.spelling_warnings(session, user, body.channel, body.subject, body.body)
     return [_issue_out(issue) for issue in issues]
+
+
+@router.get("/templates/dictionary", operation_id="list_dictionary_words")
+def list_dictionary_words(user: CurrentUser, session: SessionDep) -> list[str]:
+    """The words you added to your dictionary, sorted. The seeded words (your contacts'
+    names and companies, your own name, and a few built in) are accepted too, but they
+    are not stored, so they are not listed."""
+    return user_dictionary.added_words(session, user)
+
+
+@router.post(
+    "/templates/dictionary",
+    operation_id="add_dictionary_words",
+    responses={422: {"description": "A word the dictionary refuses, or a full dictionary"}},
+)
+def add_dictionary_words(
+    body: DictionaryWordsIn, request: Request, user: CurrentUser, session: SessionDep
+) -> list[str]:
+    """Add words to your dictionary, so the spelling check no longer flags them.
+    Answers with every word you added, sorted."""
+    try:
+        user_dictionary.add_words(session, user, body.words)
+    except (user_dictionary.InvalidWord, user_dictionary.DictionaryFull) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return user_dictionary.added_words(session, user)
+
+
+@router.delete(
+    "/templates/dictionary/{word}",
+    operation_id="remove_dictionary_word",
+    status_code=204,
+    responses={404: {"description": "You did not add that word"}},
+)
+def remove_dictionary_word(
+    word: str, request: Request, user: CurrentUser, session: SessionDep
+) -> None:
+    """Remove a word you added. A seeded word can't be removed: it is not stored."""
+    if not user_dictionary.remove_words(session, user, [word]):
+        raise HTTPException(status_code=404, detail="that word is not in your added words")
 
 
 @router.get("/templates/merge-fields", operation_id="list_merge_fields", responses=NOT_FOUND)

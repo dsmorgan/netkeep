@@ -3028,6 +3028,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/templates/dictionary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Dictionary Words
+         * @description The words you added to your dictionary, sorted. The seeded words (your contacts'
+         *     names and companies, your own name, and a few built in) are accepted too, but they
+         *     are not stored, so they are not listed.
+         */
+        get: operations["list_dictionary_words"];
+        put?: never;
+        /**
+         * Add Dictionary Words
+         * @description Add words to your dictionary, so the spelling check no longer flags them.
+         *     Answers with every word you added, sorted.
+         */
+        post: operations["add_dictionary_words"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/templates/dictionary/{word}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Dictionary Word
+         * @description Remove a word you added. A seeded word can't be removed: it is not stored.
+         */
+        delete: operations["remove_dictionary_word"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/templates/lint": {
         parameters: {
             query?: never;
@@ -3039,11 +3086,12 @@ export interface paths {
         put?: never;
         /**
          * Lint Template
-         * @description Lint a template's text without saving it, as a save of it would.
+         * @description Lint a template's text without saving it, as a save of it would, plus a spelling
+         *     warning for each word that may be misspelled (#522).
          *
          *     The editor calls this as you type, so a lint error shows before you save. It
-         *     stores nothing and reads no rows; ``user`` is there so the route authenticates
-         *     like every other.
+         *     stores nothing. Spelling warnings are checked against your dictionary, so they are
+         *     never stored with a saved template's lint, and they never block anything.
          */
         post: operations["lint_template"];
         delete?: never;
@@ -4958,6 +5006,14 @@ export interface components {
             /** Unverifies */
             unverifies?: string | null;
         };
+        /**
+         * DictionaryWordsIn
+         * @description Words to add to your dictionary for the template spelling check (#522).
+         */
+        DictionaryWordsIn: {
+            /** Words */
+            words: string[];
+        };
         /** DiscardedOut */
         DiscardedOut: {
             /** Enrollment Id */
@@ -6035,13 +6091,22 @@ export interface components {
          * LintRule
          * @enum {string}
          */
-        LintRule: "syntax" | "unsupported" | "unsafe_attribute" | "attribute_access" | "undefined_variable" | "no_contact_field" | "missing_subject" | "bad_link" | "missing_value" | "removed_field" | "linkedin_subject" | "linkedin_too_long" | "linkedin_typing_time" | "linkedin_long" | "linkedin_newline" | "linkedin_untypable";
-        /** LintStepOut */
+        LintRule: "syntax" | "unsupported" | "unsafe_attribute" | "attribute_access" | "undefined_variable" | "no_contact_field" | "missing_subject" | "bad_link" | "missing_value" | "removed_field" | "linkedin_subject" | "linkedin_too_long" | "linkedin_typing_time" | "linkedin_long" | "linkedin_newline" | "linkedin_untypable" | "spelling";
+        /**
+         * LintStepOut
+         * @description One step's lint: ``errors`` block activation; ``warnings``, spelling's included
+         *     (#522), never do.
+         */
         LintStepOut: {
             /** Errors */
             errors: components["schemas"]["LintIssueOut"][];
             /** Position */
             position: number;
+            /**
+             * Warnings
+             * @default []
+             */
+            warnings: components["schemas"]["LintIssueOut"][];
         };
         /** ListCreate */
         ListCreate: {
@@ -14823,6 +14888,93 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    list_dictionary_words: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
+                };
+            };
+        };
+    };
+    add_dictionary_words: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DictionaryWordsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
+                };
+            };
+            /** @description A word the dictionary refuses, or a full dictionary */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    remove_dictionary_word: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                word: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description You did not add that word */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

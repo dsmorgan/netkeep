@@ -46,6 +46,9 @@ dependencies = [
   # Reads the old mailing tool's workbook for the history import (#65). Read-only,
   # data_only: a formula's cached value, never one evaluated.
   "openpyxl>=3.1",
+  # Template spelling warnings (#522): pure Python, its English word list ships inside
+  # the package, so the check needs no system library and never fetches anything.
+  "pyspellchecker==0.8.3",
 ]
 
 [project.optional-dependencies]

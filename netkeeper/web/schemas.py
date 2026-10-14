@@ -2354,6 +2354,14 @@ class TemplateCreate(BaseModel):
     body: TemplateBody
 
 
+class DictionaryWordsIn(BaseModel):
+    """Words to add to your dictionary for the template spelling check (#522)."""
+
+    words: list[Annotated[str, Field(min_length=1, max_length=64)]] = Field(
+        min_length=1, max_length=100
+    )
+
+
 class TemplateLintIn(BaseModel):
     """Text to lint without saving it: the editor's lint as you type (P3-10)."""
 

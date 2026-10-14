@@ -782,6 +782,27 @@ async def test_lint_errors_are_answered_and_not_recorded(
     assert "lint" in _missing(await _review(client, s))
 
 
+async def test_lint_answers_spelling_warnings_and_is_still_clean(
+    client: httpx.AsyncClient, running_app: FastAPI
+) -> None:
+    """#522: a misspelling comes back as a step's warning; the lint is clean and recorded."""
+    s = _build(running_app)
+    with session_scope(s.factory, write=True) as session:
+        user = _local(session)
+        step = session.scalars(unscoped(select(CampaignStep).order_by(CampaignStep.id))).first()
+        assert step is not None
+        template = get_scoped(session, user, Template, step.template_id)
+        assert template is not None
+        template.body += " Thanks for teh help."
+    body = await _lint(client, s)
+    assert body["clean"] is True
+    assert [(i["rule"], i["severity"], i["field"]) for i in body["steps"][0]["warnings"]] == [
+        ("spelling", "warning", "teh")
+    ]
+    assert body["steps"][0]["errors"] == [] and body["steps"][1]["warnings"] == []
+    assert "lint" not in _missing(await _review(client, s))
+
+
 @pytest.mark.parametrize("what", ["no_steps", "nobody"])
 async def test_review_starts_only_with_a_step_and_an_audience(
     client: httpx.AsyncClient, running_app: FastAPI, what: str

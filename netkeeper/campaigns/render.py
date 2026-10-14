@@ -115,6 +115,11 @@ The newline, character, and typing-time rules come from the pacing module
 lint and the prefill can't disagree: a rendered message the plan refuses always has
 one of these errors.
 
+A word that may be misspelled is a :attr:`LintRule.SPELLING` *warning* (#522). It needs
+the user's dictionary, so :func:`lint` never adds it:
+:func:`netkeeper.campaigns.templates.spelling_warnings` does, over
+:func:`literal_text`, and it never blocks.
+
 Each issue about one place carries its one-based ``line`` in the part; an issue
 about the whole part (a missing subject, a body with no per-contact field) has
 none.
@@ -446,6 +451,7 @@ class LintRule(enum.StrEnum):
     LINKEDIN_LONG = "linkedin_long"
     LINKEDIN_NEWLINE = "linkedin_newline"
     LINKEDIN_UNTYPABLE = "linkedin_untypable"
+    SPELLING = "spelling"
 
 
 class Part(enum.StrEnum):
@@ -1338,6 +1344,24 @@ def lint(channel: TemplateChannel, subject: str | None, body: str) -> list[LintI
     """
     issues, _ = _lint(channel, subject, body)
     return issues
+
+
+def literal_text(source: str) -> list[tuple[int, str]] | None:
+    """The template's literal text, piece by piece, each with the line it starts on.
+
+    A piece is text outside every ``{{ }}``, ``{% %}`` and ``{# #}``: what the spelling
+    check reads, so a merge field and anything inside one is never checked. None when
+    the template does not lex; lint reports that as a syntax error.
+    """
+    env = _environment(date.min)
+    pieces: list[tuple[int, str]] = []
+    try:
+        for lineno, kind, value in env.lex(source):
+            if kind == "data":
+                pieces.append((lineno, value))
+    except (TemplateSyntaxError, ValueError, RecursionError):
+        return None
+    return pieces
 
 
 def fields_used(channel: TemplateChannel, subject: str | None, body: str) -> frozenset[str]:

@@ -110,6 +110,18 @@ export async function lintDraft(
   return data
 }
 
+/**
+ * Add words to your dictionary (#522), so the spelling check stops flagging them.
+ * Answers with every word you added.
+ */
+export async function addDictionaryWords(words: string[]): Promise<string[]> {
+  const { data, error, response } = await api.POST('/api/v1/templates/dictionary', {
+    body: { words },
+  })
+  if (data === undefined) fail(response.status, error, 'could not add the word')
+  return data
+}
+
 export async function createTemplate(draft: TemplateDraft): Promise<TemplateOut> {
   const { data, error, response } = await api.POST('/api/v1/templates', { body: draft })
   if (data === undefined) fail(response.status, error, 'could not save the template')

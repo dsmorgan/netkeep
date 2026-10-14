@@ -11,6 +11,12 @@
  * (during the debounce, and while the request is out), the findings are dimmed
  * and marked busy, and the editor says it is checking.
  *
+ * Spelling (#522): the subject and body use the browser's own spellcheck, in
+ * English, and lint adds a spelling warning for each word your dictionary and
+ * the English word list don't know. Each one offers **Add to dictionary**,
+ * which lints again. The name and the merge-field chips are not prose, so they
+ * have spellcheck off.
+ *
  * The merge-field helper inserts `{{ field }}` at the cursor of the subject or
  * the body, whichever was focused last (the body until you focus one), and
  * leaves the cursor after the insert.
@@ -20,7 +26,7 @@
  * back. A paste lints at once, skipping the typing debounce. A paste that
  * replaces text you had can be undone until the next edit or paste.
  */
-import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -33,7 +39,14 @@ import { Callout, ErrorNote } from '@/features/crm/controls'
 import { useDebounced } from '@/features/crm/use-debounced'
 import { cn } from '@/lib/utils'
 
-import { createTemplate, deleteTemplate, lintDraft, templateKeys, updateTemplate } from './api'
+import {
+  addDictionaryWords,
+  createTemplate,
+  deleteTemplate,
+  lintDraft,
+  templateKeys,
+  updateTemplate,
+} from './api'
 import type { ContactRow, TemplateChannel, TemplateDraft, TemplateOut } from './api'
 import { AiDraftHelper, type AppliedStep } from './ai-draft-helper'
 import { LINT_DEBOUNCE_MS, draftOf, sameDraft } from './draft'
@@ -124,6 +137,14 @@ export function TemplateEditor({
   const subjectIssues = issuesFor(issues, 'subject')
   const bodyIssues = issuesFor(issues, 'body')
   const shownStale = stale && lint.data !== undefined
+
+  // A word added to the dictionary changes every lint answer, so they are all asked again.
+  const queryClient = useQueryClient()
+  const addWord = useMutation({
+    mutationFn: (word: string) => addDictionaryWords([word]),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [...templateKeys.all, 'lint'] }),
+  })
+  const addingWord = addWord.isPending ? (addWord.variables ?? null) : null
 
   const save = useMutation({
     mutationFn: (value: TemplateDraft) =>
@@ -260,6 +281,7 @@ export function TemplateEditor({
               <Label htmlFor={ids.name}>Name</Label>
               <Input
                 id={ids.name}
+                spellCheck={false}
                 value={draft.name}
                 readOnly={locked}
                 required
@@ -299,6 +321,8 @@ export function TemplateEditor({
               value={draft.subject}
               readOnly={locked}
               disabled={noSubject}
+              spellCheck
+              lang="en"
               aria-invalid={partHasError('subject') || undefined}
               aria-describedby={
                 subjectIssues.length > 0 ? `${ids.subjectHint} ${ids.subjectLint}` : ids.subjectHint
@@ -310,7 +334,13 @@ export function TemplateEditor({
               {noSubject ? 'LinkedIn messages have no subject.' : 'Required for email.'}
             </p>
             <Findings stale={shownStale}>
-              <InlineLint id={ids.subjectLint} label="Subject lint" shown={subjectIssues} />
+              <InlineLint
+                id={ids.subjectLint}
+                label="Subject lint"
+                shown={subjectIssues}
+                onAddWord={(word) => addWord.mutate(word)}
+                addingWord={addingWord}
+              />
             </Findings>
           </div>
           <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1">
@@ -329,6 +359,7 @@ export function TemplateEditor({
                 readOnly={locked}
                 rows={12}
                 spellCheck
+                lang="en"
                 className="relative bg-transparent font-mono [scrollbar-gutter:stable] dark:bg-transparent"
                 aria-invalid={partHasError('body') || undefined}
                 aria-describedby={bodyIssues.length > 0 ? ids.bodyLint : undefined}
@@ -344,6 +375,8 @@ export function TemplateEditor({
                 shown={bodyIssues}
                 text={draft.body}
                 onGoToLine={goToLine}
+                onAddWord={(word) => addWord.mutate(word)}
+                addingWord={addingWord}
               />
             </Findings>
           </div>
@@ -385,6 +418,9 @@ export function TemplateEditor({
             </Findings>
           </section>
 
+          {addWord.isError && (
+            <ErrorNote label="Could not add the word to your dictionary" error={addWord.error} />
+          )}
           {save.isError && <ErrorNote label="Could not save the template" error={save.error} />}
           {remove.isError && !confirmDelete && (
             <ErrorNote label="Could not delete the template" error={remove.error} />
