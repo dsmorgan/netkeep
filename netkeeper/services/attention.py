@@ -62,7 +62,9 @@ AUTO_SEND_HELD: Final = "Auto-send is held until you resume it."
 REAUTH_REQUIRED: Final = "A mailbox needs you to sign in again."
 SESSION_FLAGGED: Final = "The LinkedIn session is flagged; clear it on the LinkedIn page."
 HEAT_TRIPPED: Final = "LinkedIn heat is high, so runs wait until it cools."
-BREAKER_TRIPPED: Final = "A breaker stopped scheduled runs; reset it on the Settings page."
+BREAKER_TRIPPED: Final = (
+    "A breaker is tripped, so scheduled runs can't start; reset it on the Settings page."
+)
 
 PAUSED: Final = "The LinkedIn schedule is paused."
 ARMED: Final = "Scheduled LinkedIn runs are armed."

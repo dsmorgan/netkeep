@@ -4,7 +4,8 @@ import { Menu } from 'lucide-react'
 import type { RefObject } from 'react'
 
 import { Button } from '@/components/ui/button'
-import { attentionQuery, needsYou } from '@/features/attention/api'
+import { ActivityIndicator } from '@/features/attention/activity-indicator'
+import { attentionQuery, menuLabel, needsYou } from '@/features/attention/api'
 import { PollStatusHeader } from '@/features/poll-status/poll-status-header'
 
 import { BackendHealth } from './backend-health'
@@ -32,17 +33,18 @@ export function TopBar({ menuButtonRef, navId, navOpen, onToggleNav }: TopBarPro
           variant="ghost"
           size="icon-sm"
           className="relative -ml-2 sm:hidden"
-          aria-label={marked ? 'Open navigation, something needs you' : 'Open navigation'}
+          aria-label={menuLabel(attention.data)}
           aria-expanded={navOpen}
           aria-controls={navId}
           onClick={onToggleNav}
         >
           <Menu aria-hidden="true" />
-          {marked && <AttentionDot className="absolute top-1 right-1 ring-background" />}
+          {marked && <AttentionDot className="absolute top-1 right-1 ring-2 ring-background" />}
         </Button>
         <h1 className="truncate font-medium">{sectionLabel(pathname)}</h1>
       </div>
       <div className="flex min-w-0 items-center gap-3">
+        <ActivityIndicator compact announce />
         <PollStatusHeader />
         <BackendHealth />
       </div>

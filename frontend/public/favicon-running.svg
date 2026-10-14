@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- favicon.svg while a LinkedIn run is in progress (#347): the same mark, with an amber dot. -->
+  <rect width="32" height="32" rx="7" fill="#00696a"/>
+  <path d="M10 9.5V23M10 15.5a6 6 0 0 1 12 0V23" fill="none" stroke="#f9fcff" stroke-width="3.2" stroke-linecap="round"/>
+  <circle cx="10" cy="23" r="3" fill="#f9fcff"/>
+  <circle cx="22" cy="23" r="3" fill="#f9fcff"/>
+  <circle cx="25" cy="7" r="6.5" fill="#f59e0b" stroke="#00696a" stroke-width="2"/>
+</svg>

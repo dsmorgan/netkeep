@@ -1632,6 +1632,18 @@ describe('when the page lists only part of a queue (#508)', () => {
     expect(await screen.findByText('Showing 50 of 73, oldest try first.')).toBeVisible()
   })
 
+  it('says nothing more for Try again when the list holds every item', async () => {
+    // A count a moment newer than the list (a retry since) never makes a short list look cut off.
+    renderSection({
+      'GET /api/v1/campaigns/linkedin/ready': () =>
+        jsonResponse(readyPage([], retries.slice(0, 3))),
+      'GET /api/v1/attention': () => jsonResponse(attentionWith(73)),
+    })
+
+    await screen.findByRole('list', { name: 'Try again' })
+    expect(screen.queryByText(/oldest try first/)).toBeNull()
+  })
+
   it('leaves the note off a campaign page, whose list is that campaign’s alone', async () => {
     const { calls } = renderSection(
       {

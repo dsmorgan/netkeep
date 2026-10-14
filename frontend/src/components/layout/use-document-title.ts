@@ -6,7 +6,8 @@ import { attentionQuery, documentTitle } from '@/features/attention/api'
 /**
  * Keeps the browser tab's title at `(N) netkeeper` while N items need you (#508): the
  * number badges added up, Triage left out (`title_total`). Plain `netkeeper` otherwise,
- * and while the count can't be read.
+ * and before the first answer. While the count can't be read, the tab keeps the last
+ * known number, as the badges do.
  */
 export function useDocumentTitle(): void {
   const attention = useQuery(attentionQuery)

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 import { useAttentionRefresh } from '@/features/attention/api'
+import { useFavicon } from '@/features/attention/use-favicon'
 import { ReauthBanner } from '@/features/mailboxes/reauth-banner'
 
 import { Sidebar } from './sidebar'
@@ -27,6 +28,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const navId = useId()
   useAttentionRefresh()
   useDocumentTitle()
+  useFavicon()
 
   // Focus can only go back to the menu button once it is no longer inert, which
   // is after the render that closes the drawer, so the request waits for it.

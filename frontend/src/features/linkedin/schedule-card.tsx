@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { ActivityIndicator } from '@/features/attention/activity-indicator'
 import { pollStatusKeys } from '@/features/poll-status/api'
 import { cn } from '@/lib/utils'
 
@@ -62,6 +63,7 @@ export function ScheduleCard() {
         <CardDescription>Syncs and enrichment that run on their own, when armed.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
+        <ActivityIndicator />
         {schedule.isPending && <p role="status">Loading…</p>}
         {schedule.isError && <p role="alert">{message(schedule.error)}</p>}
         {schedule.isSuccess && (

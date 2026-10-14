@@ -40,6 +40,7 @@ import { cn } from '@/lib/utils'
 
 import {
   LinkedInStepError,
+  QUEUE_PAGE,
   checkSent,
   discard,
   linkedinStepKeys,
@@ -270,7 +271,7 @@ export function LinkedInQueueCard({ campaignId, run }: { campaignId?: number; ru
                 />
               ))}
             </ul>
-            {retriesTotal > retries.length && (
+            {retries.length >= QUEUE_PAGE && retriesTotal > retries.length && (
               <p className="text-muted-foreground">
                 Showing {retries.length} of {retriesTotal}, oldest try first.
               </p>

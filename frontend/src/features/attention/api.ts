@@ -34,17 +34,57 @@ export const attentionQuery = queryOptions({
   queryKey: attentionKeys.all,
   queryFn: async ({ signal }): Promise<Attention> => {
     const { data, response } = await api.GET('/api/v1/attention', { signal })
-    // A body without its parts (an older backend, a proxy page) is no answer: the nav
-    // then shows no badges rather than failing to render.
+    // A body without its parts (an older backend, a proxy page) is no answer. Like any
+    // failed refetch, it leaves the last good answer showing; before the first one the
+    // nav has no badges.
     if (data === undefined || typeof data.counts !== 'object' || typeof data.flags !== 'object') {
       throw new Error(`GET /api/v1/attention returned ${response.status} without counts`)
     }
-    return data
+    return normalize(data)
   },
   refetchInterval: ATTENTION_EVERY_MS,
   refetchIntervalInBackground: true,
   retry: false,
 })
+
+const COUNT_KEYS = ['inbox', 'dashboard', 'waiting', 'try_again', 'triage', 'imports'] as const
+const FLAG_KEYS = ['dashboard', 'gmail', 'linkedin', 'settings'] as const
+const STATES = new Set<string>(['running', 'stopped', 'paused', 'armed', 'idle'])
+
+function count(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0
+}
+
+function flag(value: unknown): string | null {
+  return typeof value === 'string' && value !== '' ? value : null
+}
+
+/**
+ * The answer with every part made safe to show: a count that is not a finite number
+ * reads 0, a flag that is not a sentence reads as off, and an unknown activity state as
+ * idle. A partial response then shows no stray dots and no empty names.
+ */
+export function normalize(raw: Attention): Attention {
+  const counts = raw.counts as Record<string, unknown>
+  const flags = raw.flags as Record<string, unknown>
+  const activity = (raw.activity as Partial<Attention['activity']> | null | undefined) ?? {}
+  const state =
+    typeof activity.state === 'string' && STATES.has(activity.state) ? activity.state : 'idle'
+  return {
+    checked_at: raw.checked_at,
+    counts: Object.fromEntries(
+      COUNT_KEYS.map((key) => [key, count(counts[key])]),
+    ) as AttentionCounts,
+    flags: Object.fromEntries(FLAG_KEYS.map((key) => [key, flag(flags[key])])) as AttentionFlags,
+    activity: {
+      state,
+      label: typeof activity.label === 'string' ? activity.label : '',
+      run_id: typeof activity.run_id === 'number' ? activity.run_id : null,
+      run_kind: activity.run_kind ?? null,
+    },
+    title_total: count(raw.title_total),
+  }
+}
 
 /** The server events that can move a count, a flag or the activity state. */
 export const ATTENTION_EVENTS = [
@@ -85,6 +125,17 @@ export function badgeText(count: number): string {
 export function needsYou(attention: Attention | undefined): boolean {
   if (attention === undefined) return false
   return attention.title_total > 0 || Object.values(attention.flags).some((flag) => flag !== null)
+}
+
+/**
+ * The menu button's name at phone width, where the badges sit in the closed drawer:
+ * how many items need you when there is a number, or that something does for a dot.
+ */
+export function menuLabel(attention: Attention | undefined): string {
+  if (attention === undefined || !needsYou(attention)) return 'Open navigation'
+  const total = attention.title_total
+  if (total === 0) return 'Open navigation, something needs you'
+  return `Open navigation, ${total} ${total === 1 ? 'item needs' : 'items need'} you`
 }
 
 /** The tab title: `(N) netkeeper`, N being `title_total` (Triage stays out). */

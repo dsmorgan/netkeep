@@ -59,14 +59,14 @@ export function sectionLabel(pathname: string): string {
 /** How a count reads in its nav link's accessible name, with the exact number. */
 const COUNT_TEXT: Record<CountKey, (n: number) => string> = {
   inbox: (n) => `${n} unhandled`,
-  dashboard: (n) => `${n} waiting for you`,
+  dashboard: (n) => `${n} need you`,
   triage: (n) => `${n} to triage`,
   imports: (n) => `${n} ${n === 1 ? 'draft' : 'drafts'} to review`,
 }
 
 /**
- * What a nav link adds to its name, for example ", 3 unhandled" or ", A mailbox
- * needs you to sign in again." Empty when nothing shows. The badge itself is
+ * What a nav link adds to its name, for example ", 3 unhandled" or ". A mailbox
+ * needs you to sign in again." (the flag is its own sentence). Empty when nothing shows. The badge itself is
  * `aria-hidden`, so this is the only place a screen reader hears it, and it carries
  * the exact count even when the pill reads "99+".
  */
@@ -75,8 +75,6 @@ export function navStateText(
   count: number,
   flag: string | null,
 ): string {
-  const parts: string[] = []
-  if (countKey !== undefined && count > 0) parts.push(COUNT_TEXT[countKey](count))
-  if (flag !== null) parts.push(flag)
-  return parts.length === 0 ? '' : `, ${parts.join(', ')}`
+  const counted = countKey !== undefined && count > 0 ? `, ${COUNT_TEXT[countKey](count)}` : ''
+  return flag === null ? counted : `${counted}. ${flag}`
 }
