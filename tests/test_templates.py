@@ -25,6 +25,8 @@ from netkeeper.campaigns.templates import (
     UNSET,
     DuplicateTemplateName,
     InvalidTemplateValue,
+    NameSource,
+    NameUsed,
     TemplateInUse,
     TemplateNotFound,
     TemplateSuperseded,
@@ -35,13 +37,24 @@ from netkeeper.campaigns.templates import (
     get_template,
     is_superseded,
     list_templates,
+    name_source,
+    names_used,
     render_preview,
     update_template,
     versions,
 )
 from netkeeper.db import session_scope
-from netkeeper.models import Campaign, CampaignStatus, Template, TemplateChannel, User, UserKind
+from netkeeper.models import (
+    Campaign,
+    CampaignStatus,
+    CampaignStep,
+    Template,
+    TemplateChannel,
+    User,
+    UserKind,
+)
 from netkeeper.scoping import scoped
+from netkeeper.services import campaign_review
 
 EMAIL = TemplateChannel.EMAIL
 LINKEDIN = TemplateChannel.LINKEDIN
@@ -471,6 +484,7 @@ def test_contact_fields_map_the_contact_onto_the_spec_names(writer: Session, use
     assert list(fields) == list(CONTACT_FIELDS)
     assert fields == {
         "first_name": "Bob",
+        "preferred_name": "Bob",
         "last_name": "Fixture",
         "company": "Fixture Co",
         "title": "Engineer",
@@ -618,6 +632,83 @@ def test_first_name_falls_back_when_there_is_no_preferred_name(writer: Session, 
     assert contact_fields(contact, date(2026, 9, 26))["first_name"] == "Robert"
 
 
+@pytest.mark.parametrize(
+    ("first", "preferred", "name", "source"),
+    [
+        ("Robert", "Bob", "Bob", NameSource.PREFERRED_NAME),
+        ("Robert", "Robert", "Robert", NameSource.FIRST_NAME),
+        ("Robert", "", "Robert", NameSource.FIRST_NAME),  # starts as the first name
+        ("Robert", None, "Robert", NameSource.FIRST_NAME),
+        ("", "Bob", "Bob", NameSource.PREFERRED_NAME),
+        ("", "", "", None),
+    ],
+)
+def test_first_name_and_preferred_name_are_one_value(
+    writer: Session,
+    user: User,
+    first: str,
+    preferred: str | None,
+    name: str,
+    source: NameSource | None,
+) -> None:
+    """#509: preferred_name is added with first_name's fallback, and first_name keeps its
+    pre-#509 value, ``preferred_name or first_name``, so no saved template changes."""
+    contact = factories.make_contact(writer, user, first_name=first, preferred_name=preferred)
+    fields = contact_fields(contact, TODAY)
+    assert fields["first_name"] == fields["preferred_name"] == name
+    assert fields["first_name"] == (contact.preferred_name or contact.first_name)
+    assert name_source(contact) is source
+
+
+def test_a_cleared_preferred_name_falls_back_to_the_first_name(writer: Session, user: User) -> None:
+    contact = factories.make_contact(writer, user, first_name="Robert", preferred_name="Bob")
+    contact.preferred_name = ""
+    fields = contact_fields(contact, TODAY)
+    assert (fields["first_name"], fields["preferred_name"]) == ("Robert", "Robert")
+    assert name_source(contact) is NameSource.FIRST_NAME
+
+
+def test_a_template_renders_the_same_with_either_name_field(writer: Session, user: User) -> None:
+    """Swapping first_name for preferred_name changes nothing in the message."""
+    old = _create(writer, user, name="old", subject="Hi {{ first_name }}", body="{{ first_name }}!")
+    new = _create(
+        writer, user, name="new", subject="Hi {{ preferred_name }}", body="{{ preferred_name }}!"
+    )
+    for first, preferred in (("Robert", "Bob"), ("Robert", "")):
+        contact = factories.make_contact(writer, user, first_name=first, preferred_name=preferred)
+        a, b = render_preview(old, contact, today=TODAY), render_preview(new, contact, today=TODAY)
+        assert (a.subject, a.body, a.issues) == (b.subject, b.body, b.issues)
+        assert a.issues == ()
+
+
+def test_names_used_say_which_name_each_name_field_rendered(writer: Session, user: User) -> None:
+    both = _create(writer, user, name="both", body="{{ preferred_name }} {{ first_name }}")
+    one = _create(writer, user, name="one", subject="Hi {{ first_name }}", body="{{ company }}")
+    none = _create(writer, user, name="none", body="{{ company }}")
+    bob = factories.make_contact(writer, user, first_name="Robert", preferred_name="Bob")
+    robert = factories.make_contact(writer, user, first_name="Robert", preferred_name="")
+    nameless = factories.make_contact(writer, user, first_name="", preferred_name="")
+    assert names_used(both, bob) == [
+        NameUsed("first_name", "Bob", NameSource.PREFERRED_NAME),
+        NameUsed("preferred_name", "Bob", NameSource.PREFERRED_NAME),
+    ]
+    assert names_used(one, robert) == [NameUsed("first_name", "Robert", NameSource.FIRST_NAME)]
+    assert names_used(one, nameless) == [NameUsed("first_name", None, None)]
+    assert names_used(none, bob) == []
+
+
+def test_names_used_ignore_a_linkedin_subject(writer: Session, user: User) -> None:
+    """A LinkedIn message has no subject, so a name there is never rendered (#448)."""
+    row = _create(
+        writer,
+        user,
+        channel=TemplateChannel.LINKEDIN,
+        subject="{{ first_name }}",
+        body="{{ company }}",
+    )
+    assert names_used(row, factories.make_contact(writer, user, preferred_name="Bo")) == []
+
+
 def test_preview_renders_for_one_contact(writer: Session, user: User) -> None:
     row = _create(writer, user, subject="Hi {{ first_name }}", body="{{ company }} / Ada")
     contact = factories.make_contact(writer, user, preferred_name="Bo", current_company="Co")
@@ -699,3 +790,43 @@ def test_preview_uses_the_users_local_date(
         for e in service.field_examples(contact, timezone="America/Los_Angeles")
     }
     assert examples["last_position_change"] == "2026-09-01"
+
+
+def test_preferred_name_leaves_message_fingerprints_as_they_were(
+    writer: Session, user: User
+) -> None:
+    """#509 adds a merge field, but no approval given before it may come undone: the
+    message fingerprint hashes the same contact fields it did."""
+    contact = factories.make_contact(
+        writer, user, first_name="Robert", preferred_name="Bob", emails=["bob@example.com"]
+    )
+    campaign, step = Campaign(name="Example campaign"), CampaignStep(position=1)
+    today = date(2026, 9, 26)
+    fields = contact_fields(contact, today)
+    before_509 = {k: fields[k] for k in CONTACT_FIELDS if k != "preferred_name"}
+    expected = campaign_review._digest(
+        [
+            "step-print",
+            {
+                "contact": before_509,
+                "campaign_name": "Example campaign",
+                "step_number": 1,
+                "personal_line": None,
+            },
+            "bob@example.com",
+        ]
+    )
+    assert set(before_509) == {
+        "first_name",
+        "last_name",
+        "company",
+        "title",
+        "location",
+        "connected_year",
+        "years_since_connected",
+        "last_position_change",
+    }
+    got = campaign_review.message_fingerprint(
+        "step-print", contact, campaign, step, today, enrollment_id=1
+    )
+    assert got == expected

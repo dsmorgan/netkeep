@@ -50,8 +50,11 @@ An HTML body needs it on (spec 11.1), which netkeeper does not build yet.
 
 Merge fields (spec 11.1)
 ------------------------
-- Contact: :data:`CONTACT_FIELDS`. ``first_name`` resolves to the contact's
-  preferred name. A test send fills them from the self contact, your own details.
+- Contact: :data:`CONTACT_FIELDS`. ``first_name`` and ``preferred_name`` both
+  resolve to the contact's preferred name, falling back to the first name when
+  none is set (#509). ``first_name`` has always done this, so it keeps doing it:
+  no template saved before ``preferred_name`` existed renders differently. A test
+  send fills them from the self contact, your own details.
 - Campaign: ``campaign.name``, ``step.number``, ``previous_send_date``.
 - ``personal_line`` (spec 12), written per contact at preview time.
 
@@ -171,6 +174,7 @@ from netkeeper.models.campaigns import TemplateChannel
 
 CONTACT_FIELDS: Final = (
     "first_name",
+    "preferred_name",
     "last_name",
     "company",
     "title",
@@ -232,7 +236,11 @@ class MergeField:
 
 
 _FIELD_DESCRIPTIONS: Final[Mapping[str, str]] = {
-    "first_name": "The contact's first name, or their preferred name when they have one.",
+    "first_name": (
+        "The contact's preferred name, or their first name when none is set. "
+        "The same value as preferred_name."
+    ),
+    "preferred_name": "The contact's preferred name, or their first name when none is set.",
     "last_name": "The contact's last name.",
     "company": "The contact's current company.",
     "title": "The contact's current job title.",
@@ -248,6 +256,7 @@ _FIELD_DESCRIPTIONS: Final[Mapping[str, str]] = {
 
 PLACEHOLDER_EXAMPLES: Final[Mapping[str, str]] = {
     "first_name": "Alex",
+    "preferred_name": "Alex",
     "last_name": "Example",
     "company": "Example Co",
     "title": "Product Manager",

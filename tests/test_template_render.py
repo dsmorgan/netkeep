@@ -875,6 +875,7 @@ def test_merge_fields_list_every_field_spec_11_1_names() -> None:
     fields = merge_fields()
     assert [(f.name, f.group, f.insert) for f in fields] == [
         ("first_name", FieldGroup.CONTACT, "first_name"),
+        ("preferred_name", FieldGroup.CONTACT, "preferred_name"),
         ("last_name", FieldGroup.CONTACT, "last_name"),
         ("company", FieldGroup.CONTACT, "company"),
         ("title", FieldGroup.CONTACT, "title"),
@@ -890,6 +891,34 @@ def test_merge_fields_list_every_field_spec_11_1_names() -> None:
     assert all(f.description.strip() for f in fields)
     assert not any(f.name.startswith("me") for f in fields)  # #320, #342
     assert [g.value for g in FieldGroup] == ["contact", "personal", "campaign"]
+
+
+def test_the_name_fields_describe_their_fallback() -> None:
+    """#509: each name field says it is the preferred name, or the first name without one."""
+    described = {f.name: f.description for f in merge_fields()}
+    fallback = "The contact's preferred name, or their first name when none is set."
+    assert described["preferred_name"] == fallback
+    assert described["first_name"].startswith(fallback)
+    assert "preferred_name" in described["first_name"]
+
+
+@pytest.mark.parametrize("channel", list(TemplateChannel))
+def test_preferred_name_lints_like_first_name(channel: TemplateChannel) -> None:
+    """#509: no new warning, and it counts as the per-contact field a body must name."""
+    subject = None if channel is TemplateChannel.LINKEDIN else "Hi {{ preferred_name }}"
+    assert lint(channel, subject, "Hi {{ preferred_name }}, long time.") == []
+    assert lint(channel, subject, "Hi {{ first_name }}, long time.") == []
+
+
+def test_preferred_name_renders_with_no_warning_when_the_contact_has_a_name() -> None:
+    rendered = render(
+        LINKEDIN,
+        None,
+        "Hi {{ preferred_name }} / {{ first_name }}",
+        _values(first_name="Bo", preferred_name="Bo"),
+        today=TODAY,
+    )
+    assert (rendered.body, rendered.issues) == ("Hi Bo / Bo", ())
 
 
 def test_every_listed_field_lints_clean_so_the_list_and_lint_agree() -> None:

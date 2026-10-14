@@ -26,6 +26,7 @@ from netkeeper.web.schemas import (
     LintIssueOut,
     MergeFieldOut,
     MergeFieldsOut,
+    NameUsedOut,
     TemplateCreate,
     TemplateLintIn,
     TemplateOut,
@@ -288,8 +289,10 @@ def preview_template(
         if contact is None:
             raise HTTPException(status_code=404, detail=f"no contact {contact_id}")
         rendered = service.render_preview(row, contact, timezone=user.timezone)
+        names = service.names_used(row, contact)
     return TemplatePreviewOut(
         subject=rendered.subject,
         body=rendered.body,
         issues=[_issue_out(issue) for issue in rendered.issues],
+        names_used=[NameUsedOut(field=n.field, value=n.value, source=n.source) for n in names],
     )

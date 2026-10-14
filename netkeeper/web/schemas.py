@@ -15,7 +15,7 @@ from pydantic import (
 )
 
 from netkeeper.campaigns.render import FieldGroup, LintRule, Part, Severity
-from netkeeper.campaigns.templates import TEMPLATE_BODY_MAX_LENGTH, ExampleSource
+from netkeeper.campaigns.templates import TEMPLATE_BODY_MAX_LENGTH, ExampleSource, NameSource
 from netkeeper.crm.confirmation import InvalidReason
 from netkeeper.crm.filters import FilterTree, SortKey
 from netkeeper.crm.importer import ImportField
@@ -2384,6 +2384,16 @@ class TemplatePatch(BaseModel):
     body: TemplateBody | None = None
 
 
+class NameUsedOut(BaseModel):
+    """A name field in a preview: its rendered ``value``, and ``source``, whether that is
+    the contact's preferred name or their first name. Both are ``None`` when the contact
+    has neither name, so the field rendered empty."""
+
+    field: str
+    value: str | None
+    source: NameSource | None
+
+
 class TemplatePreviewOut(BaseModel):
     """A template rendered for one contact, and every issue: lint's errors, then warnings for
     fields with no value and links that came out broken."""
@@ -2391,6 +2401,9 @@ class TemplatePreviewOut(BaseModel):
     subject: str | None
     body: str
     issues: list[LintIssueOut]
+    names_used: list[NameUsedOut]
+    """Each name field the template names (``first_name``, ``preferred_name``), with the
+    value it rendered and which of the contact's names that is (#509)."""
 
 
 # --- mailboxes (P3-01) ------------------------------------------------------------

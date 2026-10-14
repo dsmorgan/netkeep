@@ -9617,6 +9617,52 @@
         "title": "MovedOut",
         "type": "object"
       },
+      "NameSource": {
+        "description": "Which of the contact's names a name field rendered.",
+        "enum": [
+          "preferred_name",
+          "first_name"
+        ],
+        "title": "NameSource",
+        "type": "string"
+      },
+      "NameUsedOut": {
+        "description": "A name field in a preview: its rendered ``value``, and ``source``, whether that is\nthe contact's preferred name or their first name. Both are ``None`` when the contact\nhas neither name, so the field rendered empty.",
+        "properties": {
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NameSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "field",
+          "value",
+          "source"
+        ],
+        "title": "NameUsedOut",
+        "type": "object"
+      },
       "Neq": {
         "additionalProperties": false,
         "properties": {
@@ -13604,6 +13650,13 @@
             "title": "Issues",
             "type": "array"
           },
+          "names_used": {
+            "items": {
+              "$ref": "#/components/schemas/NameUsedOut"
+            },
+            "title": "Names Used",
+            "type": "array"
+          },
           "subject": {
             "anyOf": [
               {
@@ -13619,7 +13672,8 @@
         "required": [
           "subject",
           "body",
-          "issues"
+          "issues",
+          "names_used"
         ],
         "title": "TemplatePreviewOut",
         "type": "object"
