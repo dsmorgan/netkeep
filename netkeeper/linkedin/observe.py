@@ -586,6 +586,12 @@ class Observation:
             f" unreadable_with_streamed_copy={streamed}"
         )
 
+    @property
+    def closed(self) -> bool:
+        """Whether :meth:`close` ran: :meth:`next` then answers ``None`` at once once
+        nothing it already received is left (#514 review)."""
+        return self._closed
+
     async def next(self, timeout_s: float) -> ObservedResponse | None:
         """The next response in arrival order, or ``None`` if none arrives within ``timeout_s``.
 
