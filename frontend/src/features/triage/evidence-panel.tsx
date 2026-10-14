@@ -23,6 +23,8 @@ import { formatDay, formatMinute, plural } from './format'
 import { toPlainText, truncate } from './plain-text'
 import type { Interaction, TimelineEntry, TriageCard } from './api'
 
+type WorkedTogether = TriageCard['evidence']['worked_together'][number]
+
 const INBOUND_KINDS = new Set(['li_in', 'email_in', 'call_in', 'meeting_in', 'other_in'])
 
 const KIND_LABELS: Record<string, string> = {
@@ -37,6 +39,19 @@ const KIND_LABELS: Record<string, string> = {
   call_in: 'Call from them',
   meeting_in: 'Met in person',
   other_in: 'Response',
+}
+
+/**
+ * "2019 to 2021", "since 2021" for a window that is still open, or just "2021".
+ * Only a confirmed overlap carries dates; an unconfirmed one has none, and the
+ * panel must not show years beside it (the API sends both as `null`).
+ */
+function overlapYears(overlap: WorkedTogether): string | null {
+  if (!overlap.confirmed || overlap.started_on === null) return null
+  const start = overlap.started_on.slice(0, 4)
+  if (overlap.ended_on === null) return `since ${start}`
+  const end = overlap.ended_on.slice(0, 4)
+  return start === end ? start : `${start} to ${end}`
 }
 
 function kindLabel(kind: string): string {
@@ -77,6 +92,36 @@ export function EvidencePanel({ card }: { card: TriageCard }) {
               ))}
             </ul>
           </>
+        )}
+      </div>
+
+      <Separator />
+
+      <div>
+        <h3 className="font-medium">Employers you share</h3>
+        <p className="text-xs text-muted-foreground">
+          From your own job history, not your address book.
+        </p>
+        {evidence.worked_together.length === 0 ? (
+          <p className="mt-1 text-muted-foreground">
+            You and this person have no employer in common.
+          </p>
+        ) : (
+          <ul className="mt-1 flex flex-col gap-1">
+            {evidence.worked_together.map((overlap) => {
+              const years = overlapYears(overlap)
+              return (
+                <li key={overlap.company} className="min-w-0 break-words">
+                  You both worked at <span className="font-medium">{overlap.company}</span>
+                  {years === null ? (
+                    <span className="text-muted-foreground">; dates unconfirmed</span>
+                  ) : (
+                    <span className="text-muted-foreground"> ({years})</span>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
         )}
       </div>
 
