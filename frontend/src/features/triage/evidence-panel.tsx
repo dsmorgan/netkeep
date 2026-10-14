@@ -42,16 +42,18 @@ const KIND_LABELS: Record<string, string> = {
 }
 
 /**
- * "2019 to 2021", "since 2021" for a window that is still open, or just "2021".
+ * "2019 to 2021", "from 2021" when no end is known, "until 2021" when no start is known, or just "2021".
  * Only a confirmed overlap carries dates; an unconfirmed one has none, and the
  * panel must not show years beside it (the API sends both as `null`).
  */
 function overlapYears(overlap: WorkedTogether): string | null {
-  if (!overlap.confirmed || overlap.started_on === null) return null
-  const start = overlap.started_on.slice(0, 4)
-  if (overlap.ended_on === null) return `since ${start}`
-  const end = overlap.ended_on.slice(0, 4)
-  return start === end ? start : `${start} to ${end}`
+  if (!overlap.confirmed) return null
+  const start = overlap.started_on?.slice(0, 4) ?? null
+  const end = overlap.ended_on?.slice(0, 4) ?? null
+  if (start !== null && end !== null) return start === end ? start : `${start} to ${end}`
+  if (start !== null) return `from ${start}`
+  if (end !== null) return `until ${end}`
+  return null
 }
 
 function kindLabel(kind: string): string {
@@ -104,7 +106,9 @@ export function EvidencePanel({ card }: { card: TriageCard }) {
         </p>
         {evidence.worked_together.length === 0 ? (
           <p className="mt-1 text-muted-foreground">
-            You and this person have no employer in common.
+            No shared employer found. netkeeper compares your job history with this person&apos;s
+            current company and any past positions on file, so an earlier employer you shared may
+            not show here.
           </p>
         ) : (
           <ul className="mt-1 flex flex-col gap-1">

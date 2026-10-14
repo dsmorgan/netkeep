@@ -23,7 +23,9 @@ async function section(workedTogether: WorkedTogether[]) {
 describe('worked together on the card', () => {
   it('says so when no employer matches', async () => {
     const block = await section([])
-    expect(block).toHaveTextContent('have no employer in common')
+    expect(block).toHaveTextContent('No shared employer found.')
+    expect(block).toHaveTextContent('an earlier employer you shared may not show here')
+    expect(block).not.toHaveTextContent(/no employer in common/i)
     expect(block).not.toHaveTextContent('You both worked at')
   })
 
@@ -39,7 +41,7 @@ describe('worked together on the card', () => {
     expect(block).toHaveTextContent('You both worked at Harbor Light Co (2019 to 2021)')
   })
 
-  it('shows a single year, and an open window as "since"', async () => {
+  it('shows a single year, and an open window as "from"', async () => {
     const block = await section([
       {
         company: 'Harbor Light Co',
@@ -50,7 +52,28 @@ describe('worked together on the card', () => {
       { company: 'Quill Works', started_on: '2022-02-01', ended_on: null, confirmed: true },
     ])
     expect(block).toHaveTextContent('You both worked at Harbor Light Co (2020)')
-    expect(block).toHaveTextContent('You both worked at Quill Works (since 2022)')
+    expect(block).toHaveTextContent('You both worked at Quill Works (from 2022)')
+  })
+
+  it('shows "until" when only the end is known', async () => {
+    const block = await section([
+      { company: 'Harbor Light Co', started_on: null, ended_on: '2021-06-30', confirmed: true },
+    ])
+    expect(block).toHaveTextContent('You both worked at Harbor Light Co (until 2021)')
+    expect(block).not.toHaveTextContent('dates unconfirmed')
+  })
+
+  it('ignores dates on an unconfirmed match', async () => {
+    const block = await section([
+      {
+        company: 'Harbor Light Co',
+        started_on: '2019-03-01',
+        ended_on: '2021-06-30',
+        confirmed: false,
+      },
+    ])
+    expect(block).toHaveTextContent('Harbor Light Co; dates unconfirmed')
+    expect(block).not.toHaveTextContent(/\d{4}/)
   })
 
   it('says the dates are unconfirmed, and shows no years, when they are', async () => {
