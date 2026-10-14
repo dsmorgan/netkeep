@@ -81,6 +81,7 @@ PRIMARY_INBOX: Final = "PRIMARY_INBOX"
 SECONDARY_INBOX: Final = "SECONDARY_INBOX"
 INMAIL: Final = "INMAIL"
 ARCHIVE: Final = "ARCHIVE"
+SPAM: Final = "SPAM"
 
 #: The labels ``conversationTypeText.text`` showed (LinkedIn's own words, not data).
 SPONSORED_LABEL: Final = "Sponsored"
@@ -1062,6 +1063,27 @@ SPONSORED_IN_INBOX: Final = Conv(
     type_label=SPONSORED_LABEL,
     creator=SAFFRON,
 )
+#: A pending InMail filed as spam (``INMAIL`` and ``SPAM``, ``state`` ``PENDING``, the
+#: ``InMail`` label, ``hostUrnData``), as the CP8c analysis (#519) read the category enum.
+#: **Invented**: the capture's list had no such item. Rule 4 skips it, so it is never
+#: attributed to a contact.
+INMAIL_SPAM: Final = Conv(
+    30,
+    (QUILLON,),
+    Msg(
+        30,
+        1,
+        QUILLON,
+        "Invented unwanted pitch about a pretend fund.",
+        _at(6),
+        subject="Invented spam subject",
+        render_content=(host_urn_render_content("SALES_INMAIL", QUILLON),),
+    ),
+    categories=(INMAIL, SPAM),
+    state="PENDING",
+    type_label=INMAIL_LABEL,
+    creator=QUILLON,
+)
 #: **Invented:** a group. The capture had none; ``groupChat`` true, three or more participants.
 GROUP: Final = Conv(
     16,
@@ -1089,6 +1111,7 @@ INBOX_OLDER_PAGE: Final = (
     INMAIL_ACCEPTED_VERIFIED,
     INMAIL_ACCEPTED_LABELLED,
     SPONSORED_IN_INBOX,
+    INMAIL_SPAM,
     GROUP,
     NO_MESSAGES,
 )
@@ -1114,6 +1137,7 @@ SKIPPED_OTHER: Final = (
     INMAIL_DECLINED,
     PREMIUM_INMAIL,
     SPONSORED_IN_INBOX,
+    INMAIL_SPAM,
 )
 #: Counted as ``skipped_group``.
 SKIPPED_GROUP: Final = (GROUP,)
@@ -1211,8 +1235,8 @@ def existing_bubble_html(recipient: Member, msgs: Sequence[Msg] = (), *, draft: 
     ``role="dialog"`` named "Messaging"; the header's ``h2`` holds a link to
     ``/in/<profile id>/`` (the id, not the slug) with the name; each message is a
     ``data-event-urn`` item; the composer and Send sit in ``form#msg-form-<n>``. Send
-    is enabled whether or not the composer is empty (captured with text in it; empty
-    is **assumed**).
+    has a plain ``disabled`` attribute while the composer is empty and is enabled once it
+    holds text (#519, from the CP8c captures).
     """
     items = "".join(
         '<li><div data-event-urn="{urn}" data-view-name="message-list-item">'
@@ -1236,7 +1260,7 @@ def existing_bubble_html(recipient: Member, msgs: Sequence[Msg] = (), *, draft: 
         "</header>"
         f"<ul>{items}</ul>"
         '<form id="msg-form-ember-invented-2">'
-        f"{_composer(draft)}{_send_footer(disabled=False)}</form>"
+        f"{_composer(draft)}{_send_footer(disabled=not draft)}</form>"
         "</div>"
     )
 

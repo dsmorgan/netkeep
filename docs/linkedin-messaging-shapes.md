@@ -97,7 +97,7 @@ Each list item is a `com.linkedin.messenger.Conversation` with these keys: `enti
 
 The list is ordered by `lastActivityAt`, newest first, in every captured answer.
 
-**How kinds are marked.** Every captured list item had `groupChat: false` and exactly two participants. Four category sets appeared:
+**How kinds are marked.** Every captured list item had `groupChat: false` and exactly two participants. Four category sets appeared in the capture, and the CP8c analysis (#484) added a fifth:
 
 | `categories` | What else marks them | Fixture |
 |---|---|---|
@@ -105,6 +105,7 @@ The list is ordered by `lastActivityAt`, newest first, in every captured answer.
 | `INBOX`, `PRIMARY_INBOX`, `INMAIL` | Conversations that began as InMail. `state` `PENDING`, `ACCEPTED` or `DECLINED`; often a `subject`. Pending ones carried the `InMail` label and a `hostUrnData` render item (`type` `SALES_INMAIL` or `PREMIUM_INMAIL`); accepted ones had no label and no `hostUrnData`, and some carried a `conversationVerificationLabel`; sponsored ones also appear here (`state` `null`, the `Sponsored` label, a `messageAdRenderContent` item) | `INMAIL_ACCEPTED`, `INMAIL_ACCEPTED_VERIFIED`, `INMAIL_PENDING`, `INMAIL_DECLINED`, `PREMIUM_INMAIL`, `SPONSORED_IN_INBOX`; invented: `INMAIL_ACCEPTED_LABELLED` |
 | `INBOX`, `SECONDARY_INBOX`, `INMAIL` | Pending requests, with `hostUrnData` and no label | `SECONDARY_PENDING` |
 | `ARCHIVE`, `INMAIL` | Sponsored messages and `LinkedIn Offer` items | `SPONSORED`, `SPONSORED_MESSAGE`, `OFFER` |
+| `INMAIL`, `SPAM` | A pending InMail filed as spam: `state` `PENDING`, the `InMail` label and a `hostUrnData` render item. The CP8c analysis (#484, #519) read this set, so the capture's list didn't include it and the fixture is invented. Rule 4 skips it, so netkeeper counts it as `skipped_other` and never attributes it to a contact | invented: `INMAIL_SPAM` |
 
 - **Sponsored and offers.** `conversationTypeText.text` is `Sponsored` or `LinkedIn Offer` (`InMail` on pending InMail); these are LinkedIn's own labels. A sponsored item also carries a `messageAdRenderContent` render item (`status`, `sponsoredCampaignUrn`, `subContent`, and tracking keys), or a `conversationAdsMessageContent` render item with `contentMetadata.conversationAdContent`. Some had an **organization** participant: `participantType.organization` (`com.linkedin.messenger.OrganizationParticipantInfo`), `hostIdentityUrn` `urn:li:fsd_company:<n>`, `participantType.member: null`.
 - **InMail.** `INMAIL` in `categories`. It stays after the person accepts, so an accepted InMail with a contact sits in `PRIMARY_INBOX` beside ordinary conversations.
@@ -162,6 +163,8 @@ The two cases differ:
 | View context `variables` | `recipients`, `type:REPLY`, `contextEntityUrn:<msg_conversation urn>` | `recipients`, `type:CONNECTION_MESSAGE` |
 | Then | `messengerMessagesBySyncToken` for that conversation (with seen receipts and quick replies) | `messengerConversations` with `mailboxUrn` and `recipients:List(<fsd_profile urn>)`, answered `messengerConversationsByRecipients` with no elements |
 
+The `messengerMailboxCounts` answer lists the category enum: `SECONDARY_INBOX`, `MESSAGE_REQUEST_PENDING`, `ARCHIVE`, `INBOX`, `SPAM` and `PRIMARY_INBOX`.
+
 `paidInMail` was `false` in both. The `existingConversationUrn` thread id, the view context's `contextEntityUrn` thread id, and the following `messengerMessages` request's thread id were the same.
 
 ## The existing-conversation bubble
@@ -171,10 +174,14 @@ From `composer.html`:
 - The bubble's root is a `div` with `role="dialog"`, `aria-label="Messaging"`, `tabindex="-1"`, `data-view-name="message-overlay-conversation-bubble-item"`, and `data-msg-overlay-conversation-bubble-is-minimized="false"`.
 - The `header` holds an `h2` whose only link is the recipient: `href="/in/<profile id>/"`, by **profile id, not vanity slug**, with the name as its text. Header buttons are named `Open the options list in your conversation with <name>`, `Minimize your conversation with <name>`, and `Close your conversation with <name>`.
 - The live bubble after the first scheduled auto-send's Send (#479) did not have exactly one button named `Close your conversation with <the header link's name>`. The maintainer's `message-check --bubble` report of 2026-10-10 (#495, #497) shows why. The bubble has one `Messaging` dialog, holding the composer, with one header link to the contact's profile; its name comes from its text, with no `aria-label` and no `aria-hidden` parts. It has one button whose name starts with `Close your conversation with `; that button is visible, has no hidden text in its name, and is the only one on the page. Its name past the prefix is 20 characters longer than the header link's name and contains it, but doesn't start with it: **the close label holds more than the header name, with extra text before the name** (and possibly after it). So the lookup by the exact name finds 0. Since #499, auto-send matches that button by its prefix and the header name it contains, as a whole ([the close rule](linkedin-browser-inputs.md#after-a-landed-send-proof-then-closing-the-bubble-and-the-tab-d1-d3)).
+- **The header controls, as the CP8c captures showed them (#519).** The close and options buttons name both participants, as `<OWNER> and <NAME>`, in either order. The minimize button uses short names. The extra text in those names is the owner's own name, which accounts for the close label's extra length described above.
+- **The header link** is relative, `/in/<profile id>/`, with no hidden text, svg or badge inside the `h2`. The presence, Premium and Verified badges are svg elements with an `aria-label` and no `<title>`, and they sit outside the `h2`.
+- **Links inside the thread** are absolute and have no trailing slash.
+- **Per-message button names** carry the message text, as `Options for the message from <NAME>: <MESSAGE>`. Never log them.
 - The messages are `li` items holding `div[data-event-urn="<msg_message urn>"][data-view-name="message-list-item"]`. A multi-line message renders as one `p` with `br` between lines. Other profile links in the bubble are absolute, `https://www.linkedin.com/in/<profile id>`.
 - The composer sits in `form#msg-form-<ember id>`: one `div[contenteditable="true"][role="textbox"][aria-multiline="true"]` with `aria-label="Write a message…"` (U+2026), followed by an `aria-hidden` placeholder `div` with the same text.
 - **Send** is that form's only `button[type="submit"]`, text `Send`. Beside it, a `button` with `data-test-msg-ui-send-mode-toggle-presenter__button`, text `Open send options`, holds the "Press Enter to Send" setting. Attach-image, attach-file, GIF and emoji buttons sit in the same footer.
-- The captured composer held a draft, and Send was enabled. Whether Send is disabled in an empty existing-conversation composer was not captured.
+- **Send** has a plain `disabled` attribute while the composer is empty, and the page enables it once the composer holds text. Past 8,000 characters, the page shows a red indicator and disables Send. It doesn't truncate the text and shows no counter. netkeeper's lint refuses bodies over 8,000 characters, and its typing time limit keeps a body near 1,100 characters, so neither limit reaches the page's own.
 
 ## The never-messaged bubble
 
@@ -190,7 +197,7 @@ The prefill must check that there is exactly one chip, that its `Remove <name>` 
 
 ## Where focus lands
 
-Neither bubble's HTML has `autofocus`, and the `role="textbox"` element has no `tabindex`. A saved HTML file can't record `document.activeElement`, and a HAR can't either. **Where focus lands after the Message click is not known**; P4-03 must focus the composer itself, by role and name, and check it.
+Neither bubble's HTML has `autofocus`, and the `role="textbox"` element has no `tabindex`. A saved HTML file can't record `document.activeElement`. The CP8c captures showed that focus stays on the **Message** button after the click. The prefill therefore focuses the composer itself, by role and name, and checks it (`_focus_seam`).
 
 ## Typing
 
@@ -244,23 +251,34 @@ The maintainer ran the step 9 table in both the bubble and `/messaging/`, with t
 
 ## The bubble across pages
 
-The maintainer's notes for step 12: a minimized bubble stays open as you move to another page, still minimized, and its draft survives. **Closing the bubble deletes the draft.** Several open bubbles can crowd the screen; P4-03 decides how many it leaves open.
+The maintainer's notes for step 12: a minimized bubble stays open as you move to another page, still minimized, and its draft survives. **Closing the bubble deletes the draft.** A bubble left open in one tab also reappears in another tab of the same Chrome profile. Several open bubbles can crowd the screen; P4-03 decides how many it leaves open.
 
 ## `/realtime/`
 
-The inbox page opens `GET /realtime/connect` (`text/event-stream`), subscribes with `PUT /realtime/realtimeFrontendSubscriptions` (the captured subscription named `presenceStatusTopic`), reads `GET /realtime/realtimeFrontendTimestamp`, and posts `realtimeFrontendClientConnectivityTracking?action=sendHeartbeat`. The HAR holds no body for the event stream, so no event's shape is known. The poll reads by sync token and doesn't depend on it.
+The inbox page opens `GET /realtime/connect`, subscribes with `PUT /realtime/realtimeFrontendSubscriptions` (the captured subscription named `presenceStatusTopic`), reads `GET /realtime/realtimeFrontendTimestamp`, and posts `realtimeFrontendClientConnectivityTracking?action=sendHeartbeat`. The HAR holds no body for the event stream, so no event body is known.
+
+The CP8c analysis (#484, #519) added these facts:
+
+- `/realtime/connect` is a streamed `fetch` with `text/event-stream`, not an `EventSource`.
+- The page acknowledges a live reply with `deliveryMechanism: REALTIME`. At thread open, the acknowledgement says `SYNC`.
+- After a reply, the page refetches neither the list nor the thread. The list reorders from the event alone.
+- The inbox poll reads by sync token and doesn't need `/realtime/`.
 
 ## What the capture couldn't show
 
-- **A reply arriving live** (step 11), and any `/realtime/` event: how a new message reaches an open page, and whether the list reorders.
+### Still to capture
+
+The CP8c captures (#484) settled the live reply's delivery, focus after the click, and Send in an empty composer. These remain: the realtime event body, a group conversation, and the filtered list request (CP8d).
+
+### Not shown by the 2026-10-05 capture
+
+- **The realtime event body**, which the CP8c analysis (#484) didn't record, a **group conversation**, and the **filtered list request** (CP8d).
 - **Whether a half-typed draft appears on the phone.**
 - **The longest message LinkedIn accepts.** P4-11 keeps its 8,000-character assumption.
 - **A live group conversation, or a system message.** Their fixtures are invented from key names. (Sponsored and InMail conversations *were* in the capture.)
 - **The end of the conversation list:** whether the last `ByCategoryQuery` answer has `nextCursor: null`, an empty `elements`, or both.
 - **A non-empty `ByAnchorTimestamp` answer**, and its order.
-- **Where focus lands after the Message click.**
 - **Which of the profile's three Message controls is visible**, and whether the never-messaged bubble's root is `role="dialog"`.
-- **Whether Send is disabled in an empty existing-conversation composer.**
 - **Whether the other person sees "typing…"** (the notes suggest so; the capture can't show it).
 
 ## What P4 reads, and what it assumes
@@ -294,7 +312,7 @@ The inbox page opens `GET /realtime/connect` (`text/event-stream`), subscribes w
 | The existing bubble | One `role="dialog"` named `Messaging`, whose header `h2` link is `/in/<contact's profile id>/` | Captured | Another id, or two dialogs: no key |
 | The new bubble | `New message`; exactly one chip, `Remove <name>`; every `/in/` link in the scope is the contact's, by slug or member id, and at least one is there (#481) | Captured (root role unknown) | Zero or two chips: no key |
 | The composer | Exactly one `role="textbox"` named `Write a message…` in that bubble, empty | Captured | None, two, or not empty: no key |
-| Focus | Focus the composer by role and name before typing | **Assumed**: where focus lands is unknown | |
+| Focus | Focus the composer by role and name before typing | Captured (CP8c, #519): focus stays on the Message button after the click | |
 | Newlines | Shift+Enter | Captured: never sends | |
 | Send | `button[type="submit"]` named `Send`: the prefill never clicks it; auto-send ([ADR 0008](adr/0008-auto-send.md)) clicks it once, behind its gates, and then the existing bubble's one close button, whose name starts with `Close your conversation with ` and holds the header link's name (#499) | Captured | Not exactly one, not in the composer's form, hidden or disabled: no click |
 | Typing indicator | The page's own `action=typing` posts, about every 5 s | Captured | Not netkeeper's to stop |
