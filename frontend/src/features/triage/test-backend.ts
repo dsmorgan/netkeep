@@ -37,6 +37,16 @@ export interface FakeContact extends TriageContact {
   invitations: number
   /** The body the newest message carries, verbatim, however unpleasant. */
   messageBody: string | null
+  /** The user's own career overlap with this contact (`evidence.worked_together`). */
+  workedTogether: WorkedTogether[]
+}
+
+/** One `evidence.worked_together` entry, as `OverlapOut` serializes it. */
+export interface WorkedTogether {
+  company: string
+  started_on: string | null
+  ended_on: string | null
+  confirmed: boolean
 }
 
 interface FakeDecision {
@@ -228,6 +238,7 @@ export function makeContact(index: number, options: { messages?: number } = {}):
     updated_at: '2026-01-02T03:04:05Z',
     messages,
     invitations: 0,
+    workedTogether: [],
     messageBody: messages > 0 ? 'Good to meet you at the Example Corp meetup.' : null,
     archived_at: null,
     merged_into_id: null,
@@ -471,6 +482,7 @@ export function createFakeBackend(options: FakeBackendOptions = {}): FakeBackend
           { company: contact.current_company ?? 'Example Corp', contact_count: 2, met_count: 1 },
           { company: 'Nobody Else Here Ltd', contact_count: 0, met_count: 0 },
         ],
+        worked_together: contact.workedTogether,
       },
     }
   }
