@@ -937,8 +937,9 @@ class _Reconcile:
         # The oldest draft still waiting, then the drafts this poll saw sent, then those
         # seen sent before (#510). Each keeps the Message-ID netkeeper made it with.
         wanted: dict[int, str] = {}
-        if drafts:
-            oldest = min(drafts, key=lambda t: t.message_id)
+        waiting = [t for t in drafts if t.status is MessageStatus.DRAFTED]
+        if waiting:
+            oldest = min(waiting, key=lambda t: t.message_id)
             wanted[oldest.message_id] = oldest.rfc822_message_id
         for tracked in sorted(seen_sent, key=lambda t: t.message_id):
             wanted.setdefault(tracked.message_id, tracked.rfc822_message_id)
@@ -1108,24 +1109,30 @@ class _Reconcile:
             self.not_seen_sent(gmail, tracked, by_message, purpose)
             return False
         settings, at = self.settings, engine.seen_sent_at(tracked, sent.internal_date)
-        self.write(
-            lambda s, u: _settled_sent(
-                s,
-                u,
-                engine.settle_sent(
-                    s,
-                    u,
+
+        def settle(session: Session, user: User) -> bool:
+            if tracked.status is MessageStatus.DISCARDED:  # by a merge, sent anyway (#544)
+                return engine.settle_discarded_sent(
+                    session,
+                    user,
                     settings,
                     tracked.message_id,
-                    expect=(MessageStatus.DRAFTED,),
                     at=at,
                     gmail_message_id=sent.id,
                     gmail_thread_id=sent.thread_id,
-                ),
-                tracked,
-                now=self.now,
+                )
+            return engine.settle_sent(
+                session,
+                user,
+                settings,
+                tracked.message_id,
+                expect=(MessageStatus.DRAFTED,),
+                at=at,
+                gmail_message_id=sent.id,
+                gmail_thread_id=sent.thread_id,
             )
-        )
+
+        self.write(lambda s, u: _settled_sent(s, u, settle(s, u), tracked, now=self.now))
         self.label(gmail, tracked, sent.id, purpose)
         return True
 
@@ -1139,6 +1146,9 @@ class _Reconcile:
         back in Drafts, possibly under a new draft id: found there, it is followed under
         that id. Only a draft in neither is marked missing, then discarded. A failed
         search raises, and the guard leaves the message as it is.
+
+        A ``discarded`` message's draft goes the same way, but gone from both it is no
+        longer followed: it stays ``discarded`` (#544).
         """
         message_id, now = tracked.message_id, self.now
         if is_scheduled(gmail, tracked.rfc822_message_id, purpose=purpose):

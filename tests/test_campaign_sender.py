@@ -57,6 +57,7 @@ from netkeeper.models import (
 )
 from netkeeper.scoping import get_scoped, scoped
 from netkeeper.services import campaign_engine as engine_module
+from netkeeper.services import campaign_guards as guards
 from netkeeper.services import campaign_replies, sending_hours
 from netkeeper.services import campaign_sender as sender_module
 from netkeeper.services import mailboxes as mailbox_service
@@ -328,6 +329,7 @@ def test_the_sender_constants_are_pinned() -> None:
     assert sender_module.FIND_MAX == 10
     assert timedelta(minutes=10) == engine_module.RECONCILE_AFTER
     assert engine_module.RECONCILE_BATCH == 10
+    assert engine_module.DISCARDED_DRAFTS_MAX == 100
     assert engine_module.STOP_WAIT_S == 45.0
     assert engine_module.DRAFT_DISCARDED_REASON == "draft_discarded"
     assert {s.value for s in engine_module.LIVE_STATUSES} == {"pending", "active", "paused"}
@@ -1374,6 +1376,171 @@ def test_a_merge_discarded_drafts_gmail_draft_stays_for_the_person(drafts: Mail)
         "messages.get",
         "messages.list",
     }
+
+
+def _merge_two_waiting_drafts(drafts: Mail) -> tuple[int, Message, Message]:
+    """Two contacts, each with step 1 waiting as a Gmail draft, merged: the survivor's
+    enrollment id, its waiting message, and the discarded one (#544)."""
+    older = drafts.enroll("ada@example.test")
+    newer = drafts.enroll("ada.other@example.test")
+    drafts.tick()
+    drafts.tick(NOW + timedelta(hours=1))
+    assert len(drafts.gmail.drafts()) == 2
+    survivor, loser = (drafts.enrollment(i).contact_id for i in (newer, older))
+    drafts.write(lambda s: merge_contacts(s, drafts.user, survivor, loser))
+    [kept] = [m for m in drafts.messages() if m.status is MessageStatus.DRAFTED]
+    [discarded] = [m for m in drafts.messages() if m.status is MessageStatus.DISCARDED]
+    assert discarded.gmail_draft_id is not None
+    assert kept.enrollment_id == discarded.enrollment_id
+    return kept.enrollment_id, kept, discarded
+
+
+def _last_outbound(drafts: Mail, contact_id: int) -> datetime | None:
+    def load(session: Session) -> datetime | None:
+        facts = guards.load_facts(session, drafts.user, [contact_id], campaign_id=None)
+        return facts[contact_id].last_outbound_at
+
+    return drafts.read(load)
+
+
+@pytest.mark.parametrize("keep_id", [False, True])
+def test_a_merge_discarded_draft_the_person_sends_is_recorded_sent(
+    drafts: Mail, keep_id: bool
+) -> None:
+    """#544: the person sends the discarded draft from Gmail anyway. The drafts poll sees
+    it sent: ``sent`` at Gmail's time, so the recency guard and the enrollment's delay
+    count from it, and the step does not fire again."""
+    enrollment_id, kept, discarded = _merge_two_waiting_drafts(drafts)
+    contact_id = drafts.enrollment(enrollment_id).contact_id
+    assert _last_outbound(drafts, contact_id) is None
+    sent_at = NOW + timedelta(hours=2)
+    sent_ref = drafts.gmail.send_draft(discarded.gmail_draft_id or "", at=sent_at, keep_id=keep_id)
+
+    drafts.tick(NOW + timedelta(hours=3))
+    [after] = [m for m in drafts.messages() if m.id == discarded.id]
+    assert (after.status, after.sent_at) == (MessageStatus.SENT, sent_at)
+    assert (after.gmail_message_id, after.error) == (sent_ref.id, None)
+    assert _last_outbound(drafts, contact_id) == sent_at
+    [waiting] = [m for m in drafts.messages() if m.id == kept.id]
+    assert waiting.status is MessageStatus.DRAFTED  # the survivor's draft still waits
+    assert len(drafts.messages(enrollment_id)) == 2  # nothing fired again
+    assert sent_ref.id in drafts.labelled()
+
+
+def test_a_discarded_draft_sent_after_the_kept_one_moves_the_next_step_later(
+    drafts: Mail,
+) -> None:
+    """#544: the survivor's draft goes first and schedules step 2 from it; the discarded
+    one, sent a day later, moves step 2 to a week after itself. The step stays 1."""
+    enrollment_id, kept, discarded = _merge_two_waiting_drafts(drafts)
+    first = NOW + timedelta(hours=2)
+    drafts.gmail.send_draft(kept.gmail_draft_id or "", at=first)
+    drafts.tick(NOW + timedelta(hours=3))
+    assert drafts.enrollment(enrollment_id).next_action_at == follow_up(first)
+
+    second = NOW + timedelta(days=1)
+    drafts.gmail.send_draft(discarded.gmail_draft_id or "", at=second)
+    drafts.tick(NOW + timedelta(days=1, hours=1))
+    enrollment = drafts.enrollment(enrollment_id)
+    assert (enrollment.current_step, enrollment.next_action_at) == (1, follow_up(second))
+    assert {m.status for m in drafts.messages(enrollment_id)} == {MessageStatus.SENT}
+
+
+def test_a_discarded_draft_sent_first_leaves_the_kept_draft_waiting(drafts: Mail) -> None:
+    """#544: the discarded draft settling sent neither fires nor advances the step: the
+    survivor's draft still waits, and step 2 counts from the later of the two sends."""
+    enrollment_id, kept, discarded = _merge_two_waiting_drafts(drafts)
+    first = NOW + timedelta(hours=2)
+    drafts.gmail.send_draft(discarded.gmail_draft_id or "", at=first)
+    drafts.tick(NOW + timedelta(hours=3))
+    enrollment = drafts.enrollment(enrollment_id)
+    assert (enrollment.current_step, enrollment.next_action_at) == (1, None)
+
+    second = NOW + timedelta(hours=4)
+    drafts.gmail.send_draft(kept.gmail_draft_id or "", at=second)
+    drafts.tick(NOW + timedelta(hours=5))
+    enrollment = drafts.enrollment(enrollment_id)
+    assert (enrollment.current_step, enrollment.next_action_at) == (1, follow_up(second))
+
+
+def test_a_discarded_draft_scheduled_in_gmail_is_recorded_when_delivered(drafts: Mail) -> None:
+    """#544: Schedule send on the discarded draft. While it waits in Scheduled it stays
+    ``discarded`` and followed; delivered, it is ``sent`` no earlier than it was seen
+    waiting, even when Gmail keeps the date it was scheduled with."""
+    _, _, discarded = _merge_two_waiting_drafts(drafts)
+    scheduled = drafts.gmail.schedule_draft(
+        discarded.gmail_draft_id or "", at=NOW + timedelta(hours=2)
+    )
+    seen = NOW + timedelta(hours=3)
+    drafts.tick(seen)
+    drafts.tick(NOW + timedelta(hours=4))
+    [waiting] = [m for m in drafts.messages() if m.id == discarded.id]
+    assert (waiting.status, waiting.gmail_draft_id) == (
+        MessageStatus.DISCARDED,
+        discarded.gmail_draft_id,
+    )
+
+    drafts.gmail.send_scheduled(scheduled, at=NOW + timedelta(hours=5), keep_date=True)
+    drafts.tick(NOW + timedelta(hours=6))
+    [after] = [m for m in drafts.messages() if m.id == discarded.id]
+    assert after.status is MessageStatus.SENT
+    assert after.sent_at is not None and after.sent_at >= NOW + timedelta(hours=4)
+
+
+def test_a_discarded_draft_the_person_deletes_stays_discarded_and_is_let_go(
+    drafts: Mail,
+) -> None:
+    """#544: gone from Gmail with nothing sent, the discarded draft is marked once, then no
+    longer followed: still ``discarded``, no error, its enrollment untouched, and no
+    further Gmail lookups for it."""
+    enrollment_id, kept, discarded = _merge_two_waiting_drafts(drafts)
+    before = drafts.enrollment(enrollment_id)
+    drafts.gmail.discard_draft(discarded.gmail_draft_id or "")
+    drafts.tick(NOW + timedelta(hours=2))
+    [marked] = [m for m in drafts.messages() if m.id == discarded.id]
+    assert (marked.status, marked.error) == (MessageStatus.DISCARDED, DRAFT_MISSING)
+
+    drafts.tick(NOW + timedelta(hours=3))
+    [after] = [m for m in drafts.messages() if m.id == discarded.id]
+    assert (after.status, after.error, after.gmail_draft_id, after.sent_at) == (
+        MessageStatus.DISCARDED,
+        None,
+        None,
+        None,
+    )
+    enrollment = drafts.enrollment(enrollment_id)
+    assert (enrollment.status, enrollment.current_step, enrollment.next_action_at) == (
+        before.status,
+        before.current_step,
+        before.next_action_at,
+    )
+    [waiting] = [m for m in drafts.messages() if m.id == kept.id]
+    assert waiting.status is MessageStatus.DRAFTED
+
+    calls = len(drafts.gmail.calls)
+    drafts.tick(NOW + timedelta(hours=4))
+    later = [m for m, _ in drafts.gmail.calls[calls:]]
+    assert later == ["drafts.list"]  # the kept draft's poll alone; nothing for the discarded
+
+
+def test_the_drafts_poll_follows_only_this_users_discarded_drafts(
+    drafts: Mail, session_factory: sessionmaker[Session]
+) -> None:
+    """#544: the discarded drafts the poll follows are the user's own."""
+    _, _, discarded = _merge_two_waiting_drafts(drafts)
+    other = make_mail(session_factory, modes=(StepMode.DRAFT,) * 3)
+
+    def work(mail: Mail) -> set[int]:
+        def load(session: Session) -> set[int]:
+            user = session.get(User, mail.user.id)
+            assert user is not None
+            found = engine_module.reconcile_work(session, user, now=mail.clock.now)
+            return {t.message_id for t in found.drafts}
+
+        return mail.read(load)
+
+    assert discarded.id in work(drafts)
+    assert work(other) == set()
 
 
 # --- nothing reaches Gmail but the fake ----------------------------------------------------

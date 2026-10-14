@@ -2141,6 +2141,10 @@ for clearing only: the dating of its send never reads it (:func:`seen_sent_at`).
 DRAFT_DISCARDED_REASON: Final = "draft_discarded"
 """``exit_reason`` of an enrollment whose draft the person deleted (spec 11.5)."""
 
+DISCARDED_DRAFTS_MAX: Final = 100
+"""The most ``discarded`` messages with a Gmail draft the drafts poll follows per user,
+newest first (#544). Each costs no Gmail call while its draft is listed."""
+
 LIVE_STATUSES: Final[frozenset[EnrollmentStatus]] = frozenset(
     {EnrollmentStatus.PENDING, EnrollmentStatus.ACTIVE, EnrollmentStatus.PAUSED}
 )
@@ -2273,9 +2277,11 @@ def reconcile_work(session: Session, user: User, *, now: datetime) -> ReconcileW
       :data:`RECONCILE_BATCH` per mailbox, so one that cannot be searched never
       holds another mailbox's slots (#273 review).
     - **Drafts:** ``drafted`` with a Gmail draft id, for the drafts poll (spec 11.5).
-
-    A ``discarded`` message's Gmail draft, if it has one, is left where it is:
-    netkeeper deletes nothing in Gmail (ADR 0003; #273, question 2).
+      Then ``discarded`` with one, newest first, at most :data:`DISCARDED_DRAFTS_MAX`:
+      a merge discards one of two waiting drafts of a step, and leaves its Gmail
+      draft where it is, since netkeeper deletes nothing in Gmail (ADR 0003; #273,
+      question 2). The person may send it anyway, and the guards must see that
+      send (#544): :func:`settle_discarded_sent`.
     """
     due = scoped(user, Message).where(
         Message.status == MessageStatus.SCHEDULED,
@@ -2306,7 +2312,16 @@ def reconcile_work(session: Session, user: User, *, now: datetime) -> ReconcileW
         ),
         with_thread=True,
     )
-    return ReconcileWork(leftovers, drafts)
+    discarded = _tracked(
+        session,
+        user,
+        scoped(user, Message)
+        .where(Message.status == MessageStatus.DISCARDED, Message.gmail_draft_id.is_not(None))
+        .order_by(Message.id.desc())
+        .limit(DISCARDED_DRAFTS_MAX),
+        with_thread=True,
+    )
+    return ReconcileWork(leftovers, drafts + discarded)
 
 
 def _tracked_message(
@@ -2365,8 +2380,9 @@ def settle_sent(
     rng: random.Random | None = None,
 ) -> bool:
     """Gmail has the message as sent: ``sent`` at ``at``, and the next step scheduled
-    from it (spec 11.3). For a leftover found by its Message-ID, a draft seen sent,
-    and a discarded draft the person sent anyway. False when the message moved on.
+    from it (spec 11.3). For a leftover found by its Message-ID and a draft seen
+    sent; a discarded draft the person sent anyway is :func:`settle_discarded_sent`.
+    False when the message moved on.
 
     A leftover (``scheduled``) also moves its mailbox's next send time to no sooner
     than a new spacing gap (drawn with ``rng``) after ``at``: the record of an
@@ -2390,6 +2406,66 @@ def settle_sent(
     _after_settling(session, user, settings, message, fired=True)
     log.info("message %d is sent (found in Gmail)", message_id)
     return True
+
+
+def settle_discarded_sent(
+    session: Session,
+    user: User,
+    settings: Settings,
+    message_id: int,
+    *,
+    at: datetime,
+    gmail_message_id: str,
+    gmail_thread_id: str,
+) -> bool:
+    """A ``discarded`` message's Gmail draft, seen sent: the person sent it anyway (#544).
+    False when the message moved on.
+
+    It becomes ``sent`` at ``at``, so the recency guard, the reply poll and the
+    enrollment's next delay count it. The step is not fired or advanced: it fired
+    when the message was made (:func:`step_has_message` counts a discarded one), and
+    the enrollment's own message of the step, if any, still settles on its own. The
+    only change to the enrollment: a next step already due is moved later, never
+    earlier, to its delay after this send."""
+    _require_writer(session, "settle_discarded_sent")
+    if at.tzinfo is None or at.utcoffset() is None:
+        raise ValueError("at must be timezone-aware")
+    message = _tracked_message(session, user, message_id, (MessageStatus.DISCARDED,))
+    if message is None:
+        return False
+    message.status = MessageStatus.SENT
+    message.sent_at = at
+    message.error = None
+    message.gmail_message_id = gmail_message_id
+    message.gmail_thread_id = gmail_thread_id
+    session.flush()
+    _push_back_next_step(session, user, settings, message.enrollment_id)
+    log.info("message %d was discarded, and the person sent it; it is sent", message_id)
+    return True
+
+
+def _push_back_next_step(
+    session: Session, user: User, settings: Settings, enrollment_id: int
+) -> None:
+    """A due next step, no sooner than its delay after the enrollment's latest send."""
+    enrollment = _enrollment(session, user, enrollment_id)
+    position = enrollment.current_step or 0
+    if (
+        enrollment.status not in (EnrollmentStatus.ACTIVE, EnrollmentStatus.PAUSED)
+        or enrollment.next_action_at is None
+        or position < 1
+    ):
+        return
+    upcoming = next(
+        (s for s in _steps(session, user, enrollment.campaign_id) if s.position > position), None
+    )
+    latest = latest_fired(session, user, enrollment.id)
+    if upcoming is None or latest is None:
+        return
+    due = follow_up_due(settings, user, upcoming, latest, hours_for(session, user))
+    if due > enrollment.next_action_at:
+        enrollment.next_action_at = due
+        session.flush()
 
 
 def _space_after(
@@ -2511,14 +2587,26 @@ def settle_not_sent(
 def settle_draft_missing(session: Session, user: User, message_id: int) -> bool:
     """The draft is gone and nothing in its thread was sent. The first time, it is
     marked (:data:`DRAFT_MISSING`); the second, the message is ``discarded`` and the
-    enrollment ``removed`` (spec 11.5). True once it is discarded."""
+    enrollment ``removed`` (spec 11.5). True once it is discarded.
+
+    A ``discarded`` message's draft, gone the same way, is no longer followed: the
+    second time, its draft id is cleared, and it stays ``discarded`` with its
+    enrollment as it is (#544). False for it."""
     _require_writer(session, "settle_draft_missing")
-    message = _tracked_message(session, user, message_id, (MessageStatus.DRAFTED,))
+    message = _tracked_message(
+        session, user, message_id, (MessageStatus.DRAFTED, MessageStatus.DISCARDED)
+    )
     if message is None:
         return False
     if message.error != DRAFT_MISSING:
         message.error = DRAFT_MISSING
         session.flush()
+        return False
+    if message.status is MessageStatus.DISCARDED:
+        message.error = None
+        message.gmail_draft_id = None  # gone from Gmail: nothing left to follow
+        session.flush()
+        log.info("message %d: its discarded draft was deleted, not sent", message_id)
         return False
     message.status = MessageStatus.DISCARDED
     message.error = None
@@ -2534,7 +2622,9 @@ def settle_draft_missing(session: Session, user: User, message_id: int) -> bool:
 def settle_draft_present(session: Session, user: User, message_id: int) -> None:
     """The draft is still there: a mark from an earlier poll no longer holds."""
     _require_writer(session, "settle_draft_present")
-    message = _tracked_message(session, user, message_id, (MessageStatus.DRAFTED,))
+    message = _tracked_message(
+        session, user, message_id, (MessageStatus.DRAFTED, MessageStatus.DISCARDED)
+    )
     if message is not None and message.error in (DRAFT_MISSING, SCHEDULED_IN_GMAIL):
         message.error = None
         session.flush()
@@ -2551,12 +2641,16 @@ def settle_seen_scheduled(session: Session, user: User, message_id: int, *, now:
     is also the search time, so it is searched again only after
     :data:`RECONCILE_SEARCH_EVERY` and never holds a :data:`RECONCILE_BATCH` slot each
     tick; its earlier misses were Gmail's search lagging, since Gmail has it. Nothing
-    reads these columns for a ``drafted`` message otherwise."""
+    reads these columns for a ``drafted`` message otherwise. A ``discarded`` message's
+    draft is marked the same way, so its send, when Gmail delivers it, is dated right (#544)."""
     _require_writer(session, "settle_seen_scheduled")
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("now must be timezone-aware")
     message = _tracked_message(
-        session, user, message_id, (MessageStatus.DRAFTED, MessageStatus.SCHEDULED)
+        session,
+        user,
+        message_id,
+        (MessageStatus.DRAFTED, MessageStatus.SCHEDULED, MessageStatus.DISCARDED),
     )
     if message is None:
         return
@@ -2577,9 +2671,12 @@ def settle_draft_moved(
     gmail_thread_id: str,
 ) -> None:
     """The draft is back in Gmail's Drafts under a new draft id (#278 review): a canceled
-    Schedule send. It is followed under its new ids, and any mark is cleared."""
+    Schedule send. It is followed under its new ids, and any mark is cleared. A
+    ``discarded`` message's draft too (#544)."""
     _require_writer(session, "settle_draft_moved")
-    message = _tracked_message(session, user, message_id, (MessageStatus.DRAFTED,))
+    message = _tracked_message(
+        session, user, message_id, (MessageStatus.DRAFTED, MessageStatus.DISCARDED)
+    )
     if message is None:
         return
     message.gmail_draft_id = gmail_draft_id
