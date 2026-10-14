@@ -287,6 +287,7 @@ class SyncResult:
     :attr:`complete`. ``hidden`` is how many places the source's answers held no
     card for (#515), as the last page it handed over reported it
     (:attr:`SourcePage.hidden`): a report only, which :attr:`complete` does not read.
+    ``rescued_not_whole`` is reported the same way (:attr:`SourcePage.rescued_not_whole`).
     """
 
     mode: SyncMode
@@ -303,6 +304,7 @@ class SyncResult:
     lost: LostAnswer | None = None
     losses: tuple[LostAnswer, ...] = ()
     hidden: int = 0
+    rescued_not_whole: int = 0
 
     @property
     def shortfall(self) -> int:
@@ -363,7 +365,9 @@ class SourcePage:
     job's own short-page rule. ``hidden`` is how many places, so far in this run,
     the answers the source read whole held no card for (#515): an answer that asks
     for the next page ten places on but holds nine cards hides one member. It is a
-    running count, not this page's alone.
+    running count, not this page's alone. ``rescued_not_whole`` is how many answers,
+    so far in this run, the source read from a streamed copy that the flight
+    structure check did not find whole (#525 review): reported, not enforced.
     """
 
     outcome: Outcome
@@ -373,6 +377,7 @@ class SourcePage:
     lost: tuple[LostAnswer, ...] = ()
     ended: bool = False
     hidden: int = 0
+    rescued_not_whole: int = 0
 
 
 class ConnectionsSource(Protocol):
@@ -451,6 +456,7 @@ async def run_connections_sync(
     source_switched = False
     losses: list[LostAnswer] = []
     hidden = 0
+    rescued_not_whole = 0
     #: Whether the slice before this one carried a loss (#201 review, L1).
     loss_before = False
 
@@ -475,6 +481,7 @@ async def run_connections_sync(
             lost=lost,
             losses=tuple(losses),
             hidden=hidden,
+            rescued_not_whole=rescued_not_whole,
         )
 
     async def stopped(result: SyncResult) -> SyncResult:
@@ -525,6 +532,7 @@ async def run_connections_sync(
         losses.extend(answer.lost)
         source_switched = source_switched or answer.switched
         hidden = max(hidden, answer.hidden)
+        rescued_not_whole = max(rescued_not_whole, answer.rescued_not_whole)
         if answer.outcome is not Outcome.OK or answer.page is None:
             outcome = Outcome.ROUTE_CHANGED if answer.outcome is Outcome.OK else answer.outcome
             return await stopped(finish(StopReason.RESPONSE, outcome, answer.final_url))
@@ -581,7 +589,18 @@ async def run_connections_sync(
             return await stopped(finish(StopReason.END_OF_LIST))
         if len(result.connections) < spec.page_size:
             if answer.ended or 0 < max_total <= start:
-                return await stopped(finish(StopReason.END_OF_LIST))
+                ended = finish(StopReason.END_OF_LIST)
+                if ended.shortfall > completion_slack(max_total):
+                    # The proven end replaced the WARNING below, the only line that
+                    # named where the list ended and what total it fell short of.
+                    log.info(
+                        "connections: %s proved the end of the list at offset %d, past"
+                        " the slack of the reported total %d",
+                        source.endpoint,
+                        start,
+                        max_total,
+                    )
+                return await stopped(ended)
             log.warning(
                 "connections: %s served %d of %d at offset %d, short of the reported"
                 " total %d; reading on",

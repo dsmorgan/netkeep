@@ -19,6 +19,7 @@ need to mean anything.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -667,6 +668,51 @@ async def test_the_runs_hidden_count_is_the_sources_running_count() -> None:
     result, _, _ = await _run(source, page_size=40)
 
     assert result.hidden == 3 and result.complete
+
+
+async def test_a_proven_end_past_the_slack_names_its_offset_and_total(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#525 review: the proven end replaced the WARNING that named where the list
+    ended and the total it fell short of; one INFO line still names both."""
+    caplog.set_level(logging.INFO, logger="netkeeper")
+    people = _hundred()[:79]
+    proven = replace(_page(people[40:79], start=40, total=100), ended=True)
+    source = FakeConnectionsSource(people, script={1: proven}, total=100)
+
+    await _run(source, page_size=40)
+
+    assert "proved the end of the list at offset 79, past the slack of the reported total 100" in (
+        caplog.text
+    )
+
+
+async def test_a_proven_end_within_the_slack_logs_no_such_line(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="netkeeper")
+    people = _hundred()[:97]
+    proven = replace(_page(people[80:97], start=80, total=100), ended=True)
+    source = FakeConnectionsSource(people, script={2: proven}, total=100)
+
+    result, _, _ = await _run(source, page_size=40)
+
+    assert result.complete and "proved the end of the list" not in caplog.text
+
+
+async def test_the_runs_count_of_copies_not_whole_is_the_sources_running_count() -> None:
+    people = _hundred()
+    source = FakeConnectionsSource(
+        people,
+        script={
+            0: replace(_page(people[0:40], start=0, total=100), rescued_not_whole=1),
+            1: replace(_page(people[40:80], start=40, total=100), rescued_not_whole=2),
+        },
+    )
+
+    result, _, _ = await _run(source, page_size=40)
+
+    assert result.rescued_not_whole == 2 and result.complete
 
 
 async def test_hidden_members_never_count_toward_completeness() -> None:

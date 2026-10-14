@@ -913,6 +913,7 @@ class _Hides:
 
     inner: FakeConnectionsSource
     hidden: int
+    rescued_not_whole: int = 0
 
     @property
     def endpoint(self) -> str:
@@ -920,7 +921,7 @@ class _Hides:
 
     async def fetch_page(self, *, start: int, count: int) -> SourcePage:
         page = await self.inner.fetch_page(start=start, count=count)
-        return replace(page, hidden=self.hidden)
+        return replace(page, hidden=self.hidden, rescued_not_whole=self.rescued_not_whole)
 
 
 async def test_hidden_members_are_counted_on_the_run_and_its_note(
@@ -929,13 +930,14 @@ async def test_hidden_members_are_counted_on_the_run_and_its_note(
     """#515: 97 seen of a claimed 100, 3 of them hidden: complete within the slack, and
     the run says so."""
     report = await _sync(
-        session_factory, user_id, _Hides(FakeConnectionsSource(_many(97), total=100), 3)
+        session_factory, user_id, _Hides(FakeConnectionsSource(_many(97), total=100), 3, 1)
     )
 
     assert report.result.complete and report.result.hidden == 3
     run = _run_row(session_factory, user_id, report.run_id)
     assert run.counts_json is not None
     assert run.counts_json["hidden"] == 3 and run.counts_json["shortfall"] == 3
+    assert run.counts_json["rescued_not_whole"] == 1
     assert run.notes == "complete with 3 short of LinkedIn's total; 3 hidden members."
 
 

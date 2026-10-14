@@ -1174,6 +1174,46 @@ async def test_a_whole_copy_of_an_answer_with_a_hidden_member_is_used(
     assert out.result.losses == () and out.result.hidden == 1
     assert out.urns == _visible(people, hide)
     assert "answer for start 40 was read from the copy streamed as it arrived" in caplog.text
+    assert "rescued answer at start 40: whole by flight check: yes" in caplog.text
+    assert out.result.rescued_not_whole == 0
+
+
+async def test_a_rescued_copy_the_flight_check_finds_not_whole_is_counted_not_refused(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#525 review: a copy that passes the rescue's checks but holds a model row its
+    root never reaches is not whole by :func:`flight.is_whole`. That is reported -- one
+    INFO line, a count on the run -- and not yet enforced: the copy is still used."""
+    caplog.set_level(logging.INFO, logger="netkeeper")
+    people = many(90)
+    hide = {40: 1}
+    copy = FlagshipSite(people, hide=hide)._page(40) + b'fff:{"stray":1}\n'
+    site = FlagshipSite(people, tap=True, hide=hide, lost={40: Lost("move_on", streamed=copy)})
+    out = await sync(site)
+    assert out.result.complete and out.result.losses == ()
+    assert out.result.rescued_not_whole == 1 and out.urns == _visible(people, hide)
+    assert "rescued answer at start 40: whole by flight check: no" in caplog.text
+
+
+class _MovesShort(FlagshipSite):
+    """The page's own answer for 40 holds 9 cards and asks for 49, not 50."""
+
+    def _page(self, start: int) -> bytes:
+        if start != 40:
+            return super()._page(start)
+        self._next = 49
+        return pagination_payload(self.people[40:49], start=40, next_start=49)
+
+
+async def test_a_copy_that_asks_past_where_the_page_moved_is_refused() -> None:
+    """The page moved on to 49, below 40 + 10; the copy holds 9 cards and asks for
+    50. It disagrees with the page, so it is refused and the answer is lost (pins the
+    ``==`` on the next start: a ``>=`` would take it)."""
+    copy = pagination_payload(many(90)[40:49], start=40, next_start=50)
+    site = _MovesShort(many(90), tap=True, lost={40: Lost("move_on", streamed=copy)})
+    out = await sync(site)
+    assert out.result.reason is StopReason.END_OF_LIST and not out.result.complete
+    assert [x.start for x in out.result.losses] == [40]
 
 
 def _copy_of_40(cards: int, next_start: int) -> bytes:
