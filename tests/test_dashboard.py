@@ -42,6 +42,13 @@ def test_the_windows_are_pinned() -> None:
     """Spec 9.8 names the changed-jobs window; "this week" is the last seven days."""
     assert service.CHANGED_JOBS_DAYS == 30
     assert timedelta(days=7) == service.INBOUND_WINDOW
+    assert {k.value for k in service.INBOUND_KINDS} == {
+        "email_in",
+        "li_in",
+        "call_in",
+        "meeting_in",
+        "other_in",
+    }
 
 
 # --- next fires ------------------------------------------------------------------------
@@ -323,10 +330,17 @@ def _inbound(session: Session) -> None:
     add(InteractionKind.EMAIL_OUT, NOW - timedelta(days=1))
     add(InteractionKind.LI_OUT, NOW - timedelta(days=1))
     add(InteractionKind.NOTE, NOW - timedelta(days=1))
+    # A response recorded from outside netkeeper counts too (#512); a logged call does not.
+    add(InteractionKind.CALL_IN, NOW - timedelta(days=2))
+    add(InteractionKind.MEETING_IN, NOW - timedelta(days=3))
+    add(InteractionKind.OTHER_IN, NOW - timedelta(days=4))
+    add(InteractionKind.OTHER_IN, NOW - timedelta(days=9))
+    add(InteractionKind.CALL, NOW - timedelta(days=1))
+    add(InteractionKind.MEETING, NOW - timedelta(days=1))
 
     count, since = service.inbound_since(session, user, now=NOW)
 
-    assert count == 2
+    assert count == 5
     assert since == NOW - timedelta(days=7)
 
 

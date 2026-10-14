@@ -15,14 +15,11 @@ SQLite cannot add or replace a CHECK constraint on a table that exists, so both 
 go through ``batch_alter_table``. The one partial index on ``messages`` is dropped first
 and made again after, as 0039 does: a rebuild would not keep its ``WHERE``.
 
-0042 is taken by #510's open pull request (#527). This revises 0041 until that one
-merges; whichever merges second revises the other.
-
 No existing data changes. The downgrade turns the three new kinds into ``note``, which
 the old CHECK takes and which, like them, is not outbound, then drops the columns; the
 inbound messages stay, as replies.
 
-Revision ID: 0043
+Revision ID: 0042
 Revises: 0041
 Create Date: 2026-10-14 00:00:00 UTC
 """
@@ -35,7 +32,7 @@ from typing import Final
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0043"
+revision: str = "0042"
 down_revision: str | None = "0041"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

@@ -17,6 +17,11 @@ already ended ``replied``, ``bounced``, ``opted_out`` or ``removed`` is refused.
 
 What it writes
 --------------
+A response is dated when they responded: never in the future (:data:`FUTURE_SKEW`
+aside), and never before the first message of an enrollment it ends went out, since it
+then answers nothing the campaign sent (:class:`TooEarly`). An enrollment with nothing
+sent yet, a pending one say, takes any time up to now.
+
 For each enrollment, an inbound ``messages`` row, as the polls write for a reply:
 ``in``, ``received``, ``sent_at`` when they responded, the step of the latest send
 before it, the note (if any) as its snippet, ``outside_via`` and ``outside_outcome``,
@@ -30,9 +35,9 @@ Then each row goes through :func:`netkeeper.services.campaign_replies._after_rep
 the end a detected reply takes: ``replied_at``, and a live enrollment ends ``replied``
 (``opted_out`` for an opt-out) through
 :func:`netkeeper.services.campaign_engine.end_enrollment`. An opt-out sets the contact
-``do_not_contact``, with every address of theirs on the do-not-send list, only when the
-person chooses it. A ``pending`` enrollment, which detection never sees, ends the same
-way through ``end_enrollment``.
+``do_not_contact``, with every address of theirs on the do-not-send list, as a detected
+unsubscribe does, unless the person says not to. A ``pending`` enrollment, which
+detection never sees, ends the same way through ``end_enrollment``.
 
 One interaction records it on the timeline, linked to the first message: ``call_in``
 for a call, ``meeting_in`` in person, ``email_in`` for an email from another address,
@@ -138,6 +143,10 @@ class EnrollmentNotFound(LookupError):
     """The contact has no enrollment with that id."""
 
 
+class TooEarly(ValueError):
+    """The response is dated before an enrollment's first send: it answers nothing sent."""
+
+
 class NothingToEnd(ValueError):
     """No enrollment of the contact could still send, or the one picked has ended."""
 
@@ -183,16 +192,18 @@ def record_outside_response(
     now: datetime,
     note: str | None = None,
     outcome: ResponseOutcome | None = None,
-    do_not_contact: bool = False,
+    do_not_contact: bool | None = None,
     enrollment_id: int | None = None,
 ) -> OutsideResponse:
     """Record a response from outside netkeeper and end what it answers (module
     docstring). ``enrollment_id`` picks one enrollment; without it, every enrollment of
-    the contact that could still send. ``do_not_contact`` goes with an opt-out only.
+    the contact that could still send. ``do_not_contact`` goes with an opt-out only;
+    None means an opt-out sets it, as a detected unsubscribe does.
 
     Raises :class:`ContactNotFound`, :class:`EnrollmentNotFound`, :class:`NothingToEnd`,
-    and ``ValueError`` for a time that is naive or in the future, a note that is too
-    long, or ``do_not_contact`` without an opt-out. Needs a writer session."""
+    and ``ValueError`` (:class:`TooEarly` among them) for a time that is naive, in the
+    future, or before an enrollment's first send, a note that is too long, or
+    ``do_not_contact`` without an opt-out. Needs a writer session."""
     if not is_writer(session):
         raise RuntimeError("record_outside_response needs a writer session")
     if at.tzinfo is None or at.utcoffset() is None:
@@ -204,6 +215,8 @@ def record_outside_response(
         raise ValueError(f"the note is longer than {NOTE_MAX_LENGTH} characters")
     if do_not_contact and outcome is not ResponseOutcome.OPT_OUT:
         raise ValueError("do_not_contact goes with an opt-out only")
+    opt_out = outcome is ResponseOutcome.OPT_OUT
+    set_do_not_contact = opt_out if do_not_contact is None else do_not_contact
     contact = get_scoped_contact(session, user, contact_id)
     if contact is None:
         raise ContactNotFound(f"no contact {contact_id}")
@@ -219,8 +232,14 @@ def record_outside_response(
         if picked.status not in RECORDABLE:
             raise NothingToEnd(f"enrollment {picked.id} has already ended ({picked.status})")
         targets = [picked]
+    for enrollment in targets:
+        first = _first_send(session, user, enrollment)
+        if first is not None and at < first:
+            raise TooEarly(
+                f"the response is dated before the first message of that campaign went out"
+                f" ({first.isoformat(timespec='minutes')}); it cannot answer it"
+            )
 
-    opt_out = outcome is ResponseOutcome.OPT_OUT
     handled = utcnow()
     rows: list[Message] = []
     for enrollment in targets:
@@ -245,7 +264,7 @@ def record_outside_response(
         rows.append(row)
         pending = enrollment.status is EnrollmentStatus.PENDING
         campaign_replies._after_reply(
-            session, user, enrollment, row, at=at, do_not_contact=do_not_contact
+            session, user, enrollment, row, at=at, do_not_contact=set_do_not_contact
         )
         if pending:
             # Detection never sees a pending enrollment (nothing was sent); the same end.
@@ -280,6 +299,20 @@ def record_outside_response(
     )
     session.flush()
     return OutsideResponse(interaction, tuple(rows), tuple(targets))
+
+
+def _first_send(session: Session, user: User, enrollment: Enrollment) -> datetime | None:
+    """When the enrollment's first message went out, or None when nothing has (a pending
+    enrollment, or an active one before its first step)."""
+    return session.scalar(
+        scoped(user, Message)
+        .with_only_columns(func.min(Message.sent_at))
+        .where(
+            Message.enrollment_id == enrollment.id,
+            Message.direction == MessageDirection.OUT,
+            Message.sent_at.is_not(None),
+        )
+    )
 
 
 def _answers(

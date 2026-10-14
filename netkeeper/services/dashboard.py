@@ -62,7 +62,15 @@ CHANGED_JOBS_WINDOW: Final = timedelta(days=CHANGED_JOBS_DAYS)
 #: so Monday morning does not read as an empty week.
 INBOUND_WINDOW: Final = timedelta(days=7)
 
-INBOUND_KINDS: Final = (InteractionKind.EMAIL_IN, InteractionKind.LI_IN)
+INBOUND_KINDS: Final = (
+    InteractionKind.EMAIL_IN,
+    InteractionKind.LI_IN,
+    # A response a person recorded from outside netkeeper (#512): a call, a meeting, a
+    # text or another app. Them reaching you, as the two above are.
+    InteractionKind.CALL_IN,
+    InteractionKind.MEETING_IN,
+    InteractionKind.OTHER_IN,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,7 +119,8 @@ def changed_jobs(
 
 
 def inbound_since(session: Session, user: User, *, now: datetime) -> tuple[int, datetime]:
-    """Inbound interactions (email or LinkedIn) in the last :data:`INBOUND_WINDOW`, and its start.
+    """Inbound interactions (email, LinkedIn, or a response recorded from outside) in the
+    last :data:`INBOUND_WINDOW`, and its start.
 
     An interaction dated after ``now`` (a clock skew, a hand-typed date) is left
     out: "this week" is up to now.

@@ -7432,7 +7432,7 @@
         "type": "object"
       },
       "InteractionKind": {
-        "description": "What happened between you and a contact. ``*_out`` is you reaching out, ``*_in``\nthem reaching you. ``call`` and ``meeting`` are ones you logged, either way;\n``call_in``, ``meeting_in`` and ``other_in`` are a response to a campaign that came\noutside netkeeper (#512; 0043): a call, meeting them in person, or a text or another\napp. One by email from another address is ``email_in``.",
+        "description": "What happened between you and a contact. ``*_out`` is you reaching out, ``*_in``\nthem reaching you. ``call`` and ``meeting`` are ones you logged, either way;\n``call_in``, ``meeting_in`` and ``other_in`` are a response to a campaign that came\noutside netkeeper (#512; 0042): a call, meeting them in person, or a text or another\napp. One by email from another address is ``email_in``.",
         "enum": [
           "note",
           "call",
@@ -9474,7 +9474,7 @@
         "type": "object"
       },
       "OutsideResponseIn": {
-        "description": "A response outside netkeeper. ``at`` must carry a timezone and not be in the\nfuture. ``outcome`` is optional; ``do_not_contact`` goes with ``opt_out`` only.\nWithout ``enrollment_id``, every enrollment of the contact that could still send\nends; with it, that one only (a ``completed`` one may be picked too, and stays\n``completed``).",
+        "description": "A response outside netkeeper. ``at`` must carry a timezone, and be neither in the\nfuture nor before the first message of an enrollment it ends went out. ``outcome``\nis optional; ``do_not_contact`` goes with ``opt_out`` only. Without\n``enrollment_id``, every enrollment of the contact that could still send ends; with\nit, that one only (a ``completed`` one may be picked too, and stays ``completed``).",
         "properties": {
           "at": {
             "format": "date-time",
@@ -9482,9 +9482,15 @@
             "type": "string"
           },
           "do_not_contact": {
-            "default": false,
-            "title": "Do Not Contact",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Do Not Contact"
           },
           "enrollment_id": {
             "anyOf": [
@@ -18040,7 +18046,7 @@
     },
     "/api/v1/contacts/{contact_id}/outside-response": {
       "post": {
-        "description": "Record a response that came outside netkeeper, and end the enrollments it answers\n``replied`` (``opted_out`` for an opt-out), as a detected reply does. No later step\nsends. ``422`` for a time in the future, or ``do_not_contact`` without an opt-out.",
+        "description": "Record a response that came outside netkeeper, and end the enrollments it answers\n``replied`` (``opted_out`` for an opt-out), as a detected reply does. No later step\nsends. ``422``, with the reason, for a time in the future or before the first send of\nan enrollment it would end, or ``do_not_contact`` without an opt-out.",
         "operationId": "record_outside_response",
         "parameters": [
           {

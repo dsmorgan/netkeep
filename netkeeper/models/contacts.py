@@ -150,7 +150,7 @@ class InteractionKind(enum.StrEnum):
     """What happened between you and a contact. ``*_out`` is you reaching out, ``*_in``
     them reaching you. ``call`` and ``meeting`` are ones you logged, either way;
     ``call_in``, ``meeting_in`` and ``other_in`` are a response to a campaign that came
-    outside netkeeper (#512; 0043): a call, meeting them in person, or a text or another
+    outside netkeeper (#512; 0042): a call, meeting them in person, or a text or another
     app. One by email from another address is ``email_in``."""
 
     NOTE = "note"
