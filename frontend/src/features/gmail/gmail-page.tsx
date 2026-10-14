@@ -6,6 +6,7 @@ import { mailboxKeys } from '@/features/mailboxes/api'
 
 import { gmailKeys } from './api'
 import { ConnectionCard } from './connection-card'
+import { LeftoverCard } from './leftover-card'
 import { PostureCard } from './posture-card'
 import { RecentCard } from './recent-card'
 import { ReplyPollCard } from './reply-poll-card'
@@ -13,7 +14,8 @@ import { SendsCard } from './sends-card'
 
 /**
  * The Gmail page (#449), laid out like the LinkedIn page: the connection and today's
- * sends, the reply poll and the posture rows that concern Gmail, then recent email.
+ * sends, the reply poll and the posture rows that concern Gmail, the drafts netkeeper
+ * left in Gmail for you to clean up (#543), then recent email.
  * Everything on it is read from what netkeeper already stored; no request here calls
  * Gmail. The app-wide banner still announces a mailbox that needs signing in again.
  */
@@ -38,6 +40,8 @@ export function GmailPage() {
         <ReplyPollCard />
         <PostureCard />
       </div>
+
+      <LeftoverCard />
 
       <RecentCard />
     </div>

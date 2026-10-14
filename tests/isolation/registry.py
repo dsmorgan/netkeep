@@ -26,6 +26,7 @@ from netkeeper.models import (
     ContactSnapshot,
     ContactSource,
     DoNotSendReason,
+    EnrollmentStatus,
     ImportRun,
     InteractionKind,
     JsonValue,
@@ -39,6 +40,7 @@ from netkeeper.models import (
     SyncRunTrigger,
     Template,
     TemplateChannel,
+    TestSend,
     User,
 )
 from netkeeper.models.base import utcnow
@@ -607,6 +609,38 @@ def _seed_inbox(session: Session, user: User) -> int:
     return 2
 
 
+def _seed_leftover_drafts(session: Session, user: User) -> int:
+    """A draft a merge discarded and one left after an opt-out in one of ``user``'s
+    campaigns, and a test draft (#543)."""
+    mailbox = mailbox_service.connect(
+        session, user, f"left{user.id}@example.com", f"rt-left-{user.id}", daily_cap=80
+    )
+    campaign = factories.make_campaign(session, user, mailbox_id=mailbox.id)
+    for enrollment_status, status in (
+        (EnrollmentStatus.ACTIVE, MessageStatus.DISCARDED),
+        (EnrollmentStatus.OPTED_OUT, MessageStatus.DRAFTED),
+    ):
+        enrollment = factories.make_enrollment(
+            session, campaign, factories.make_contact(session, user), status=enrollment_status
+        )
+        factories.make_message(
+            session, enrollment, status=status, sent_at=None, gmail_draft_id="seed-draft"
+        )
+    session.add(
+        TestSend(
+            user_id=user.id,
+            campaign_id=campaign.id,
+            step_id=campaign.steps[0].id,
+            fingerprint="0" * 64,
+            to_address=mailbox.email,
+            gmail_draft_id="seed-test-draft",
+            sent_at=SEED_AT,
+        )
+    )
+    session.flush()
+    return 3
+
+
 def _seed_contact_enrollments(session: Session, user: User) -> int:
     """One contact of ``user``'s enrolled in two campaigns (#512)."""
     contact = factories.make_contact(session, user)
@@ -727,6 +761,7 @@ REGISTRY: list[ListEndpoint] = [
         path_params=_own_campaign,
     ),
     ListEndpoint(f"{API_PREFIX}/inbox", _seed_inbox, paged_count),
+    ListEndpoint(f"{API_PREFIX}/gmail/leftover-drafts", _seed_leftover_drafts, paged_count),
     ListEndpoint(f"{API_PREFIX}/do-not-send", _seed_do_not_send, array_count),
     ListEndpoint(f"{API_PREFIX}/dashboard/next-fires", _seed_next_fires, paged_count),
     ListEndpoint(f"{API_PREFIX}/campaigns/linkedin/ready", _seed_linkedin_ready, paged_count),

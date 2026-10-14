@@ -16,17 +16,17 @@ Line numbers are as of `acfe01b5` on `main`.
 
 | Case | Today | Trash ever right? | Shown for cleanup in the UI? |
 |---|---|---|---|
-| 1. A merge discards a waiting draft | Message marked `discarded`; draft stays | Yes, a candidate | No |
-| 2. A detected reply ends the enrollment | Enrollment `replied`; draft stays `drafted` | No | No |
-| 3. A detected opt-out ends the enrollment | Enrollment `opted_out`; draft stays `drafted` | Yes, the strongest candidate | No |
-| 4. A bounce ends the enrollment | Enrollment `bounced`; draft stays `drafted` | Yes, a candidate | No |
-| 5. You remove an enrollment | Enrollment `removed`; draft stays `drafted` | Maybe, only if you ask | No |
-| 6. You record an outside response (#512) | Ends like case 2 or 3 | As case 2 or 3 | No |
-| 7. You mark a contact do not contact, or add an address to do-not-send | Nothing changes until the next step fires | Yes, as case 3 | No |
+| 1. A merge discards a waiting draft | Message marked `discarded`; draft stays | Yes, a candidate | Yes, listed |
+| 2. A detected reply ends the enrollment | Enrollment `replied`; draft stays `drafted` | No | Yes, listed last |
+| 3. A detected opt-out ends the enrollment | Enrollment `opted_out`; draft stays `drafted` | Yes, the strongest candidate | Yes, flagged |
+| 4. A bounce ends the enrollment | Enrollment `bounced`; draft stays `drafted` | Yes, a candidate | Yes, flagged |
+| 5. You remove an enrollment | Enrollment `removed`; draft stays `drafted` | Maybe, only if you ask | Yes, listed |
+| 6. You record an outside response (#512) | Ends like case 2 or 3 | As case 2 or 3 | As case 2 or 3 |
+| 7. You mark a contact do not contact, or add an address to do-not-send | Nothing changes until the next step fires | Yes, as case 3 | Yes, flagged |
 | 8. A campaign is paused or ended | Campaign status only; drafts stay | No | Partly: the end dialog warns |
 | 9. A campaign is archived | Only an ended campaign; drafts stay | No | No |
 | 10. A campaign is deleted | Only a never-activated one; its test drafts stay | Yes, a candidate | Yes, listed |
-| 11. Review and arming test drafts | Kept; searched for, never touched | Yes, the safest candidate | Only on campaign delete |
+| 11. Review and arming test drafts | Kept; searched for, never touched | Yes, the safest candidate | Yes, listed |
 | 12. A mailbox is disconnected or its token expires | Token forgotten; drafts stay `drafted` | No | No |
 | 13. Import rollback | Refused if a created contact has any message | Never needed | Not applicable |
 | 14. A contact is archived | Contact archived; draft stays `drafted` | No | No |
@@ -36,7 +36,7 @@ Line numbers are as of `acfe01b5` on `main`.
 | 18. A LinkedIn step changes mode (#536) | No Gmail draft involved | Not applicable | Not applicable |
 | 19. Reconcile gives up on a leftover | `discarded` or `failed`; a draft Gmail made may remain | Yes, a candidate, once confirmed | No |
 
-No list of leftover drafts exists in the UI. See [The cleanup list](#the-cleanup-list).
+The Gmail page lists the leftover drafts (#543). See [The cleanup list](#the-cleanup-list).
 
 ## The cases
 
@@ -44,43 +44,43 @@ No list of leftover drafts exists in the UI. See [The cleanup list](#the-cleanup
 
 - **Today:** when two merged contacts both have an enrollment in one campaign, the outranked enrollment's unsent messages are marked `discarded` (`netkeeper/crm/identity.py:1520-1532`; the statuses are at `identity.py:1388-1395`). Only the status changes, so the message keeps its `gmail_draft_id`, and the Gmail draft stays in Drafts. The drafts poll tracks only `drafted` messages (`netkeeper/services/campaign_engine.py:2301-2308`), so netkeeper stops watching that draft, and if you send it anyway, the send may go unrecorded.
 - **Trash?** Yes, it's a candidate. netkeeper made the draft, nothing will send it, and sending it would repeat a step the surviving enrollment holds. Trash, not delete, because you may have edited it.
-- **By hand:** no. The merge preview says how many unsent messages are discarded (`frontend/src/features/contacts/merge-text.ts:115-118`), but not that their Gmail drafts stay or which ones. Afterward, the Gmail page's recent card can show a `discarded` pill (`frontend/src/features/gmail/recent-card.tsx:12-20`), but only among the newest 20 email messages (`netkeeper/services/gmail_activity.py:55`), and it doesn't say a draft remains.
+- **By hand:** yes. The merge preview says the discarded drafts stay in Gmail, and the Gmail page lists them under Leftover drafts (#543). A discarded draft you send is recorded `sent` (#544), and one you delete loses its draft id, so either drops off the list.
 
 ### 2. A detected reply ends the enrollment
 
 - **Today:** the reply poll ends the enrollment `replied` (`_after_reply`, `netkeeper/services/campaign_replies.py:640-677`), and ending an enrollment changes no message (`netkeeper/services/campaign_engine.py:872-891`). The waiting draft stays `drafted`, and the drafts poll still records it `sent` if you send it.
 - **Trash?** No. You may want to edit the draft and send it as your answer.
-- **By hand:** no. The campaign's enrollment table shows the status, the exit reason, and a link to the inbox (`frontend/src/features/campaigns/campaign-detail-page.tsx:1210-1235`), but not that a draft waits.
+- **By hand:** yes. Leftover drafts lists it last, since you may still want to send it.
 
 ### 3. A detected opt-out ends the enrollment
 
 - **Today:** an unsubscribe reply sets the contact `do_not_contact`, puts the address on the do-not-send list, and ends the enrollment `opted_out` (`netkeeper/services/campaign_replies.py:55-57`, `:653-673`). The draft stays `drafted`.
 - **Trash?** Yes, the strongest candidate. Sending that draft by hand would ignore the opt-out, and nothing in netkeeper can stop a send you make in Gmail.
-- **By hand:** no. Nothing tells you a draft waits for someone who opted out.
+- **By hand:** yes. Leftover drafts lists it first and flags it, and the Gmail nav item shows a dot.
 
 ### 4. A bounce ends the enrollment
 
 - **Today:** the enrollment ends `bounced` (`netkeeper/services/campaign_replies.py:710`) and the address goes on the do-not-send list. The draft stays `drafted`.
 - **Trash?** Yes, a candidate. The draft is addressed to an address that bounced.
-- **By hand:** no, as in case 2.
+- **By hand:** yes, flagged, as in case 3.
 
 ### 5. You remove an enrollment
 
 - **Today:** `remove_enrollment` ends it `removed` and changes no message (`netkeeper/services/campaign_engine.py:859-869`). The draft stays `drafted`.
 - **Trash?** Maybe, but only as a choice you make in the removal itself. You removed the contact from the sequence, which doesn't say what you want done with a draft you may have edited.
-- **By hand:** no.
+- **By hand:** yes. Leftover drafts lists it.
 
 ### 6. You record an outside response (#512)
 
 - **Today:** a response you record (a call, a text, in person) ends every live enrollment of the contact through `_after_reply`, the path a detected reply takes (`netkeeper/services/campaign_replies.py:640-677`), or as an opt-out when you say so. A `pending` enrollment, which detection never sees, ends the same way (`netkeeper/services/outside_responses.py:33-40`, `:272-283`). Drafts stay `drafted`.
 - **Trash?** As case 2 for a response, and as case 3 for an opt-out.
-- **By hand:** no. The record-response dialog doesn't mention waiting drafts.
+- **By hand:** yes, as case 2 or 3. The record-response dialog doesn't mention waiting drafts.
 
 ### 7. You mark a contact do not contact, or add an address to do-not-send
 
 - **Today:** nothing changes at once. The guards check at the next step fire (`netkeeper/crm/do_not_send.py:1-6`; `netkeeper/services/campaign_guards.py:262`, `:300`), and a do-not-contact contact's enrollment then ends `opted_out` (`netkeeper/services/campaign_engine.py:217-220`). A draft step's next step is scheduled only after the draft is seen sent, so while the draft waits, no step fires and nothing checks.
 - **Trash?** Yes, as case 3.
-- **By hand:** no.
+- **By hand:** yes. A draft still waiting for a contact who is do not contact, or who has an address on the do-not-send list, is listed under Leftover drafts and flagged, though its enrollment is live.
 
 ### 8. A campaign is paused or ended
 
@@ -104,7 +104,7 @@ No list of leftover drafts exists in the UI. See [The cleanup list](#the-cleanup
 
 - **Today:** a test send on a mailbox armed for drafts only makes a test draft addressed to the mailbox itself (`netkeeper/services/campaign_review.py:63`). The Message-ID check searches for the newest of them and never touches them (`netkeeper/services/mailboxes.py:339-356`). They stay in Drafts until you delete them.
 - **Trash?** Yes, the safest candidate. netkeeper made them, they go only to you, and no campaign message depends on them. Trash one only after the mailbox is verified, since an unverified mailbox needs one to verify (#304).
-- **By hand:** only when you delete the campaign (case 10).
+- **By hand:** yes. Leftover drafts lists each test draft, and says to keep it until the mailbox's Message-ID check passes.
 
 ### 12. A mailbox is disconnected or its token expires
 
@@ -156,10 +156,11 @@ No list of leftover drafts exists in the UI. See [The cleanup list](#the-cleanup
 
 ## The cleanup list
 
-The issue expected P3-11 to list drafts whose message is `discarded` or whose enrollment has ended. P3-11's goal in the [implementation guide](implementation-guide.md#phase-3-email-campaigns) (campaign list, builder, review, enrollment table, and inbox) doesn't include one, and no such list exists in the UI. Until a switch exists, you can't find these drafts in netkeeper. A follow-up issue should add the list. The data is there:
+The Gmail page's Leftover drafts card lists the drafts netkeeper no longer wants (#543; `netkeeper/services/leftover_drafts.py`). The P3-11 list this catalogue's issue assumed was never built. Each row has an **Open in Gmail** link, which searches the mailbox's account for the draft's Message-ID. The list covers:
 
 - `discarded` messages that still have a `gmail_draft_id` (case 1).
-- `drafted` messages whose enrollment isn't `pending`, `active`, or `paused` (cases 2 to 7), opt-outs and bounces first.
+- `drafted` messages whose enrollment isn't `pending`, `active`, or `paused` (cases 2 to 6).
+- `drafted` messages on a live enrollment whose contact is do not contact or has an address on the do-not-send list (case 7).
 - Test sends with a `gmail_draft_id` (case 11).
 
-Each row needs an **Open in Gmail** link, and the merge preview needs to say that discarded drafts stay in Gmail.
+A draft for a contact who opted out, bounced, is do not contact, or is on the do-not-send list is flagged and listed first, and also puts a dot on the Gmail nav item. A draft left after a reply is listed last. The merge preview says that discarded drafts stay in Gmail and appear in this list. The list only reads: it never calls Gmail, and it deletes nothing.

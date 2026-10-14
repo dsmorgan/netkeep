@@ -1641,6 +1641,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/gmail/leftover-drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Leftover Drafts
+         * @description Drafts netkeeper left in Gmail, for you to clean up by hand. Read-only: it never
+         *     calls Gmail, and netkeeper deletes nothing there.
+         */
+        get: operations["get_gmail_leftover_drafts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -5139,6 +5160,12 @@ export interface components {
          */
         DoNotSendReason: "manual" | "invalid" | "bounced" | "opted_out";
         /**
+         * DraftWarning
+         * @description Why sending the draft would be wrong, strongest first.
+         * @enum {string}
+         */
+        DraftWarning: "opted_out" | "bounced" | "do_not_contact" | "do_not_send";
+        /**
          * DuplicateContact
          * @description The ``409`` body of adding someone already in the address book (#303).
          *
@@ -5408,6 +5435,46 @@ export interface components {
             recent: components["schemas"]["RecentMessageOut"][];
             /** Timezone */
             timezone: string;
+        };
+        /** GmailLeftoverDraftOut */
+        GmailLeftoverDraftOut: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Campaign Id */
+            campaign_id: number;
+            /** Campaign Name */
+            campaign_name: string;
+            /** Contact Id */
+            contact_id: number | null;
+            /** Contact Name */
+            contact_name: string | null;
+            enrollment_status: components["schemas"]["EnrollmentStatus"] | null;
+            /** Keep For Check */
+            keep_for_check: boolean;
+            kind: components["schemas"]["LeftoverKind"];
+            /** Low Priority */
+            low_priority: boolean;
+            /** Mailbox Email */
+            mailbox_email: string | null;
+            /** Message Id */
+            message_id: number | null;
+            /** Rfc822 Message Id */
+            rfc822_message_id: string | null;
+            /** Step Position */
+            step_position: number | null;
+            /** Test Send Id */
+            test_send_id: number | null;
+            warning: components["schemas"]["DraftWarning"] | null;
+        };
+        /** GmailLeftoverDraftsOut */
+        GmailLeftoverDraftsOut: {
+            /** Items */
+            items: components["schemas"]["GmailLeftoverDraftOut"][];
+            /** More */
+            more: boolean;
         };
         /**
          * GmailSetupIn
@@ -6124,6 +6191,11 @@ export interface components {
             /** To Address */
             to_address: string;
         };
+        /**
+         * LeftoverKind
+         * @enum {string}
+         */
+        LeftoverKind: "discarded" | "ended" | "waiting" | "test";
         /**
          * LinkKind
          * @enum {string}
@@ -12353,6 +12425,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GmailActivityOut"];
+                };
+            };
+        };
+    };
+    get_gmail_leftover_drafts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GmailLeftoverDraftsOut"];
                 };
             };
         };

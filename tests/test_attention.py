@@ -44,7 +44,7 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.scoping import get_scoped
+from netkeeper.scoping import get_scoped, scoped
 from netkeeper.services import attention as service
 from netkeeper.services import heat as heat_service
 from netkeeper.services import inbox, linkedin_steps, posture, route_breaker, runs
@@ -60,7 +60,7 @@ NOW = datetime(2026, 9, 16, 15, 0, tzinfo=UTC)
 A = service.ActivityState
 
 #: The most statements one call may cost: the service's own reads, and the endpoint's
-#: with the request's user and settings. Measured at 19 and 21 on the dearest path; the
+#: with the request's user and settings. Measured at 20 and 22 on the dearest path; the
 #: ceiling leaves headroom, and the data-independence test keeps the number flat.
 SERVICE_STATEMENTS_MAX = 30
 ENDPOINT_STATEMENTS_MAX = 32
@@ -340,6 +340,38 @@ def test_only_a_mailbox_that_needs_signing_in_raises_the_gmail_flag(world: World
     assert world.read().flags.gmail is None
 
 
+def _email_draft(session: Session, user: User, status: EnrollmentStatus) -> Message:
+    enrollment = _enroll(session, factories.make_campaign(session, user), status=status)
+    return factories.make_message(
+        session, enrollment, status=MessageStatus.DRAFTED, sent_at=None, gmail_draft_id="d-1"
+    )
+
+
+def test_a_draft_waiting_for_an_opted_out_contact_raises_the_gmail_flag(world: World) -> None:
+    """#543: a reply's draft is no flag; an opt-out's is, until it is sent, and a mailbox
+    to sign in to again outranks it."""
+    with world.write() as (session, user):
+        _email_draft(session, user, EnrollmentStatus.REPLIED)
+    assert world.read().flags.gmail is None
+
+    with world.write() as (session, user):
+        draft = _email_draft(session, user, EnrollmentStatus.OPTED_OUT).id
+    assert world.read().flags.gmail == service.DRAFT_FLAGGED
+
+    with world.write() as (session, user):
+        mailbox = _mailbox(session, user, MailboxStatus.REAUTH_REQUIRED).id
+    assert world.read().flags.gmail == service.REAUTH_REQUIRED
+
+    with world.write() as (session, user):
+        row = get_scoped(session, user, Mailbox, mailbox)
+        assert row is not None
+        row.status = MailboxStatus.OK
+        message = get_scoped(session, user, Message, draft)
+        assert message is not None
+        message.status = MessageStatus.SENT
+    assert world.read().flags.gmail is None
+
+
 def test_resuming_auto_send_clears_the_dashboard_flag(world: World) -> None:
     with world.write() as (session, user):
         account = ensure_account(session, user).id
@@ -503,6 +535,7 @@ def test_flag_labels_are_plain_sentences() -> None:
         service.AUTO_SEND_HELD,
         service.AUTO_SEND_HELD_ACTIVITY,
         service.REAUTH_REQUIRED,
+        service.DRAFT_FLAGGED,
         service.SESSION_FLAGGED,
         service.HEAT_TRIPPED,
         service.BREAKER_TRIPPED,
@@ -548,16 +581,21 @@ def test_one_call_costs_a_bounded_number_of_statements(world: World, engine: Eng
     with world.write() as (session, user):
         _seed_everything(session, user)
         ensure_account(session, user)
+        # A mailbox to sign in to again would skip the leftover-draft read (#543).
+        for mailbox in session.scalars(scoped(user, Mailbox)):
+            mailbox.status = MailboxStatus.OK
 
     count, found = _count_statements(world, engine)
 
     assert found.activity.state is A.IDLE
+    assert found.flags.gmail is None
     assert count <= SERVICE_STATEMENTS_MAX, count
 
 
 def _seed_rows(session: Session, user: User, n: int) -> None:
-    """``n`` rows of each kind a count reads: an unhandled reply, a message waiting for
-    you, a step waiting for Try again, a draft import, and their contacts."""
+    """``n`` rows of each kind a count or flag reads: an unhandled reply, a message waiting
+    for you, a step waiting for Try again, a draft import, a Gmail draft waiting for a
+    bounced contact, and their contacts."""
     campaign = _linkedin_campaign(session, user)
     for _ in range(n):
         factories.make_message(
@@ -578,6 +616,7 @@ def _seed_rows(session: Session, user: User, n: int) -> None:
             not_sent_error="not_typed: nothing",
         )
         _seed_import(session, user)
+        _email_draft(session, user, EnrollmentStatus.BOUNCED)
 
 
 def test_the_statement_count_does_not_grow_with_the_rows(world: World, engine: Engine) -> None:

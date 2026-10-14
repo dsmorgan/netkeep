@@ -16,7 +16,7 @@ import { mailbox, status } from '@/features/mailboxes/test-support'
 import { FakeEventSource, resetFakeEventSource } from '@/test/fake-event-source'
 import { jsonResponse, mockFetch } from '@/test/fetch'
 
-import type { GmailActivity } from './api'
+import { gmailDraftUrl, type GmailActivity, type LeftoverDraft, type LeftoverDrafts } from './api'
 import { GmailPage } from './gmail-page'
 import { capWarning } from './cap'
 
@@ -108,10 +108,32 @@ function posture() {
   }
 }
 
+function leftover(overrides: Partial<LeftoverDraft> = {}): LeftoverDraft {
+  return {
+    kind: 'discarded',
+    message_id: 1,
+    test_send_id: null,
+    campaign_id: 7,
+    campaign_name: 'Autumn hello',
+    step_position: 2,
+    contact_id: 3,
+    contact_name: 'Fictional Person',
+    enrollment_status: 'active',
+    warning: null,
+    low_priority: false,
+    at: NOW,
+    mailbox_email: 'sender@example.com',
+    rfc822_message_id: '<abc123@example.com>',
+    keep_for_check: false,
+    ...overrides,
+  }
+}
+
 interface Backend {
   mailboxes?: ReturnType<typeof status>
   activity?: GmailActivity
   poll?: ReturnType<typeof pollStatus>
+  leftovers?: LeftoverDrafts
 }
 
 function renderPage(backend: Backend = {}) {
@@ -126,6 +148,9 @@ function renderPage(backend: Backend = {}) {
     }
     if (pathname === '/api/v1/gmail/activity') return jsonResponse(backend.activity ?? activity())
     if (pathname === '/api/v1/poll-status') return jsonResponse(backend.poll ?? pollStatus())
+    if (pathname === '/api/v1/gmail/leftover-drafts') {
+      return jsonResponse(backend.leftovers ?? { items: [], more: false })
+    }
     if (pathname === '/api/v1/posture') return jsonResponse(posture())
     if (request.method === 'POST' && pathname === '/api/v1/mailboxes/oauth/start') {
       return jsonResponse({ authorization_url: 'https://accounts.example.test/auth' })
@@ -364,5 +389,74 @@ describe('Gmail page', () => {
     await screen.findByText('sender@example.com')
 
     expect(calls.filter((call) => call.method !== 'GET')).toEqual([])
+  })
+
+  it('says when no draft is left over', async () => {
+    renderPage()
+
+    expect(await screen.findByText('No leftover drafts.')).toBeInTheDocument()
+  })
+
+  it('lists leftover drafts with an Open in Gmail link each, flagging the wrong ones', async () => {
+    renderPage({
+      leftovers: {
+        items: [
+          leftover({
+            kind: 'ended',
+            message_id: 11,
+            enrollment_status: 'opted_out',
+            warning: 'opted_out',
+          }),
+          leftover({ message_id: 12 }),
+          leftover({
+            kind: 'test',
+            message_id: null,
+            test_send_id: 5,
+            contact_id: null,
+            contact_name: null,
+            enrollment_status: null,
+            rfc822_message_id: '<test5@example.com>',
+            keep_for_check: true,
+          }),
+          leftover({
+            kind: 'ended',
+            message_id: 13,
+            enrollment_status: 'replied',
+            low_priority: true,
+          }),
+        ],
+        more: true,
+      },
+    })
+
+    const list = await screen.findByRole('list', { name: 'Leftover drafts' })
+    const rows = within(list).getAllByRole('listitem')
+    expect(rows).toHaveLength(4)
+
+    expect(within(rows[0]!).getByText(/^Opted out/)).toBeInTheDocument()
+    expect(within(rows[0]!).getByRole('note', { name: 'Warning' })).toHaveTextContent(
+      'They opted out. Don’t send this draft.',
+    )
+    expect(within(rows[0]!).getByRole('link', { name: 'Open in Gmail' })).toHaveAttribute(
+      'href',
+      'https://mail.google.com/mail/u/sender@example.com/#search/rfc822msgid%3Aabc123%40example.com',
+    )
+    expect(within(rows[1]!).getByText(/^Discarded by a contact merge/)).toBeInTheDocument()
+    expect(within(rows[1]!).queryByRole('note')).not.toBeInTheDocument()
+    expect(within(rows[2]!).getByText('sender@example.com')).toBeInTheDocument()
+    expect(
+      within(rows[2]!).getByText('Keep it until the mailbox’s Message-ID check passes.'),
+    ).toBeInTheDocument()
+    expect(
+      within(rows[3]!).getByText('They replied. You may still want to send it as your answer.'),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/There are more/)).toBeInTheDocument()
+  })
+
+  it('builds a Gmail link from the Message-ID, or opens Drafts without one', () => {
+    expect(gmailDraftUrl('me+nk@example.com', '<id.1@example.com>')).toBe(
+      'https://mail.google.com/mail/u/me%2Bnk@example.com/#search/rfc822msgid%3Aid.1%40example.com',
+    )
+    expect(gmailDraftUrl(null, null)).toBe('https://mail.google.com/mail/u/0/#drafts')
   })
 })

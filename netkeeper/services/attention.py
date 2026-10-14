@@ -11,8 +11,10 @@ lists, through that page's own helper, so a badge and its page never disagree:
 
 A flag is a state that blocks something until you deal with it, as one plain sentence
 with no names and no message text: auto-send held (Dashboard), a mailbox that needs you
-to sign in again (Gmail), the session flagged or heat tripped (LinkedIn), and a tripped
-breaker (Settings; breakers only, not the full posture check).
+to sign in again, or else a Gmail draft waiting for a contact who opted out, bounced, is
+do not contact or is on the do-not-send list (Gmail, :func:`leftover_drafts.flagged_waiting`,
+#543), the session flagged or heat tripped (LinkedIn), and a tripped breaker (Settings;
+breakers only, not the full posture check).
 
 The activity state covers LinkedIn runs only (``sync_runs``); a campaign send batch or a
 Gmail reply poll never shows as running. The first match wins: Running, Stopped,
@@ -38,7 +40,7 @@ from netkeeper.config import Settings
 from netkeeper.crm import triage
 from netkeeper.models import ImportRun, ImportStatus, Mailbox, MailboxStatus, SyncRunKind, User
 from netkeeper.scoping import scoped_count
-from netkeeper.services import heat, inbox, linkedin_steps, route_breaker, runs
+from netkeeper.services import heat, inbox, leftover_drafts, linkedin_steps, route_breaker, runs
 from netkeeper.services.linkedin_accounts import (
     LEGACY_ACCOUNT_ID,
     find_account,
@@ -64,6 +66,9 @@ AUTO_SEND_HELD_ACTIVITY: Final = (
 )
 """The activity sentence when the hold alone blocks: it holds auto-send, not the rest."""
 REAUTH_REQUIRED: Final = "A mailbox needs you to sign in again."
+DRAFT_FLAGGED: Final = (
+    "A Gmail draft waits for a contact you shouldn't email; see Leftover drafts on the Gmail page."
+)
 SESSION_FLAGGED: Final = "The LinkedIn session is flagged; clear it on the LinkedIn page."
 HEAT_TRIPPED: Final = "LinkedIn heat is high, so runs wait until it cools."
 BREAKER_TRIPPED: Final = (
@@ -153,6 +158,13 @@ def _reauth_required(session: Session, user: User) -> bool:
     return bool(session.scalar(statement))
 
 
+def _gmail_flag(session: Session, user: User) -> str | None:
+    """A mailbox to sign in to again first: it stops every email step."""
+    if _reauth_required(session, user):
+        return REAUTH_REQUIRED
+    return DRAFT_FLAGGED if leftover_drafts.flagged_waiting(session, user) else None
+
+
 def _draft_imports(session: Session, user: User) -> int:
     statement = scoped_count(user, ImportRun).where(ImportRun.status == ImportStatus.DRAFT)
     return session.scalar(statement) or 0
@@ -179,7 +191,7 @@ def attention(session: Session, user: User, *, now: datetime, settings: Settings
     breaker = breaker_tripped(session, user, account_id)
     flags = Flags(
         dashboard=AUTO_SEND_HELD if held else None,
-        gmail=REAUTH_REQUIRED if _reauth_required(session, user) else None,
+        gmail=_gmail_flag(session, user),
         linkedin=SESSION_FLAGGED if flagged else HEAT_TRIPPED if hot else None,
         settings=BREAKER_TRIPPED if breaker else None,
     )

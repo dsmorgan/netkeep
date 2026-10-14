@@ -113,8 +113,10 @@ export function describeMoves(moves: MergeMoves): string[] {
   }
   if (moves.messages_moved > 0) lines.push(moving(moves.messages_moved, 'campaign message'))
   if (moves.messages_discarded > 0) {
+    // netkeeper deletes nothing in Gmail (ADR 0003): a discarded draft stays there (#543).
+    const one = moves.messages_discarded === 1
     lines.push(
-      `${count(moves.messages_discarded, 'unsent campaign message')} ${moves.messages_discarded === 1 ? 'is' : 'are'} discarded, so no step goes out twice`,
+      `${count(moves.messages_discarded, 'unsent campaign message')} ${one ? 'is' : 'are'} discarded, so no step goes out twice; ${one ? 'its Gmail draft, if it has one, stays in your Drafts and is' : 'their Gmail drafts stay in your Drafts and are'} listed under Leftover drafts on the Gmail page`,
     )
   }
   if (moves.history_rows > 0) {

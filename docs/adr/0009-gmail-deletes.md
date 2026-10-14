@@ -43,4 +43,4 @@ Until a switch exists, you clean up by hand. netkeeper has no list of the drafts
 
 ## Amendments
 
-None yet.
+- 2026-10-14: the list of leftover drafts exists on the Gmail page (#543); the switch doesn't.
