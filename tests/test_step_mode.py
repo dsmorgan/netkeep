@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import replace
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +37,7 @@ from netkeeper.models import (
     CampaignStep,
     Contact,
     Enrollment,
+    EnrollmentStatus,
     Message,
     MessageStatus,
     StepMode,
@@ -520,6 +521,67 @@ def test_still_wanted_refuses_a_contact_that_kept_prefill(lane: Lane) -> None:
     assert why == "the step is not an auto-send step"
 
 
+def test_a_scheduled_run_on_a_kept_contact_is_refused_in_prepare(lane: Lane) -> None:
+    """``prepare`` reads the mode for the enrollment: a scheduled run for a contact that
+    kept Prefill opens nothing, whatever the step's own mode."""
+    _switch(lane, StepMode.AUTO_SEND)
+    a = Auto(lane)
+    step_id = _step(lane).id
+
+    def keep(session: Session, user: User) -> None:
+        enrollment = get_scoped(session, user, Enrollment, a.enrollment_id)
+        assert enrollment is not None
+        enrollment.prefill_kept_step_id = step_id
+
+    lane.write(keep)
+    done = message_send.prepare(
+        lane.factory, lane.user_id, a.run_id, settings=AUTO, clock=lambda: NOW, seed=1
+    )
+    assert isinstance(done, message_send.PrefillReport)
+    assert a.run().notes == "not started: the step is not an auto-send step"
+    assert a.message() is None
+
+
+def test_a_merge_keeps_the_prefill_mark_of_the_row_that_wins(lane: Lane) -> None:
+    from netkeeper.crm import identity
+
+    marked = lane.enroll(contact=_other_contact(11))  # active, due: queued at the switch
+    survivor = lane.enroll(contact=dict(CONTACT), status=EnrollmentStatus.PENDING)
+    assert _switch(lane, StepMode.AUTO_SEND).kept_prefill == 1
+    survivor_contact = lane.enrollment(survivor).contact_id
+    loser_contact = lane.enrollment(marked).contact_id
+    lane.write(lambda s, u: identity.merge(s, u, survivor_contact, loser_contact))
+
+    kept = lane.enrollment(survivor)
+    # The loser's row won (active beats pending) and its mark came with it.
+    assert kept.status is EnrollmentStatus.ACTIVE and kept.next_action_at == NOW
+    assert kept.prefill_kept_step_id == _step(lane).id
+    assert _auto_claim(lane) is None
+
+
+def test_a_merge_keeps_the_mark_for_the_merged_rows_next_step(lane: Lane) -> None:
+    from netkeeper.crm import identity
+
+    step_one, step_two = _step(lane, 1).id, _step(lane, 2).id
+
+    def mark(enrollment_id: int, step_id: int) -> None:
+        def act(session: Session, user: User) -> None:
+            row = get_scoped(session, user, Enrollment, enrollment_id)
+            assert row is not None
+            row.prefill_kept_step_id = step_id
+
+        lane.write(act)
+
+    behind = lane.enroll(contact=_other_contact(12))
+    ahead = lane.enroll(contact=dict(CONTACT), current_step=1)
+    mark(behind, step_one)
+    mark(ahead, step_two)
+    survivor_contact = lane.enrollment(ahead).contact_id
+    loser_contact = lane.enrollment(behind).contact_id
+    lane.write(lambda s, u: identity.merge(s, u, survivor_contact, loser_contact))
+    assert lane.enrollment(ahead).prefill_kept_step_id == step_two
+
+
 # --- the preview, the campaign status --------------------------------------------------
 
 
@@ -531,8 +593,9 @@ def test_the_preview_counts_what_a_switch_would_change(lane: Lane) -> None:
             s, u, lane.campaign_id, _step(lane).id, now=NOW, auto_send_on=True
         )
     )
-    assert (shown.mode, shown.queued, shown.kept_prefill, shown.refusal) == (
+    assert (shown.mode, shown.queued, shown.scheduled, shown.kept_prefill, shown.refusal) == (
         StepMode.PREFILL,
+        1,
         1,
         0,
         None,
@@ -697,6 +760,10 @@ def test_the_cli_asks_before_auto_send_and_not_before_prefill(
         campaign = factories.make_campaign(session, user, channels=(LINKEDIN,))
         contact = factories.make_contact(session, user, **_other_contact(7))
         factories.make_enrollment(session, campaign, contact, next_action_at=NOW)
+        later = factories.make_contact(session, user, **_other_contact(8))
+        factories.make_enrollment(
+            session, campaign, later, next_action_at=datetime.now(UTC) + timedelta(days=30)
+        )
         campaign_id, step_id = campaign.id, campaign.steps[0].id
     runner = CliRunner()
 
@@ -710,14 +777,15 @@ def test_the_cli_asks_before_auto_send_and_not_before_prefill(
     declined = runner.invoke(cli, [*args, "auto_send"], input="n\n")
     assert declined.exit_code == 1
     assert step_mode.AUTO_SEND_CONFIRM in declined.output
-    assert "1 contacts already queued for the step keep prefill" in declined.output
+    assert "1 contact already queued for the step keeps prefill" in declined.output
+    assert "1 contact already scheduled for the step will be sent on its own" in (declined.output)
     assert "auto-send is off" in declined.output
     assert "cancelled: step 1 is still prefill" in declined.output
     assert mode() is StepMode.PREFILL
 
     accepted = runner.invoke(cli, [*args, "auto_send"], input="y\n")
     assert accepted.exit_code == 0, accepted.output
-    assert "is now auto_send (was prefill); 1 queued contacts keep prefill" in accepted.output
+    assert "is now auto_send (was prefill); 1 queued contact keeps prefill" in accepted.output
     assert mode() is StepMode.AUTO_SEND
 
     back = runner.invoke(cli, [*args, "prefill"])  # no input: it does not ask

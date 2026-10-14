@@ -4365,6 +4365,14 @@ def campaigns_adopt_template(
     )
 
 
+def _contacts(n: int) -> str:
+    return "1 contact" if n == 1 else f"{n} contacts"
+
+
+def _messages(n: int) -> str:
+    return "1 message" if n == 1 else f"{n} messages"
+
+
 def _mode_lines(p: step_mode.ModePreview, to: StepMode) -> list[str]:
     """What `step-mode` shows before it switches."""
     lines = [
@@ -4374,8 +4382,14 @@ def _mode_lines(p: step_mode.ModePreview, to: StepMode) -> list[str]:
     if to is StepMode.AUTO_SEND:
         lines.append(step_mode.AUTO_SEND_CONFIRM)
         lines.append(
-            f"{p.queued} contacts already queued for the step keep prefill: you prefill them"
-            " as before. Only contacts that reach the step later are sent on their own."
+            f"{_contacts(p.queued)} already queued for the step"
+            f" {'keeps' if p.queued == 1 else 'keep'} prefill: you prefill"
+            f" {'it' if p.queued == 1 else 'them'} as before."
+        )
+        lines.append(
+            f"{_contacts(p.scheduled)} already scheduled for the step will be sent on"
+            f" {'its' if p.scheduled == 1 else 'their'} own, and so will contacts who reach"
+            " the step later."
         )
         if not p.auto_send_on:
             lines.append(
@@ -4386,10 +4400,13 @@ def _mode_lines(p: step_mode.ModePreview, to: StepMode) -> list[str]:
         lines.append("nothing more on this step is sent on its own: each message waits for you.")
         if p.claimed:
             lines.append(
-                f"{p.claimed} messages under way: an auto-send stops before it clicks Send."
+                f"{_messages(p.claimed)} under way: an auto-send stops before it clicks Send."
             )
     if p.prefilled:
-        lines.append(f"{p.prefilled} messages already typed into LinkedIn keep waiting for you.")
+        verb = "keeps" if p.prefilled == 1 else "keep"
+        lines.append(
+            f"{_messages(p.prefilled)} already typed into LinkedIn {verb} waiting for you."
+        )
     lines.append("the switch itself sends nothing.")
     return lines
 
@@ -4450,7 +4467,8 @@ def campaigns_step_mode(
                 auto_send_on=on,
             )
     kept = (
-        f"; {result.kept_prefill} queued contacts keep prefill"
+        f"; {result.kept_prefill} queued"
+        f" {'contact keeps' if result.kept_prefill == 1 else 'contacts keep'} prefill"
         if result.to_mode is StepMode.AUTO_SEND
         else ""
     )

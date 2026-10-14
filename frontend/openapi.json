@@ -9719,6 +9719,10 @@
             ],
             "title": "Refusal"
           },
+          "scheduled": {
+            "title": "Scheduled",
+            "type": "integer"
+          },
           "step_id": {
             "title": "Step Id",
             "type": "integer"
@@ -9732,6 +9736,7 @@
           "mode",
           "auto_send_on",
           "queued",
+          "scheduled",
           "kept_prefill",
           "claimed",
           "prefilled",

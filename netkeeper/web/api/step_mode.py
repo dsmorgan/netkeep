@@ -49,6 +49,10 @@ class ModePreviewOut(BaseModel):
     step sends nothing: it waits for you to prefill it."""
     queued: int
     """Contacts queued for the step now. On a switch to ``auto_send`` they keep Prefill."""
+    scheduled: int
+    """Contacts enrolled and waiting for the step but not queued yet (due later, or
+    waiting on an earlier step). On a switch to ``auto_send`` they are sent on their own
+    when they reach it."""
     kept_prefill: int
     """Contacts that keep the step as a prefill from an earlier switch."""
     claimed: int
@@ -122,6 +126,7 @@ def get_mode(
         mode=p.mode,
         auto_send_on=p.auto_send_on,
         queued=p.queued,
+        scheduled=p.scheduled,
         kept_prefill=p.kept_prefill,
         claimed=p.claimed,
         prefilled=p.prefilled,

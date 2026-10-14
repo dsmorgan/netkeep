@@ -3540,7 +3540,30 @@ def test_0044_keeps_no_step_and_starts_an_empty_history(migration_engine: Engine
 
 def test_0044_downgrades_to_enrollments_without_it(migration_engine: Engine) -> None:
     migrations.upgrade(migration_engine, "0044")
+    with migration_engine.begin() as connection:
+        _seed_users(connection, 1)
+        _insert_contact(connection, id=1, user_id=1)
+        _insert_template(connection, id=1, channel="linkedin")
+        _insert_campaign(connection, id=1, status="active")
+        _insert_step(
+            connection, id=1, campaign_id=1, template_id=1, channel="linkedin", mode="auto_send"
+        )
+        _insert_step(
+            connection,
+            id=2,
+            campaign_id=1,
+            template_id=1,
+            position=2,
+            channel="linkedin",
+            mode="auto_send",
+        )
+        _insert_enrollment(connection, id=1, campaign_id=1, contact_id=1)
+        connection.execute(text("UPDATE enrollments SET prefill_kept_step_id = 1"))
     migrations.downgrade(migration_engine, "0043")
+    with migration_engine.begin() as connection:
+        modes = connection.execute(text("SELECT id, mode FROM campaign_steps ORDER BY id"))
+        # A step a contact kept as a prefill goes back to prefill; the other stays.
+        assert [tuple(r) for r in modes] == [(1, "prefill"), (2, "auto_send")]
     columns = {c["name"] for c in inspect(migration_engine).get_columns("enrollments")}
     assert "prefill_kept_step_id" not in columns
     assert "campaign_step_mode_changes" not in inspect(migration_engine).get_table_names()
