@@ -95,8 +95,17 @@ const mergeFieldsRoute: RouteHandler = ({ url }) => {
     {
       name: 'first_name',
       group: 'contact',
-      description: "The contact's first name.",
+      description:
+        "The contact's preferred name, or their first name when none is set. The same value as preferred_name.",
       insert: 'first_name',
+      example: contactId === null ? 'Alex' : 'Robin',
+      example_source: contactId === null ? 'placeholder' : 'contact',
+    },
+    {
+      name: 'preferred_name',
+      group: 'contact',
+      description: "The contact's preferred name, or their first name when none is set.",
+      insert: 'preferred_name',
       example: contactId === null ? 'Alex' : 'Robin',
       example_source: contactId === null ? 'placeholder' : 'contact',
     },
@@ -332,6 +341,7 @@ describe('preview', () => {
                 field: 'company',
               },
             ],
+            names_used: [],
           }),
       }),
     )
@@ -355,6 +365,49 @@ describe('preview', () => {
 
     expect(requestsTo(seen, 'GET', '/api/v1/contacts')[0]?.search).toContain('q=rob')
     expect(requestsTo(seen, 'GET', '/api/v1/templates/1/preview')[0]?.search).toBe('?contact_id=7')
+    expect(screen.queryByRole('list', { name: 'Names used' })).not.toBeInTheDocument()
+  })
+
+  it.each([
+    {
+      used: 'the preferred name',
+      names: [
+        { field: 'first_name', value: 'Rob', source: 'preferred_name' },
+        { field: 'preferred_name', value: 'Rob', source: 'preferred_name' },
+      ],
+      shown: ['first_name: Rob (preferred name)', 'preferred_name: Rob (preferred name)'],
+    },
+    {
+      used: 'the first name, with no different preferred name set',
+      names: [{ field: 'preferred_name', value: 'Robin', source: 'first_name' }],
+      shown: ['preferred_name: Robin (first name, no different preferred name set)'],
+    },
+    {
+      used: 'nothing, with neither name set',
+      names: [{ field: 'first_name', value: null, source: null }],
+      shown: ['first_name: empty, the contact has no first or preferred name'],
+    },
+  ])('says when a name field used $used', async ({ names, shown }) => {
+    mockApi(
+      routes([template()], {
+        'GET /api/v1/contacts': () =>
+          jsonResponse({
+            items: [{ id: 7, first_name: 'Robin', last_name: 'Example', current_company: null }],
+            total: 1,
+            describe: '',
+          }),
+        'GET /api/v1/templates/1/preview': () =>
+          jsonResponse({ subject: 'Hi', body: 'Hi.', issues: [], names_used: names }),
+      }),
+    )
+    await renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: 'reconnect' }))
+    fireEvent.change(await screen.findByLabelText('Contact'), { target: { value: 'rob' } })
+    fireEvent.click(await screen.findByRole('button', { name: /Robin Example/ }, WAIT))
+
+    const list = await screen.findByRole('list', { name: 'Names used' })
+    const items = within(list).getAllByRole('listitem')
+    expect(items.map((item) => item.textContent)).toEqual(shown)
   })
 
   it('says it shows the saved version while the editor has changes', async () => {
@@ -978,14 +1031,21 @@ describe('merge-field helper', () => {
             describe: '',
           }),
         'GET /api/v1/templates/1/preview': () =>
-          jsonResponse({ subject: 'Hi Robin', body: 'Hi Robin at .', issues: [] }),
+          jsonResponse({ subject: 'Hi Robin', body: 'Hi Robin at .', issues: [], names_used: [] }),
       }),
     )
     await renderPage()
     fireEvent.click(await screen.findByRole('button', { name: 'reconnect' }))
     const helper = await screen.findByRole('region', { name: 'Merge fields' }, WAIT)
     const insert = await within(helper).findByRole('button', { name: 'Insert {{ first_name }}' })
-    expect(insert).toHaveAccessibleDescription(/The contact's first name\.\s*Example: Alex/)
+    expect(insert).toHaveAccessibleDescription(
+      /The contact's preferred name, or their first name when none is set\. The same value as preferred_name\.\s*Example: Alex/,
+    )
+    expect(
+      within(helper).getByRole('button', { name: 'Insert {{ preferred_name }}' }),
+    ).toHaveAccessibleDescription(
+      /The contact's preferred name, or their first name when none is set\.\s*Example: Alex/,
+    )
     expect(within(helper).getByText(/Examples are made up/)).toBeInTheDocument()
     expect(requestsTo(seen, 'GET', '/api/v1/templates/merge-fields')[0]?.search).toBe('')
 
@@ -1187,7 +1247,7 @@ describe('draft with your AI assistant', () => {
       routes([row], {
         'GET /api/v1/contacts': () => jsonResponse({ items: [ROBIN], total: 1, describe: '' }),
         'GET /api/v1/templates/1/preview': () =>
-          jsonResponse({ subject: 'Hi Robin', body: 'Hi Robin at .', issues: [] }),
+          jsonResponse({ subject: 'Hi Robin', body: 'Hi Robin at .', issues: [], names_used: [] }),
         ...extra,
       }),
     )

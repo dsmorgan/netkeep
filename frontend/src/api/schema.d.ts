@@ -6718,6 +6718,25 @@ export interface components {
             /** Moved */
             moved: number;
         };
+        /**
+         * NameSource
+         * @description Which of the contact's names a name field rendered.
+         * @enum {string}
+         */
+        NameSource: "preferred_name" | "first_name";
+        /**
+         * NameUsedOut
+         * @description A name field in a preview: its rendered ``value``, and ``source``, whether that is
+         *     the contact's preferred name or their first name. Both are ``None`` when the contact
+         *     has neither name, so the field rendered empty.
+         */
+        NameUsedOut: {
+            /** Field */
+            field: string;
+            source: components["schemas"]["NameSource"] | null;
+            /** Value */
+            value: string | null;
+        };
         /** Neq */
         Neq: {
             /**
@@ -8319,6 +8338,8 @@ export interface components {
             body: string;
             /** Issues */
             issues: components["schemas"]["LintIssueOut"][];
+            /** Names Used */
+            names_used: components["schemas"]["NameUsedOut"][];
             /** Subject */
             subject: string | null;
         };

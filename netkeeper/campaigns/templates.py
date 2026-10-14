@@ -49,6 +49,7 @@ from netkeeper.campaigns.render import (
     MergeValues,
     Rendered,
     Severity,
+    fields_used,
     lint,
     merge_fields,
     placeholder_example,
@@ -574,15 +575,19 @@ def contact_fields(contact: Contact, today: date) -> dict[str, object]:
     """A contact's merge values (spec 11.1), keyed by
     :data:`~netkeeper.campaigns.render.CONTACT_FIELDS`.
 
-    ``first_name`` is the preferred name, falling back to the first name.
+    ``first_name`` and ``preferred_name`` are the same value: the preferred name,
+    falling back to the first name (#509). ``first_name`` has always been this, so
+    a template saved before ``preferred_name`` existed renders as it did.
     ``last_position_change`` is the latest start or end date on or before
     ``today`` among the contact's positions: leaving a job is a change just as
     starting one is (#232), and neither an announced departure nor an announced
     new job has happened yet (#255). ``years_since_connected`` counts whole
     years to ``today``.
     """
+    name = contact.preferred_name or contact.first_name
     values: dict[str, object] = {
-        "first_name": contact.preferred_name or contact.first_name,
+        "first_name": name,
+        "preferred_name": name,
         "last_name": contact.last_name,
         "company": contact.current_company,
         "title": contact.current_title,
@@ -621,6 +626,57 @@ def render_preview(
     values = MergeValues(contact=contact_fields(contact, day), personal_line=personal_line)
     subject = None if row.channel is TemplateChannel.LINKEDIN else row.subject
     return render(row.channel, subject, row.body, values, today=day)
+
+
+NAME_FIELDS: Final = ("first_name", "preferred_name")
+"""The merge fields that give the contact's preferred name, falling back to the first name."""
+
+
+class NameSource(enum.StrEnum):
+    """Which of the contact's names a name field rendered."""
+
+    PREFERRED_NAME = "preferred_name"
+    FIRST_NAME = "first_name"
+
+
+@dataclass(frozen=True, slots=True)
+class NameUsed:
+    """A name field a previewed template names, the value it rendered and where that came
+    from. ``value`` and ``source`` are ``None`` when the contact has neither name, so the
+    field renders empty."""
+
+    field: str
+    value: str | None
+    source: NameSource | None
+
+
+def name_source(contact: Contact) -> NameSource | None:
+    """Which name :func:`contact_fields` gives ``first_name`` and ``preferred_name``, or
+    ``None`` when neither is set.
+
+    A contact's ``preferred_name`` starts as its first name (spec 8.1), so it counts as
+    the preferred name only when it differs from the first name.
+    """
+    if not (contact.preferred_name or contact.first_name):
+        return None
+    if contact.preferred_name and contact.preferred_name != contact.first_name:
+        return NameSource.PREFERRED_NAME
+    return NameSource.FIRST_NAME
+
+
+def names_used(row: Template, contact: Contact) -> list[NameUsed]:
+    """Each name field (:data:`NAME_FIELDS`) ``row`` names, with the value it renders for
+    ``contact`` and whether that is the preferred name or the first name, for the preview
+    (#509). Empty for a template that names neither."""
+    subject = None if row.channel is TemplateChannel.LINKEDIN else row.subject
+    used = fields_used(row.channel, subject, row.body)
+    source = name_source(contact)
+    value = None if source is None else _shown(contact.preferred_name or contact.first_name)
+    return [
+        NameUsed(name, value, None if value is None else source)
+        for name in NAME_FIELDS
+        if name in used
+    ]
 
 
 # --- the editor's field list --------------------------------------------------------

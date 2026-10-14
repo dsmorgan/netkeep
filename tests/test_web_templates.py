@@ -255,6 +255,7 @@ async def test_preview(client: httpx.AsyncClient, running_app: FastAPI) -> None:
                 "line": 1,
             }
         ],
+        "names_used": [{"field": "first_name", "value": "Bo", "source": "preferred_name"}],
     }
     missing = await client.get(
         f"/api/v1/templates/{created['id']}/preview", params={"contact_id": contact_id + 999}
@@ -358,7 +359,7 @@ async def test_merge_fields_without_a_contact_are_invented_placeholders(
     listed = response.json()
     assert listed["contact_id"] is None
     by_name = {f["name"]: f for f in listed["fields"]}
-    assert list(by_name)[:2] == ["first_name", "last_name"]
+    assert list(by_name)[:3] == ["first_name", "preferred_name", "last_name"]
     assert by_name["first_name"] == {
         "name": "first_name",
         "group": "contact",
@@ -386,6 +387,7 @@ async def test_merge_fields_with_a_contact_show_its_values_and_no_me_fields(
     assert listed["contact_id"] == contact_id
     shown = {f["name"]: (f["example"], f["example_source"]) for f in listed["fields"]}
     assert shown["first_name"] == ("Bo", "contact")
+    assert shown["preferred_name"] == ("Bo", "contact")
     assert shown["company"] == ("Fixture Co", "contact")
     assert shown["location"] == (None, "contact")  # renders empty for this contact
     assert not [name for name in shown if name.startswith("me")]  # #320, #342

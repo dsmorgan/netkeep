@@ -6,6 +6,10 @@
  * exactly that. A field the contact has no value for renders empty and shows
  * as a warning under the preview; only a template that cannot render at all
  * is an error.
+ *
+ * Under the message, each name field the template names says which of the
+ * contact's names it used (#509): `{{ first_name }}` and `{{ preferred_name }}`
+ * both give the preferred name, or the first name when none is set.
  */
 import { useQuery } from '@tanstack/react-query'
 import { useId, useState } from 'react'
@@ -19,7 +23,7 @@ import { Callout, ErrorNote, LoadingNote } from '@/features/crm/controls'
 import { useDebounced } from '@/features/crm/use-debounced'
 
 import { contactSearchQuery, previewQuery } from './api'
-import type { ContactRow } from './api'
+import type { ContactRow, TemplatePreview } from './api'
 import { LintList } from './lint-list'
 
 interface PreviewPanelProps {
@@ -83,7 +87,7 @@ function Rendered({ templateId, contactId }: { templateId: number; contactId: nu
   if (preview.isPending) return <LoadingNote label="Rendering…" />
   if (preview.isError)
     return <ErrorNote label="Could not render the preview" error={preview.error} />
-  const { subject, body, issues } = preview.data
+  const { subject, body, issues, names_used: namesUsed } = preview.data
   return (
     <div className="space-y-3">
       <section aria-label="Rendered message" className="space-y-2 rounded-lg border p-3">
@@ -108,8 +112,37 @@ function Rendered({ templateId, contactId }: { templateId: number; contactId: nu
           </pre>
         </div>
       </section>
+      {namesUsed.length > 0 && <NamesUsed names={namesUsed} />}
       {issues.length > 0 && <LintList issues={issues} label="Preview issues" />}
     </div>
+  )
+}
+
+const NAME_SOURCES: Record<NonNullable<NameUsed['source']>, string> = {
+  preferred_name: 'preferred name',
+  first_name: 'first name, no different preferred name set',
+}
+
+type NameUsed = TemplatePreview['names_used'][number]
+
+/** Which of the contact's names each name field rendered, like "first_name: Liz (preferred name)". */
+function NamesUsed({ names }: { names: NameUsed[] }) {
+  return (
+    <ul aria-label="Names used" className="space-y-0.5 text-xs text-muted-foreground">
+      {names.map((name) => (
+        <li key={name.field}>
+          <span className="font-mono">{name.field}</span>:{' '}
+          {name.value === null || name.source === null ? (
+            'empty, the contact has no first or preferred name'
+          ) : (
+            <>
+              <span className="font-medium text-foreground">{name.value}</span> (
+              {NAME_SOURCES[name.source]})
+            </>
+          )}
+        </li>
+      ))}
+    </ul>
   )
 }
 
