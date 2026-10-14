@@ -378,9 +378,9 @@ describe('preview', () => {
       shown: ['first_name: Rob (preferred name)', 'preferred_name: Rob (preferred name)'],
     },
     {
-      used: 'the first name, with no different preferred name set',
+      used: 'the first name, with no preferred name set',
       names: [{ field: 'preferred_name', value: 'Robin', source: 'first_name' }],
-      shown: ['preferred_name: Robin (first name, no different preferred name set)'],
+      shown: ['preferred_name: Robin (first name; no preferred name set)'],
     },
     {
       used: 'nothing, with neither name set',

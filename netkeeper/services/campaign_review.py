@@ -659,9 +659,12 @@ def message_fingerprint(
     if contact is None:
         return _digest([step_print, None])
     values = merge_values(contact, campaign, step, today, enrollment_id=enrollment_id)
-    # preferred_name is always first_name's value (#509), so hashing it adds nothing,
-    # and hashing it would undo every approval given before it existed.
-    fields = {k: v for k, v in values.contact.items() if k != "preferred_name"}
+    # preferred_name is first_name's value (#509): while the two agree, hashing it adds
+    # nothing and would undo every approval given before it existed. Should they ever
+    # differ, it is hashed, so a change to it still undoes the approval.
+    fields = dict(values.contact)
+    if fields.get("preferred_name") == fields.get("first_name"):
+        fields.pop("preferred_name", None)
     context = {
         "contact": fields,
         "campaign_name": values.campaign_name,

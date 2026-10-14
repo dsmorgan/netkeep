@@ -120,7 +120,7 @@ function Rendered({ templateId, contactId }: { templateId: number; contactId: nu
 
 const NAME_SOURCES: Record<NonNullable<NameUsed['source']>, string> = {
   preferred_name: 'preferred name',
-  first_name: 'first name, no different preferred name set',
+  first_name: 'first name; no preferred name set',
 }
 
 type NameUsed = TemplatePreview['names_used'][number]
