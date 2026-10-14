@@ -27,6 +27,7 @@ from netkeeper.models import (
     InteractionKind,
     ListKind,
     ListMember,
+    MailboxStatus,
     MessageStatus,
     TemplateChannel,
     User,
@@ -35,6 +36,8 @@ from netkeeper.models import (
 from netkeeper.models.base import utcnow
 from netkeeper.scoping import scoped, scoped_count
 from netkeeper.services import mailboxes as mailbox_service
+from netkeeper.services import route_breaker
+from netkeeper.services.linkedin_accounts import ensure_account
 from netkeeper.services.linkedin_session import flag_session
 from netkeeper.web.app import API_PREFIX
 from netkeeper.web.security import CLIENT_HEADER, CLIENT_HEADER_VALUE
@@ -45,6 +48,7 @@ from .registry import (
     IMPORT_MAPPING,
     REGISTRY,
     ListEndpoint,
+    _seed_inbox,
     _seed_linkedin_ready,
     _seed_linkedin_waiting,
     seed_contacts,
@@ -284,6 +288,61 @@ async def test_posture_is_isolated(running_app: FastAPI) -> None:
     # the one unavoidable warning here (no browser probe, spec 9.1) is the
     # only thing keeping it False, not anything of A's.
     assert all("checkpoint" not in warning for warning in b_report["warnings"])
+
+
+async def test_attention_is_isolated(running_app: FastAPI) -> None:
+    """``GET /attention`` is a record of counts and flags, not a list, so it is not in
+    ``REGISTRY`` (#508). Each user's counts, flags and activity are their own, both ways:
+    A has inbox items, waiting messages, a draft import and a flagged session; B has a
+    Try again step, a tripped breaker and a mailbox that needs signing in again."""
+    factory: sessionmaker[Session] = running_app.state.session_factory
+    with session_scope(factory, write=True) as session:
+        a = User(kind=UserKind.HOSTED, display_name="A")
+        b = User(kind=UserKind.HOSTED, display_name="B")
+        session.add_all([a, b])
+        session.flush()
+        _seed_inbox(session, a)
+        _seed_linkedin_waiting(session, a)
+        import_service.create_run(
+            session, a, filename="people.csv", content=IMPORT_CSV, mapping=IMPORT_MAPPING
+        )
+        flag_session(session, a, Outcome.CHECKPOINT, url="https://example.invalid/checkpoint/x")
+        _seed_linkedin_ready(session, b)
+        account = ensure_account(session, b).id
+        for _ in range(3):
+            route_breaker.record(
+                session, b, account, route_changed=True, succeeded=False, now=utcnow()
+            )
+        mailbox = mailbox_service.connect(session, b, "b@example.test", "rt-b", daily_cap=80)
+        mailbox.status = MailboxStatus.REAUTH_REQUIRED
+        a_id, b_id = a.id, b.id
+
+    a_body = await _get(running_app, a_id, "/attention")
+    b_body = await _get(running_app, b_id, "/attention")
+
+    assert a_body["counts"] == {
+        "inbox": 2,
+        "dashboard": 2,
+        "waiting": 2,
+        "try_again": 0,
+        "triage": 4,
+        "imports": 1,
+    }
+    assert b_body["counts"] == {
+        "inbox": 0,
+        "dashboard": 1,
+        "waiting": 0,
+        "try_again": 1,
+        "triage": 3,
+        "imports": 0,
+    }
+    assert a_body["flags"]["linkedin"] is not None
+    assert a_body["flags"]["settings"] is None and a_body["flags"]["gmail"] is None
+    assert b_body["flags"]["linkedin"] is None
+    assert b_body["flags"]["settings"] is not None and b_body["flags"]["gmail"] is not None
+    assert a_body["activity"]["label"] != b_body["activity"]["label"]
+    assert a_body["title_total"] == 5
+    assert b_body["title_total"] == 1
 
 
 async def test_inbound_this_week_is_isolated(running_app: FastAPI) -> None:
