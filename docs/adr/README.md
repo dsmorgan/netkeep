@@ -21,5 +21,6 @@ An ADR records one decision, the context that forced it, and its consequences. T
 | [0006](0006-observe-dont-request.md) | Observe, don't request | Accepted |
 | [0007](0007-prefill-inputs.md) | The prefill's inputs: one Message click, typing into one verified composer, never Enter | Accepted |
 | [0008](0008-auto-send.md) | Auto-send clicks Send, only from the scheduler, and stops at the first doubt | Accepted |
+| [0009](0009-gmail-deletes.md) | netkeeper deletes nothing in Gmail; a future trash switch follows fixed rules | Proposed |
 
 The mechanics behind ADRs 0006, 0007, and 0008 (the browser inputs, their checks, and their pins) are in [How netkeeper drives a LinkedIn page](../linkedin-browser-inputs.md).
