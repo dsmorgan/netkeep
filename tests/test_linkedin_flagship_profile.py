@@ -397,6 +397,21 @@ def test_a_website_outside_the_wrapper_is_read_as_it_is() -> None:
     assert info.websites == ("https://priya-fake.example.test/",)
 
 
+def test_a_phone_shown_as_text_with_a_mobile_label_reads_as_the_number() -> None:
+    """The CP8c overlay showed the phone as plain text beside ``(Mobile)``, not a ``tel:`` link."""
+    body = contact_info_payload(
+        PRIYA,
+        phones=["+1 555 0101"],
+        phone_labels=["(Mobile)"],
+        birthday="March 3",
+        connected_since="Oct 3, 2023",
+    )
+    info = parse_contact_info(body, slug=PRIYA.slug)
+    assert info.phones == ("+1 555 0101",)
+    assert info.birthday == "March 3"
+    assert info.connected_on == date(2023, 10, 3)
+
+
 def test_the_invented_sections_leave_out_what_does_not_read() -> None:
     body = contact_info_payload(
         PRIYA, phones=["call me maybe"], twitter=["https://not a handle"], birthday=""
