@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
-from typing import Any
+from typing import Any, Final
 
 import factories
 import pytest
@@ -830,3 +830,73 @@ def test_preferred_name_leaves_message_fingerprints_as_they_were(
         "step-print", contact, campaign, step, today, enrollment_id=1
     )
     assert got == expected
+
+
+PRE_509_FINGERPRINT: Final = "c814828e38cb5070d6362aa78fd9f7ba02be97e1b14468baf5887792e20a32cf"
+"""``message_fingerprint`` of the invented contact below, computed on origin/main before
+#509 (23feaf25). It must not change, or approvals given before #509 come undone."""
+
+
+def test_a_fixed_contacts_fingerprint_matches_the_one_before_509(
+    writer: Session, user: User
+) -> None:
+    contact = factories.make_contact(
+        writer,
+        user,
+        first_name="Robert",
+        preferred_name="Bob",
+        last_name="Fixture",
+        current_company="Fixture Co",
+        current_title="Engineer",
+        location="Springfield",
+        connected_on=date(2019, 9, 27),
+        emails=["bob@example.com"],
+    )
+    got = campaign_review.message_fingerprint(
+        "step-print",
+        contact,
+        Campaign(name="Example campaign"),
+        CampaignStep(position=1),
+        date(2026, 9, 26),
+        enrollment_id=1,
+    )
+    assert got == PRE_509_FINGERPRINT
+
+
+def test_editing_the_preferred_name_changes_the_fingerprint(writer: Session, user: User) -> None:
+    """A message of a template that uses ``{{ preferred_name }}`` changes when the name
+    does, so its approval must come undone."""
+    _create(writer, user, body="Hi {{ preferred_name }}")
+    contact = factories.make_contact(
+        writer, user, first_name="Robert", preferred_name="Bob", emails=["bob@example.com"]
+    )
+    campaign, step = Campaign(name="Example campaign"), CampaignStep(position=1)
+
+    def fingerprint() -> str:
+        return campaign_review.message_fingerprint(
+            "step-print", contact, campaign, step, TODAY, enrollment_id=1
+        )
+
+    before = fingerprint()
+    contact.preferred_name = "Rob"
+    assert fingerprint() != before
+
+
+def test_the_fingerprint_hashes_preferred_name_should_it_differ_from_first_name(
+    writer: Session, user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fail-safe: preferred_name is left out only while it equals first_name."""
+    contact = factories.make_contact(writer, user, emails=["bob@example.com"])
+    campaign, step = Campaign(name="Example campaign"), CampaignStep(position=1)
+    real = contact_fields
+
+    def with_preferred(name: str) -> str:
+        def fields(c: Any, day: date) -> dict[str, object]:
+            return {**real(c, day), "first_name": "Bob", "preferred_name": name}
+
+        monkeypatch.setattr(campaign_review, "contact_fields", fields)
+        return campaign_review.message_fingerprint(
+            "step-print", contact, campaign, step, TODAY, enrollment_id=1
+        )
+
+    assert with_preferred("Bob") != with_preferred("Rob") != with_preferred("Bobby")
