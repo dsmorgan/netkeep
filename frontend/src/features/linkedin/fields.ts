@@ -100,7 +100,24 @@ export function formatFields(data: Record<string, unknown> | null | undefined): 
     ...KNOWN_ORDER.filter((key) => keys.includes(key)),
     ...keys.filter((key) => !KNOWN_ORDER.includes(key)).sort(),
   ]
-  return ordered.map((key) => ({ label: titleCase(key), value: display(data[key]) }))
+  return ordered.flatMap((key) => {
+    const value = data[key]
+    // A nested count object (a run's `harvests`, #465) becomes one labeled row per entry,
+    // "Harvests Applied: 3", never a JSON blob. Any key works, so new counts need no change here.
+    if (isPlainObject(value)) {
+      const entries = Object.entries(value)
+      if (entries.length === 0) return [{ label: titleCase(key), value: '—' }]
+      return formatFields(value).map((field) => ({
+        label: `${titleCase(key)} ${field.label}`,
+        value: field.value,
+      }))
+    }
+    return [{ label: titleCase(key), value: display(value) }]
+  })
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /** The first few fields of `progress`/`counts`, as one line for a table cell. */

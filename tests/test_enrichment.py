@@ -1167,6 +1167,24 @@ async def test_max_visits_never_raises_the_budget(session_factory: sessionmaker[
     assert len(browser.visited()) == 10 == _spent(session_factory, user_id)
 
 
+async def test_a_run_with_nothing_due_stops_nothing_due_and_completes(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """#465: an empty plan ends ``nothing_due`` (completed), not ``end_of_plan``, and
+    visits nothing."""
+    user_id, _ = _setup(session_factory, [])
+    browser = FakeBrowser.of([])
+
+    report = await _enrich(session_factory, user_id, browser)
+
+    assert report.result.reason is StopReason.NOTHING_DUE
+    assert (report.result.planned, report.result.visits) == (0, 0)
+    assert browser.visited() == []
+    run = _read(session_factory, user_id, lambda s, u: runs.get_run(s, u, report.run_id))
+    assert (run.status, run.stop_reason) == ("completed", "nothing_due")
+    assert runs.view(run).stop_reason_text == "no contact was due for a visit"
+
+
 async def test_the_run_row_records_how_the_run_ended(
     session_factory: sessionmaker[Session],
 ) -> None:
@@ -1762,7 +1780,7 @@ def test_a_natural_end_that_read_one_overlay_reads_contact_info_again(reason: St
     [
         reason
         for reason in StopReason
-        if reason not in (StopReason.END_OF_PLAN, StopReason.VISIT_BUDGET)
+        if reason not in (StopReason.END_OF_PLAN, StopReason.NOTHING_DUE, StopReason.VISIT_BUDGET)
     ],
 )
 def test_no_other_ending_reads_contact_info_again(reason: StopReason) -> None:
@@ -1793,7 +1811,13 @@ def test_the_contact_info_caps_are_lost_again() -> None:
     [
         reason
         for reason in StopReason
-        if reason not in (StopReason.END_OF_PLAN, StopReason.VISIT_BUDGET, StopReason.ANSWER_LOST)
+        if reason
+        not in (
+            StopReason.END_OF_PLAN,
+            StopReason.NOTHING_DUE,
+            StopReason.VISIT_BUDGET,
+            StopReason.ANSWER_LOST,
+        )
     ],
 )
 def test_no_other_ending_is_lost_again(reason: StopReason) -> None:
