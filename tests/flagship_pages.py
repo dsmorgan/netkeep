@@ -1096,3 +1096,44 @@ def contact_info_payload(
     body = rows.model(_el("div", {"data-testid": "fake-overlay", "children": children}))
     rows.model([f"$L{body}"], row="0")
     return rows.payload()
+
+
+# --- the missing-profile page (#514) -------------------------------------------------------
+
+#: The missing-profile page's page key and route, as the CP8c capture (#484) recorded them.
+MISSING_PAGE_KEY: Final = "urn:li:page:d_flagship3_404"
+MISSING_PAGE_ROUTE: Final = "/404/"
+
+
+def missing_profile_payload(
+    *, page_key: str | None = MISSING_PAGE_KEY, initial_path: str | None = MISSING_PAGE_ROUTE
+) -> bytes:
+    """The flight a ``GET /in/<slug>/`` for a profile that does not exist carries (#514).
+
+    LinkedIn answers ``200`` with its missing-profile page: a router whose
+    ``initialPath`` is ``/404/``, a page instance of ``urn:li:page:d_flagship3_404``,
+    and no ``profile-top-card`` view. The anchors are the capture's; the layout around
+    them is **invented**. ``page_key`` and ``initial_path`` set either anchor, or leave
+    it out with ``None``.
+    """
+    rows = _Rows()
+    router = rows.module("RouterProvider")
+    props: dict[str, Any] = {
+        "children": [
+            _el(
+                "main",
+                {
+                    "children": [
+                        _el("h1", {"children": ["This page doesn't exist"]}),
+                        _el("a", {"href": "/feed/", "children": ["Go to your feed"]}),
+                    ]
+                },
+            )
+        ]
+    }
+    if initial_path is not None:
+        props["initialPath"] = initial_path
+    if page_key is not None:
+        props["pageInstance"] = f"{page_key};fakeTrackingId0000=="
+    rows.model(_el(f"$L{router}", props), row="0")
+    return rows.payload()

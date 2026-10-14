@@ -42,6 +42,7 @@ from flagship_pages import (
     contact_info_payload,
     document_html,
     experience_payload,
+    missing_profile_payload,
     profile_payload,
 )
 from voyager_pages import PEOPLE, Person
@@ -69,6 +70,8 @@ pytestmark = pytest.mark.skipif(
 
 CDP_URL = os.environ.get("NETKEEPER_CDP_URL", "http://127.0.0.1:9222")
 PRIYA, MATEO = PEOPLE[0], PEOPLE[1]
+#: #514: an invented person whose profile does not exist.
+QUORBELLE = Person(514, "Quorbelle", "Fictionary", None, public_id="quorbelle-fictionary")
 LOCATION = "Faketown, State of Example"
 ROLES = (Role("Staff Engineer", "Fictional Robotics Co", "Full-time", "Aug 2021 - Present"),)
 
@@ -152,8 +155,23 @@ _SCRIPT = """
 """
 
 
+#: #514: LinkedIn's missing-profile page moves the tab to ``/404/`` about 100 ms after
+#: ``load``, from its own script, without a request for that path.
+_MISSING_SCRIPT = """
+<script>
+  window.addEventListener('load', () => {
+    setTimeout(() => { history.replaceState(null, '', '/404/'); }, 100);
+  });
+</script>
+"""
+
+
 class _Replica(BaseHTTPRequestHandler):
     people: ClassVar[dict[str, Person]] = {}
+    #: #514: slugs whose url answers LinkedIn's missing-profile page (200, then /404/).
+    missing: ClassVar[set[str]] = set()
+    #: Every ``GET`` path the replica received, in order.
+    fetched: ClassVar[list[str]] = []
     controls: ClassVar[int] = 1
     received: ClassVar[list[dict[str, Any]]] = []
     #: #197: answers that break off mid-body, once each: ``"profile:<slug>"`` for the
@@ -170,6 +188,13 @@ class _Replica(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = urlsplit(self.path).path
         slug = path.removeprefix("/in/").strip("/") if path.startswith("/in/") else ""
+        type(self).fetched.append(path)
+        if slug in self.missing:
+            page = document_html(missing_profile_payload()).replace(
+                "</body>", _MISSING_SCRIPT + "</body>"
+            )
+            self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
+            return
         person = self.people.get(slug)
         if person is None:
             self._send(404, b"<html>gone</html>", "text/html")
@@ -306,6 +331,8 @@ class _Replica(BaseHTTPRequestHandler):
 @pytest.fixture
 def site() -> Iterator[str]:
     _Replica.people = {p.slug: p for p in (PRIYA, MATEO)}
+    _Replica.missing = set()
+    _Replica.fetched = []
     _Replica.controls = 1
     _Replica.received = []
     _Replica.drop = set()
@@ -548,3 +575,29 @@ async def test_answers_the_page_aborts_after_reading_are_read_from_their_streame
     received = [(r["path"], r["body"], r["marker"]) for r in _Replica.received]
     assert received == [(urlsplit(s["path"]).path, s["body"], s["marker"]) for s in sent]
     assert [path for path, _, _ in received] == [COMPONENT_PATH, NAVIGATION_PATH]
+
+
+# --- #514: LinkedIn's missing-profile page ---------------------------------------------------
+
+
+async def test_the_missing_profile_page_is_not_found_and_the_run_goes_on(
+    provider: AttachBrowserProvider, site: str
+) -> None:
+    """Quorbelle's url answers 200 with the missing-profile page, whose own script then
+    moves the tab to /404/. Her visit is NotFound with no scroll and no click; Mateo's
+    visit after it reads whole. Nothing asked for /404/."""
+    _Replica.missing = {QUORBELLE.slug}
+    result, harvests, sent, log = await _visit(
+        provider, site, [_target(QUORBELLE), _target(MATEO)], landing_wait_s=5.0
+    )
+    assert [h.outcome for h in harvests] == [Outcome.NOT_FOUND, Outcome.OK]
+    assert result.reason is StopReason.END_OF_PLAN
+    assert (result.not_found, result.unreadable, result.clicks) == (1, 0, 1)
+    assert "/404/" not in _Replica.fetched
+    pages = [path for path in _Replica.fetched if path != "/favicon.ico"]  # Chrome's own
+    assert pages == [f"/in/{QUORBELLE.slug}/", f"/in/{MATEO.slug}/"]
+    # Only Mateo's page sent anything: Quorbelle's visit spent no scroll and no click.
+    received = [(r["path"], r["body"], r["marker"]) for r in _Replica.received]
+    assert received == [(urlsplit(s["path"]).path, s["body"], s["marker"]) for s in sent]
+    assert [path for path, _, _ in received] == [COMPONENT_PATH, NAVIGATION_PATH]
+    assert log["clicks"] == [{"trusted": True, "text": "Contact info"}]

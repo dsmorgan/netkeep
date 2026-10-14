@@ -79,6 +79,18 @@ COMPONENT_PATH: Final = "/flagship-web/rsc-action/actions/component"  # captured
 #: The top card: degree, headline, location, the Contact info link.
 TOP_CARD_VIEW: Final = "profile-top-card"  # captured 2026-09-24
 
+#: Where LinkedIn's own script moves the tab, about 100 ms after ``load``, when a
+#: profile does not exist (#514). The document still answers ``200`` at ``/in/<slug>/``,
+#: and no request for this path is made.
+MISSING_PAGE_PATH: Final = "/404/"  # captured 2026-10-14
+
+#: The missing-profile document's page instance, ``urn:li:page:d_flagship3_404``, as a
+#: whole string or before a ``;`` and its tracking suffix (#514).
+MISSING_PAGE_KEY: Final = "urn:li:page:d_flagship3_404"  # captured 2026-10-14
+
+#: The router field of the missing-profile document's flight, and its value (#514).
+MISSING_PAGE_ROUTE_FIELD: Final = "initialPath"  # captured 2026-10-14
+
 #: The experience card, inline on the screen or loaded lazily.
 EXPERIENCE_VIEW: Final = "profile-card-experience"  # captured 2026-09-24
 
@@ -272,6 +284,38 @@ def parse_profile(
         positions=tuple(dict.fromkeys(positions)),
         education=tuple(dict.fromkeys(education)),
     )
+
+
+def has_top_card(screen: bytes | str) -> bool:
+    """Whether a flight payload holds a ``profile-top-card`` element at all (#514).
+
+    The cheap check the browser half makes before it accepts a document's flight as the
+    profile screen: LinkedIn's missing-profile page answers ``200`` with a flight that
+    has none. Any number of top cards counts, so a profile whose top card does not read
+    is still refused by :func:`parse_profile`, as before. Raises
+    :class:`~netkeeper.linkedin.voyager.RouteChanged` when ``screen`` is not flight.
+    """
+    payload = parse_flight(screen, endpoint=PROFILE_ENDPOINT)
+    return bool(_views(payload, TOP_CARD_VIEW, endpoint=PROFILE_ENDPOINT))
+
+
+def is_missing_page(screen: bytes | str) -> bool:
+    """Whether a flight payload names itself LinkedIn's missing-profile page (#514).
+
+    True when a string in it is :data:`MISSING_PAGE_KEY` (alone or before ``;``), or a
+    :data:`MISSING_PAGE_ROUTE_FIELD` holds :data:`MISSING_PAGE_PATH`. This is only a
+    second signal: :mod:`netkeeper.linkedin.page_profiles` reads ``NotFound`` only when
+    the tab's own address is that path as well. Raises
+    :class:`~netkeeper.linkedin.voyager.RouteChanged` when ``screen`` is not flight.
+    """
+    payload = parse_flight(screen, endpoint=PROFILE_ENDPOINT)
+    for node in payload.nodes(endpoint=PROFILE_ENDPOINT):
+        if isinstance(node, str):
+            if node == MISSING_PAGE_KEY or node.startswith(f"{MISSING_PAGE_KEY};"):
+                return True
+        elif isinstance(node, dict) and node.get(MISSING_PAGE_ROUTE_FIELD) == MISSING_PAGE_PATH:
+            return True
+    return False
 
 
 def parse_profile_urn(screen: bytes | str, *, slug: str) -> str:

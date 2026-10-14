@@ -118,6 +118,7 @@ async def visit(
     limits: ObservationLimits | None = None,
     on_sleep: Callable[[float], None] | None = None,
     cancelled: Callable[[], Awaitable[bool]] | None = None,
+    landing_wait_s: float = 0.05,
 ) -> Visit:
     provider, _ = fake_provider(site)
     harvests: list[ProfileHarvest] = []
@@ -137,7 +138,7 @@ async def visit(
             run,
             origin=origin,
             sleep=sleep,
-            landing_wait_s=0.05,
+            landing_wait_s=landing_wait_s,
             lazy_wait_s=0.01,
             overlay_wait_s=0.05,
             **extra,
