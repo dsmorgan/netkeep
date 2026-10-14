@@ -38,8 +38,8 @@ class ConfigError(ValueError):
 
 
 DEPRECATED_KEYS: dict[str, str] = {
-    "campaigns.send_window_days": "the send window is gone (#338)",
-    "campaigns.send_window_hours": "the send window is gone (#338)",
+    "campaigns.send_window_days": "the send window is gone",
+    "campaigns.send_window_hours": "the send window is gone",
 }
 """Keys an older config may still hold, and why netkeeper ignores them. A file that
 has any of them still loads: they are left out, with one warning (see
@@ -235,7 +235,7 @@ def _drop_me(raw: dict[str, Any], *, source: Path) -> tuple[dict[str, Any], Lega
     if "me" not in raw:
         return raw, None
     cleaned = {k: v for k, v in raw.items() if k != "me"}
-    log.warning("%s: ignoring the deprecated [me] section (#342): %s", source, ME_SECTION_ADVICE)
+    log.warning("%s: ignoring the deprecated [me] section: %s", source, ME_SECTION_ADVICE)
     table = raw["me"]
     if not isinstance(table, Mapping):
         return cleaned, None

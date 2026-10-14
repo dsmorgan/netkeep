@@ -527,7 +527,7 @@ def describe_removed_field_campaigns(found: Sequence[RemovedFieldCampaign]) -> s
         for c in found
     )
     return (
-        f"{named}: a step template uses the removed me.* fields (#342), so those steps send"
+        f"{named}: a step template uses the removed me.* fields, so those steps send"
         f" nothing. To send it, {FIX_ADVICE}"
     )
 

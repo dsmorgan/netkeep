@@ -269,7 +269,7 @@ async def test_a_predicate_that_is_not_built_yet_says_which_item_delivers_it(
         headers=CSRF,
     )
     assert response.status_code == 422
-    assert "P3-04" in response.text
+    assert "enrolled_in is not available yet" in response.text
 
 
 async def test_the_search_lists_by_substring(client: httpx.AsyncClient, people: list[int]) -> None:

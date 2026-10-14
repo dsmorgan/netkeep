@@ -732,10 +732,7 @@ def test_placeholders_parse_but_do_not_compile(session: Session, user: User, op:
     assert info.value.item == PLACEHOLDERS[op]
     assert isinstance(info.value, FilterError)
     assert [issue.path for issue in info.value.issues] == ["where.children[1]"]
-    assert (
-        str(info.value)
-        == f"where.children[1]: {op} is not available yet; {PLACEHOLDERS[op]} delivers it"
-    )
+    assert str(info.value) == f"where.children[1]: {op} is not available yet"
 
 
 def test_placeholder_set_is_exactly_the_campaign_two(user: User) -> None:

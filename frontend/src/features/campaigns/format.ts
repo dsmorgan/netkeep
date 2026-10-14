@@ -46,9 +46,17 @@ export const MODE_LABELS: Record<StepMode, string> = {
   auto_send: 'Auto-send',
 }
 
+/** What each mode does, in one line, where the builder offers a pick between them. */
+export const MODE_HINTS: Record<StepMode, string> = {
+  draft: 'netkeeper writes a Gmail draft, and you send it yourself.',
+  send: 'netkeeper sends the email itself.',
+  prefill: 'Waits for you: netkeeper types the message in Chrome, and you click Send yourself.',
+  auto_send: 'Sends on its own: netkeeper types the message and clicks Send itself.',
+}
+
 /** Why auto-send is off by default, shown with the mode whenever it is offered (ADR 0004). */
 export const AUTO_SEND_RISK =
-  'Auto-send has netkeeper send LinkedIn messages itself instead of prefilling them for you to send. An automated send is the action LinkedIn restricts hardest, so it is off by default (ADR 0004).'
+  'Auto-send has netkeeper send LinkedIn messages itself instead of prefilling them for you to send. An automated send is the action LinkedIn restricts hardest, so auto-send is off by default.'
 
 export const CONDITION_LABELS: Record<StepCondition, string> = {
   always: 'Always',

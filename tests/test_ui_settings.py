@@ -262,7 +262,9 @@ def test_window_weekend_and_auto_send_warnings_match_posture() -> None:
     )
     assert "overnight" in _view(views, WINDOW).warnings[0]
     assert "not damped" in _view(views, "linkedin.weekend_multiplier").warnings[0]
-    assert "ADR 0004" in _view(views, "campaigns.linkedin_auto_send").warnings[0]
+    warning = _view(views, "campaigns.linkedin_auto_send").warnings[0]
+    assert "steps set to Auto-send" in warning
+    assert "ADR" not in warning
 
 
 def test_a_file_value_above_the_hard_max_is_warned_about() -> None:

@@ -20,6 +20,18 @@ export const PREFILL_IT_YOURSELF = 'You can still prefill it yourself.'
 export const AUTO_SEND_STEP_OFF =
   'Auto-send step, but auto-send is off in config.toml, so it waits for you to prefill it.'
 
+/** A Prefill step in the queue: nothing happens until you prefill it. */
+export const WAITS_FOR_PREFILL = 'Waits for you to prefill.'
+
+/** The queue's auto-send banner: only steps set to Auto-send send on their own. */
+export const AUTO_SEND_ON_NOTE =
+  'netkeeper sends LinkedIn messages itself for steps set to Auto-send. Steps set to Prefill still wait for you. See Settings, Posture.'
+
+/** A due step your sending hours hold, as a sentence. */
+export function heldText(until: string): string {
+  return `Your sending hours hold it until ${formatWhen(until)}.`
+}
+
 /** A stale message auto-send clicked Send for (ADR 0008). */
 export const AUTO_SENT_STALE =
   'Auto-sent three days ago or more, and the inbox poll never saw it sent. Check the conversation in Chrome: if it went, check now; if not, discard it.'
@@ -42,7 +54,7 @@ export const REASON_TEXT: Readonly<Record<string, string>> = {
   outside_active_hours: "it's outside your LinkedIn active hours",
   auto_send_off: 'auto-send is off in config.toml',
   not_an_auto_send_step: "this step isn't an auto-send step",
-  bad_active_hours: "your LinkedIn active hours can't be read; fix them in the config",
+  bad_active_hours: "your LinkedIn active hours can't be read; fix them in config.toml",
   not_a_linkedin_step: "this enrollment's next step isn't a LinkedIn step",
   no_step: 'this enrollment has no next step',
   rendered_errors: "the message for this contact has errors, so it's parked for you to fix",

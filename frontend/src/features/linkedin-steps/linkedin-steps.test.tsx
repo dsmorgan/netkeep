@@ -30,12 +30,14 @@ import { formatWhen } from '@/features/campaigns/format'
 
 import type { ReadyItem, ReadyPage, TryAgainItem, WaitingItem, WaitingPage } from './api'
 import {
+  AUTO_SEND_ON_NOTE,
   AUTO_SEND_STEP_OFF,
   AUTO_SEND_WAIT_TEXT,
   AUTO_SENT_STALE,
   ONE_AT_A_TIME,
   PREFILL_IT_YOURSELF,
   REVIEW_AND_SEND,
+  WAITS_FOR_PREFILL,
   ageText,
   autoSendStepText,
   autoSendWaitText,
@@ -412,7 +414,29 @@ describe('the LinkedIn queue', () => {
     })
     const badge = await screen.findByText('Auto-send on')
     expect(badge.closest('[role="note"]')).not.toBeNull()
+    // It names the steps it applies to, not every step (#494).
+    expect(badge.closest('[role="note"]')).toHaveTextContent(AUTO_SEND_ON_NOTE)
+    expect(AUTO_SEND_ON_NOTE).toMatch(/for steps set to Auto-send/)
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('says what happens next on every row (#494)', async () => {
+    renderSection({
+      'GET /api/v1/campaigns/linkedin/options': () => jsonResponse({ auto_send: true }),
+      'GET /api/v1/campaigns/linkedin/ready': () =>
+        jsonResponse(
+          readyPage([
+            readyItem({ auto_send: true }),
+            readyItem({ enrollment_id: 32, contact_name: 'Bartholomew Finch' }),
+          ]),
+        ),
+    })
+    const auto = await screen.findByRole('listitem', { name: 'Rosalind Quillfeather, step 1' })
+    expect(auto).toHaveTextContent('Sends on its own')
+    expect(auto).not.toHaveTextContent(WAITS_FOR_PREFILL)
+    const prefill = screen.getByRole('listitem', { name: 'Bartholomew Finch, step 1' })
+    expect(prefill).toHaveTextContent(WAITS_FOR_PREFILL)
+    expect(prefill).not.toHaveTextContent(/Sends on its own/)
   })
 
   it('marks an auto-send step in the queue, sent on schedule while the flag is on', async () => {
@@ -486,6 +510,7 @@ describe('the LinkedIn queue', () => {
     expect(rows[0]).toHaveTextContent(AUTO_SEND_STEP_OFF)
     expect(within(rows[0]!).getByText('Auto-send step')).toBeVisible()
     expect(rows[1]).not.toHaveTextContent(/Auto-send/)
+    expect(rows[1]).toHaveTextContent(WAITS_FOR_PREFILL)
   })
 
   it('shows the budget warning with auto-send on', async () => {

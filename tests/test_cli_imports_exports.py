@@ -1186,7 +1186,7 @@ def test_cli_export_says_why_a_predicate_is_unavailable(cli_db: sessionmaker[Ses
     result = CliRunner().invoke(cli, ["export", "--filter", tree])
     assert result.exit_code == 1
     assert "Traceback" not in result.output
-    assert "P3-04" in result.output
+    assert "enrolled_in is not available yet" in result.output
 
 
 def test_cli_export_rejects_a_filter_that_does_not_compile(cli_db: sessionmaker[Session]) -> None:

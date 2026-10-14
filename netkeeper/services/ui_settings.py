@@ -303,8 +303,8 @@ FIELDS: Final[tuple[FieldSpec, ...]] = (
         group="campaigns",
         label="LinkedIn auto-send",
         help=(
-            "Off: netkeeper types LinkedIn messages for you to send yourself (ADR 0004)."
-            " Auto-send isn't built yet."
+            "Off: netkeeper types LinkedIn messages for you to send yourself. On: netkeeper"
+            " sends LinkedIn messages itself for steps set to Auto-send."
         ),
         kind="bool",
         applies="restart",

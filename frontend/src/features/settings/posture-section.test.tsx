@@ -270,15 +270,15 @@ describe('PostureSection: LinkedIn sends and the first inbox poll (#383)', () =>
     name: 'manual linkedin sends',
     key: 'manual_linkedin_sends',
     status: 'on',
-    value: 'auto-send off (ADR 0004)',
-    summary: 'auto-send off (ADR 0004)',
+    value: 'auto-send off',
+    summary: 'auto-send off',
     warnings: [],
     notes: [],
   }
   const AUTO_SEND_WARNING =
-    'campaigns.linkedin_auto_send is true, so netkeeper sends LinkedIn messages itself rather' +
-    ' than prefilling them for you to send. ADR 0004 defaults it off: an automated send is the' +
-    ' action LinkedIn restricts hardest'
+    'linkedin_auto_send is on in the [campaigns] section of config.toml, so netkeeper sends' +
+    ' LinkedIn messages itself for steps set to Auto-send, rather than prefilling them for you' +
+    ' to send. It is off by default: an automated send is the action LinkedIn restricts hardest'
   const SHORT_POLL_WARNING =
     "the first LinkedIn inbox poll couldn't read back to 2030-01-02; check older LinkedIn" +
     ' replies by hand, then click Acknowledge in Settings, Posture, or run' +
