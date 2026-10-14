@@ -26,7 +26,7 @@ describe('describeMoves', () => {
       '1 unsent campaign message is discarded, so no step goes out twice; its Gmail draft, if it has one, stays in your Drafts and is listed under Leftover drafts on the Gmail page',
     ])
     expect(describeMoves({ ...NONE, messages_discarded: 2 })).toEqual([
-      '2 unsent campaign messages are discarded, so no step goes out twice; their Gmail drafts stay in your Drafts and are listed under Leftover drafts on the Gmail page',
+      '2 unsent campaign messages are discarded, so no step goes out twice; any Gmail drafts among them stay in your Drafts and are listed under Leftover drafts on the Gmail page',
     ])
   })
 })
