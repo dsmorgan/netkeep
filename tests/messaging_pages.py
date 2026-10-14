@@ -1230,11 +1230,41 @@ def _send_footer(*, disabled: bool) -> str:
     )
 
 
-def existing_bubble_html(recipient: Member, msgs: Sequence[Msg] = (), *, draft: str = "") -> str:
+def header_pair(recipient: Member, owner: Member | None, *, owner_first: bool) -> str:
+    """Whom the bubble's options and close controls name, past their prefix (#516): the
+    contact and the account owner, full names, joined by `` and ``, in either order, as
+    the CP8c captures show (#484). Without an owner, the contact alone."""
+    if owner is None:
+        return recipient.name
+    names = (owner.name, recipient.name) if owner_first else (recipient.name, owner.name)
+    return " and ".join(names)
+
+
+def minimize_pair(recipient: Member, owner: Member | None, *, owner_first: bool) -> str:
+    """Whom the bubble's minimize control names (#516): short names, the contact's first
+    name and the owner's first name with a last initial, in the close control's order."""
+    if owner is None:
+        return recipient.name
+    mine = f"{owner.first} {owner.last[:1]}."
+    names = (mine, recipient.first) if owner_first else (recipient.first, mine)
+    return " and ".join(names)
+
+
+def existing_bubble_html(
+    recipient: Member,
+    msgs: Sequence[Msg] = (),
+    *,
+    draft: str = "",
+    owner: Member | None = OWNER,
+    owner_first: bool = False,
+) -> str:
     """The bubble for an existing conversation, as ``composer.html`` showed it.
 
     ``role="dialog"`` named "Messaging"; the header's ``h2`` holds a link to
-    ``/in/<profile id>/`` (the id, not the slug) with the name; each message is a
+    ``/in/<profile id>/`` (the id, not the slug) with the name; the header's options and
+    close controls name the contact and ``owner``, in the order ``owner_first`` says,
+    and minimize names both by short names (:func:`header_pair`, :func:`minimize_pair`;
+    ``owner=None`` names the contact alone, the shape before #516); each message is a
     ``data-event-urn`` item; the composer and Send sit in ``form#msg-form-<n>``. Send
     has a plain ``disabled`` attribute while the composer is empty and is enabled once it
     holds text (#519, from the CP8c captures).
@@ -1247,6 +1277,8 @@ def existing_bubble_html(recipient: Member, msgs: Sequence[Msg] = (), *, draft: 
         for m in msgs
     )
     name = escape(recipient.name)
+    pair = escape(header_pair(recipient, owner, owner_first=owner_first))
+    short = escape(minimize_pair(recipient, owner, owner_first=owner_first))
     return (
         '<div id="ember-invented-1" data-msg-overlay-conversation-bubble-open="" '
         'data-msg-overlay-conversation-bubble-is-minimized="false" tabindex="-1" role="dialog" '
@@ -1255,9 +1287,10 @@ def existing_bubble_html(recipient: Member, msgs: Sequence[Msg] = (), *, draft: 
         '<header tabindex="0">'
         f'<h2 tabindex="-1"><a href="/in/{recipient.profile_id}/">{name}</a></h2>'
         '<button type="button" aria-expanded="false">'
-        f"<span>Open the options list in your conversation with {name}</span></button>"
-        f'<button aria-expanded="true"><span>Minimize your conversation with {name}</span></button>'
-        f"<button><span>Close your conversation with {name}</span></button>"
+        f"<span>Open the options list in your conversation with {pair}</span></button>"
+        '<button aria-expanded="true">'
+        f"<span>Minimize your conversation with {short}</span></button>"
+        f"<button><span>Close your conversation with {pair}</span></button>"
         "</header>"
         f"<ul>{items}</ul>"
         '<form id="msg-form-ember-invented-2">'
