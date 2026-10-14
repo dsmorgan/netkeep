@@ -73,6 +73,25 @@ describe('RunDetail', () => {
     ).toBeInTheDocument()
   })
 
+  it('shows a full sync’s hidden members in its note and its counts (#515)', async () => {
+    renderDetail(1, {
+      'GET /api/v1/linkedin/runs/1': () =>
+        jsonResponse(
+          run({
+            id: 1,
+            kind: 'connections_full',
+            status: 'completed',
+            stop_reason: 'end_of_list',
+            completed_at: '2026-09-23T11:00:00Z',
+            counts: { mode: 'full', total: 46, hidden: 3, shortfall: 3, complete: true },
+            notes: "complete with 3 short of LinkedIn's total; 3 hidden members.",
+          }),
+        ),
+    })
+    expect(await screen.findByText(/3 hidden members\./)).toBeInTheDocument()
+    expect(screen.getByText('Hidden')).toBeInTheDocument()
+  })
+
   it('says plainly that active hours stopped the run, and when the window opens (#213)', async () => {
     renderDetail(1, {
       'GET /api/v1/linkedin/runs/1': () =>

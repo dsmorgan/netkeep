@@ -61,6 +61,11 @@ logic; it decides what the job may do and what happens after it stops:
   on the run's note ("complete with 4 short of LinkedIn's total"). This is on top
   of, not instead of, the aging limits below: aging can still refuse a complete
   run outright.
+* **Hidden members** (#515). LinkedIn's total counts places, and an answer can
+  hold fewer cards than the places it covers. ``counts_json.hidden`` carries how
+  many places the run's answers held no card for, and a nonzero count gets its own
+  words on the run's note ("complete; 3 hidden members"). It is a report only: the
+  slack above still decides whether the run is complete.
 * **Mapping.** Each page is written in its own writer session as it arrives,
   so the write lock is never held across a fetch or a pause. After a
   *complete* full sync, and only then, contacts it did not see are aged
@@ -159,6 +164,7 @@ class SyncRunReport:
             "total": self.result.max_total,
             "complete": self.result.complete,
             "shortfall": self.result.shortfall,
+            "hidden": self.result.hidden,
             "seen": pages.seen,
             "created": pages.created,
             "updated": pages.updated,
@@ -588,9 +594,22 @@ def _lost_notes(result: SyncResult) -> tuple[str, ...]:
 
 
 def _completion_notes(result: SyncResult) -> tuple[str, ...]:
-    """#204: a full sync that completed a little short of LinkedIn's own total says so."""
+    """#204: a full sync that completed a little short of LinkedIn's own total says so.
+
+    #515: a run whose answers hid members says how many, complete or not.
+    """
+    hidden = (
+        f"{result.hidden} hidden member{'' if result.hidden == 1 else 's'}"
+        if result.hidden > 0
+        else None
+    )
     if result.complete and result.shortfall > 0:
-        return (f"complete with {result.shortfall} short of LinkedIn's total.",)
+        short = f"complete with {result.shortfall} short of LinkedIn's total"
+        return (f"{short}; {hidden}." if hidden else f"{short}.",)
+    if result.complete and hidden:
+        return (f"complete; {hidden}.",)
+    if hidden:
+        return (f"{hidden}.",)
     return ()
 
 

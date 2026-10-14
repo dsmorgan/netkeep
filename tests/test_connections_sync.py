@@ -907,6 +907,63 @@ async def test_a_shortfall_past_the_slack_keeps_todays_behavior(
     assert run.notes is None
 
 
+@dataclass(slots=True)
+class _Hides:
+    """A source whose every page reports ``hidden`` places held no card (#515)."""
+
+    inner: FakeConnectionsSource
+    hidden: int
+
+    @property
+    def endpoint(self) -> str:
+        return self.inner.endpoint
+
+    async def fetch_page(self, *, start: int, count: int) -> SourcePage:
+        page = await self.inner.fetch_page(start=start, count=count)
+        return replace(page, hidden=self.hidden)
+
+
+async def test_hidden_members_are_counted_on_the_run_and_its_note(
+    session_factory: sessionmaker[Session], user_id: int
+) -> None:
+    """#515: 97 seen of a claimed 100, 3 of them hidden: complete within the slack, and
+    the run says so."""
+    report = await _sync(
+        session_factory, user_id, _Hides(FakeConnectionsSource(_many(97), total=100), 3)
+    )
+
+    assert report.result.complete and report.result.hidden == 3
+    run = _run_row(session_factory, user_id, report.run_id)
+    assert run.counts_json is not None
+    assert run.counts_json["hidden"] == 3 and run.counts_json["shortfall"] == 3
+    assert run.notes == "complete with 3 short of LinkedIn's total; 3 hidden members."
+
+
+async def test_hidden_members_are_reported_on_an_incomplete_run_too(
+    session_factory: sessionmaker[Session], user_id: int
+) -> None:
+    """#515: the count is a report, not a pass: 90 of a claimed 100 is past the slack,
+    and one hidden member does not change that."""
+    report = await _sync(
+        session_factory, user_id, _Hides(FakeConnectionsSource(_many(90), total=100), 1)
+    )
+
+    assert not report.result.complete and report.aging is None
+    run = _run_row(session_factory, user_id, report.run_id)
+    assert run.counts_json is not None and run.counts_json["hidden"] == 1
+    assert run.notes == "1 hidden member."
+
+
+async def test_a_complete_run_with_hidden_members_and_no_shortfall_says_so(
+    session_factory: sessionmaker[Session], user_id: int
+) -> None:
+    report = await _sync(session_factory, user_id, _Hides(FakeConnectionsSource(_many(10)), 2))
+
+    assert report.result.complete and report.result.shortfall == 0
+    run = _run_row(session_factory, user_id, report.run_id)
+    assert run.notes == "complete; 2 hidden members."
+
+
 class CancelsOnFirstWait(Sleeps):
     """Asks the running run to stop during the first wait between two pages."""
 

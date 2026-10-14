@@ -243,8 +243,9 @@ class Lost:
     #: What the body tap's session receives as the answer streams in (#200), when the
     #: site has one: ``"whole"`` (the page's own copy), ``"half"`` (cut short),
     #: ``"short"`` (a whole payload with half the cards, still asking for the next
-    #: page), or ``"none"`` (Chrome refuses to stream it).
-    streamed: str = "none"
+    #: page), or ``"none"`` (Chrome refuses to stream it). Bytes are streamed as given,
+    #: for a copy a test builds by hand (#515).
+    streamed: str | bytes = "none"
 
 
 class FakeCdpSession:
@@ -296,6 +297,10 @@ class FlagshipSite(FakeContext):
     ``lost`` makes the answer for a ``startIndex`` arrive without a readable body;
     ``duplicate_answers`` follows a page's answer with the page's retried copy of the
     same request, answered as given (a stale start answered with a wall or a throttle).
+    ``hide`` makes the answer for a ``startIndex`` hold that many fewer cards than the
+    places it covers (#515): the last people of its slice are hidden members, never
+    served, and the answer still asks for the start a full page on. The first screen's
+    total still counts them, as LinkedIn's counts places.
     """
 
     def __init__(
@@ -320,6 +325,7 @@ class FlagshipSite(FakeContext):
         lost: Mapping[int, Lost] | None = None,
         duplicate_answers: Mapping[int, Answer] | None = None,
         tap: bool = False,
+        hide: Mapping[int, int] | None = None,
     ) -> None:
         super().__init__()
         self.people = list(people)
@@ -343,6 +349,7 @@ class FlagshipSite(FakeContext):
         self.origin = origin
         self.lost = dict(lost or {})
         self.duplicate_answers = dict(duplicate_answers or {})
+        self.hide = dict(hide or {})
         #: Whether a body tap's CDP session can be opened here (#200), and the one that was.
         self.tap = tap
         self.cdp: FakeCdpSession | None = None
@@ -501,8 +508,10 @@ class FlagshipSite(FakeContext):
         short = pagination_payload(
             self.people[start : start + self.size // 2], start=start, next_start=start + self.size
         )
-        streamed = {"whole": copy, "half": copy[: len(copy) // 2], "short": short}.get(
+        streamed = (
             lost.streamed
+            if isinstance(lost.streamed, bytes)
+            else {"whole": copy, "half": copy[: len(copy) // 2], "short": short}.get(lost.streamed)
         )
         self._send(
             tab,
@@ -536,7 +545,8 @@ class FlagshipSite(FakeContext):
             for index, option in self.card_options.items()
             if start <= index < after
         }
-        return pagination_payload(people, start=start, next_start=next_start, card_options=options)
+        served = people[: len(people) - self.hide.get(start, 0)]
+        return pagination_payload(served, start=start, next_start=next_start, card_options=options)
 
     def _send(
         self,

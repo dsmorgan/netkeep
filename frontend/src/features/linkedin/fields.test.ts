@@ -34,6 +34,12 @@ describe('formatFields', () => {
     expect(fields.map((f) => f.label)).toEqual(['Mode', 'Pages', 'Connections', 'Total'])
   })
 
+  it('shows a sync’s hidden members right after its total (#515)', () => {
+    const fields = formatFields({ shortfall: 3, hidden: 3, total: 626, connections: 623 })
+    expect(fields.map((f) => f.label)).toEqual(['Connections', 'Total', 'Hidden', 'Shortfall'])
+    expect(fields.map((f) => f.value)).toEqual(['623', '626', '3', '3'])
+  })
+
   it('appends unknown keys, alphabetically, after the known ones', () => {
     const fields = formatFields({ visited: 1, zeta: 'z', alpha: 'a' })
     expect(fields.map((f) => f.label)).toEqual(['Visited', 'Alpha', 'Zeta'])

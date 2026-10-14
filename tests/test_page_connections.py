@@ -56,6 +56,7 @@ from netkeeper.linkedin.observe import (
 )
 from netkeeper.linkedin.pacing import ScrollPlan
 from netkeeper.linkedin.page_connections import PageConnections
+from netkeeper.linkedin.voyager import RouteChanged
 
 #: No test here needs more scroll plans than this; a scroll loop that never stops
 #: fails at this bound instead of hanging the suite (#198 review, L4).
@@ -1031,13 +1032,29 @@ async def test_a_lost_answer_is_read_from_its_streamed_copy_and_nothing_is_lost(
     )
 
 
-@pytest.mark.parametrize("streamed", ["half", "none", "short"])
+@pytest.mark.parametrize("streamed", ["half", "none"])
 async def test_a_streamed_copy_cut_short_or_refused_leaves_the_answer_lost(streamed: str) -> None:
     people = many(90)
     site = FlagshipSite(people, tap=True, lost={40: Lost("move_on", streamed=streamed)})
     out = await sync(site)
     assert out.result.reason is StopReason.END_OF_LIST and not out.result.complete
     assert [x.start for x in out.result.losses] == [40]
+
+
+async def test_a_whole_copy_with_fewer_cards_reads_as_the_answer_itself_would() -> None:
+    """#515: a whole copy of the answer for 40 that holds 5 cards and asks for 50 is
+    what the page itself received, and is read exactly as that answer's own body would
+    be when it reads: the same people, 5 hidden, and the slack, not the rescue, decides
+    whether the run is complete (5 short of 90 is within it)."""
+    people = many(90)
+    rescued = await sync(
+        FlagshipSite(people, tap=True, lost={40: Lost("move_on", streamed="short")})
+    )
+    read = await sync(FlagshipSite(people, hide={40: 5}))
+    assert rescued.result.losses == () and read.result.losses == ()
+    assert rescued.urns == read.urns == _visible(people, {40: 5})
+    assert rescued.result.hidden == read.result.hidden == 5
+    assert rescued.result.complete is read.result.complete is True
 
 
 async def test_a_streamed_copy_that_disagrees_with_the_page_is_not_used(
@@ -1127,6 +1144,122 @@ async def test_a_streamed_copy_that_proves_nothing_after_a_stall_is_not_used() -
     out = await sync(site)
     assert out.result.reason is StopReason.ANSWER_LOST
     assert out.result.lost is not None and out.result.lost.start == 30
+
+
+# --- #515: hidden members, a whole copy of an under-filled answer, a proven short end ------
+
+
+def _visible(people: Sequence[Person], hide: dict[int, int], *, size: int = 10) -> list[str]:
+    """The URNs a site built with ``hide`` serves: each hidden slice's last people are gone."""
+    gone = {
+        person.urn
+        for start, count in hide.items()
+        for person in people[start + size - count : start + size]
+    }
+    return [person.urn for person in people if person.urn not in gone]
+
+
+async def test_a_whole_copy_of_an_answer_with_a_hidden_member_is_used(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Run 177's lost answer (#515): the answer for 40 holds 9 cards for its 10 places
+    and asks for 50. Chrome kept no body, the streamed copy is whole, and the page moves
+    on to 50. The copy stands in: nothing is lost, the run completes, 1 member hidden."""
+    caplog.set_level(logging.INFO, logger="netkeeper")
+    people = many(90)
+    hide = {40: 1}
+    site = FlagshipSite(people, tap=True, hide=hide, lost={40: Lost("move_on", streamed="whole")})
+    out = await sync(site)
+    assert out.result.reason is StopReason.END_OF_LIST and out.result.complete
+    assert out.result.losses == () and out.result.hidden == 1
+    assert out.urns == _visible(people, hide)
+    assert "answer for start 40 was read from the copy streamed as it arrived" in caplog.text
+
+
+def _copy_of_40(cards: int, next_start: int) -> bytes:
+    """A hand-built streamed copy of the answer for 40: ``cards`` cards, asking for
+    ``next_start``."""
+    return pagination_payload(many(90)[40 : 40 + cards], start=40, next_start=next_start)
+
+
+@pytest.mark.parametrize(
+    "streamed",
+    [
+        pytest.param(_copy_of_40(11, 50), id="more-cards-than-places"),
+        pytest.param(_copy_of_40(0, 50), id="no-cards"),
+        pytest.param(_copy_of_40(9, 49), id="asks-for-49-the-page-asked-50"),
+        pytest.param(_copy_of_40(9, 60), id="asks-for-60"),
+        pytest.param("half", id="cut-short"),
+    ],
+)
+async def test_a_copy_of_an_under_filled_answer_that_does_not_check_out_is_refused(
+    streamed: str | bytes,
+) -> None:
+    """The answer for 40 hides a member and the page moves on to 50. A copy with more
+    cards than the 10 places, with none, that asks for another start than the page
+    did, or that was cut short is refused: the answer stays lost, the run reads on to
+    the end, and it is incomplete."""
+    site = FlagshipSite(
+        many(90), tap=True, hide={40: 1}, lost={40: Lost("move_on", streamed=streamed)}
+    )
+    out = await sync(site)
+    assert out.result.reason is StopReason.END_OF_LIST and not out.result.complete
+    assert [x.start for x in out.result.losses] == [40]
+
+
+async def test_a_copy_cut_short_of_an_under_filled_answer_does_not_parse() -> None:
+    """The parser's strictness is what the rescue rests on: half of a 9-card answer
+    is not a shorter answer, it is no answer."""
+    site = FlagshipSite(many(90), hide={40: 1})
+    whole = site._page(40)
+    chunk = flagship.parse_connections_chunk(whole, endpoint="test", expected_start=40)
+    assert (len(chunk.cards), chunk.next_start) == (9, 50)
+    with pytest.raises(RouteChanged):
+        flagship.parse_connections_chunk(
+            whole[: len(whole) // 2], endpoint="test", expected_start=40
+        )
+
+
+async def test_hidden_members_are_counted_and_the_run_ends_at_its_proven_short_slice(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An invented 46-place list: the first screen holds 10, the answers at 10, 20, and
+    30 hold 9 cards each for 10 places, and the answer at 40 holds 6 and asks for
+    nothing. 3 members are hidden, 43 seen of 46 is within the slack, and the second
+    unit (3 cards, the end proven) ends the run: no third, empty unit, and no WARNING."""
+    caplog.set_level(logging.INFO, logger="netkeeper")
+    people = many(46)
+    hide = {10: 1, 20: 1, 30: 1}
+    gate = Gate()
+    out = await sync(FlagshipSite(people, end="short", hide=hide), gate=gate)
+    assert out.result.reason is StopReason.END_OF_LIST and out.result.complete
+    assert out.result.hidden == 3 and out.result.shortfall == 3
+    assert out.urns == _visible(people, hide)
+    assert gate.units == 2 and out.result.pages == 2
+    sync_loggers = {"netkeeper.linkedin.connections", "netkeeper.linkedin.page_connections"}
+    warnings = [
+        r.getMessage()
+        for r in caplog.records
+        if r.levelno >= logging.WARNING and r.name in sync_loggers
+    ]
+    assert warnings == []
+
+
+async def test_a_total_past_the_slack_of_the_places_stays_incomplete_at_a_proven_end() -> None:
+    """The same 46 places under a stated total of 60: the list's end is proven, so the
+    run ends there, but 43 of 60 is past the slack, so it is incomplete."""
+    out = await sync(FlagshipSite(many(46), end="short", total=60, hide={10: 1, 20: 1, 30: 1}))
+    assert out.result.reason is StopReason.END_OF_LIST and not out.result.complete
+    assert out.result.hidden == 3 and out.result.shortfall == 17
+
+
+async def test_the_places_of_a_lost_answer_are_not_counted_as_hidden() -> None:
+    """Only answers read whole say how many cards they held: a lost answer's places
+    are a loss, not hidden members."""
+    site = FlagshipSite(many(60), hide={20: 1, 40: 1}, lost={20: Lost("move_on")})
+    out = await sync(site)
+    assert [x.start for x in out.result.losses] == [20]
+    assert out.result.hidden == 1 and not out.result.complete
 
 
 async def test_a_browser_without_cdp_sessions_reads_as_before(
