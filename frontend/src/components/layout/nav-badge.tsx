@@ -8,7 +8,7 @@ export function AttentionDot({ className }: { className?: string }) {
       aria-hidden="true"
       data-testid="attention-dot"
       className={cn(
-        'inline-block size-2 shrink-0 rounded-full bg-amber-500 ring-2 ring-sidebar dark:bg-amber-400',
+        'inline-block size-2 shrink-0 rounded-full bg-amber-500 dark:bg-amber-400',
         className,
       )}
     />
