@@ -30,6 +30,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { attentionQuery } from '@/features/attention/api'
 import { campaignKeys } from '@/features/campaigns/api'
 import { formatWhen } from '@/features/campaigns/format'
 import { Callout, ErrorNote, LoadingNote } from '@/features/crm/controls'
@@ -206,6 +207,10 @@ export function LinkedInQueueCard({ campaignId, run }: { campaignId?: number; ru
   const blocked = typing || open !== null || !waiting.isSuccess
   const items = ready.data?.items ?? []
   const retries = ready.data?.try_again ?? []
+  // The ready page lists at most 50 of them; the dashboard's count says how many wait
+  // in all (#508). A campaign page lists its own campaign's, which that count is not.
+  const attention = useQuery({ ...attentionQuery, enabled: campaignId === undefined })
+  const retriesTotal = campaignId === undefined ? (attention.data?.counts.try_again ?? 0) : 0
   const nextReady = items.find((item) => !held(item, now))
 
   return (
@@ -265,6 +270,11 @@ export function LinkedInQueueCard({ campaignId, run }: { campaignId?: number; ru
                 />
               ))}
             </ul>
+            {retriesTotal > retries.length && (
+              <p className="text-muted-foreground">
+                Showing {retries.length} of {retriesTotal}, oldest try first.
+              </p>
+            )}
           </section>
         )}
 
@@ -592,17 +602,24 @@ export function WaitingForYouCard({ campaignId }: { campaignId?: number }) {
         ) : items.length === 0 ? (
           <p className="text-muted-foreground">Nothing waits for you.</p>
         ) : (
-          <ul aria-label="Waiting for you" className="flex flex-col gap-2">
-            {items.map((item) => (
-              <WaitingRow
-                key={item.message_id}
-                item={item}
-                state={waitingState(item, now)}
-                now={now}
-                showCampaign={campaignId === undefined}
-              />
-            ))}
-          </ul>
+          <>
+            <ul aria-label="Waiting for you" className="flex flex-col gap-2">
+              {items.map((item) => (
+                <WaitingRow
+                  key={item.message_id}
+                  item={item}
+                  state={waitingState(item, now)}
+                  now={now}
+                  showCampaign={campaignId === undefined}
+                />
+              ))}
+            </ul>
+            {waiting.data.total > items.length && (
+              <p className="pt-2 text-muted-foreground">
+                Showing {items.length} of {waiting.data.total}, oldest first.
+              </p>
+            )}
+          </>
         )}
       </CardContent>
     </Card>
