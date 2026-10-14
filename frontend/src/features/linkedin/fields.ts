@@ -61,7 +61,8 @@ function titleCase(key: string): string {
  * `total`, `stopped`; a finished sync's counts also carry `hidden`, the places
  * LinkedIn's total counts that no answer held a card for, #515, and
  * `rescued_not_whole`, answers read from a streamed copy the flight check did
- * not find whole, #525). Both are
+ * not find whole, #525). A finished run of either kind also carries `snapshots`
+ * and `field_changes`, its job-field change counts (#518), shown after those. Both are
  * `dict[str, Any]` on the wire — untyped on purpose,
  * since a job's own progress dataclass is free to change — so this only orders
  * whichever of these keys shows up and appends anything else after, rather than
@@ -80,6 +81,8 @@ const KNOWN_ORDER = [
   'total',
   'hidden',
   'rescued_not_whole',
+  'snapshots',
+  'field_changes',
   'stopped',
 ]
 

@@ -93,6 +93,14 @@ JOB_FIELDS: Final[tuple[str, ...]] = ("headline", "current_title", "current_comp
 # value only an import or a person wrote: a job change is an enrichment
 # replacing what an earlier enrichment recorded (#323).
 POSITION_FIELDS: Final[tuple[str, ...]] = ("current_title", "current_company")
+#: Each job field under the short name a run's counts give it (#518): ``field_changes``
+#: in a run's ``counts_json``, and ``netkeeper linkedin field-changes``.
+JOB_FIELD_KEYS: Final[dict[str, str]] = {
+    "headline": "headline",
+    "current_title": "title",
+    "current_company": "company",
+    "location": "location",
+}
 
 # More decided wins in a merge: a person who said "met" is not un-met by a duplicate.
 MET_RANK: Final[dict[ContactMet, int]] = {
@@ -573,6 +581,22 @@ def _resolve_name(session: Session, user: User, incoming: IncomingContact) -> Re
 # --- apply ------------------------------------------------------------------
 
 
+@dataclass(frozen=True, slots=True)
+class Applied:
+    """What :func:`apply_detailed` wrote: the contact, and which job fields changed (#518).
+
+    ``changed`` holds the :data:`JOB_FIELDS` whose stored value went from a non-empty
+    value to another one: the change a ``contact_snapshot`` records. A first fill from
+    empty is not one, a new contact has none, and a field whose column kept a
+    person's value is not one either. ``snapshot`` says whether a ``contact_snapshot``
+    was written.
+    """
+
+    contact: Contact
+    changed: frozenset[str] = frozenset()
+    snapshot: bool = False
+
+
 def apply(
     session: Session,
     user: User,
@@ -582,7 +606,23 @@ def apply(
     decision: Decision | None = None,
     snapshot: bool = True,
 ) -> Contact:
-    """Write ``incoming`` to the contact ``resolution`` names, or to a new one, and return it.
+    """:func:`apply_detailed`, returning only the contact."""
+    return apply_detailed(
+        session, user, incoming, resolution, decision=decision, snapshot=snapshot
+    ).contact
+
+
+def apply_detailed(
+    session: Session,
+    user: User,
+    incoming: IncomingContact,
+    resolution: Resolution,
+    *,
+    decision: Decision | None = None,
+    snapshot: bool = True,
+) -> Applied:
+    """Write ``incoming`` to the contact ``resolution`` names, or to a new one, and say what
+    changed (:class:`Applied`).
 
     A new contact takes ``incoming.source`` as its first source and records it in
     ``field_sources`` for every provided field. An existing contact takes each
@@ -636,7 +676,7 @@ def apply(
             return _update(session, user, contact, incoming, snapshot=snapshot)
         case New():
             _no_decision(decision)
-            return _create(session, user, incoming)
+            return Applied(_create(session, user, incoming))
         case Candidate():
             match decision:
                 case None:
@@ -648,7 +688,7 @@ def apply(
                     contact = resolve_survivor(session, user, contact_id)
                     return _update(session, user, contact, incoming, snapshot=snapshot)
                 case CreateNew():
-                    return _create(session, user, incoming)
+                    return Applied(_create(session, user, incoming))
                 case _:
                     assert_never(decision)
         case _:
@@ -682,7 +722,7 @@ def _update(
     incoming: IncomingContact,
     *,
     snapshot: bool = True,
-) -> Contact:
+) -> Applied:
     provided = incoming.provided_fields()
     # Decided once per field, from the state before any write: the rule reads the
     # live value, and an empty field that a lower-ranked row is free to fill would
@@ -721,13 +761,13 @@ def _update(
         and provided[name] != enriched_before[name]
         for name in POSITION_FIELDS
     )
-    if snapshot and (
-        position_changed
-        or any(
-            before[name] not in (None, "") and before[name] != getattr(contact, name)
-            for name in JOB_FIELDS
-        )
-    ):
+    changed = frozenset(
+        name
+        for name in JOB_FIELDS
+        if before[name] not in (None, "") and before[name] != getattr(contact, name)
+    )
+    wrote_snapshot = snapshot and (position_changed or bool(changed))
+    if wrote_snapshot:
         contact.snapshots.append(
             ContactSnapshot(
                 user_id=user.id,
@@ -740,7 +780,7 @@ def _update(
     _upsert_children(user, contact, incoming)
     session.flush()
     log.debug("updated contact %d for user %d from %s", contact.id, user.id, incoming.source)
-    return contact
+    return Applied(contact, changed, wrote_snapshot)
 
 
 def _enriched_value(contact: Contact, name: str) -> str | date | None:

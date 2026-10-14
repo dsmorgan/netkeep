@@ -46,6 +46,17 @@ describe('formatFields', () => {
     expect(fields.map((f) => f.value)).toEqual(['46', '3', '0', '1'])
   })
 
+  it('shows a run’s snapshots and field changes after its other counts (#518)', () => {
+    const fields = formatFields({
+      field_changes: { headline: 3, title: 0, company: 0, location: 1 },
+      zeta: 1,
+      snapshots: 4,
+      total: 46,
+    })
+    expect(fields.map((f) => f.label)).toEqual(['Total', 'Snapshots', 'Field Changes', 'Zeta'])
+    expect(fields[2]?.value).toContain('"headline":3')
+  })
+
   it('appends unknown keys, alphabetically, after the known ones', () => {
     const fields = formatFields({ visited: 1, zeta: 'z', alpha: 'a' })
     expect(fields.map((f) => f.label)).toEqual(['Visited', 'Alpha', 'Zeta'])

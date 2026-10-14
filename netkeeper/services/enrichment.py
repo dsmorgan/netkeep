@@ -218,7 +218,14 @@ class EnrichRunReport:
             "copied": len(self.result.copied),
             "skipped": self.skipped,
             "visit_budget": self.visit_budget,
-            "harvests": dataclasses.asdict(self.harvests),
+            # #518: the per-field change counts sit beside the harvest counts, as a
+            # sync's do, so the run views read one key for both kinds.
+            "harvests": {
+                key: value
+                for key, value in dataclasses.asdict(self.harvests).items()
+                if key != "field_changes"
+            },
+            "field_changes": dict(self.harvests.field_changes),
             "outcome": None if self.result.outcome is None else self.result.outcome.value,
             "heat_raised": self.heat_raised,
             "session_flagged": self.session_flagged,
