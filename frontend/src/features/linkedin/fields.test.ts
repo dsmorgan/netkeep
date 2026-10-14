@@ -53,8 +53,15 @@ describe('formatFields', () => {
       snapshots: 4,
       total: 46,
     })
-    expect(fields.map((f) => f.label)).toEqual(['Total', 'Snapshots', 'Field Changes', 'Zeta'])
-    expect(fields[2]?.value).toContain('"headline":3')
+    expect(fields.map((f) => [f.label, f.value])).toEqual([
+      ['Total', '46'],
+      ['Snapshots', '4'],
+      ['Field Changes Company', '0'],
+      ['Field Changes Headline', '3'],
+      ['Field Changes Location', '1'],
+      ['Field Changes Title', '0'],
+      ['Zeta', '1'],
+    ])
   })
 
   it('appends unknown keys, alphabetically, after the known ones', () => {

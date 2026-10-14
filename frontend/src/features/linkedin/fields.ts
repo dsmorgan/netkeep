@@ -61,9 +61,9 @@ function titleCase(key: string): string {
  * `total`, `stopped`; a finished sync's counts also carry `hidden`, the places
  * LinkedIn's total counts that no answer held a card for, #515, and
  * `rescued_not_whole`, answers read from a streamed copy the flight check did
- * not find whole, #525). A finished run of either kind also carries `snapshots`
- * and `field_changes`, its job-field change counts (#518), shown after those. Both are
- * `dict[str, Any]` on the wire — untyped on purpose,
+ * not find whole, #525). A finished run of either kind also carries `snapshots` and
+ * `field_changes`, how many times it changed each job field (#518), shown after those.
+ * Both shapes are `dict[str, Any]` on the wire — untyped on purpose,
  * since a job's own progress dataclass is free to change — so this only orders
  * whichever of these keys shows up and appends anything else after, rather than
  * assuming one shape and dropping what does not fit it.
