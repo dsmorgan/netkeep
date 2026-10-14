@@ -1416,8 +1416,8 @@ def linkedin_inbox_acknowledge(ctx: typer.Context) -> None:
 def linkedin_auto_send_resume() -> None:
     """Resume auto-send after it held because a message bubble was left open in Chrome.
 
-    Close every LinkedIn message bubble, in this or another LinkedIn tab in the netkeeper
-    Chrome window, first (send or discard what is in it): the next auto-send refuses a
+    Close every LinkedIn message bubble, in any LinkedIn tab in the netkeeper Chrome
+    window, first (send or discard what is in it): the next auto-send refuses a
     page that still shows one. This asks you to confirm, and runs only at a terminal;
     there is no `--yes`, because a script can't have looked at Chrome. It touches no
     browser and visits nothing.
