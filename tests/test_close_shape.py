@@ -25,7 +25,7 @@ import messaging_dom
 import pytest
 from factories import make_contact
 from messaging_dom import MessagingSite, MessagingTab
-from messaging_pages import Member, existing_bubble_html
+from messaging_pages import OWNER, Member, existing_bubble_html, header_pair
 from run_fakes import fake_provider
 from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
@@ -45,10 +45,12 @@ from netkeeper.linkedin.browser import (
     BrowserRun,
     BubbleCheck,
     CloseButtonShape,
+    CloseForm,
     CloseMiss,
     CloseShape,
     NameRelation,
     NameSource,
+    close_form,
     close_names_person,
     name_relation,
     read_close_shape,
@@ -75,7 +77,7 @@ CLOSE = "Close your conversation with "
 
 def assert_no_pii(text: str) -> None:
     """No name, part of a name, slug, profile id, URL or path in ``text``."""
-    for member in (PERSON, OTHER):
+    for member in (PERSON, OTHER, OWNER):
         for secret in (
             member.first,
             member.last,
@@ -98,7 +100,16 @@ def _tab(site: MessagingSite, html: str, *, url: str = FEED) -> MessagingTab:
 
 
 def _bubble(change: Callable[[str], str] = lambda html: html, member: Member = PERSON) -> str:
-    return change(existing_bubble_html(member))
+    """The bubble with its header controls naming the contact alone, the single-name form
+    the close rule still accepts (#516): the relation report (#495) reads each change
+    against the header name by itself. :func:`_live_bubble` is the captured shape."""
+    return change(existing_bubble_html(member, owner=None))
+
+
+def _live_bubble(*, owner_first: bool, member: Member = PERSON) -> str:
+    """The bubble as the CP8c captures show it (#484, #516): close and options name the
+    contact and the account owner, in either order; minimize uses short names."""
+    return existing_bubble_html(member, owner=OWNER, owner_first=owner_first)
 
 
 def _close_button(name: str) -> str:
@@ -256,25 +267,177 @@ def test_the_close_rule_s_edges_and_normalization(header: str, suffix: str, hold
     assert close_names_person(header, suffix) is holds
 
 
+# --- #516: the close control names the contact and one other ---------------------------------
+
+
 @pytest.mark.parametrize(
-    ("suffix", "rule", "miss"),
+    ("header", "suffix", "form"),
     [
-        (f"Invented status line, {PERSON.name}", 1, None),
-        (f"{PERSON.name} (Active now)", 1, None),
-        (f"Invented status · {PERSON.name}, away", 1, None),
-        (f"{PERSON.name}son", 0, CloseMiss.NOT_THIS_PERSON),
-        (OTHER.name, 0, CloseMiss.NOT_THIS_PERSON),
-        (PERSON.name.lower(), 0, CloseMiss.NOT_THIS_PERSON),
+        # The contact alone, the exact single-name form, kept if LinkedIn ever serves it.
+        ("Quorbelle Fictionary", "Quorbelle Fictionary", CloseForm.ALONE),
+        # The captures: the account owner's name and the contact's, in either order.
+        (
+            "Quorbelle Fictionary",
+            "Quorbelle Fictionary and Odalys Inventova",
+            CloseForm.HEADER_FIRST,
+        ),
+        (
+            "Quorbelle Fictionary",
+            "Odalys Inventova and Quorbelle Fictionary",
+            CloseForm.HEADER_LAST,
+        ),
+        # Any non-empty other name: netkeeper doesn't compare the owner's name.
+        ("Ann", "Ann and B", CloseForm.HEADER_FIRST),
+        ("Ann", "B and Ann", CloseForm.HEADER_LAST),
+        ("Ann", "Ann and Ann", CloseForm.HEADER_FIRST),
+        ("Ann", "Ann and Jo Lee, MBA", CloseForm.HEADER_FIRST),
+        # The cost of not comparing it: whatever stands on the other side is "a name".
+        ("Ann", "Ann and others", CloseForm.HEADER_FIRST),
+        ("Ann", "Ann and Bo (Active now)", CloseForm.HEADER_FIRST),
+        # The contact's name inside the owner's, as a whole: the other side is the owner.
+        ("Fictionary", "Fictionary and Quorbelle Fictionary", CloseForm.HEADER_FIRST),
+        ("Fictionary", "Quorbelle Fictionary and Fictionary", CloseForm.HEADER_LAST),
+        # Normalized as close_names_person normalizes: whitespace, then NFC. Case counts.
+        ("Ann", "Ann\u00a0and  Bo", CloseForm.HEADER_FIRST),
+        (" Ann ", "Bo and Ann", CloseForm.HEADER_LAST),
+        (unicodedata.normalize("NFD", "Quorbéllé"), "Bo and Quorbéllé", CloseForm.HEADER_LAST),
+        ("Quorbéllé", unicodedata.normalize("NFD", "Quorbéllé and Bo"), CloseForm.HEADER_FIRST),
+        # A header name that holds " and " passes only alone.
+        ("Ann and Bo", "Ann and Bo", CloseForm.ALONE),
+    ],
+)
+def test_the_close_forms(header: str, suffix: str, form: CloseForm) -> None:
+    assert close_form(header, suffix) is form
+
+
+@pytest.mark.parametrize(
+    ("header", "suffix"),
+    [
+        # A third name, in any place.
+        ("Ann", "Ann and Bo and Cy"),
+        ("Ann", "Bo and Ann and Cy"),
+        ("Ann", "Bo and Cy and Ann"),
+        # " and " with an empty side, or none at all.
+        ("Ann", "Ann and "),
+        ("Ann", " and Ann"),
+        ("Ann", "Ann and"),
+        ("Ann", "and Ann"),
+        ("Ann", "Ann and  "),
+        ("Ann", "Ann and \u200b"),
+        ("Ann", "Ann  and"),
+        ("Ann", "Ann, Bo"),
+        ("Ann", "Ann & Bo"),
+        # The contact's name inside the other name, never a side of its own.
+        ("Ann Lee", "Mary Ann Lee and Bo"),
+        ("Ann Lee", "Bo and Ann Lee Smith"),
+        ("Fictionary", "Quorbelle Fictionary and Odalys Inventova"),
+        ("Fictionary", "Odalys Inventova and Quorbelle Fictionary"),
+        # Text beside the names, which #499's rule accepted.
+        ("Ann", "Status, Ann"),
+        ("Ann", "Ann (Active now)"),
+        ("Ann", "Status: Ann and Bo"),
+        ("Ann", "Ann, and Bo"),
+        ("Ann", "Bo and Ann."),
+        # #500's boundaries still refuse.
+        ("Ann", "Annabel and Bo"),
+        ("Ann", "Bo and Joann"),
+        ("Ann", "Ann-Marie and Bo"),
+        ("Ann", "Bo and Ann's"),
+        # Case, and the join's case.
+        ("Ann", "ann and Bo"),
+        ("Ann", "Ann AND Bo"),
+        ("Ann", "Ann And Bo"),
+        # A header name that holds " and ", beside another name: the split is a guess.
+        ("Ann and Bo", "Ann and Bo and Cy"),
+        ("Ann and Bo", "Cy and Ann and Bo"),
+        # An owner's name that holds " and ".
+        ("Ann", "Ann and Bo and Co"),
+        # Nothing to compare.
+        ("", "Ann and Bo"),
+        ("   ", " and Ann"),
+        ("\u200b", "Ann"),
+        ("Ann", ""),
+        ("", ""),
+        ("Ann", "Wendolyn Madeupton"),
+    ],
+)
+def test_the_close_forms_refuse(header: str, suffix: str) -> None:
+    assert close_form(header, suffix) is None
+
+
+def test_every_close_form_holds_the_header_name_as_a_whole() -> None:
+    """#516 tightens #499, never loosens it: a name in a close form passes
+    ``close_names_person`` too, and the rule asks both."""
+    for header, suffix in (
+        ("Ann", "Ann"),
+        ("Ann", "Ann and Bo"),
+        ("Ann", "Bo and Ann"),
+        ("Ann", "Ann and Ann"),
+        ("Fictionary", "Fictionary and Quorbelle Fictionary"),
+    ):
+        assert close_form(header, suffix) is not None
+        assert close_names_person(header, suffix)
+
+
+@pytest.mark.parametrize(
+    ("suffix", "rule", "miss", "form"),
+    [
+        (PERSON.name, 1, None, CloseForm.ALONE),
+        (f"{PERSON.name} and {OWNER.name}", 1, None, CloseForm.HEADER_FIRST),
+        (f"{OWNER.name} and {PERSON.name}", 1, None, CloseForm.HEADER_LAST),
+        (f"Invented status line, {PERSON.name}", 0, CloseMiss.NOT_TWO_NAMES, None),
+        (f"{PERSON.name} (Active now)", 0, CloseMiss.NOT_TWO_NAMES, None),
+        (f"Invented status · {PERSON.name}, away", 0, CloseMiss.NOT_TWO_NAMES, None),
+        (f"{PERSON.name} and {OWNER.name} and {OTHER.name}", 0, CloseMiss.NOT_TWO_NAMES, None),
+        (f"{PERSON.name} and ", 0, CloseMiss.NOT_TWO_NAMES, None),
+        (f"Mary {PERSON.name} and {OWNER.name}", 0, CloseMiss.NOT_TWO_NAMES, None),
+        (f"{PERSON.name}son", 0, CloseMiss.NOT_THIS_PERSON, None),
+        (OTHER.name, 0, CloseMiss.NOT_THIS_PERSON, None),
+        (f"{OTHER.name} and {OWNER.name}", 0, CloseMiss.NOT_THIS_PERSON, None),
+        (PERSON.name.lower(), 0, CloseMiss.NOT_THIS_PERSON, None),
     ],
 )
 async def test_the_shape_reports_the_close_rule(
-    suffix: str, rule: int, miss: CloseMiss | None
+    suffix: str, rule: int, miss: CloseMiss | None, form: CloseForm | None
 ) -> None:
     shape = await shape_of(_bubble(_rename_close(suffix)))
-    assert (shape.exact, shape.rule, shape.rule_miss) == (0, rule, miss)
-    want = f"close lookup by the rule: {rule}" + ("" if miss is None else f" ({miss.value})")
-    assert want in shape.lines()
-    assert f"0 exact, {rule} by rule" in shape.describe()
+    exact = 1 if suffix == PERSON.name else 0
+    assert (shape.exact, shape.rule, shape.rule_miss, shape.rule_form) == (exact, rule, miss, form)
+    why = miss if miss is not None else form
+    assert why is not None
+    assert f"close lookup by the rule: {rule} ({why.value})" in shape.lines()
+    assert f"{exact} exact, {rule} by rule" in shape.describe()
+    [button] = shape.buttons
+    assert button.form is form
+
+
+@pytest.mark.parametrize(
+    ("owner_first", "form", "relation"),
+    [
+        (False, CloseForm.HEADER_FIRST, NameRelation.SUFFIX_STARTS),
+        (True, CloseForm.HEADER_LAST, NameRelation.SUFFIX_CONTAINS),
+    ],
+    ids=["owner-last", "owner-first"],
+)
+async def test_the_captured_bubble_is_found_by_the_rule_in_either_order(
+    owner_first: bool, form: CloseForm, relation: NameRelation
+) -> None:
+    """#516: the CP8c captures' header controls, both orders. The exact lookup used before
+    #499 finds nothing; the rule finds the one close button, and says which form."""
+    shape = await shape_of(_live_bubble(owner_first=owner_first))
+    assert (shape.by_prefix, shape.by_prefix_visible, shape.exact) == (1, 1, 0)
+    assert (shape.rule, shape.rule_miss, shape.rule_form) == (1, None, form)
+    assert (shape.options_by_prefix, shape.minimize_by_prefix) == (1, 1)
+    [button] = shape.buttons
+    # The owner's name and " and ": the 20 characters of #495's report, for this owner.
+    extra = len(OWNER.name) + len(" and ")
+    assert (button.relation, button.difference, button.form) == (relation, -extra, form)
+    lines = "\n".join(shape.lines())
+    assert f"close lookup by the rule: 1 ({form.value})" in lines
+    assert f"form: {form.value}" in lines
+    assert_no_pii(lines + shape.describe())
+    pair = header_pair(PERSON, OWNER, owner_first=owner_first)
+    assert pair.count(" and ") == 1 and PERSON.name in pair and OWNER.name in pair
 
 
 async def test_the_shape_reports_each_close_rule_miss() -> None:
@@ -317,17 +480,24 @@ def test_the_close_rule_s_words_are_fixed() -> None:
         "its name could not be read",
         "hidden text changes its name",
         "its name does not hold the header name",
+        "its name is not the header name, alone or with one other name",
+    ]
+    assert browser.CLOSE_NAMES_JOIN == " and "
+    assert [f.value for f in CloseForm] == [
+        "the header name alone",
+        "the header name, then one other name",
+        "one other name, then the header name",
     ]
 
 
 # --- the shape, on invented bubbles ---------------------------------------------------------
 
 
-async def test_the_capture_s_bubble_has_one_exact_close_control() -> None:
+async def test_the_single_name_bubble_has_one_exact_close_control() -> None:
     shape = await shape_of(_bubble())
     assert (shape.by_prefix, shape.by_prefix_visible, shape.exact) == (1, 1, 1)
-    assert (shape.rule, shape.rule_miss) == (1, None)
-    assert "close lookup by the rule: 1" in shape.lines()
+    assert (shape.rule, shape.rule_miss, shape.rule_form) == (1, None, CloseForm.ALONE)
+    assert "close lookup by the rule: 1 (the header name alone)" in shape.lines()
     assert (shape.options_by_prefix, shape.minimize_by_prefix) == (1, 1)
     assert (shape.draft_close, shape.draft_minimize, shape.any_close) == (0, 0, 1)
     [button] = shape.buttons
@@ -379,7 +549,7 @@ async def test_an_aria_label_on_the_header_link_is_named_as_its_source() -> None
 async def test_a_decomposed_header_name_that_nfc_changes_is_named() -> None:
     """The lookup asks with the NFC name; a page whose text is NFD doesn't match it."""
     decomposed = unicodedata.normalize("NFD", "Quorbéllé Fictionary")
-    html = existing_bubble_html(PERSON).replace(PERSON.name, decomposed)
+    html = existing_bubble_html(PERSON, owner=None).replace(PERSON.name, decomposed)
     shape = await shape_of(html)
     assert shape.exact == 0 and shape.by_prefix == 1 and shape.header_nfc_changes is True
     [button] = shape.buttons

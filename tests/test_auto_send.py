@@ -25,7 +25,13 @@ import pytest
 from campaign_fakes import NOW
 from inbox_fakes import record_poll
 from messaging_dom import Bubble, MessagingSite, MessagingTab
-from messaging_pages import THADDEUS, ZEPHYRINE, existing_bubble_html, never_messaged_bubble_html
+from messaging_pages import (
+    OWNER,
+    THADDEUS,
+    ZEPHYRINE,
+    existing_bubble_html,
+    never_messaged_bubble_html,
+)
 from run_fakes import fake_provider
 from sqlalchemy.orm import Session, sessionmaker
 from test_linkedin_steps import LINKEDIN, Lane, make_lane
@@ -35,6 +41,7 @@ from netkeeper.linkedin.browser import (
     CLOSE_HIDDEN_TEXT,
     CLOSE_NAME_UNREAD,
     CLOSE_NOT_FOR_PERSON,
+    CLOSE_NOT_TWO_NAMES,
     CLOSE_NOT_VISIBLE,
     NO_ONE_CLOSE_CONTROL,
     BrowserRun,
@@ -1381,7 +1388,8 @@ async def test_a_sent_bubble_for_someone_else_is_not_closed() -> None:
 async def test_two_close_controls_are_not_clicked() -> None:
     def twice(tab: MessagingTab) -> None:
         [header] = [e for e in _dialog(tab).elements() if e.tag == "header"]
-        name = ZEPHYRINE.name
+        # The same captured label twice (#516): the contact's name, then the owner's.
+        name = f"{ZEPHYRINE.name} and {OWNER.name}"
         from messaging_dom import parse_into
 
         parse_into(header, f"<button><span>Close your conversation with {name}</span></button>")
@@ -1389,8 +1397,9 @@ async def test_two_close_controls_are_not_clicked() -> None:
     result, _ = await _close_after(twice)
     assert result.close_refusal == (
         "the sent bubble does not have one close control for this person (header from text,"
-        " 0 elements; close buttons: 2 by prefix, 2 visible, 2 exact, 0 by rule; #1 visible,"
-        " same length, exact; #2 visible, same length, exact)"
+        " 0 elements; close buttons: 2 by prefix, 2 visible, 0 exact, 0 by rule; #1 visible,"
+        " suffix +21, suffix starts with header name; #2 visible, suffix +21, suffix starts"
+        " with header name)"
     )
 
 
@@ -1639,11 +1648,18 @@ def _close_named(suffix: str) -> Callable[[MessagingTab], None]:
     "suffix",
     [
         pytest.param(ZEPHYRINE.name, id="exact"),
-        pytest.param(f"Invented status line, {ZEPHYRINE.name}", id="extra-before"),
-        pytest.param(f"{ZEPHYRINE.name} and others", id="extra-after"),
-        pytest.param(f"Status: busy · {ZEPHYRINE.name} (Active now)", id="extra-both-sides"),
-        pytest.param(f"({ZEPHYRINE.name})", id="in-parentheses"),
+        # #516: the CP8c captures, the account owner's name on either side.
+        pytest.param(f"{OWNER.name} and {ZEPHYRINE.name}", id="owner-first"),
+        pytest.param(f"{ZEPHYRINE.name} and {OWNER.name}", id="owner-last"),
+        # Any non-empty other name: the owner's name isn't compared.
+        pytest.param(f"{ZEPHYRINE.name} and {SOMEONE_ELSE}", id="other-name-last"),
+        pytest.param(f"{SOMEONE_ELSE} and {ZEPHYRINE.name}", id="other-name-first"),
+        pytest.param(f"{ZEPHYRINE.name} and others", id="other-word"),
+        pytest.param(f"{ZEPHYRINE.name} and {ZEPHYRINE.name}", id="same-name-twice"),
+        # The contact's name inside the owner's, with the contact's own side.
+        pytest.param(f"{ZEPHYRINE.name} and Odalys {ZEPHYRINE.name}", id="owner-holds-name"),
         pytest.param(f"{ZEPHYRINE.first}  {ZEPHYRINE.last}", id="whitespace"),
+        pytest.param(f"{ZEPHYRINE.name}\u00a0and  {OWNER.name}", id="whitespace-join"),
     ],
 )
 async def test_a_close_control_that_holds_the_name_is_clicked_once(suffix: str) -> None:
@@ -1668,7 +1684,45 @@ async def test_a_close_control_that_holds_the_name_is_clicked_once(suffix: str) 
         pytest.param(ZEPHYRINE.first, CLOSE_NOT_FOR_PERSON, id="first-name-only"),
         pytest.param(SOMEONE_ELSE, CLOSE_NOT_FOR_PERSON, id="someone-else"),
         pytest.param(f"{SOMEONE_ELSE} and others", CLOSE_NOT_FOR_PERSON, id="someone-else-more"),
+        pytest.param(f"{SOMEONE_ELSE} and {OWNER.name}", CLOSE_NOT_FOR_PERSON, id="two-others"),
         pytest.param("", NO_ONE_CLOSE_CONTROL, id="prefix-only"),
+        # #516: text beside the name, which #499's rule clicked.
+        pytest.param(
+            f"Invented status line, {ZEPHYRINE.name}", CLOSE_NOT_TWO_NAMES, id="extra-before"
+        ),
+        pytest.param(
+            f"Status: busy · {ZEPHYRINE.name} (Active now)",
+            CLOSE_NOT_TWO_NAMES,
+            id="extra-both-sides",
+        ),
+        pytest.param(f"({ZEPHYRINE.name})", CLOSE_NOT_TWO_NAMES, id="in-parentheses"),
+        pytest.param(f"{ZEPHYRINE.name}, {OWNER.name}", CLOSE_NOT_TWO_NAMES, id="comma-join"),
+        # A third name, wherever it stands.
+        pytest.param(
+            f"{ZEPHYRINE.name} and {OWNER.name} and {SOMEONE_ELSE}",
+            CLOSE_NOT_TWO_NAMES,
+            id="third-name-last",
+        ),
+        pytest.param(
+            f"{OWNER.name} and {ZEPHYRINE.name} and {SOMEONE_ELSE}",
+            CLOSE_NOT_TWO_NAMES,
+            id="third-name-around",
+        ),
+        # " and " with an empty side.
+        pytest.param(f"{ZEPHYRINE.name} and ", CLOSE_NOT_TWO_NAMES, id="empty-side-after"),
+        pytest.param(f" and {ZEPHYRINE.name}", CLOSE_NOT_TWO_NAMES, id="empty-side-before"),
+        # The contact's name only inside the owner's name.
+        pytest.param(
+            f"Odalys {ZEPHYRINE.name} and {SOMEONE_ELSE}",
+            CLOSE_NOT_TWO_NAMES,
+            id="name-inside-owner-first",
+        ),
+        pytest.param(
+            f"{SOMEONE_ELSE} and {ZEPHYRINE.name} Inventova",
+            CLOSE_NOT_TWO_NAMES,
+            id="name-inside-owner-last",
+        ),
+        pytest.param(f"Odalys {ZEPHYRINE.name}", CLOSE_NOT_TWO_NAMES, id="name-inside-alone"),
     ],
 )
 async def test_a_close_control_that_does_not_hold_the_name_is_not_clicked(
@@ -1740,6 +1794,9 @@ async def test_a_close_control_whose_name_cannot_be_read_is_not_clicked() -> Non
 def test_the_close_refusals_are_pinned() -> None:
     assert NO_ONE_CLOSE_CONTROL == "the sent bubble does not have one close control for this person"
     assert CLOSE_NOT_FOR_PERSON == "the sent bubble's close control does not name this person"
+    assert CLOSE_NOT_TWO_NAMES == (
+        "the sent bubble's close control does not name this person alone or with one other"
+    )
     assert CLOSE_NAME_UNREAD == "the sent bubble's close control's name could not be read"
     assert CLOSE_HIDDEN_TEXT == "hidden text changes the sent bubble's close control's name"
     assert CLOSE_NOT_VISIBLE == "the sent bubble's close control is not visible"
@@ -2476,6 +2533,80 @@ async def test_a_cancel_during_the_refund_still_records_the_pre_click_hold(
     a = Auto(lane, MessagingSite(ZEPHYRINE, before=existing_bubble_html(ZEPHYRINE)))
     with pytest.raises(asyncio.CancelledError):
         await a.execute()
+    hold = _hold_of(lane)
+    assert hold is not None and hold.reason == linkedin_steps.AUTO_SEND_HOLD_BUBBLE
+
+
+# --- #516 (F9): a bubble drawn late, after the pre-click check, holds auto-send ------------
+
+#: A minimized bubble's composer, as #444's pre-click test draws it.
+LATE_COMPOSER = (
+    '<div hidden><div contenteditable="true" role="textbox" '
+    'aria-label="Write a message…"><p><br></p></div></div>'
+)
+#: A second minimized ``Messaging`` dialog, without a composer of its own.
+LATE_DIALOG = '<div hidden role="dialog" aria-label="Messaging"><header></header></div>'
+
+
+@pytest.mark.parametrize(
+    ("late", "reason"),
+    [
+        (
+            LATE_COMPOSER,
+            "another message composer is on the page, in an open or minimized bubble;"
+            " close the other bubbles",
+        ),
+        (
+            LATE_DIALOG,
+            "another message bubble is on the page, open or minimized; close the others",
+        ),
+    ],
+    ids=["second composer", "second dialog"],
+)
+async def test_a_bubble_drawn_after_the_pre_click_check_holds_auto_send(
+    lane: Lane, late: str, reason: str
+) -> None:
+    """#516, item 2 (F9 of the CP8c analysis): the page was clear at the pre-click check
+    (#444), and a second bubble draws with the Message click, as a restored bubble may.
+    The check after the click refuses with nothing typed, and auto-send holds: the
+    bubble netkeeper didn't expect stays open, so every later auto-send would meet it.
+    The hold comes from ADR 0008's rule 5 (any ending after an attempted Message click
+    that didn't close its own tab), not from #444's pre-click map."""
+    site = MessagingSite(
+        ZEPHYRINE, bubble=Bubble(ZEPHYRINE, html=existing_bubble_html(ZEPHYRINE) + late)
+    )
+    a = Auto(lane, site)
+    await a.execute()
+    _no_send(a)
+    assert [c.tag for c in a.site.tab.clicks] == ["a"]  # the Message click, and no other
+    assert a.site.tab.keys == []  # nothing typed
+    counts = a.run().counts_json or {}
+    assert counts.get("message_click_attempted") is True and counts.get("tab_closed") is False
+    assert "opened" not in counts  # not given back unopened: the not_typed path
+    assert a.message() is None
+    assert lane.enrollment(a.enrollment_id).not_sent_error == f"not_typed: {reason}"
+    hold = _hold_of(lane)
+    assert hold is not None and hold.reason == linkedin_steps.AUTO_SEND_HOLD_BUBBLE
+    assert hold.run_id == a.run_id
+    # Nothing typed and no Send click: the li_messages_auto unit came back; the visit didn't.
+    assert a.spent(ActionClass.LI_MESSAGES_AUTO) == 0
+    assert a.spent(ActionClass.PROFILE_VISITS) == 1
+    # Held: nothing else is claimed until a person resumes.
+    lane.enroll(contact={"li_urn": "urn:li:fsd_profile:ACoAAOther9", "li_public_id": "q9"})
+    lane.write(lambda s, u: record_poll(s, u, NOW))
+    assert lane.write(lambda s, u: claim_auto_send(s, u, now=NOW, settings=AUTO)) is None
+
+
+async def test_a_composer_drawn_after_send_leaves_the_bubble_open_and_holds(lane: Lane) -> None:
+    """#516: a second composer drawn after a landed Send. The close rule needs exactly one
+    composer, so nothing is closed, the tab is handed over, and auto-send holds."""
+    site = MessagingSite(ZEPHYRINE)
+    site.after_send = lambda tab: tab.add_html(LATE_COMPOSER)
+    a = Auto(lane, site)
+    await a.execute()
+    assert len(a.site.sent) == 1 and site.closed_bubbles == 0
+    counts = a.run().counts_json or {}
+    assert counts.get("bubble_closed") is False and counts.get("tab_closed") is False
     hold = _hold_of(lane)
     assert hold is not None and hold.reason == linkedin_steps.AUTO_SEND_HOLD_BUBBLE
 

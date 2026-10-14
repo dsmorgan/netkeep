@@ -39,12 +39,14 @@ from urllib.parse import quote, unquote, urlsplit
 import pytest
 from browser_guard import isolated_cdp
 from messaging_pages import (
+    OWNER,
     Member,
     compose_href,
     compose_option_answer,
     compose_option_urn,
     conversation_urn,
     existing_bubble_html,
+    header_pair,
     message_control_html,
     messages_sync_url,
     never_messaged_bubble_html,
@@ -180,7 +182,7 @@ document.addEventListener('click', async (event) => {
     box.innerHTML = '<p><br></p>';
     return;
   }
-  if (button && button.textContent.trim() === 'Close your conversation with ' + cfg.name) {
+  if (button && button.textContent.trim() === 'Close your conversation with ' + cfg.close_names) {
     note('closed');
     const bubble = button.closest('[role="dialog"]');
     if (bubble) bubble.remove();
@@ -408,6 +410,8 @@ def _profile_html(scenario: Scenario) -> str:
         "enter_sends": scenario.enter_sends,
         "slug": member.slug,
         "name": (scenario.header_for or member).name,
+        # #516: the close control names the contact and the account owner.
+        "close_names": header_pair(scenario.header_for or member, OWNER, owner_first=False),
         "conversation": conversation_urn(9) if scenario.existing else None,
     }
     page = (

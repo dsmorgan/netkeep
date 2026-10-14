@@ -30,7 +30,7 @@ from typing import Any, ClassVar
 
 import pytest
 from browser_guard import isolated_cdp
-from messaging_pages import Member, existing_bubble_html
+from messaging_pages import OWNER, Member, existing_bubble_html, header_pair
 
 from netkeeper.linkedin.browser import (
     BUBBLE_NAME,
@@ -56,6 +56,9 @@ CDP_URL = os.environ.get("NETKEEPER_CDP_URL", "http://127.0.0.1:9222")
 CLOSE = "Close your conversation with "
 #: An icon as LinkedIn draws one inside a header button: an ``aria-hidden`` svg, no text.
 ICON = '<svg aria-hidden="true" width="16" height="16"><use href="#close-small"></use></svg>'
+
+#: The invented account owner's name, as the header controls carry it (#516).
+_OWNER = escape(OWNER.name)
 
 #: Every input the page could see, recorded so a test can prove none arrived.
 _SCRIPT = """
@@ -90,6 +93,7 @@ _CLOSE_INSIDES = {
         f"<span>{CLOSE}{name}</span>"
     ),
     # #499: the live close label held more than the header name, with text before it.
+    # #516 refuses text beside the name that isn't one other name across " and ".
     "extra_before": lambda name: f"{ICON}<span>{CLOSE}Invented status line {name}</span>",
     "extra_both_sides": lambda name: (
         f"{ICON}<span>{CLOSE}Invented status, {name} (Active now)</span>"
@@ -98,6 +102,17 @@ _CLOSE_INSIDES = {
         f"{ICON}<span>{CLOSE}Invented status </span><span>{name}</span><span>, away</span>"
     ),
     "longer_word": lambda name: f"{ICON}<span>{CLOSE}{name}son</span>",
+    # #516: the CP8c captures' label, the contact and the account owner, in either order.
+    "owner_last": lambda name: f"{ICON}<span>{CLOSE}{name} and {_OWNER}</span>",
+    "owner_first": lambda name: f"{ICON}<span>{CLOSE}{_OWNER} and {name}</span>",
+    "owner_split_spans": lambda name: f"{ICON}<span>{CLOSE}{name}</span><span> and {_OWNER}</span>",
+    "third_name": lambda name: (
+        f"{ICON}<span>{CLOSE}{name} and {_OWNER} and Invented Thirdperson</span>"
+    ),
+    "empty_side": lambda name: f"{ICON}<span>{CLOSE}{name} and </span>",
+    "name_inside_owner": lambda name: (
+        f"{ICON}<span>{CLOSE}Odalys {name} and Invented Otherperson</span>"
+    ),
 }
 
 #: Whether the exact-name lookup used before #499, ``get_by_role("button",
@@ -118,16 +133,24 @@ EXACT_LOOKUP_FINDS = {
     "extra_both_sides": False,
     "extra_split_spans": False,
     "longer_word": False,
+    "owner_last": False,
+    "owner_first": False,
+    "owner_split_spans": False,
+    "third_name": False,
+    "empty_side": False,
+    "name_inside_owner": False,
 }
-#: Whether the close lookup's rule since #499 (``_close_by_rule``: one button by prefix,
-#: visible, its confirmed name the same with hidden text counted, holding the header
-#: name as a whole) finds the close button in a real Chrome. It finds every shape the
-#: exact lookup did, and the ones with text beside the name; never a longer word.
+#: Whether the close lookup's rule (``_close_by_rule``: one button by prefix, visible,
+#: its confirmed name the same with hidden text counted, holding the header name as a
+#: whole (#499), and that name alone or with one other name across " and " (#516))
+#: finds the close button in a real Chrome. It finds every shape the exact lookup did,
+#: and the captured two-name labels in either order; never a longer word, text beside
+#: the name, a third name, an empty side, or the name only inside another.
 RULE_FINDS = {
     **EXACT_LOOKUP_FINDS,
-    "extra_before": True,
-    "extra_both_sides": True,
-    "extra_split_spans": True,
+    "owner_last": True,
+    "owner_first": True,
+    "owner_split_spans": True,
 }
 MEMBERS = {variant: _member(500 + i) for i, variant in enumerate(_CLOSE_INSIDES)}
 
@@ -135,7 +158,10 @@ MEMBERS = {variant: _member(500 + i) for i, variant in enumerate(_CLOSE_INSIDES)
 def _bubble(variant: str, member: Member) -> str:
     html = existing_bubble_html(member)
     name = escape(member.name)
-    plain = f"<button><span>{CLOSE}{name}</span></button>"
+    # The fixture's own close label names both participants (#516); each variant
+    # replaces it whole.
+    pair = escape(header_pair(member, OWNER, owner_first=False))
+    plain = f"<button><span>{CLOSE}{pair}</span></button>"
     assert plain in html
     return html.replace(plain, f"<button>{_CLOSE_INSIDES[variant](name)}</button>", 1)
 
@@ -255,6 +281,7 @@ async def test_the_close_shape_and_the_close_lookup_in_a_real_browser(
     assert shape.exact == (1 if EXACT_LOOKUP_FINDS[variant] else 0), shape.describe()
     finds = RULE_FINDS[variant]
     assert shape.rule == (1 if finds else 0), shape.lines()
+    assert (shape.rule_form is not None) is finds, shape.lines()
     assert not isinstance(control, str) if finds else isinstance(control, str), control
     assert events == []
 

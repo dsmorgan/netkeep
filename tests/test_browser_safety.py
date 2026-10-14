@@ -402,7 +402,8 @@ ALLOWED_INPUTS = frozenset(
         (LINKEDIN / "browser.py", "BrowserRun.click_send", "click"),
         # ADR 0008, decision D1: after a landed Send, one click on the sent bubble's own
         # close control, in the verified dialog: the one button whose name starts with
-        # "Close your conversation with " and holds the header link's name (#499).
+        # "Close your conversation with " and holds the header link's name (#499), and
+        # is that name alone or with one other name either side of " and " (#516).
         (LINKEDIN / "browser.py", "BrowserRun.close_sent_bubble", "click"),
     }
 )
@@ -2792,8 +2793,9 @@ def _close_rule_findings(rule: ast.AsyncFunctionDef) -> list[str]:
     when it holds: one ``get_by_role`` on ``dialog`` by ``CLOSE_CONTROL_ROLE`` and
     ``CLOSE_CONTROL_PATTERN`` with ``include_hidden=True``, counted ``!= 1``; that
     locator ``filter``-ed ``visible=True``, counted ``!= 1``; the name compared by
-    ``close_names_person``; and only that visible locator, narrowed to its confirmed
-    exact name with hidden text counted (``visible.and_(same)``), returned as a locator."""
+    ``close_names_person`` (#499) and then by ``close_form`` (#516); and only that
+    visible locator, narrowed to its confirmed exact name with hidden text counted
+    (``visible.and_(same)``), returned as a locator."""
     findings: list[str] = []
     calls = [n for n in walk(rule) if isinstance(n, ast.Call)]
     on_dialog = [
@@ -2818,6 +2820,7 @@ def _close_rule_findings(rule: ast.AsyncFunctionDef) -> list[str]:
         "visible = closes.filter(visible=True)",
         "if await visible.count() != 1:",
         "if not close_names_person(header, read.name[len(CLOSE_CONTROL_PREFIX):]):",
+        "if close_form(header, read.name[len(CLOSE_CONTROL_PREFIX):]) is None:",
         "if await visible.and_(same).count() != 1:",
         "_read_accessible_name(tab, visible, CLOSE_CONTROL_ROLE)",
     ):
@@ -2830,6 +2833,13 @@ def _close_rule_findings(rule: ast.AsyncFunctionDef) -> list[str]:
     ]
     if [r for r in returned if not r.startswith("CloseMiss.")] != ["visible.and_(same)"]:
         findings.append(f"returns: {returned}")
+    # #516: the form is asked after the whole-name check, and a miss of either returns.
+    names_at = source.find("if not close_names_person(")
+    form_at = source.find("if close_form(")
+    if not 0 <= names_at < form_at:
+        findings.append("close_form is not asked after close_names_person")
+    if "return CloseMiss.NOT_TWO_NAMES" not in source:
+        findings.append("missing: return CloseMiss.NOT_TWO_NAMES")
     return findings
 
 
@@ -2852,6 +2862,12 @@ def test_the_close_click_target_is_built_by_the_rule() -> None:
         ("    return visible.and_(same)\n", "    return visible.and_(closes)\n"),
         ("    if not close_names_person(", "    if False and close_names_person("),
         ("if await visible.and_(same).count() != 1:", "if await visible.and_(same).count() < 1:"),
+        # #516: the two-name form, dropped, inverted, or not returned on.
+        ("    if close_form(", "    if False and close_form("),
+        ("PREFIX) :]) is None:", "PREFIX) :]) is not None:"),
+        ("PREFIX) :]) is None:", "PREFIX) :]) == CloseForm.ALONE:"),
+        ("        return CloseMiss.NOT_TWO_NAMES\n", "        pass\n"),
+        ("close_form(header, read.name", "close_form(header, header"),
     ],
 )
 def test_the_close_rule_pin_catches_each_mutation(old: str, new: str) -> None:
@@ -2863,3 +2879,90 @@ def test_the_close_rule_pin_catches_each_mutation(old: str, new: str) -> None:
     assert body.count(old) == 1, old
     mutated = source[:start] + body.replace(old, new, 1) + source[end:]
     assert _close_rule_findings(_close_rule_function(mutated)), f"the pin missed {new!r}"
+
+
+def _close_form_function(source: str | None = None) -> ast.FunctionDef:
+    tree = parse(source if source is not None else read_source(LINKEDIN / "browser.py"))
+    [form] = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "close_form"]
+    return form
+
+
+def _close_form_findings(form: ast.FunctionDef) -> list[str]:
+    """What is wrong with ``close_form`` (#516), in words; empty when it holds: both sides
+    normalized as ``close_names_person`` normalizes them; an empty header refused; the
+    header alone accepted only exactly; and otherwise exactly one ``CLOSE_NAMES_JOIN``,
+    split into two non-empty sides, one of them exactly the header."""
+    source = ast.unparse(form)
+    findings = [
+        f"missing: {needed}"
+        for needed in (
+            "h, s = (unicodedata.normalize('NFC', _playwright_space(part)) for part in"
+            " (header, suffix))",
+            "if not h:\n        return None",
+            "if s == h:\n        return CloseForm.ALONE",
+            "if s.count(CLOSE_NAMES_JOIN) != 1:\n        return None",
+            "left, right = s.split(CLOSE_NAMES_JOIN)",
+            "if not left or not right:\n        return None",
+            "if left == h:\n        return CloseForm.HEADER_FIRST",
+            "if right == h:\n        return CloseForm.HEADER_LAST",
+        )
+        if needed not in source
+    ]
+    returns = sorted(
+        (n for n in walk(form) if isinstance(n, ast.Return) and n.value is not None),
+        key=lambda n: (n.lineno, n.col_offset),
+    )
+    returned = [ast.unparse(n.value) for n in returns if n.value is not None]
+    if returned != [
+        "None",
+        "CloseForm.ALONE",
+        "None",
+        "None",
+        "CloseForm.HEADER_FIRST",
+        "CloseForm.HEADER_LAST",
+        "None",
+    ]:
+        findings.append(f"returns, in order: {returned}")
+    return findings
+
+
+def test_the_close_form_holds_the_two_name_template() -> None:
+    """#516: the close control names the header link's name alone, or it and exactly one
+    other non-empty name either side of one " and "; nothing looser."""
+    assert _close_form_findings(_close_form_function()) == []
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("    if not h:\n        return None\n", ""),
+        ("    if s == h:\n", "    if h in s:\n"),
+        ("    if s.count(CLOSE_NAMES_JOIN) != 1:", "    if s.count(CLOSE_NAMES_JOIN) < 1:"),
+        (
+            "    left, right = s.split(CLOSE_NAMES_JOIN)",
+            "    left, right = s.split(CLOSE_NAMES_JOIN, 1)",
+        ),
+        ("    if not left or not right:", "    if not left and not right:"),
+        ("    if left == h:", "    if left.startswith(h):"),
+        ("    if right == h:", "    if h in right:"),
+        ("    if right == h:", "    if right.casefold() == h.casefold():"),
+        (
+            "        return None\n    if left == h:",
+            "        return CloseForm.ALONE\n    if left == h:",
+        ),
+        ("    return None\n\n\nclass CloseMiss", "    return CloseForm.ALONE\n\n\nclass CloseMiss"),
+        (
+            '"NFC", _playwright_space(part)) for part in (header, suffix))',
+            '"NFC", part) for part in (header, suffix))',
+        ),
+    ],
+)
+def test_the_close_form_pin_catches_each_mutation(old: str, new: str) -> None:
+    """Each loosening of the two-name template fails the pin above."""
+    source = read_source(LINKEDIN / "browser.py")
+    start = source.index("def close_form(")
+    end = source.index("\nclass CloseMiss(", start) + len("\nclass CloseMiss(")
+    body = source[start:end]
+    assert body.count(old) == 1, old
+    mutated = source[:start] + body.replace(old, new, 1) + source[end:]
+    assert _close_form_findings(_close_form_function(mutated)), f"the pin missed {new!r}"
