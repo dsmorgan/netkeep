@@ -160,6 +160,14 @@ class StopReason(enum.StrEnum):
     (#405): :data:`MAX_CONTACT_INFO_LOST_IN_A_ROW` in a row, or more than half of the
     run's overlays after :data:`CONTACT_INFO_LOST_SHARE_AFTER` clicks."""
 
+    MANY_NOT_FOUND = "many_not_found"
+    """Too many profiles were not found (#514 review): :data:`MAX_NOT_FOUND_IN_A_ROW` in
+    a row, or more than half of the run's visits after :data:`NOT_FOUND_SHARE_AFTER`
+    visits. That many missing people is LinkedIn answering every profile as missing,
+    not that many people leaving, so none of the run's not-found answers is recorded
+    as one: each is handed over as an unreadable visit with the cause
+    :attr:`UnreadableCause.NOT_FOUND_DISCOUNTED`."""
+
 
 #: The pause a person takes between reaching the top of a profile and clicking
 #: **Contact info**: a second or two, with no distraction tail. Spec 9.5 has no
@@ -191,6 +199,17 @@ MAX_CONTACT_INFO_LOST_IN_A_ROW: Final = 5
 #: ``answer_lost``: a loss that comes and goes never trips the in-a-row rule, and
 #: without this a run could spend its visits saving profiles with no contact info.
 CONTACT_INFO_LOST_SHARE_AFTER: Final = 6
+
+#: Not-found profiles in a row that stop the run as ``many_not_found`` (#514 review).
+#: Two in a row is ordinary (people leave LinkedIn); four is the page answering every
+#: profile as missing, a soft block perhaps, and three weekly runs of that would mark
+#: every contact in their plans gone.
+MAX_NOT_FOUND_IN_A_ROW: Final = 4
+
+#: The visits a run makes before the share rule applies (#514 review). Once a run has
+#: visited this many profiles, more than half of them not found stops it as
+#: ``many_not_found``: a block that comes and goes never trips the in-a-row rule.
+NOT_FOUND_SHARE_AFTER: Final = 6
 
 #: The reasons a gate may give for refusing a visit.
 GATE_REASONS: Final = frozenset({StopReason.BUDGET, StopReason.CANCELLED, StopReason.INACTIVE})
@@ -285,6 +304,12 @@ class UnreadableCause(enum.StrEnum):
     ID_MISMATCH = "id_mismatch"
     """The profile's own id is not the contact's URN (#190): read, not clicked, not written."""
 
+    NOT_FOUND_DISCOUNTED = "not_found_discounted"
+    """The profile was not found, in a run that stopped as ``many_not_found`` (#514
+    review). Not recorded as not found, so it adds nothing to the contact's not-found
+    streak; the contact is revisited as after any unreadable visit. Not counted toward
+    the unreadable limits: the run had already stopped."""
+
     UNKNOWN = "unknown"
     """A source that gave no cause: a fake, or a path with no code yet."""
 
@@ -296,7 +321,9 @@ class UnreadableVisit:
     ``visit`` is the visit's number in this run, from 1. ``contact_ref`` is the core's
     own reference for the contact (its id), never anything from the page. A visit whose
     Contact info was deferred (:attr:`UnreadableCause.CONTACT_INFO_DEFERRED`, #405) is
-    recorded the same way, though it does not count toward the limits.
+    recorded the same way, though it does not count toward the limits, and so is a
+    not-found visit a ``many_not_found`` stop discounted
+    (:attr:`UnreadableCause.NOT_FOUND_DISCOUNTED`, #514 review).
     """
 
     visit: int
@@ -472,7 +499,8 @@ class EnrichResult:
     visit whose answer stopped the run at once as ``RouteChanged`` (not by the
     unreadable limits), with its cause; ``None`` for any other stop.
     ``contact_info_read`` is how many Contact info answers were read and parsed
-    (#424).
+    (#424). ``not_found`` counts the profiles the page answered as missing, in a
+    ``many_not_found`` run too, though that run hands none of them over as not found.
     """
 
     reason: StopReason
@@ -659,9 +687,15 @@ async def run_enrichment(
     """Visit the spec's targets in order, to its stopping point, and say why it stopped.
 
     ``on_harvest`` receives each harvest as soon as its visit finishes, before
-    the gate is asked about the next one. An exception from it propagates and
+    the gate is asked about the next one, until the run's first ``NotFound``
+    (#514 review). From then on every harvest is held, in order, and handed over
+    when the run stops: a run that stops as ``many_not_found`` hands each of its
+    ``NotFound`` harvests over as ``RouteChanged`` with the cause
+    :attr:`UnreadableCause.NOT_FOUND_DISCOUNTED`, so no contact's not-found streak
+    grows from a run that saw too many. An exception from ``on_harvest`` propagates and
     ends the run: a run that ends by exception has no :class:`EnrichResult`,
-    and the target it was handing over is not in anybody's completed list.
+    and the target it was handing over is not in anybody's completed list, nor is
+    any harvest still held (the core never hears of those, and visits them again).
     ``rng`` draws the pacing plan (:func:`~netkeeper.linkedin.pacing.plan_enrichment`),
     then, for each visit that clicks, the pause before the click and the scroll
     back to the top; a seeded one replays all of it. The waits *between* profiles
@@ -682,6 +716,10 @@ async def run_enrichment(
     copied: list[str] = []
     unreadable_visits: list[UnreadableVisit] = []
     visits = harvested = not_found = unreadable = unreadable_in_a_row = clicks = mismatched = 0
+    # #514 review: not-found visits in a row, and the harvests held from the run's first
+    # NotFound on, each with its visit number, until the run stops.
+    not_found_in_a_row = 0
+    held: list[tuple[int, ProfileHarvest]] = []
     # #405: Contact info answers lost, and lost in a row among the visits that clicked.
     info_lost = info_lost_in_a_row = 0
     # #424: Contact info answers read and parsed, for the breaker across runs.
@@ -699,12 +737,33 @@ async def run_enrichment(
             contact_info_lost=info_lost,
         )
 
+    async def release(*, discount: bool) -> None:
+        """Hand over every held harvest, in order; with ``discount``, none as NotFound."""
+        discounted = False
+        while held:
+            number, harvest = held.pop(0)
+            if discount and harvest.outcome is Outcome.NOT_FOUND:
+                cause = UnreadableCause.NOT_FOUND_DISCOUNTED
+                harvest = ProfileHarvest(
+                    contact_ref=harvest.contact_ref,
+                    requested_public_id=harvest.requested_public_id,
+                    outcome=Outcome.ROUTE_CHANGED,
+                    observed_at=harvest.observed_at,
+                    unreadable_cause=cause,
+                )
+                unreadable_visits.append(UnreadableVisit(number, harvest.contact_ref, cause))
+                discounted = True
+            await on_harvest(harvest)
+        if discounted:
+            unreadable_visits.sort(key=lambda visit: visit.visit)
+
     async def stop(
         reason: StopReason,
         outcome: Outcome | None = None,
         final_url: str | None = None,
         stopped_by: UnreadableVisit | None = None,
     ) -> EnrichResult:
+        await release(discount=reason is StopReason.MANY_NOT_FOUND)
         await on_progress(progress(reason))
         log.info(
             "enrichment stopped: %s after %d of %d planned visits (%d harvested, %d not found)%s",
@@ -883,9 +942,26 @@ async def run_enrichment(
             )
         if cause is not None:
             unreadable_visits.append(UnreadableVisit(visits, target.contact_ref, cause))
-        await on_harvest(harvest)
+        not_found_in_a_row = not_found_in_a_row + 1 if outcome is Outcome.NOT_FOUND else 0
+        if held or outcome is Outcome.NOT_FOUND:
+            # #514 review: held until the run stops, so a run that turns out to have
+            # seen too many missing profiles records none of them as not found.
+            held.append((visits, harvest))
+        else:
+            await on_harvest(harvest)
         completed.append(target.contact_ref)
         await on_progress(progress())
+        if not_found_in_a_row >= MAX_NOT_FOUND_IN_A_ROW or (
+            visits >= NOT_FOUND_SHARE_AFTER and 2 * not_found > visits
+        ):
+            log.warning(
+                "enrichment: %d of %d profiles not found (%d in a row); stopping, and"
+                " recording none of them as not found",
+                not_found,
+                visits,
+                not_found_in_a_row,
+            )
+            return await stop(StopReason.MANY_NOT_FOUND)
         if (outcome is Outcome.ROUTE_CHANGED or mismatch) and (
             unreadable_in_a_row >= MAX_UNREADABLE_IN_A_ROW
             or unreadable + mismatched >= MAX_UNREADABLE_PER_RUN

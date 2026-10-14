@@ -62,6 +62,9 @@ REASON_TEXT: Final[Mapping[str, str]] = {
     ),
     "profile_status": "the profile answered a status that stopped the run at once",
     "id_mismatch": "the profile's id is not the contact's; nothing saved",
+    "not_found_discounted": (
+        "the profile was not found, in a run with too many of those; not recorded as not found"
+    ),
     "unknown": "no cause was recorded",
 }
 

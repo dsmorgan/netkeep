@@ -867,6 +867,10 @@ STOP_REASON_TEXT: Final[Mapping[str, str]] = {
     "cancelled": "cancelled",
     "paused": "paused; resume it to continue its plan",
     "answer_lost": "lost some of the page's answers",
+    "many_not_found": (
+        "too many profiles were not found; none was recorded as not found, and they are"
+        " visited again later"
+    ),
     "inbox_read": "read the inbox back to the last complete poll",
     "inbox_incomplete": "read part of the inbox; the next poll reads it again",
     "inbox_first_short": "the first poll could not read back to the earliest outreach",

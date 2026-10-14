@@ -399,9 +399,13 @@ class PageProfiles:
         while answers < MAX_LANDING_ANSWERS:
             remaining = max(deadline - loop.time(), 0.0)
             wait = min(remaining, MISSING_PAGE_POLL_S) if self._missing_document else remaining
+            asked = loop.time()
             response = await observation.next(wait)
             if response is None:
-                if wait < remaining and not self._at_missing_page(self._tab_url()):
+                # An observation that ended answers None at once; nothing more arrives,
+                # so the wait ends rather than spin (#514 review).
+                ended = loop.time() - asked < wait / 2
+                if wait < remaining and not ended and not self._at_missing_page(self._tab_url()):
                     # #514: the missing-profile document arrived; the page's own script
                     # moves the tab soon after. Read its address again, nothing more.
                     continue
