@@ -28,7 +28,15 @@ whose visible length is a multiple of ten; #208). A page that simply stops
 loading more is not an end: after :data:`MAX_IDLE_SCROLLS` scrolls that
 brought nothing, the call answers ``RouteChanged``, so the run stops and ages nobody.
 A short slice is returned only once the end is proven, which is what lets the job's
-short-page rule stand.
+short-page rule stand; that slice carries :attr:`~netkeeper.linkedin.connections.SourcePage.ended`,
+so the job ends there rather than read one more, empty, unit to find out (#515).
+
+**Hidden members** (#515). LinkedIn's total counts *places*, and an answer can hold
+fewer cards than the places it covers: nine cards, still asking for the start ten
+places on. The member in that place is hidden from the list. The run counts those
+places over the answers it read whole
+(:attr:`~netkeeper.linkedin.connections.SourcePage.hidden`) and reports them; the
+completion slack still decides whether the run is complete.
 
 **What makes a run complete.** The first screen states the total connection count, and
 every slice reports it as the page's ``total``.
@@ -84,9 +92,10 @@ body tap (:mod:`netkeeper.linkedin.body_tap`), so a lost answer may come with th
 Chrome streamed to netkeeper's read-only CDP session as the answer arrived. Before a
 loss is recorded, that copy stands in for the answer only if it parses whole as the
 page for the lost start and agrees with what the page did next: when the page moved
-on, it must ask for the start the page asked for and hold exactly the cards in
-between; when the page went quiet, it must prove the end of the list. Otherwise the
-answer is lost, as above.
+on, it must ask for the start the page asked for and hold at least one card and no
+more cards than the places in between (fewer when the answer hides a member, #515);
+when the page went quiet, it must prove the end of the list. Otherwise the answer is
+lost, as above.
 
 The list's end is still proven only by the page's own answers; the cards of a lost
 answer (the gap between its start and the next one) count toward the first screen's
@@ -247,8 +256,10 @@ class PageConnections:
         #: handed to the job with a slice.
         self._lost_count = 0
         self._unreported: list[LostAnswer] = []
-        #: The cards the lost answers held: the gap each left in the list's indexes.
-        self._lost_cards = 0
+        #: The places the lost answers covered: the gap each left in the list's indexes.
+        self._lost_places = 0
+        #: Places the answers read whole held no card for (#515): a report only.
+        self._hidden = 0
         #: Whether any answer read in this run asked for a next page (#208 review, M1).
         #: The completion slack at a full last answer is allowed only once one has:
         #: a parser that stopped reading the next request (a renamed ``$type``) would
@@ -313,6 +324,9 @@ class PageConnections:
                 connections=selected, start=start, count=count, total=self._total
             ),
             lost=self._report(),
+            # #515: the list's end is proven and this slice holds its last card.
+            ended=self._ended and len(self._cards) <= start + count,
+            hidden=self._hidden,
         )
 
     def _failure(self) -> ObservationFailed | AnswerLost:
@@ -591,12 +605,15 @@ class PageConnections:
         slack = completion_slack(self._total) if self._asked_next else 0
         if chunk.next_start is not None:
             self._asked_next = True
+            # #515: the places this answer covers that it holds no card for. Only an
+            # answer that asks for a next page says how many places it covers.
+            self._hidden += max(0, chunk.next_start - chunk.start - len(chunk.cards))
         if chunk.ends_list:
             self._ended = True
         elif (
             chunk.next_start is None
             and self._total > 0
-            and self._distinct() + self._lost_cards >= self._total - slack
+            and self._distinct() + self._lost_places >= self._total - slack
         ):
             # A full answer that asks for no next page is the end of a list whose length
             # is a multiple of ten -- but only once the run has seen as many distinct
@@ -627,10 +644,13 @@ class PageConnections:
         The copy is what Chrome streamed as the answer arrived (#200). It stands in
         for the answer only when it parses whole as the page for the lost start and
         agrees with what the page itself did next: when the page asked for
-        ``next_start``, the copy must ask for that start too and hold exactly the
-        cards in between; when the page went quiet (``None``), the copy must prove
-        the end of the list. Anything else -- no copy, a copy cut short, a copy that
-        does not parse -- leaves the answer lost.
+        ``next_start``, the copy must ask for that start too and hold at least one
+        card and no more than the places in between. An answer can hold fewer cards
+        than its places, one per hidden member (#515), so fewer is accepted; the
+        parser's strictness is what keeps a copy cut short from passing for one, since
+        a copy cut short does not parse. When the page went quiet (``None``), the copy
+        must prove the end of the list. Anything else -- no copy, a copy cut short, a
+        copy that does not parse -- leaves the answer lost.
         """
         pending = self._lost
         assert pending is not None
@@ -654,12 +674,13 @@ class PageConnections:
             # short does not parse, so it cannot pass for a short last answer.
             places = (
                 len({card.urn for card in self._cards} | {card.urn for card in chunk.cards})
-                + self._lost_cards
+                + self._lost_places
             )
             agrees = (chunk.ends_list or chunk.next_start is None) and 0 < self._total <= places
         else:
             agrees = (
-                chunk.next_start == next_start and len(chunk.cards) == next_start - pending.start
+                chunk.next_start == next_start
+                and 0 < len(chunk.cards) <= next_start - pending.start
             )
         if not agrees:
             log.info(
@@ -693,7 +714,7 @@ class PageConnections:
             raise self._give_up("the page moved more than one answer past it")
         self._lost = None
         self._lost_count += 1
-        self._lost_cards += next_start - pending.start
+        self._lost_places += next_start - pending.start
         self._next_start = next_start
         lost = LostAnswer(start=pending.start, cause=pending.cause, ending=MOVED_PAST)
         next_bytes = "unreadable" if response.body is None else str(len(response.body))

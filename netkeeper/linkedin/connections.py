@@ -34,8 +34,10 @@ the gate refuses the next page.
 
 **The end of the list** is an empty page, or a *short* page (fewer
 connections than asked for) that reaches the largest total any page has
-reported. A short page before that total is an under-filled page, not the
-end: it is logged and the run carries on from the next offset, so an endpoint
+reported, or a short page whose source proved the end of the list
+(:attr:`SourcePage.ended`, #515). A short page before that total is an
+under-filled page, not the end: it is logged and the run carries on from the
+next offset, so an endpoint
 that sometimes serves 39 of 40 does not end every full sync partway and leave
 the lifecycle never running. ``paging.total`` alone never ends a run: a full
 page is always followed by another request, so a total that lies low cannot
@@ -282,7 +284,9 @@ class SyncResult:
     when ``reason`` is :attr:`StopReason.ANSWER_LOST`, and is ``None`` otherwise.
     ``losses`` is every answer the source lost in this run, in order, that one
     included (#200): the run read on past the others. A run with any loss is never
-    :attr:`complete`.
+    :attr:`complete`. ``hidden`` is how many places the source's answers held no
+    card for (#515), as the last page it handed over reported it
+    (:attr:`SourcePage.hidden`): a report only, which :attr:`complete` does not read.
     """
 
     mode: SyncMode
@@ -298,6 +302,7 @@ class SyncResult:
     source_switched: bool = False
     lost: LostAnswer | None = None
     losses: tuple[LostAnswer, ...] = ()
+    hidden: int = 0
 
     @property
     def shortfall(self) -> int:
@@ -351,6 +356,14 @@ class SourcePage:
     :func:`run_connections_sync` folds it into :class:`SyncResult.source_switched`
     (#173 review, F5(a)). ``lost`` is every answer the source lost and read on past
     since the last page it answered (#200), whatever this one's outcome.
+
+    ``ended`` is true when the source has proven the end of the list and this page
+    holds its last connection (#515): a short page with it set is the end, without
+    reading one more page to find it empty. A source that leaves it unset keeps the
+    job's own short-page rule. ``hidden`` is how many places, so far in this run,
+    the answers the source read whole held no card for (#515): an answer that asks
+    for the next page ten places on but holds nine cards hides one member. It is a
+    running count, not this page's alone.
     """
 
     outcome: Outcome
@@ -358,6 +371,8 @@ class SourcePage:
     page: ConnectionsPageResult | None = None
     switched: bool = False
     lost: tuple[LostAnswer, ...] = ()
+    ended: bool = False
+    hidden: int = 0
 
 
 class ConnectionsSource(Protocol):
@@ -435,6 +450,7 @@ async def run_connections_sync(
     start = 0
     source_switched = False
     losses: list[LostAnswer] = []
+    hidden = 0
     #: Whether the slice before this one carried a loss (#201 review, L1).
     loss_before = False
 
@@ -458,6 +474,7 @@ async def run_connections_sync(
             source_switched=source_switched,
             lost=lost,
             losses=tuple(losses),
+            hidden=hidden,
         )
 
     async def stopped(result: SyncResult) -> SyncResult:
@@ -507,6 +524,7 @@ async def run_connections_sync(
             return await stopped(finish(StopReason.ANSWER_LOST, lost=exc.lost))
         losses.extend(answer.lost)
         source_switched = source_switched or answer.switched
+        hidden = max(hidden, answer.hidden)
         if answer.outcome is not Outcome.OK or answer.page is None:
             outcome = Outcome.ROUTE_CHANGED if answer.outcome is Outcome.OK else answer.outcome
             return await stopped(finish(StopReason.RESPONSE, outcome, answer.final_url))
@@ -556,12 +574,13 @@ async def run_connections_sync(
 
         start += len(result.connections)
         # See the module docstring: an empty page ends the list, a short page
-        # ends it only once it reaches the largest total any page reported, and
-        # a full page never does, whatever the total says.
+        # ends it only once it reaches the largest total any page reported or the
+        # source proved the end (#515), and a full page never does, whatever the
+        # total says.
         if not result.connections:
             return await stopped(finish(StopReason.END_OF_LIST))
         if len(result.connections) < spec.page_size:
-            if 0 < max_total <= start:
+            if answer.ended or 0 < max_total <= start:
                 return await stopped(finish(StopReason.END_OF_LIST))
             log.warning(
                 "connections: %s served %d of %d at offset %d, short of the reported"

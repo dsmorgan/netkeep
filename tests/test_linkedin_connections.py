@@ -612,6 +612,79 @@ async def test_a_short_page_that_reaches_the_total_is_the_end() -> None:
     assert result.complete
 
 
+async def test_a_short_page_the_source_did_not_prove_the_end_of_still_reads_on() -> None:
+    """#515: a short page with ``ended`` unset keeps today's rule: short of the total,
+    it is read past, and the next, empty page ends the list."""
+    people = _hundred()[:79]
+    under_filled = replace(_page(people[40:79], start=40, total=100), ended=False)
+    source = FakeConnectionsSource(people, script={1: under_filled}, total=100)
+
+    result, _, _ = await _run(source, page_size=40)
+
+    assert source.starts == [0, 40, 79]
+    assert result.reason is StopReason.END_OF_LIST
+
+
+async def test_a_short_page_with_the_end_proven_ends_the_list_there() -> None:
+    """#515: the same short page, with the source's proof of the end, ends the run
+    without the empty page. The end does not make it complete: 79 seen of a claimed
+    100 is past the slack."""
+    people = _hundred()[:79]
+    proven = replace(_page(people[40:79], start=40, total=100), ended=True)
+    source = FakeConnectionsSource(people, script={1: proven}, total=100)
+
+    result, _, _ = await _run(source, page_size=40)
+
+    assert source.starts == [0, 40]
+    assert result.reason is StopReason.END_OF_LIST
+    assert result.shortfall == 21 and not result.complete
+
+
+async def test_a_full_page_with_the_end_proven_is_still_followed_by_another() -> None:
+    """``ended`` changes only the short-page rule: a full page never ends the list."""
+    people = _hundred()[:80]
+    full = replace(_page(people[40:80], start=40, total=80), ended=True)
+    source = FakeConnectionsSource(people, script={1: full})
+
+    result, _, _ = await _run(source, page_size=40)
+
+    assert source.starts == [0, 40, 80]
+    assert result.reason is StopReason.END_OF_LIST and result.complete
+
+
+async def test_the_runs_hidden_count_is_the_sources_running_count() -> None:
+    """#515: each page carries the source's count so far; the run reports the last
+    one, and it never decides completeness."""
+    people = _hundred()
+    source = FakeConnectionsSource(
+        people,
+        script={
+            0: replace(_page(people[0:40], start=0, total=100), hidden=1),
+            1: replace(_page(people[40:80], start=40, total=100), hidden=3),
+        },
+    )
+
+    result, _, _ = await _run(source, page_size=40)
+
+    assert result.hidden == 3 and result.complete
+
+
+async def test_hidden_members_never_count_toward_completeness() -> None:
+    """#515 keeps the completeness rule: 90 seen of a claimed 100 is 10 short, past
+    the slack of 5, and 6 hidden members do not make up the difference."""
+    people = _hundred()[:90]
+    source = FakeConnectionsSource(
+        people,
+        total=100,
+        script={2: replace(_page(people[80:90], start=80, total=100), hidden=6, ended=True)},
+    )
+
+    result, _, _ = await _run(source, page_size=40)
+
+    assert result.reason is StopReason.END_OF_LIST
+    assert result.hidden == 6 and result.shortfall == 10 and not result.complete
+
+
 async def test_endless_full_pages_stop_at_the_page_budget() -> None:
     """A source that never runs out (or a total that never arrives) is bounded."""
     endless = [Person(1000 + i, f"Given{i}", f"Family{i}", None) for i in range(1000)]

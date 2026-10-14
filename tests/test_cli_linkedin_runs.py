@@ -501,6 +501,29 @@ def test_runs_run_and_cancel(cli_db: sessionmaker[Session]) -> None:
     assert runner.invoke(cli, ["linkedin", "run", "999"]).exit_code == 1
 
 
+def test_a_run_shows_its_hidden_members(cli_db: sessionmaker[Session]) -> None:
+    """#515: ``netkeeper linkedin run`` shows a full sync's hidden count and its note."""
+    with session_scope(cli_db, write=True) as session:
+        user = _user(session)
+        run_id = runs.create_run(
+            session, user, SyncRunKind.CONNECTIONS_FULL, trigger=SyncRunTrigger.MANUAL, now=NOW
+        ).id
+        runs.finish_run(
+            session,
+            user,
+            run_id,
+            status=SyncRunStatus.COMPLETED,
+            now=NOW,
+            stop_reason="end_of_list",
+            counts={"mode": "full", "total": 46, "complete": True, "shortfall": 3, "hidden": 3},
+            notes=("complete with 3 short of LinkedIn's total; 3 hidden members.",),
+        )
+    shown = CliRunner().invoke(cli, ["linkedin", "run", str(run_id)])
+    assert shown.exit_code == 0, shown.output
+    assert "hidden      3" in shown.output
+    assert "3 hidden members." in shown.output
+
+
 def test_resuming_an_enrichment_shows_the_profile_view_notice_before_it_starts(
     cli_db: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -58,7 +58,9 @@ function titleCase(key: string): string {
  * The order the two known progress/counts shapes are shown in (spec 9.4, 9.10's
  * `ProgressEvent`): enrichment's (`planned`, `visited`, `harvested`, `not_found`,
  * `unreadable`, `stopped`) or a connections sync's (`mode`, `pages`, `connections`,
- * `total`, `stopped`). Both are `dict[str, Any]` on the wire — untyped on purpose,
+ * `total`, `stopped`; a finished sync's counts also carry `hidden`, the places
+ * LinkedIn's total counts that no answer held a card for, #515). Both are
+ * `dict[str, Any]` on the wire — untyped on purpose,
  * since a job's own progress dataclass is free to change — so this only orders
  * whichever of these keys shows up and appends anything else after, rather than
  * assuming one shape and dropping what does not fit it.
@@ -74,6 +76,7 @@ const KNOWN_ORDER = [
   'not_found',
   'unreadable',
   'total',
+  'hidden',
   'stopped',
 ]
 
