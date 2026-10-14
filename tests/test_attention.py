@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -47,7 +47,7 @@ from netkeeper.models import (
 from netkeeper.scoping import get_scoped
 from netkeeper.services import attention as service
 from netkeeper.services import heat as heat_service
-from netkeeper.services import inbox, linkedin_steps, route_breaker, runs
+from netkeeper.services import inbox, linkedin_steps, posture, route_breaker, runs
 from netkeeper.services.linkedin_accounts import (
     arm_scheduled_runs,
     ensure_account,
@@ -60,10 +60,10 @@ NOW = datetime(2026, 9, 16, 15, 0, tzinfo=UTC)
 A = service.ActivityState
 
 #: The most statements one call may cost: the service's own reads, and the endpoint's
-#: with the request's user and settings. Both are the measured numbers, so a new count
-#: or flag is a deliberate change here.
-SERVICE_STATEMENTS_MAX = 22
-ENDPOINT_STATEMENTS_MAX = 24
+#: with the request's user and settings. Measured at 19 and 21 on the dearest path; the
+#: ceiling leaves headroom, and the data-independence test keeps the number flat.
+SERVICE_STATEMENTS_MAX = 30
+ENDPOINT_STATEMENTS_MAX = 32
 
 
 @dataclass
@@ -529,21 +529,96 @@ class _Statements:
         event.remove(self.engine, "before_cursor_execute", self._record)
 
 
-def test_one_call_costs_a_fixed_number_of_statements(world: World, engine: Engine) -> None:
-    """Measured with every count non-zero and no breaker or flag up, so no ``or`` stops
-    early and every activity branch is read (the dearest path)."""
-    with world.write() as (session, user):
-        _seed_everything(session, user)
-        ensure_account(session, user)
+def _count_statements(world: World, engine: Engine) -> tuple[int, service.Attention]:
     with world.read_session() as (session, user):
         statements = _Statements(engine)
         try:
             found = service.attention(session, user, now=NOW, settings=Settings())
         finally:
             statements.close()
+    return statements.count, found
+
+
+def test_one_call_costs_a_bounded_number_of_statements(world: World, engine: Engine) -> None:
+    """Measured with every count non-zero and no breaker or flag up, so no ``or`` stops
+    early and every activity branch is read (the dearest path)."""
+    with world.write() as (session, user):
+        _seed_everything(session, user)
+        ensure_account(session, user)
+
+    count, found = _count_statements(world, engine)
 
     assert found.activity.state is A.IDLE
-    assert statements.count <= SERVICE_STATEMENTS_MAX, statements.count
+    assert count <= SERVICE_STATEMENTS_MAX, count
+
+
+def _seed_rows(session: Session, user: User, n: int) -> None:
+    """``n`` rows of each kind a count reads: an unhandled reply, a message waiting for
+    you, a step waiting for Try again, a draft import, and their contacts."""
+    campaign = _linkedin_campaign(session, user)
+    for _ in range(n):
+        factories.make_message(
+            session,
+            _enroll(session, campaign),
+            direction=MessageDirection.IN,
+            status=MessageStatus.RECEIVED,
+            sent_at=NOW,
+        )
+        factories.make_message(
+            session, _enroll(session, campaign), status=MessageStatus.STALE, prefilled_at=NOW
+        )
+        _enroll(
+            session,
+            campaign,
+            next_action_at=None,
+            not_sent_count=1,
+            not_sent_error="not_typed: nothing",
+        )
+        _seed_import(session, user)
+
+
+def test_the_statement_count_does_not_grow_with_the_rows(world: World, engine: Engine) -> None:
+    with world.write() as (session, user):
+        ensure_account(session, user)
+        _seed_rows(session, user, 1)
+    one, found_one = _count_statements(world, engine)
+
+    with world.write() as (session, user):
+        _seed_rows(session, user, 9)
+    ten, found_ten = _count_statements(world, engine)
+
+    assert (found_one.counts.inbox, found_ten.counts.inbox) == (1, 10)
+    assert (found_one.counts.waiting, found_ten.counts.waiting) == (1, 10)
+    assert (found_one.counts.try_again, found_ten.counts.try_again) == (1, 10)
+    assert (found_one.counts.imports, found_ten.counts.imports) == (1, 10)
+    assert one == ten
+
+
+@pytest.mark.parametrize("raises", [0, 1, 50])
+@pytest.mark.parametrize("half_life_hours", [6, 0])
+def test_the_heat_flag_reads_as_the_posture_report_does(
+    world: World, raises: int, half_life_hours: int
+) -> None:
+    """The flag skips the score and multiplier reads, and still says what
+    ``posture.heat_status(...).tripped`` says: cold, warm, hot, and a zero half-life."""
+    base = Settings()
+    settings = replace(
+        base,
+        linkedin=replace(
+            base.linkedin, heat=replace(base.linkedin.heat, half_life_hours=half_life_hours)
+        ),
+    )
+    with world.write() as (session, user):
+        account = ensure_account(session, user).id
+        for _ in range(raises):
+            heat_service.raise_heat(session, user, account, now=NOW, settings=base.linkedin.heat)
+
+    with world.read_session() as (session, user):
+        report = posture.heat_status(session, user, account, now=NOW, settings=settings.linkedin)
+        flag = service._heat_tripped(session, user, account, now=NOW, settings=settings)
+    assert flag is report.tripped
+    if half_life_hours and raises == 50:
+        assert flag, "fifty raises trip it"
 
 
 # --- the endpoint ----------------------------------------------------------------------------

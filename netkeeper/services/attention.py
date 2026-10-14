@@ -38,7 +38,7 @@ from netkeeper.config import Settings
 from netkeeper.crm import triage
 from netkeeper.models import ImportRun, ImportStatus, Mailbox, MailboxStatus, SyncRunKind, User
 from netkeeper.scoping import scoped_count
-from netkeeper.services import inbox, linkedin_steps, posture, route_breaker, runs
+from netkeeper.services import heat, inbox, linkedin_steps, route_breaker, runs
 from netkeeper.services.linkedin_accounts import (
     LEGACY_ACCOUNT_ID,
     find_account,
@@ -131,6 +131,17 @@ def breaker_tripped(session: Session, user: User, account_id: int) -> bool:
     )
 
 
+def _heat_tripped(
+    session: Session, user: User, account_id: int, *, now: datetime, settings: Settings
+) -> bool:
+    """``posture.heat_status(...).tripped``, without the score and multiplier reads it also
+    makes: nothing trips over a non-positive half-life, else :func:`heat.should_skip`."""
+    heat_settings = settings.linkedin.heat
+    if heat_settings.half_life_hours <= 0:
+        return False
+    return heat.should_skip(session, user, account_id, now=now, settings=heat_settings)
+
+
 def _reauth_required(session: Session, user: User) -> bool:
     statement = scoped_count(user, Mailbox).where(Mailbox.status == MailboxStatus.REAUTH_REQUIRED)
     return bool(session.scalar(statement))
@@ -158,12 +169,12 @@ def attention(session: Session, user: User, *, now: datetime, settings: Settings
     account_id = LEGACY_ACCOUNT_ID if account is None else account.id
     held = linkedin_steps.auto_send_hold(session, user, account_id) is not None
     flagged = session_flag(session, user) is not None
-    hot = posture.heat_status(session, user, account_id, now=now, settings=settings.linkedin)
+    hot = _heat_tripped(session, user, account_id, now=now, settings=settings)
     breaker = breaker_tripped(session, user, account_id)
     flags = Flags(
         dashboard=AUTO_SEND_HELD if held else None,
         gmail=REAUTH_REQUIRED if _reauth_required(session, user) else None,
-        linkedin=SESSION_FLAGGED if flagged else HEAT_TRIPPED if hot.tripped else None,
+        linkedin=SESSION_FLAGGED if flagged else HEAT_TRIPPED if hot else None,
         settings=BREAKER_TRIPPED if breaker else None,
     )
 
