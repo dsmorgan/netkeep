@@ -33,6 +33,7 @@ from netkeeper.linkedin.enrich import StopReason as EnrichStop
 from netkeeper.linkedin.voyager import ConnectionSummary
 from netkeeper.models import (
     Contact,
+    ContactSnapshot,
     ContactSource,
     SyncRunKind,
     SyncRunStatus,
@@ -49,6 +50,10 @@ from netkeeper.services.visit_budget import TodaysVisits
 NOW = datetime(2026, 9, 23, 15, 0, tzinfo=UTC)
 QUORBELLE = Profile(n=9518, first="Quorbelle", last="Fictionary", headline="Profile text")
 OTTOLINE = Profile(n=9519, first="Ottoline", last="Madeupson", headline="Steady text")
+#: Quorbelle again, as her profile reads it with a location (the A, B, C case below).
+QUORBELLE_PLACED = Profile(
+    n=9518, first="Quorbelle", last="Fictionary", headline="Profile text", location="Invented City"
+)
 NAMES = ("Quorbelle", "Fictionary", "Ottoline", "Madeupson")
 
 
@@ -402,3 +407,71 @@ def test_linkedin_run_shows_the_snapshots_and_field_changes(
     assert shown.exit_code == 0, shown.output
     assert "field changes  headline 3, title 0, company 0, location 1" in shown.output
     assert "snapshots      4" in shown.output
+
+
+def test_a_headline_that_only_moves_on_is_not_a_flip_flop(cli_db: sessionmaker[Session]) -> None:
+    """Archive, then "Card text", "Profile text", "Third text": every value is new, so 0.
+
+    Quorbelle's location is stored and her profile reads the same one: snapshots carry
+    it, and it never changed, so no run counts a location change.
+    """
+    with session_scope(cli_db, write=True) as session:
+        user = _local(session)
+        contact = _stored(session, user, QUORBELLE, "Archive text")
+        contact.location = "Invented City"
+        session.flush()
+
+    def sync(headline: str) -> Work:
+        def work(session: Session, user: User, at: datetime) -> None:
+            mapping.apply_page(session, user, _page((QUORBELLE,), headline, at=at))
+
+        return work
+
+    def enrich(session: Session, user: User, at: datetime) -> None:
+        contact = session.scalars(
+            scoped(user, Contact).where(Contact.li_urn == QUORBELLE.urn)
+        ).one()
+        mapping.apply_harvest(session, user, _harvest(contact, QUORBELLE_PLACED, at=at))
+
+    ids = [
+        _run(cli_db, SyncRunKind.CONNECTIONS_FULL, NOW, sync("Card text")),
+        _run(cli_db, SyncRunKind.ENRICH, NOW + timedelta(hours=1), enrich),
+        _run(cli_db, SyncRunKind.CONNECTIONS_FULL, NOW + timedelta(days=7), sync("Third text")),
+    ]
+
+    with session_scope(cli_db) as session:
+        report = field_changes.field_changes(session, _local(session), ids)
+
+    assert [item.field_changes["headline"] for item in report.runs] == [1, 1, 1]
+    assert [item.field_changes["location"] for item in report.runs] == [0, 0, 0]
+    assert report.headline_flip_flops == 0
+
+
+def test_a_snapshot_another_source_wrote_during_a_run_is_not_the_runs(
+    cli_db: sessionmaker[Session],
+) -> None:
+    """An import's snapshot observed inside a sync's window is the import's, not the sync's.
+
+    It is on Quorbelle, whose sync snapshots bring her timeline into the report.
+    """
+    first, middle, last = _flip_flop_runs(cli_db)
+    with session_scope(cli_db, write=True) as session:
+        user = _local(session)
+        contact = session.scalars(
+            scoped(user, Contact).where(Contact.li_urn == QUORBELLE.urn)
+        ).one()
+        contact.snapshots.append(
+            ContactSnapshot(
+                user_id=user.id,
+                source=ContactSource.ARCHIVE,
+                observed_at=NOW + timedelta(minutes=2),
+                headline="Import text",
+            )
+        )
+        session.flush()
+
+    with session_scope(cli_db) as session:
+        report = field_changes.field_changes(session, _local(session), [first, middle, last])
+
+    assert [item.snapshots for item in report.runs] == [1, 1, 1]
+    assert [item.field_changes["headline"] for item in report.runs] == [1, 1, 1]
