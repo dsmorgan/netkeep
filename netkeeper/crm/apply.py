@@ -74,6 +74,7 @@ import logging
 import math
 import re
 import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta, tzinfo
 from typing import Final
@@ -746,7 +747,12 @@ class HarvestCounts:
 
 
 def apply_harvest(
-    session: Session, user: User, harvest: ProfileHarvest, counts: HarvestCounts | None = None
+    session: Session,
+    user: User,
+    harvest: ProfileHarvest,
+    counts: HarvestCounts | None = None,
+    *,
+    not_found_streak: bool = True,
 ) -> HarvestResult:
     """Write one profile visit's harvest to the contact it was visited for (spec 9.4 step 4).
 
@@ -793,7 +799,10 @@ def apply_harvest(
     the contact gets ``li_disconnected_at`` and a note on its timeline (spec
     9.8), and the streak starts over, so marking gone once is not marking gone
     again on each later visit. An applied harvest ends the streak, and so does a
-    sync that sees the contact (:func:`_mark_seen`).
+    sync that sees the contact (:func:`_mark_seen`). With ``not_found_streak`` false
+    (#514 review) a NotFound harvest is only an attempt: the enrichment run adds its
+    streak with :func:`add_not_found_streaks` after it stopped, and only when it did
+    not stop as ``many_not_found``.
 
     ``last_enriched_at`` is set, and ``enrich_priority`` cleared, only by an
     applied harvest, and not by one whose Contact info came from a streamed copy
@@ -819,6 +828,10 @@ def apply_harvest(
         return HarvestResult.MISSING
     contact.li_enrich_attempted_at = harvest.observed_at
     if harvest.outcome is Outcome.NOT_FOUND:
+        if not not_found_streak:
+            session.flush()
+            counts.add(HarvestResult.NOT_FOUND)
+            return HarvestResult.NOT_FOUND
         result = _record_not_found(session, user, contact, harvest.observed_at)
         counts.add(result)
         return result
@@ -903,6 +916,37 @@ def apply_harvest(
     session.flush()
     counts.add(HarvestResult.APPLIED)
     return HarvestResult.APPLIED
+
+
+def add_not_found_streaks(
+    session: Session,
+    user: User,
+    found: Sequence[tuple[int, datetime]],
+    counts: HarvestCounts | None = None,
+) -> list[HarvestResult]:
+    """Add one run's not-found visits to their contacts' streaks, after the run (#514 review).
+
+    ``found`` is each ``(contact_ref, observed_at)`` the run applied with
+    ``not_found_streak`` false, in visit order. Each is :func:`_record_not_found`, as
+    :func:`apply_harvest` does it at once otherwise: one more on the streak, and gone at
+    spec 9.8's bar. ``counts`` already holds each as ``not_found``; one marked gone moves
+    to ``gone``. A contact no longer the user's is skipped. Nothing is committed; the
+    session must be a writer, and the caller adds a run's streaks once.
+    """
+    _require_writer(session)
+    results: list[HarvestResult] = []
+    for contact_ref, observed_at in found:
+        try:
+            contact = resolve_survivor(session, user, contact_ref)
+        except ValueError:
+            log.warning("enrichment: contact %d is not one of user %d's", contact_ref, user.id)
+            continue
+        result = _record_not_found(session, user, contact, observed_at)
+        if counts is not None and result is HarvestResult.GONE:
+            counts.not_found -= 1
+            counts.gone += 1
+        results.append(result)
+    return results
 
 
 def _record_not_found(

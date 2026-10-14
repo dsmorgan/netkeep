@@ -415,7 +415,7 @@ async def test_three_missing_visits_across_fourteen_days_mark_the_contact_gone(
 async def test_an_observation_that_ended_does_not_spin_the_poll(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """After the missing document, an observation that ended answers ``None`` at once.
+    """After the missing document, the observation ends and answers ``None`` at once.
     The landing wait ends there, rather than ask again and again until its deadline."""
     real = Observation.next
     calls = 0
@@ -423,9 +423,9 @@ async def test_an_observation_that_ended_does_not_spin_the_poll(
     async def ended_after_one(self: Observation, timeout_s: float) -> ObservedResponse | None:
         nonlocal calls
         calls += 1
-        if calls == 1:
-            return await real(self, timeout_s)
-        return None  # as Observation.next answers once it is closed: no await
+        if calls > 1:
+            await self.close()  # the observation ends: next answers None at once
+        return await real(self, timeout_s)
 
     monkeypatch.setattr(Observation, "next", ended_after_one)
     site = ProfileSite([missing(QUORBELLE, tab_after_load=None)])

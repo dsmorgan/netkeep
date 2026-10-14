@@ -28,7 +28,11 @@ logic, only what the job may do and what happens after it stops:
   sliced, and the cancel flag is read between slices (spec 9.9).
 * **Each harvest** is mapped in its own writer session as it arrives, in the
   same transaction as the stored plan's record that the contact is done, so a
-  resumed plan skips exactly what was written.
+  resumed plan skips exactly what was written. A profile not found is mapped the
+  same way, as an attempt only (#514 review): its not-found streak is added once the
+  run stops, in the transaction that records the ending, and not at all after a
+  ``many_not_found`` stop (too many not found to believe), a cancel, or an exception.
+  Only streak increments are lost that way, never a profile already read.
 * **Why a visit was unreadable** (#405). Every visit that counts toward the
   unreadable limits -- unreadable, or under another id -- is recorded on the run
   as its visit number, the contact's id, and a fixed reason code
@@ -468,13 +472,18 @@ async def enrich_contacts(
         # A harvest is one visit, in order, so its number is how many came before it.
         handed_over = 0
         unreadable_seen: list[UnreadableVisit] = []
+        # #514 review: each NotFound applied without its streak, in visit order, for the
+        # run's ending to add (or, after a many_not_found stop, not to).
+        not_found_seen: list[tuple[int, datetime]] = []
 
         def apply_harvest(harvest: ProfileHarvest) -> None:
             # One transaction: the harvest and the plan's record that its contact is
             # done commit together, so a resume skips exactly what was written.
             with session_scope(factory, write=True) as session:
                 user = _load_user(session, user_id)
-                outcome = mapping.apply_harvest(session, user, harvest, counts)
+                outcome = mapping.apply_harvest(
+                    session, user, harvest, counts, not_found_streak=False
+                )
                 enrich_plan.mark_completed(session, user, run_id, harvest.contact_ref)
                 # The dashboard's last few contacts (#324), in the same transaction.
                 run_contacts.record(
@@ -492,6 +501,8 @@ async def enrich_contacts(
                 # exception, and the reason must already be on it.
                 await off_loop(record_reasons)
             await off_loop(apply_harvest, harvest)
+            if harvest.outcome is Outcome.NOT_FOUND:
+                not_found_seen.append((harvest.contact_ref, harvest.observed_at))
 
         def record_reasons() -> None:
             with session_scope(factory, write=True) as session:
@@ -560,6 +571,10 @@ async def enrich_contacts(
             heat_raised = flagged = False
             with session_scope(factory, write=True) as session:
                 user = _load_user(session, user_id)
+                if runs.get_run(session, user, run_id).status is SyncRunStatus.RUNNING:
+                    # #514 review: in the transaction that ends the run, so a run's
+                    # streaks are added once, or not at all.
+                    _end_not_found(session, user, result, not_found_seen, counts, run_id)
                 if result.reason is StopReason.RESPONSE and result.outcome is not None:
                     if result.outcome in _HEAT_OUTCOMES:
                         heat_service.raise_heat(
@@ -598,6 +613,44 @@ async def enrich_contacts(
 
         report = await off_loop(finish, result)
     return report
+
+
+#: The stops after which a run's not-found visits add nothing to their streaks (#514
+#: review): too many of them, or a person stopping the run partway.
+_NO_STREAKS: Final = frozenset({StopReason.MANY_NOT_FOUND, StopReason.CANCELLED})
+
+
+def _end_not_found(
+    session: Session,
+    user: User,
+    result: EnrichResult,
+    found: list[tuple[int, datetime]],
+    counts: mapping.HarvestCounts,
+    run_id: int,
+) -> None:
+    """A run's not-found visits, once it stopped (#514 review).
+
+    After any stop but ``many_not_found`` or ``cancelled``, each adds to its contact's
+    streak (:func:`~netkeeper.crm.apply.add_not_found_streaks`). After
+    ``many_not_found`` none does: the counts move them from ``not_found`` to
+    ``unreadable``, and ``progress_json.unreadable_visits`` takes the job's record, in
+    visit order, with each one as ``not_found_discounted``. A run that ends by
+    exception never gets here, so it adds no streak either.
+    """
+    if result.reason is StopReason.MANY_NOT_FOUND:
+        counts.not_found -= len(found)
+        counts.unreadable += len(found)
+        runs.record_progress_field(
+            session,
+            user,
+            run_id,
+            "unreadable_visits",
+            visit_records(result.unreadable_visits),
+        )
+        return
+    if result.reason in _NO_STREAKS:
+        return
+    mapping.add_not_found_streaks(session, user, found, counts)
 
 
 async def resume_enrichment(
