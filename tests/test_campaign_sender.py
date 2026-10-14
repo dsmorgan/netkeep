@@ -1453,6 +1453,8 @@ def test_a_discarded_draft_sent_first_leaves_the_kept_draft_waiting(drafts: Mail
     first = NOW + timedelta(hours=2)
     drafts.gmail.send_draft(discarded.gmail_draft_id or "", at=first)
     drafts.tick(NOW + timedelta(hours=3))
+    [settled] = [m for m in drafts.messages() if m.id == discarded.id]
+    assert (settled.status, settled.sent_at) == (MessageStatus.SENT, first)
     enrollment = drafts.enrollment(enrollment_id)
     assert (enrollment.current_step, enrollment.next_action_at) == (1, None)
 
@@ -1461,6 +1463,64 @@ def test_a_discarded_draft_sent_first_leaves_the_kept_draft_waiting(drafts: Mail
     drafts.tick(NOW + timedelta(hours=5))
     enrollment = drafts.enrollment(enrollment_id)
     assert (enrollment.current_step, enrollment.next_action_at) == (1, follow_up(second))
+
+
+def test_a_discarded_draft_sent_leaves_a_later_next_step_alone(drafts: Mail) -> None:
+    """#544: settling a discarded draft only ever moves the next step later. One already
+    due after this send's delay stays where it is, and the step stays 1."""
+    enrollment_id, kept, discarded = _merge_two_waiting_drafts(drafts)
+    drafts.gmail.send_draft(kept.gmail_draft_id or "", at=NOW + timedelta(hours=2))
+    drafts.tick(NOW + timedelta(hours=3))
+    far = NOW + timedelta(days=60)
+    drafts.set_enrollment(enrollment_id, next_action_at=far)
+
+    drafts.gmail.send_draft(discarded.gmail_draft_id or "", at=NOW + timedelta(days=1))
+    drafts.tick(NOW + timedelta(days=1, hours=1))
+    enrollment = drafts.enrollment(enrollment_id)
+    assert (enrollment.current_step, enrollment.next_action_at) == (1, far)
+    [after] = [m for m in drafts.messages() if m.id == discarded.id]
+    assert after.status is MessageStatus.SENT
+
+
+def test_the_drafts_poll_follows_the_newest_discarded_drafts_first(
+    drafts: Mail, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#544: past :data:`DISCARDED_DRAFTS_MAX`, the newest discarded drafts are followed."""
+    _, kept, discarded = _merge_two_waiting_drafts(drafts)
+    drafts.set_message(kept.id, status=MessageStatus.DISCARDED)
+    monkeypatch.setattr(engine_module, "DISCARDED_DRAFTS_MAX", 1)
+
+    def load(session: Session) -> list[int]:
+        user = session.get(User, drafts.user.id)
+        assert user is not None
+        work = engine_module.reconcile_work(session, user, now=drafts.clock.now)
+        return [t.message_id for t in work.drafts]
+
+    assert drafts.read(load) == [max(kept.id, discarded.id)]
+
+
+def test_the_message_id_check_searches_a_waiting_draft_not_a_discarded_one(
+    drafts: Mail,
+) -> None:
+    """#544, #510: the check's "oldest draft still waiting" is a ``drafted`` one, never a
+    discarded draft the poll now follows, even an older one."""
+    _, kept, discarded = _merge_two_waiting_drafts(drafts)
+    if discarded.id > kept.id:  # make the discarded draft the older row
+        drafts.set_message(kept.id, status=MessageStatus.DISCARDED)
+        drafts.set_message(discarded.id, status=MessageStatus.DRAFTED)
+        kept, discarded = discarded, kept
+    assert discarded.id < kept.id
+
+    def unverify(session: Session) -> None:
+        row = get_scoped(session, drafts.user, Mailbox, drafts.mailbox.id)
+        assert row is not None
+        row.message_id_verified_at = None
+
+    drafts.write(unverify)
+    calls = len(drafts.gmail.calls)
+    drafts.tick(NOW + timedelta(hours=2))
+    checked = [p for _, p in drafts.gmail.calls[calls:] if p.startswith("Message-ID check")]
+    assert set(checked) == {f"Message-ID check of message {kept.id}"}
 
 
 def test_a_discarded_draft_scheduled_in_gmail_is_recorded_when_delivered(drafts: Mail) -> None:
