@@ -34,6 +34,7 @@ from netkeeper.models import (
     MessageDirection,
     MessageStatus,
     RuleField,
+    StepMode,
     SyncRun,
     SyncRunKind,
     SyncRunStatus,
@@ -46,7 +47,7 @@ from netkeeper.models import (
 from netkeeper.models.base import utcnow
 from netkeeper.scoping import scoped
 from netkeeper.services import campaigns as campaign_service
-from netkeeper.services import enrich_plan, run_contacts, runs, user_dictionary
+from netkeeper.services import enrich_plan, run_contacts, runs, step_mode, user_dictionary
 from netkeeper.services import mailboxes as mailbox_service
 from netkeeper.services.linkedin_accounts import ensure_account
 from netkeeper.web.app import API_PREFIX
@@ -656,6 +657,24 @@ def _seed_do_not_send(session: Session, user: User) -> int:
     return 2
 
 
+def _seed_mode_changes(session: Session, user: User) -> int:
+    """Two switches of one LinkedIn step of ``user``'s, to auto-send and back (#536)."""
+    campaign = factories.make_campaign(session, user, channels=(TemplateChannel.LINKEDIN,))
+    step = campaign.steps[0]
+    for mode in (StepMode.AUTO_SEND, StepMode.PREFILL):
+        step_mode.switch(
+            session,
+            user,
+            campaign.id,
+            step.id,
+            mode=mode,
+            confirm=True,
+            now=SEED_AT,
+            auto_send_on=False,
+        )
+    return 2
+
+
 def _own_campaign(session: Session, user: User) -> dict[str, str]:
     """``campaign_id`` of the user's first campaign; the placeholder points nowhere when
     they have none, which the endpoint answers ``404``."""
@@ -758,6 +777,12 @@ REGISTRY: list[ListEndpoint] = [
         f"{API_PREFIX}/campaigns/{{campaign_id}}/enrollments",
         _seed_enrollments,
         paged_count,
+        path_params=_own_campaign,
+    ),
+    ListEndpoint(
+        f"{API_PREFIX}/campaigns/{{campaign_id}}/mode-changes",
+        _seed_mode_changes,
+        array_count,
         path_params=_own_campaign,
     ),
     ListEndpoint(f"{API_PREFIX}/inbox", _seed_inbox, paged_count),

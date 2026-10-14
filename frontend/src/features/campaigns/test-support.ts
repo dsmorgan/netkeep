@@ -88,6 +88,7 @@ export const STEPS: Campaign['steps'] = [
     fired: 0,
     sent: 0,
     outbound: {},
+    kept_prefill: 0,
   },
   {
     id: 102,
@@ -104,6 +105,7 @@ export const STEPS: Campaign['steps'] = [
     fired: 0,
     sent: 0,
     outbound: {},
+    kept_prefill: 0,
   },
 ]
 

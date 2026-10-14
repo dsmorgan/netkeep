@@ -9598,6 +9598,190 @@
         "title": "MissingOut",
         "type": "object"
       },
+      "ModeChangeOut": {
+        "description": "One switch, as the campaign's history keeps it. Never message text.",
+        "properties": {
+          "auto_send_on": {
+            "title": "Auto Send On",
+            "type": "boolean"
+          },
+          "changed_at": {
+            "format": "date-time",
+            "title": "Changed At",
+            "type": "string"
+          },
+          "changed_by": {
+            "title": "Changed By",
+            "type": "integer"
+          },
+          "from_mode": {
+            "$ref": "#/components/schemas/StepMode"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kept_prefill": {
+            "title": "Kept Prefill",
+            "type": "integer"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "step_id": {
+            "title": "Step Id",
+            "type": "integer"
+          },
+          "to_mode": {
+            "$ref": "#/components/schemas/StepMode"
+          }
+        },
+        "required": [
+          "id",
+          "step_id",
+          "position",
+          "from_mode",
+          "to_mode",
+          "changed_at",
+          "changed_by",
+          "kept_prefill",
+          "auto_send_on"
+        ],
+        "title": "ModeChangeOut",
+        "type": "object"
+      },
+      "ModeIn": {
+        "properties": {
+          "confirm": {
+            "default": false,
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/StepMode"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "ModeIn",
+        "type": "object"
+      },
+      "ModePreviewOut": {
+        "properties": {
+          "auto_send_on": {
+            "title": "Auto Send On",
+            "type": "boolean"
+          },
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "integer"
+          },
+          "campaign_status": {
+            "$ref": "#/components/schemas/CampaignStatus"
+          },
+          "claimed": {
+            "title": "Claimed",
+            "type": "integer"
+          },
+          "confirm_text": {
+            "title": "Confirm Text",
+            "type": "string"
+          },
+          "kept_prefill": {
+            "title": "Kept Prefill",
+            "type": "integer"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/StepMode"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "prefilled": {
+            "title": "Prefilled",
+            "type": "integer"
+          },
+          "queued": {
+            "title": "Queued",
+            "type": "integer"
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refusal"
+          },
+          "step_id": {
+            "title": "Step Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "campaign_status",
+          "step_id",
+          "position",
+          "mode",
+          "auto_send_on",
+          "queued",
+          "kept_prefill",
+          "claimed",
+          "prefilled",
+          "refusal",
+          "confirm_text"
+        ],
+        "title": "ModePreviewOut",
+        "type": "object"
+      },
+      "ModeSwitchOut": {
+        "properties": {
+          "auto_send_on": {
+            "title": "Auto Send On",
+            "type": "boolean"
+          },
+          "campaign": {
+            "$ref": "#/components/schemas/CampaignOut"
+          },
+          "changed": {
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "changed_at": {
+            "format": "date-time",
+            "title": "Changed At",
+            "type": "string"
+          },
+          "from_mode": {
+            "$ref": "#/components/schemas/StepMode"
+          },
+          "kept_prefill": {
+            "title": "Kept Prefill",
+            "type": "integer"
+          },
+          "to_mode": {
+            "$ref": "#/components/schemas/StepMode"
+          }
+        },
+        "required": [
+          "from_mode",
+          "to_mode",
+          "changed",
+          "kept_prefill",
+          "auto_send_on",
+          "changed_at",
+          "campaign"
+        ],
+        "title": "ModeSwitchOut",
+        "type": "object"
+      },
       "MovedOut": {
         "description": "The loser's rows of one kind: how many move, how many the survivor already holds.",
         "properties": {
@@ -12774,6 +12958,11 @@
           },
           "id": {
             "title": "Id",
+            "type": "integer"
+          },
+          "kept_prefill": {
+            "default": 0,
+            "title": "Kept Prefill",
             "type": "integer"
           },
           "mode": {
@@ -16443,6 +16632,56 @@
         ]
       }
     },
+    "/api/v1/campaigns/{campaign_id}/mode-changes": {
+      "get": {
+        "description": "The campaign's step mode switches, newest first (at most 200).",
+        "operationId": "list_step_mode_changes",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ModeChangeOut"
+                  },
+                  "title": "Response List Step Mode Changes",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such campaign, template, mailbox or list"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Mode Changes",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
     "/api/v1/campaigns/{campaign_id}/pause": {
       "post": {
         "description": "``active`` to ``paused``: nothing fires until resumed; enrollments keep their state.",
@@ -17310,6 +17549,120 @@
           }
         },
         "summary": "Get Adoption",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/steps/{step_id}/mode": {
+      "get": {
+        "description": "The step's mode and what switching it now would change. Changes nothing.",
+        "operationId": "step_mode_preview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "step_id",
+            "required": true,
+            "schema": {
+              "title": "Step Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModePreviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such campaign, template, mailbox or list"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Mode",
+        "tags": [
+          "campaigns"
+        ]
+      },
+      "put": {
+        "description": "Switch a LinkedIn step between ``prefill`` and ``auto_send``. Nothing is sent by the\nswitch; contacts already queued for the step keep Prefill. ``auto_send`` needs\n``confirm: true``.",
+        "operationId": "set_step_mode",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "step_id",
+            "required": true,
+            "schema": {
+              "title": "Step Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModeSwitchOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such campaign, template, mailbox or list"
+          },
+          "409": {
+            "description": "Refused in the campaign's state, or a name taken"
+          },
+          "422": {
+            "description": "A value a campaign cannot be made from"
+          }
+        },
+        "summary": "Set Mode",
         "tags": [
           "campaigns"
         ]

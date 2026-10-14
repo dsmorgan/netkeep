@@ -19,6 +19,7 @@ from netkeeper.models import Contact, StepMode
 from netkeeper.models.base import utcnow
 from netkeeper.services import campaign_engine
 from netkeeper.services import dashboard as service
+from netkeeper.services.linkedin_steps import effective_mode
 from netkeeper.web.deps import CurrentUser, SessionDep
 from netkeeper.web.schemas import (
     ChangedJobOut,
@@ -63,7 +64,8 @@ def list_next_fires(
                 contact_id=fire.contact.id,
                 contact_name=_name(fire.contact),
                 ready_to_prefill=fire.ready_to_prefill(now),
-                auto_send=fire.step is not None and fire.step.mode is StepMode.AUTO_SEND,
+                auto_send=fire.step is not None
+                and effective_mode(fire.step, fire.enrollment) is StepMode.AUTO_SEND,
             )
             for fire in fires
         ],

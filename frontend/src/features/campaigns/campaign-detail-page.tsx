@@ -81,6 +81,7 @@ import { canRecordOn } from './response-labels'
 import { ReviewPanel } from './review-panel'
 import { UNCHOSEN, startIso, type StartChoice } from './start'
 import { StartPicker } from './start-picker'
+import { StepModeSwitch } from './step-mode-switch'
 
 export function NoSuchCampaign() {
   return (
@@ -648,6 +649,7 @@ function StepRow({
           {step.mode === 'auto_send' && <AutoSendStepState />}
           {step.mode === 'prefill' && <span className="block text-xs">{WAITS_FOR_PREFILL}</span>}
           {step.channel === 'linkedin' && <LinkedInStepCounts step={step} ready={ready} />}
+          <StepModeSwitch campaign={campaign} step={step} />
         </td>
         <td className="py-2 pr-3 tabular-nums">{step.fired}</td>
         <td className="py-2 pr-3 tabular-nums">{step.sent}</td>

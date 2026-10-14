@@ -99,6 +99,7 @@ from netkeeper.services.linkedin_steps import (
     NOT_STARTED_NOTE,
     SEND_UNCONFIRMED_NOTE,
     auto_send_hold,
+    effective_mode,
     give_back_unopened,
     hold_auto_send,
     record_prefill_outcome,
@@ -470,7 +471,12 @@ def prepare(
                 if message.step_id is None
                 else get_scoped(session, user, CampaignStep, message.step_id)
             )
-            step_mode = None if step is None else step.mode
+            enrollment = get_scoped(session, user, Enrollment, message.enrollment_id)
+            # The mode for this enrollment (#536): one queued before its step switched to
+            # auto-send keeps the step as a prefill.
+            step_mode = (
+                None if step is None or enrollment is None else effective_mode(step, enrollment)
+            )
             claimed = (
                 message.id,
                 message.scheduled_at,
@@ -530,10 +536,11 @@ def prepare(
 def still_wanted(session: Session, user: User, run_id: int, *, now: datetime) -> str | None:
     """Whether the claimed message is still one to send (ADR 0008, #458 final review),
     read live, before the navigation and again just before the Send click: still
-    ``scheduled``; its step still ``auto_send``; no reply on the enrollment; and the
-    step still passes its guards (:func:`~netkeeper.services.campaign_guards.check_step`:
-    the enrollment and the campaign ``active``, the contact not do-not-contact, and the
-    rest). ``None`` when it is; otherwise why not, in fixed words. Read-only."""
+    ``scheduled``; its step still ``auto_send`` for this enrollment (#536); no reply on
+    the enrollment; and the step still passes its guards
+    (:func:`~netkeeper.services.campaign_guards.check_step`: the enrollment and the
+    campaign ``active``, the contact not do-not-contact, and the rest). ``None`` when
+    it is; otherwise why not, in fixed words. Read-only."""
     message = _claimed(session, user, run_id)
     if message is None:
         return "the claimed message is no longer waiting to be sent"
@@ -547,6 +554,8 @@ def still_wanted(session: Session, user: User, run_id: int, *, now: datetime) ->
     enrollment = get_scoped(session, user, Enrollment, message.enrollment_id)
     if enrollment is None:
         return "the enrollment is gone"
+    if effective_mode(step, enrollment) is not StepMode.AUTO_SEND:
+        return "the step is not an auto-send step"
     if engine._reply_at(session, user, enrollment.id) is not None:
         return "a reply arrived"
     verdict = check_step(session, user, enrollment, step, now=now)

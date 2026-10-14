@@ -106,6 +106,7 @@ from netkeeper.services import (
     run_diagnostics,
     runs,
     simulate_campaign,
+    step_mode,
     template_adoption,
     ui_settings,
     user_dictionary,
@@ -4361,6 +4362,101 @@ def campaigns_adopt_template(
     typer.echo(
         f"campaign {campaign_id} step {position} now uses v{result.to_version}"
         f" (was v{result.from_version}){released}"
+    )
+
+
+def _mode_lines(p: step_mode.ModePreview, to: StepMode) -> list[str]:
+    """What `step-mode` shows before it switches."""
+    lines = [
+        f"step {p.position} of campaign {p.campaign_id} ({p.campaign_status.value}):"
+        f" {p.mode.value} -> {to.value}"
+    ]
+    if to is StepMode.AUTO_SEND:
+        lines.append(step_mode.AUTO_SEND_CONFIRM)
+        lines.append(
+            f"{p.queued} contacts already queued for the step keep prefill: you prefill them"
+            " as before. Only contacts that reach the step later are sent on their own."
+        )
+        if not p.auto_send_on:
+            lines.append(
+                "auto-send is off ([campaigns] linkedin_auto_send), so nothing sends on its"
+                " own until you turn it on."
+            )
+    else:
+        lines.append("nothing more on this step is sent on its own: each message waits for you.")
+        if p.claimed:
+            lines.append(
+                f"{p.claimed} messages under way: an auto-send stops before it clicks Send."
+            )
+    if p.prefilled:
+        lines.append(f"{p.prefilled} messages already typed into LinkedIn keep waiting for you.")
+    lines.append("the switch itself sends nothing.")
+    return lines
+
+
+@campaigns_app.command("step-mode")
+def campaigns_step_mode(
+    ctx: typer.Context,
+    campaign_id: Annotated[int, typer.Argument(help="The campaign's ID.")],
+    position: Annotated[int, typer.Argument(help="The step's number, 1 for the first.")],
+    mode: Annotated[
+        StepMode,
+        typer.Argument(help="prefill (waits for you) or auto_send (sends on its own)."),
+    ],
+) -> None:
+    """Switch an active or paused campaign's LinkedIn step between prefill and auto_send.
+
+    GET /campaigns/{id}/steps/{step_id}/mode, then PUT .../mode. A switch to auto_send
+    asks you to confirm, and there is no flag to skip the question. The switch never
+    sends anything by itself: contacts already queued for the step keep prefill, and
+    only contacts that reach it later are sent on their own, through every gate an
+    auto-send passes. A switch to prefill stops any auto-send of the step that has not
+    clicked Send yet. Each switch is recorded in the campaign's history.
+    """
+    if mode not in step_mode.LINKEDIN_MODES:
+        typer.echo(f"error: a LinkedIn step is prefill or auto_send, not {mode.value}", err=True)
+        raise typer.Exit(code=1)
+    settings = _load_settings_or_exit(ctx.ensure_object(CliState))
+    on = settings.campaigns.linkedin_auto_send
+    with _campaign_db() as factory:
+        # Read, then ask, then write: a writer held across the prompt would lock out serve.
+        with session_scope(factory) as session, _campaign_errors():
+            user = _local_user_or_exit(session)
+            step = campaign_review.step_at(session, user, campaign_id, position)
+            shown = step_mode.preview(
+                session, user, campaign_id, step.id, now=datetime.now(UTC), auto_send_on=on
+            )
+        if shown.refusal is not None:
+            typer.echo(f"error: {shown.refusal}", err=True)
+            raise typer.Exit(code=1)
+        if shown.mode is mode:
+            typer.echo(f"campaign {campaign_id} step {position} is already {mode.value}")
+            return
+        typer.echo("\n".join(_mode_lines(shown, mode)))
+        confirm = mode is StepMode.AUTO_SEND
+        if confirm and not typer.confirm(f"switch step {position} to auto_send?"):
+            typer.echo(f"cancelled: step {position} is still {shown.mode.value}")
+            raise typer.Exit(code=1)
+        with session_scope(factory, write=True) as session, _campaign_errors():
+            user = _local_user_or_exit(session)
+            result = step_mode.switch(
+                session,
+                user,
+                campaign_id,
+                shown.step_id,
+                mode=mode,
+                confirm=confirm,
+                now=datetime.now(UTC),
+                auto_send_on=on,
+            )
+    kept = (
+        f"; {result.kept_prefill} queued contacts keep prefill"
+        if result.to_mode is StepMode.AUTO_SEND
+        else ""
+    )
+    typer.echo(
+        f"campaign {campaign_id} step {position} is now {result.to_mode.value}"
+        f" (was {result.from_mode.value}){kept}"
     )
 
 

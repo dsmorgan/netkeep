@@ -301,7 +301,7 @@ def list_ready(
                 contact_name=_name(row.contact),
                 due=row.due,
                 held_until=row.held_until,
-                auto_send=row.step.mode is StepMode.AUTO_SEND,
+                auto_send=service.effective_mode(row.step, row.enrollment) is StepMode.AUTO_SEND,
             )
             for row in rows
         ],
