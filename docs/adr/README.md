@@ -4,10 +4,11 @@ An ADR records one decision, the context that forced it, and its consequences. T
 
 ## Rules
 
-- **One decision per ADR, under about 1,000 words before amendments.** State the decision in a paragraph, list the rules that make it acceptable with a one-line reason each, list the consequences, and stop. ADR 0007, the most involved decision here, runs about 1,150; if yours is longer, you're writing design, and design belongs in [architecture.md](../architecture.md) or a design document under `docs/` that the ADR links to. The spec holds the design; the ADR holds the reasoning.
+- **One decision per ADR, under about 1,000 words before amendments.** State the decision in a paragraph, list the rules that make it acceptable with a one-line reason each, list the consequences, and stop. If yours runs much longer, you're writing design, and design belongs in [architecture.md](../architecture.md) or a design document under `docs/` that the ADR links to. The spec holds the design; the ADR holds the reasoning.
 - **The decision is never changed after acceptance.** A reversal is a new ADR that supersedes the old one. Condensing an accepted ADR's prose, or moving its design detail out to a document it links to, is allowed when the decision reads the same afterward; record it as an amendment with the date.
 - **Amendments are one line each**, under `## Amendments`, dated, with the issue number: what changed and why, in a sentence or two. The mechanics go in the design document, not in the amendment.
 - **Numbers, locator rules, CDP methods, error strings, and test listings don't belong in an ADR.** They drift, and a reader looking for the decision has to wade through them. Put them where they're tested, and link.
+- These rules apply to new ADRs and new amendments. Older amendments that carry numbers (ADRs 0003 and 0004) stay as written.
 - Propose one by opening an issue, then a pull request that adds `NNNN-short-title.md` from the [template](template.md).
 
 | ADR | Title | Status |
