@@ -30,8 +30,10 @@ logic, only what the job may do and what happens after it stops:
   same transaction as the stored plan's record that the contact is done, so a
   resumed plan skips exactly what was written. A profile not found is mapped the
   same way, as an attempt only (#514 review): its not-found streak is added once the
-  run stops, in the transaction that records the ending, and not at all after a
-  ``many_not_found`` stop (too many not found to believe), a cancel, or an exception.
+  run stops, in the transaction that records the ending, and only after a natural end
+  or a limit of netkeeper's own (``STREAK_STOPS``): never after ``many_not_found``
+  (too many not found to believe), a cancel, anything LinkedIn answered, or an
+  exception.
   Only streak increments are lost that way, never a profile already read.
 * **Why a visit was unreadable** (#405). Every visit that counts toward the
   unreadable limits -- unreadable, or under another id -- is recorded on the run
@@ -615,9 +617,15 @@ async def enrich_contacts(
     return report
 
 
-#: The stops after which a run's not-found visits add nothing to their streaks (#514
-#: review): too many of them, or a person stopping the run partway.
-_NO_STREAKS: Final = frozenset({StopReason.MANY_NOT_FOUND, StopReason.CANCELLED})
+#: The only stops after which a run's not-found visits add to their streaks (#514
+#: review): the run reached its own end, or a limit of netkeeper's own stopped it.
+#: Every other stop adds none, a reason added later included until it is listed here:
+#: too many not found, a person cancelling, or anything LinkedIn answered (a
+#: checkpoint, a throttle, a sign-out, a route that changed, lost answers), after
+#: which the run's pages are suspect.
+STREAK_STOPS: Final = frozenset(
+    {StopReason.END_OF_PLAN, StopReason.VISIT_BUDGET, StopReason.BUDGET, StopReason.INACTIVE}
+)
 
 
 def _end_not_found(
@@ -630,8 +638,8 @@ def _end_not_found(
 ) -> None:
     """A run's not-found visits, once it stopped (#514 review).
 
-    After any stop but ``many_not_found`` or ``cancelled``, each adds to its contact's
-    streak (:func:`~netkeeper.crm.apply.add_not_found_streaks`). After
+    After a stop in :data:`STREAK_STOPS`, each adds to its contact's streak
+    (:func:`~netkeeper.crm.apply.add_not_found_streaks`); after any other, none does. After
     ``many_not_found`` none does: the counts move them from ``not_found`` to
     ``unreadable``, and ``progress_json.unreadable_visits`` takes the job's record, in
     visit order, with each one as ``not_found_discounted``. A run that ends by
@@ -648,9 +656,8 @@ def _end_not_found(
             visit_records(result.unreadable_visits),
         )
         return
-    if result.reason in _NO_STREAKS:
-        return
-    mapping.add_not_found_streaks(session, user, found, counts)
+    if result.reason in STREAK_STOPS:
+        mapping.add_not_found_streaks(session, user, found, counts)
 
 
 async def resume_enrichment(

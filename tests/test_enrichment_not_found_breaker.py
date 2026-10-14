@@ -21,7 +21,15 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import pytest
-from profile_fakes import NOT_FOUND, FakeBrowser, Scripted
+from profile_fakes import (
+    BAD_REQUEST,
+    CHECKPOINT,
+    LOGGED_OUT,
+    NOT_FOUND,
+    THROTTLED,
+    FakeBrowser,
+    Scripted,
+)
 from sqlalchemy.orm import Session, sessionmaker
 from test_enrichment import (
     NOW,
@@ -34,6 +42,7 @@ from test_enrichment import (
     _setup,
 )
 
+from netkeeper.config import BudgetSettings, LinkedInSettings
 from netkeeper.crm import apply as mapping
 from netkeeper.crm.apply import HarvestResult
 from netkeeper.db import session_scope
@@ -44,7 +53,7 @@ from netkeeper.linkedin.enrich import StopReason, UnreadableCause, UnreadableVis
 from netkeeper.models import Contact, SyncRunStatus, User
 from netkeeper.scoping import get_scoped
 from netkeeper.services import enrich_plan, route_breaker, runs
-from netkeeper.services.enrichment import EnrichRunReport
+from netkeeper.services.enrichment import STREAK_STOPS, EnrichRunReport
 
 
 def test_the_not_found_limits_are_pinned() -> None:
@@ -438,3 +447,67 @@ class _Open:
 
 async def _ignore(harvest: object) -> None:
     return None
+
+
+# --- which stops add streaks -----------------------------------------------------------
+
+#: Every stop reason, and whether a run that stops with it adds its not-found streaks.
+#: A new StopReason fails the test below until it is classified here (and, if it should
+#: add streaks, listed in STREAK_STOPS); unlisted, it adds none.
+ADDS_STREAKS: dict[StopReason, bool] = {
+    StopReason.END_OF_PLAN: True,
+    StopReason.VISIT_BUDGET: True,
+    StopReason.BUDGET: True,
+    StopReason.INACTIVE: True,
+    StopReason.CANCELLED: False,
+    StopReason.RESPONSE: False,  # a checkpoint, a throttle, a sign-out, a changed route
+    StopReason.ANSWER_LOST: False,
+    StopReason.MANY_NOT_FOUND: False,
+}
+
+
+@pytest.mark.parametrize("reason", list(StopReason), ids=lambda reason: reason.value)
+def test_every_stop_reason_is_classified_for_streaks(reason: StopReason) -> None:
+    assert reason in ADDS_STREAKS, f"classify {reason.value!r}: does it add not-found streaks?"
+    assert (reason in STREAK_STOPS) is ADDS_STREAKS[reason]
+
+
+def test_the_streak_stops_are_only_the_classified_ones() -> None:
+    assert {reason for reason, adds in ADDS_STREAKS.items() if adds} == STREAK_STOPS
+
+
+@pytest.mark.parametrize(
+    "stop",
+    [
+        pytest.param(CHECKPOINT, id="checkpoint"),
+        pytest.param(THROTTLED, id="throttled"),
+        pytest.param(LOGGED_OUT, id="logged-out"),
+        pytest.param(BAD_REQUEST, id="route-changed"),
+    ],
+)
+async def test_a_stop_linkedin_caused_adds_no_streak(
+    session_factory: sessionmaker[Session], stop: Scripted
+) -> None:
+    """Visit 1 not found, then LinkedIn's own answer stops the run: that run's pages are
+    suspect, so its not-found visit is an attempt only."""
+    people = _people(4)
+    user_id, ids = _setup(session_factory, people)
+    browser = FakeBrowser.of(people, landing={**_script(1), 1: stop})
+    report = await _enrich(session_factory, user_id, browser)
+    assert report.result.reason is StopReason.RESPONSE and report.result.not_found == 1
+    missing = _contact(session_factory, user_id, ids[people[0].n])
+    assert missing.li_not_found_count == 0 and missing.li_enrich_attempted_at == NOW
+
+
+async def test_a_budget_stop_adds_the_streaks(session_factory: sessionmaker[Session]) -> None:
+    """A limit of netkeeper's own says nothing about LinkedIn's pages: the streak is added."""
+    people = _people(4)
+    user_id, ids = _setup(session_factory, people)
+    report = await _enrich(
+        session_factory,
+        user_id,
+        FakeBrowser.of(people, landing=_script(1)),
+        settings=LinkedInSettings(budget=BudgetSettings(profile_visits_per_day=2, warmup_start=2)),
+    )
+    assert report.result.reason in STREAK_STOPS and report.result.visits <= 2
+    assert _contact(session_factory, user_id, ids[people[0].n]).li_not_found_count == 1
