@@ -22,6 +22,8 @@ import {
   type MailboxArm,
 } from '@/features/mailboxes/api'
 
+import { ArmPath } from './arm-path'
+import { armSendBlocked } from './arm-path-text'
 import { ClientForm } from './client-form'
 import { GmailSetupWizard } from './gmail-setup-wizard'
 
@@ -147,93 +149,108 @@ export function GmailSection({ outcome }: { outcome: GmailOutcome }) {
             <h3 className="font-medium">Mailbox</h3>
             {status.data.mailboxes.length > 0 && (
               <ul className="space-y-2">
-                {status.data.mailboxes.map((mailbox) => (
-                  <li key={mailbox.id} className="space-y-1 rounded-lg border px-3 py-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium">{mailbox.email}</span>
-                      <Badge variant={mailbox.status === 'ok' ? 'outline' : 'destructive'}>
-                        {STATUS_LABEL[mailbox.status]}
-                      </Badge>
-                    </div>
-                    {mailbox.status !== 'disabled' && (
-                      <p className="flex flex-wrap items-center gap-2">
-                        <Badge variant={mailbox.arm === null ? 'secondary' : 'outline'}>
-                          {ARM_LABEL[mailbox.arm ?? 'none']}
+                {status.data.mailboxes.map((mailbox) => {
+                  const steps = status.data.arm_steps.find((row) => row.mailbox_id === mailbox.id)
+                  const blocked = steps === undefined ? null : armSendBlocked(mailbox, steps)
+                  const blockedId = `arm-send-blocked-${mailbox.id}`
+                  // The way to arming offers its own Check now when that is the next step.
+                  const pathChecks = blocked !== null && steps?.next_step === 'check_now'
+                  return (
+                    <li key={mailbox.id} className="space-y-1 rounded-lg border px-3 py-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium">{mailbox.email}</span>
+                        <Badge variant={mailbox.status === 'ok' ? 'outline' : 'destructive'}>
+                          {STATUS_LABEL[mailbox.status]}
                         </Badge>
-                        <span className="text-muted-foreground">{armText(mailbox)}</span>
-                      </p>
-                    )}
-                    {mailbox.status !== 'ok' && reasonText(mailbox.status_reason) !== null && (
-                      <p className="text-muted-foreground">{reasonText(mailbox.status_reason)}</p>
-                    )}
-                    <p className="text-xs text-muted-foreground">
-                      Up to {mailbox.daily_cap} recipients a day · labels{' '}
-                      <code className="font-mono">{mailbox.label_prefix}/…</code> · token last
-                      refreshed {when(mailbox.checked_at)}
-                    </p>
-                    {mailbox.status !== 'disabled' && (
-                      <div className="flex flex-wrap gap-2">
-                        {mailbox.status === 'reauth_required' && (
-                          <Button
-                            size="sm"
-                            onClick={() => connect.mutate(mailbox.id)}
-                            disabled={connect.isPending}
-                          >
-                            Re-authorize
-                          </Button>
-                        )}
-                        {mailbox.status === 'ok' && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => check.mutate(mailbox.id)}
-                            disabled={check.isPending}
-                          >
-                            {check.isPending ? 'Checking…' : 'Check now'}
-                          </Button>
-                        )}
-                        {mailbox.arm === null && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setArming({ mailbox, mode: 'draft' })}
-                          >
-                            Arm for drafts
-                          </Button>
-                        )}
-                        {mailbox.arm === 'draft' && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setArming({ mailbox, mode: 'send' })}
-                            disabled={mailbox.message_id_verified_at === null}
-                          >
-                            Arm to send
-                          </Button>
-                        )}
-                        {mailbox.arm !== null && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => disarm.mutate(mailbox.id)}
-                            disabled={disarm.isPending}
-                          >
-                            Disarm
-                          </Button>
-                        )}
-                        <Button variant="ghost" size="sm" onClick={() => setDisconnecting(mailbox)}>
-                          Disconnect
-                        </Button>
                       </div>
-                    )}
-                    {mailbox.arm === 'draft' && mailbox.message_id_verified_at === null && (
+                      {mailbox.status !== 'disabled' && (
+                        <p className="flex flex-wrap items-center gap-2">
+                          <Badge variant={mailbox.arm === null ? 'secondary' : 'outline'}>
+                            {ARM_LABEL[mailbox.arm ?? 'none']}
+                          </Badge>
+                          <span className="text-muted-foreground">{armText(mailbox)}</span>
+                        </p>
+                      )}
+                      {mailbox.status !== 'ok' && reasonText(mailbox.status_reason) !== null && (
+                        <p className="text-muted-foreground">{reasonText(mailbox.status_reason)}</p>
+                      )}
                       <p className="text-xs text-muted-foreground">
-                        Arming to send waits until netkeeper finds one of its drafts here by its
-                        Message-ID, which the next drafts check does after a draft is made.
+                        Up to {mailbox.daily_cap} recipients a day · labels{' '}
+                        <code className="font-mono">{mailbox.label_prefix}/…</code> · token last
+                        refreshed {when(mailbox.checked_at)}
                       </p>
-                    )}
-                  </li>
-                ))}
+                      {mailbox.status !== 'disabled' && (
+                        <div className="flex flex-wrap gap-2">
+                          {mailbox.status === 'reauth_required' && (
+                            <Button
+                              size="sm"
+                              onClick={() => connect.mutate(mailbox.id)}
+                              disabled={connect.isPending}
+                            >
+                              Re-authorize
+                            </Button>
+                          )}
+                          {mailbox.status === 'ok' && !pathChecks && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => check.mutate(mailbox.id)}
+                              disabled={check.isPending}
+                            >
+                              {check.isPending ? 'Checking…' : 'Check now'}
+                            </Button>
+                          )}
+                          {mailbox.arm === null && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setArming({ mailbox, mode: 'draft' })}
+                            >
+                              Arm for drafts
+                            </Button>
+                          )}
+                          {mailbox.arm === 'draft' && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setArming({ mailbox, mode: 'send' })}
+                              disabled={steps === undefined ? true : !steps.can_arm_send}
+                              aria-describedby={blocked === null ? undefined : blockedId}
+                            >
+                              Arm to send
+                            </Button>
+                          )}
+                          {mailbox.arm !== null && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => disarm.mutate(mailbox.id)}
+                              disabled={disarm.isPending}
+                            >
+                              Disarm
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setDisconnecting(mailbox)}
+                          >
+                            Disconnect
+                          </Button>
+                        </div>
+                      )}
+                      {steps !== undefined && mailbox.status !== 'disabled' && (
+                        <ArmPath
+                          mailbox={mailbox}
+                          steps={steps}
+                          onCheckNow={() => check.mutate(mailbox.id)}
+                          checking={check.isPending}
+                          blockedId={blockedId}
+                        />
+                      )}
+                    </li>
+                  )
+                })}
               </ul>
             )}
             {disarm.isError && (

@@ -2617,7 +2617,8 @@ export interface paths {
         };
         /**
          * Mailbox Status
-         * @description Whether a client is set, every mailbox, and whether any needs re-authorizing.
+         * @description Whether a client is set, every mailbox, whether any needs re-authorizing, and how
+         *     far each connected one is on the way to arming to send.
          */
         get: operations["mailbox_status_api_v1_mailboxes_status_get"];
         put?: never;
@@ -2661,6 +2662,10 @@ export interface paths {
         /**
          * Check Mailbox
          * @description Refresh the token now, as the background poll does; answers the mailbox after.
+         *
+         *     While ``serve`` runs and the mailbox is armed and ``ok``, it also asks for the
+         *     drafts check, with its Message-ID check, at the next tick (#510). That never calls
+         *     Gmail here: the tick runs the check, gated as usual.
          */
         post: operations["check_mailbox_api_v1_mailboxes__mailbox_id__check_post"];
         delete?: never;
@@ -2806,7 +2811,8 @@ export interface paths {
         /**
          * Check Gmail Replies Now
          * @description Poll Gmail for replies at the next campaign tick (within a minute), not at the end
-         *     of the interval. Never calls Gmail itself: the tick runs the poll, gated as usual.
+         *     of the interval, and run the drafts check (with its Message-ID check) then too. Never
+         *     calls Gmail itself: the tick runs both polls, gated as usual.
          *     Refused, with the reason, while ``serve`` isn't running, no mailbox is armed or
          *     connected, or every armed mailbox needs signing in again.
          */
@@ -3639,6 +3645,12 @@ export interface components {
              */
             unfamiliar_message_files: string[];
         };
+        /**
+         * ArmNextStep
+         * @description The button that moves a mailbox along.
+         * @enum {string}
+         */
+        ArmNextStep: "arm_drafts" | "reauthorize" | "send_test" | "check_now" | "arm_send";
         /**
          * AutoSendHoldOut
          * @description An auto-send hold (ADR 0008): fixed words, never page text.
@@ -6150,6 +6162,33 @@ export interface components {
             mode: components["schemas"]["MailboxArm"];
         };
         /**
+         * MailboxArmStepsOut
+         * @description Where a mailbox is on the way to arming to send (#510): armed for drafts, then
+         *     netkeeper finding its own draft by Message-ID, then a person arming it to send.
+         */
+        MailboxArmStepsOut: {
+            /** Armed For Drafts */
+            armed_for_drafts: boolean;
+            /** Armed To Send */
+            armed_to_send: boolean;
+            /** Can Arm Send */
+            can_arm_send: boolean;
+            /** Check Requested At */
+            check_requested_at: string | null;
+            /** Checked At */
+            checked_at: string | null;
+            /** Checks Running */
+            checks_running: boolean;
+            /** Mailbox Id */
+            mailbox_id: number;
+            next_step: components["schemas"]["ArmNextStep"] | null;
+            /** Test Campaign Id */
+            test_campaign_id: number | null;
+            /** Verified At */
+            verified_at: string | null;
+            waiting: components["schemas"]["MessageIdWait"] | null;
+        };
+        /**
          * MailboxOut
          * @description A connected Gmail account. Never its token: that is in the Keychain.
          */
@@ -6174,6 +6213,8 @@ export interface components {
             id: number;
             /** Label Prefix */
             label_prefix: string;
+            /** Message Id Checked At */
+            message_id_checked_at: string | null;
             /** Message Id Verified At */
             message_id_verified_at: string | null;
             provider: components["schemas"]["MailboxProvider"];
@@ -6237,6 +6278,11 @@ export interface components {
          * @description What the Settings page and the re-auth banner read.
          */
         MailboxStatusOut: {
+            /**
+             * Arm Steps
+             * @default []
+             */
+            arm_steps: components["schemas"]["MailboxArmStepsOut"][];
             /** Client Configured */
             client_configured: boolean;
             /** Client Id */
@@ -6361,6 +6407,12 @@ export interface components {
          * @enum {string}
          */
         MessageDirection: "out" | "in";
+        /**
+         * MessageIdWait
+         * @description Why the Message-ID check has not passed yet, in the order it is read.
+         * @enum {string}
+         */
+        MessageIdWait: "disconnected" | "not_armed" | "reauth_required" | "no_draft" | "test_draft_not_found" | "not_checked" | "not_found";
         /**
          * MessagePreviewOut
          * @description One message of a step, rendered for a pending enrollment. ``blocked`` says why

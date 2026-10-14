@@ -97,6 +97,7 @@ from netkeeper.services import (
     keychain,
     linkedin_steps,
     message_check,
+    message_id_check,
     outside_responses,
     route_breaker,
     run_diagnostics,
@@ -5166,14 +5167,25 @@ def gmail_login(
 
 @gmail_app.command("status")
 def gmail_status() -> None:
-    """List the mailboxes and their health, without asking Google."""
+    """List the mailboxes and their health, without asking Google.
+
+    For each connected mailbox, it also shows the steps to arming it to send: armed for
+    drafts, netkeeper finding one of its own drafts there by Message-ID (with the date,
+    or why it's waiting), then `netkeeper gmail arm --send`."""
     engine = make_engine(database_url())
     try:
         factory = make_session_factory(engine)
         install_scope_guard(factory)
         with session_scope(factory) as session:
             user = _local_user_or_exit(session)
-            rows = [_mailbox_row(row) for row in mailbox_service.list_mailboxes(session, user)]
+            mailboxes = mailbox_service.list_mailboxes(session, user)
+            rows = [_mailbox_row(row) for row in mailboxes]
+            now = datetime.now(UTC)
+            steps = [
+                (row.email, message_id_check.arm_steps(session, user, row, now=now))
+                for row in mailboxes
+                if row.status is not MailboxStatus.DISABLED
+            ]
         client = _keychain_or_exit(lambda: mailbox_service.load_client(user.id))
     finally:
         engine.dispose()
@@ -5185,6 +5197,10 @@ def gmail_status() -> None:
         _format_table(("ID", "EMAIL", "STATUS", "REASON", "CAP", "CHECKED", "ARMED"), rows),
         nl=False,
     )
+    for email, mailbox_steps in steps:
+        typer.echo(f"\n{email}: arming to send")
+        for line in message_id_check.describe(mailbox_steps):
+            typer.echo(f"  {line}")
 
 
 @gmail_app.command("check")

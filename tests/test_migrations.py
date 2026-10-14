@@ -3491,4 +3491,34 @@ def test_0042_downgrades_the_inbound_kinds_to_notes(migration_engine: Engine) ->
         kind = connection.execute(text("SELECT kind FROM interactions WHERE id = 9")).scalar()
         assert kind == "note"
         assert _count(connection, "messages") == 1
+
+
+# --- the Message-ID check's last look (0043, #510) -----------------------------------------
+
+
+def test_0043_leaves_every_mailbox_not_checked(migration_engine: Engine) -> None:
     migrations.upgrade(migration_engine, "0042")
+    with migration_engine.begin() as connection:
+        _seed_users(connection, 1)
+        _insert_mailbox(connection, id=1)
+    migrations.upgrade(migration_engine, "0043")
+    with migration_engine.begin() as connection:
+        row = connection.execute(
+            text("SELECT message_id_checked_at FROM mailboxes WHERE id = 1")
+        ).one()
+        assert tuple(row) == (None,)
+        connection.execute(text("UPDATE mailboxes SET message_id_checked_at = :t"), {"t": STAMP})
+
+
+def test_0043_downgrades_to_mailboxes_without_it(migration_engine: Engine) -> None:
+    migrations.upgrade(migration_engine, "0043")
+    with migration_engine.begin() as connection:
+        _seed_users(connection, 1)
+        _insert_mailbox(connection, id=1)
+        connection.execute(text("UPDATE mailboxes SET message_id_checked_at = :t"), {"t": STAMP})
+    migrations.downgrade(migration_engine, "0042")
+    columns = {c["name"] for c in inspect(migration_engine).get_columns("mailboxes")}
+    assert "message_id_checked_at" not in columns
+    with migration_engine.begin() as connection:
+        assert _count(connection, "mailboxes") == 1
+    migrations.upgrade(migration_engine, "0043")

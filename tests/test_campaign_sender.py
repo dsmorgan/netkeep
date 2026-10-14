@@ -2180,6 +2180,155 @@ def test_the_first_draft_found_by_its_message_id_verifies_the_mailbox(drafts: Ma
         assert mailbox.arm is MailboxArm.SEND
 
 
+def _verified_at(mail: Mail) -> datetime | None:
+    row = mail.read(lambda s: get_scoped(s, mail.user, Mailbox, mail.mailbox.id))
+    assert row is not None
+    return row.message_id_verified_at
+
+
+def _mailbox_row(mail: Mail) -> Mailbox:
+    row = mail.read(lambda s: get_scoped(s, mail.user, Mailbox, mail.mailbox.id))
+    assert row is not None
+    return row
+
+
+def _message_id_searches(mail: Mail) -> int:
+    return sum(
+        1
+        for method, purpose in mail.gmail.calls
+        if "Message-ID check" in purpose and method == "messages.list"
+    )
+
+
+def test_a_draft_seen_sent_while_the_search_lagged_still_verifies_the_mailbox(
+    drafts: Mail,
+) -> None:
+    """#510: the person sends the draft before any poll looks; the poll that sees it sent
+    searches while Gmail's search lags. The draft is no longer tracked, but its sent
+    message keeps netkeeper's Message-ID, and the next poll finds it."""
+    set_arm(drafts, MailboxArm.DRAFT, verified=False)
+    enrollment_id = drafts.enroll()
+    drafts.tick()
+    [message] = drafts.messages(enrollment_id)
+    assert message.gmail_draft_id is not None
+    drafts.gmail.send_draft(message.gmail_draft_id, at=NOW + timedelta(minutes=1))
+    drafts.gmail.lag = 1
+    drafts.tick(NOW + timedelta(minutes=2))
+    assert drafts.messages(enrollment_id)[0].status is MessageStatus.SENT
+    assert _verified_at(drafts) is None
+    assert _mailbox_row(drafts).message_id_checked_at == NOW + timedelta(minutes=2)
+
+    drafts.tick(NOW + timedelta(minutes=3))
+    assert _verified_at(drafts) == NOW + timedelta(minutes=3)
+    # Never armed by the check: arming to send stays a person's action.
+    assert _mailbox_row(drafts).arm is MailboxArm.DRAFT
+    before = _message_id_searches(drafts)
+    drafts.tick(NOW + timedelta(minutes=4))
+    assert _message_id_searches(drafts) == before  # verified: no more searches
+
+
+def test_a_sent_draft_counts_when_the_oldest_waiting_draft_is_never_found(drafts: Mail) -> None:
+    """Before #510 only the oldest waiting draft was searched for, so one Gmail never
+    finds held the check back for good. A draft seen sent is searched for too."""
+    set_arm(drafts, MailboxArm.DRAFT, verified=False)
+    first = drafts.enroll("ada@example.test")
+    second = drafts.enroll("bob@example.test")
+    drafts.tick()
+    [oldest] = drafts.messages(first)
+    assert oldest.gmail_draft_id is not None
+    # Gmail lost the oldest draft's Message-ID (as an edit in another client might).
+    stored = drafts.gmail._messages[drafts.gmail.drafts()[oldest.gmail_draft_id].id]
+    stored.parsed.replace_header("Message-ID", "<edited@mail.example>")
+    drafts.tick(NOW + timedelta(hours=1))  # the second claim, past the spacing
+    assert _verified_at(drafts) is None
+    [newer] = drafts.messages(second)
+    assert newer.gmail_draft_id is not None
+    drafts.gmail.send_draft(newer.gmail_draft_id, at=NOW + timedelta(hours=1, minutes=1))
+    drafts.tick(NOW + timedelta(hours=1, minutes=2))
+    assert drafts.messages(second)[0].status is MessageStatus.SENT
+    assert _verified_at(drafts) == NOW + timedelta(hours=1, minutes=2)
+
+
+def test_a_message_gmail_sent_under_its_own_message_id_verifies_nothing(drafts: Mail) -> None:
+    """The check still needs netkeeper's own Message-ID: a sent draft Gmail gave a new
+    one is seen sent (by its thread) but never verifies the mailbox."""
+    set_arm(drafts, MailboxArm.DRAFT, verified=False)
+    enrollment_id = drafts.enroll()
+    drafts.tick()
+    [message] = drafts.messages(enrollment_id)
+    assert message.gmail_draft_id is not None
+    ref = drafts.gmail.send_draft(message.gmail_draft_id, at=NOW + timedelta(minutes=1))
+    drafts.gmail._messages[ref.id].parsed.replace_header("Message-ID", "<gmail-own@mail.example>")
+    for minute in (2, 3, 4):
+        drafts.tick(NOW + timedelta(minutes=minute))
+    assert drafts.messages(enrollment_id)[0].status is MessageStatus.SENT
+    assert _verified_at(drafts) is None
+    assert _mailbox_row(drafts).message_id_checked_at == NOW + timedelta(minutes=4)
+    with session_scope(drafts.factory, write=True) as session:
+        user = session.get(User, drafts.user.id)
+        assert user is not None
+        mailbox = mailbox_service.get_mailbox(session, user, drafts.mailbox.id)
+        with pytest.raises(mailbox_service.ArmRefused):
+            mailbox_service.arm(session, user, mailbox, MailboxArm.SEND, by="test", now=NOW)
+
+
+def test_a_sent_draft_is_not_searched_for_on_a_disarmed_mailbox(drafts: Mail) -> None:
+    set_arm(drafts, MailboxArm.DRAFT, verified=False)
+    enrollment_id = drafts.enroll()
+    drafts.tick()
+    [message] = drafts.messages(enrollment_id)
+    assert message.gmail_draft_id is not None
+    drafts.gmail.send_draft(message.gmail_draft_id, at=NOW + timedelta(minutes=1))
+    drafts.gmail.lag = 1
+    drafts.tick(NOW + timedelta(minutes=2))
+    set_arm(drafts, None, verified=False)
+    before = len(drafts.gmail.calls)
+    drafts.tick(NOW + timedelta(minutes=3))
+    assert len(drafts.gmail.calls) == before
+    assert _verified_at(drafts) is None
+
+
+def test_a_failed_draft_listing_still_runs_the_message_id_check(drafts: Mail) -> None:
+    set_arm(drafts, MailboxArm.DRAFT, verified=False)
+    drafts.enroll()
+    drafts.tick()
+    drafts.gmail.fail_next("drafts.list", GmailTransient("down", code="unavailable"))
+    drafts.tick(NOW + timedelta(minutes=1))
+    assert _verified_at(drafts) == NOW + timedelta(minutes=1)
+
+
+def test_check_now_runs_the_drafts_check_at_the_next_tick(drafts: Mail) -> None:
+    """#510: "Check now" brings the drafts poll forward, as it does the reply poll."""
+    set_arm(drafts, MailboxArm.DRAFT, verified=False)
+    drafts.sender = GmailSender(
+        drafts.factory,
+        opener=lambda user_id, mailbox_id: drafts.gmail,
+        clock=drafts.clock,
+        replies_every=NO_REPLY_POLL,
+    )
+    drafts.gmail.lag = 1
+    drafts.enroll()
+    drafts.tick()
+    drafts.tick(NOW + timedelta(minutes=1))  # the first drafts poll: the search lags
+    assert _verified_at(drafts) is None
+    drafts.tick(NOW + timedelta(minutes=2))  # inside the interval: no poll
+    assert _verified_at(drafts) is None
+    assert drafts.sender.request_drafts_poll(drafts.user.id)
+    assert not drafts.sender.request_drafts_poll(drafts.user.id)  # presses collapse
+    assert drafts.sender.drafts_poll_requested_at(drafts.user.id) == NOW + timedelta(minutes=2)
+    drafts.tick(NOW + timedelta(minutes=3))
+    assert _verified_at(drafts) == NOW + timedelta(minutes=3)
+    assert drafts.sender.drafts_poll_requested_at(drafts.user.id) is None
+
+
+def test_the_message_id_check_limits_are_pinned() -> None:
+    from netkeeper.services import message_id_check
+
+    assert sender_module.MESSAGE_ID_CHECKS_MAX == 5
+    assert message_id_check.SENT_DRAFTS_CHECKED == 3
+    assert message_id_check.SENT_DRAFTS_WITHIN.total_seconds() == 14 * 24 * 60 * 60
+
+
 def test_a_linkedin_answer_polled_before_the_draft_was_seen_sent_is_its_reply(
     drafts: Mail,
 ) -> None:

@@ -461,6 +461,35 @@ def test_a_test_draft_to_verify_keeps_the_drafts_poll_busy(world: World) -> None
     assert world.read()["gmail_drafts"].state is S.DUE
 
 
+def test_a_sent_draft_to_verify_keeps_the_drafts_poll_busy(world: World) -> None:
+    """#510: a draft netkeeper saw sent is still searched for until the check passes."""
+    for session, user in world.write():
+        mailbox = _mailbox(session, user, polled=NOW)
+        campaign = factories.make_campaign(session, user, mailbox_id=mailbox.id)
+        enrollment = factories.make_enrollment(
+            session, campaign, factories.make_contact(session, user)
+        )
+        factories.make_message(
+            session, enrollment, gmail_draft_id="d1", sent_at=NOW - timedelta(hours=1)
+        )
+
+    assert world.read()["gmail_drafts"].state is S.DUE
+
+
+def test_check_now_makes_the_drafts_poll_due_and_requested(world: World) -> None:
+    for session, user in world.write():
+        _drafted(session, user, _mailbox(session, user, polled=NOW))
+    polled = NOW - timedelta(minutes=4)
+    asked = NOW - timedelta(seconds=10)
+    serving = service.Serving(
+        scheduler=True, campaign_engine=True, drafts_polled_at=polled, drafts_requested_at=asked
+    )
+
+    drafts = world.read(serving=serving)["gmail_drafts"]
+
+    assert (drafts.state, drafts.next_at, drafts.requested_at) == (S.DUE, None, asked)
+
+
 def test_drafts_read_the_running_senders_last_poll(world: World) -> None:
     for session, user in world.write():
         _drafted(session, user, _mailbox(session, user, polled=NOW))

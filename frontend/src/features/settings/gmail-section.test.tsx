@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { navigation } from '@/features/mailboxes/api'
-import { mailbox, renderWithBackend, status } from '@/features/mailboxes/test-support'
+import { armSteps, mailbox, renderWithBackend, status } from '@/features/mailboxes/test-support'
 import { pollStatusKeys } from '@/features/poll-status/api'
 import { resetFakeEventSource } from '@/test/fake-event-source'
 import { jsonResponse } from '@/test/fetch'
@@ -199,10 +199,95 @@ describe('GmailSection', () => {
 
   it('waits for a draft found by its Message-ID before it can arm to send', async () => {
     renderSection(() =>
-      status({ mailboxes: [mailbox({ arm: 'draft', armed_at: '2026-09-27T12:00:00Z' })] }),
+      status({
+        mailboxes: [mailbox({ arm: 'draft', armed_at: '2026-09-27T12:00:00Z' })],
+        arm_steps: [armSteps({ test_campaign_id: 7 })],
+      }),
     )
-    expect(await screen.findByRole('button', { name: 'Arm to send' })).toBeDisabled()
-    expect(screen.getByText(/waits until netkeeper finds one of its drafts/)).toBeInTheDocument()
+    const arm = await screen.findByRole('button', { name: 'Arm to send' })
+    expect(arm).toBeDisabled()
+    expect(arm).toHaveAccessibleDescription(
+      'Arm to send is off until netkeeper finds one of its own drafts in this mailbox.',
+    )
+    const path = screen.getByRole('region', { name: 'Arm to send' })
+    expect(within(path).getByText(/Waiting: no draft yet/)).toBeInTheDocument()
+    expect(within(path).getByRole('link', { name: 'Send a test' })).toHaveAttribute(
+      'href',
+      '/campaigns/7',
+    )
+    expect(path).toHaveTextContent('Disarm takes all of that back')
+  })
+
+  it('shows each reason the check waits, and the next step for it', async () => {
+    let current = status({
+      mailboxes: [mailbox({ arm: 'draft', armed_at: '2026-09-27T12:00:00Z' })],
+      arm_steps: [
+        armSteps({
+          waiting: 'not_found',
+          checked_at: '2026-09-28T12:00:00Z',
+          next_step: 'check_now',
+        }),
+      ],
+    })
+    const { calls } = renderSection(() => current, {
+      'POST /api/v1/mailboxes/3/check': () => {
+        current = status({
+          mailboxes: current.mailboxes,
+          arm_steps: [
+            armSteps({
+              waiting: 'not_found',
+              checked_at: '2026-09-28T12:00:00Z',
+              check_requested_at: '2026-09-28T12:05:00Z',
+              next_step: 'check_now',
+            }),
+          ],
+        })
+        return jsonResponse(current.mailboxes[0])
+      },
+    })
+    const path = await screen.findByRole('region', { name: 'Arm to send' })
+    const last = new Date('2026-09-28T12:00:00Z').toLocaleString()
+    expect(
+      within(path).getByText(`Waiting: not found yet. Last checked ${last}.`),
+    ).toBeInTheDocument()
+    // One Check now, in the way to arming, not a second one beside Disarm.
+    expect(screen.getAllByRole('button', { name: 'Check now' })).toHaveLength(1)
+    fireEvent.click(within(path).getByRole('button', { name: 'Check now' }))
+    expect(await within(path).findByText(/A check runs within a minute/)).toBeInTheDocument()
+    expect(calls).toContainEqual({ method: 'POST', path: '/api/v1/mailboxes/3/check', body: null })
+  })
+
+  it('says when the check waits for you to sign in again', async () => {
+    renderSection(() =>
+      status({
+        mailboxes: [
+          mailbox({
+            arm: 'draft',
+            armed_at: '2026-09-27T12:00:00Z',
+            status: 'reauth_required',
+            status_reason: 'invalid_grant',
+          }),
+        ],
+        arm_steps: [armSteps({ waiting: 'reauth_required', next_step: 'reauthorize' })],
+      }),
+    )
+    const path = await screen.findByRole('region', { name: 'Arm to send' })
+    expect(within(path).getByText(/the mailbox needs you to sign in again/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Re-authorize' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Arm to send' })).toBeDisabled()
+  })
+
+  it('says when nothing checks because serve is not running', async () => {
+    renderSection(() =>
+      status({
+        mailboxes: [mailbox({ arm: 'draft', armed_at: '2026-09-27T12:00:00Z' })],
+        arm_steps: [
+          armSteps({ waiting: 'not_checked', next_step: 'check_now', checks_running: false }),
+        ],
+      }),
+    )
+    const path = await screen.findByRole('region', { name: 'Arm to send' })
+    expect(within(path).getByText(/netkeeper serve isn’t running/)).toBeInTheDocument()
   })
 
   it('arms to send, a separate step, only after confirming', async () => {
@@ -211,14 +296,25 @@ describe('GmailSection', () => {
       armed_at: '2026-09-27T12:00:00Z',
       message_id_verified_at: '2026-09-27T12:10:00Z',
     }
-    let current = status({ mailboxes: [mailbox(drafts)] })
+    const ready = armSteps({
+      verified_at: '2026-09-27T12:10:00Z',
+      waiting: null,
+      can_arm_send: true,
+      next_step: 'arm_send',
+    })
+    let current = status({ mailboxes: [mailbox(drafts)], arm_steps: [ready] })
     const { calls } = renderSection(() => current, {
       'POST /api/v1/mailboxes/3/arm': () => {
         const sending = mailbox({ ...drafts, arm: 'send', send_armed_at: '2026-09-28T12:00:00Z' })
-        current = status({ mailboxes: [sending] })
+        current = status({
+          mailboxes: [sending],
+          arm_steps: [{ ...ready, armed_to_send: true, can_arm_send: false, next_step: null }],
+        })
         return jsonResponse(sending)
       },
     })
+    const found = new Date('2026-09-27T12:10:00Z').toLocaleString()
+    expect(await screen.findByText(`Found ${found}.`)).toBeInTheDocument()
     fireEvent.click(await screen.findByRole('button', { name: 'Arm to send' }))
     const dialog = await screen.findByRole('alertdialog')
     expect(dialog).toHaveTextContent('with no one pressing Send')

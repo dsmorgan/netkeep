@@ -320,8 +320,9 @@ def arm(
                 )
             raise ArmRefused(
                 f"no draft on {mailbox.email} has been found by its Message-ID yet; while it"
-                " is armed for drafts, `serve` checks the first draft it makes, a campaign's"
-                " test draft included"
+                " is armed for drafts, `serve` checks for its drafts, a campaign's test draft"
+                " and drafts you already sent included (`netkeeper gmail status` says why it"
+                " waits)"
             )
         if mailbox.send_armed_at is None:
             mailbox.send_armed_at = now

@@ -2,6 +2,7 @@
 
 import shutil
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import factories
@@ -90,6 +91,7 @@ async def test_nothing_is_set_up_at_first(client: httpx.AsyncClient, running_app
         "client_id": None,
         "mailboxes": [],
         "reauth_required": False,
+        "arm_steps": [],
     }
     assert (await client.get("/api/v1/mailboxes")).json() == []
 
@@ -421,6 +423,109 @@ async def test_arming_goes_draft_then_send_and_disarm_undoes_it(
     disarmed = await client.post(f"/api/v1/mailboxes/{mailbox['id']}/disarm", headers=CSRF)
     assert disarmed.status_code == 200
     assert (disarmed.json()["arm"], disarmed.json()["armed_at"]) == (None, None)
+
+
+def _arm_steps(body: dict[str, Any]) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = body["arm_steps"]
+    [only] = rows
+    return only
+
+
+class _Engine:
+    """Stands in for ``serve``'s campaign engine: the handlers only read its sender."""
+
+    def __init__(self, sender: object) -> None:
+        self.sender = sender
+
+
+def _no_gmail(user_id: int, mailbox_id: int) -> Any:
+    raise AssertionError("a request handler opened Gmail")
+
+
+async def test_the_status_shows_the_way_to_arming_to_send(
+    client: httpx.AsyncClient, fake_google: FakeGoogle, running_app: FastAPI
+) -> None:
+    """#510: each step's state, and the button for the next one."""
+    await _set_client(client)
+    await _connect(client, fake_google)
+    [mailbox] = (await client.get("/api/v1/mailboxes")).json()
+
+    def steps(body: dict[str, Any]) -> dict[str, Any]:
+        rows: list[dict[str, Any]] = body["arm_steps"]
+        [only] = rows
+        return only
+
+    first = steps(await _status(client))
+    assert first == {
+        "mailbox_id": mailbox["id"],
+        "armed_for_drafts": False,
+        "armed_to_send": False,
+        "verified_at": None,
+        "waiting": "not_armed",
+        "checked_at": None,
+        "check_requested_at": None,
+        "checks_running": False,
+        "can_arm_send": False,
+        "next_step": "arm_drafts",
+        "test_campaign_id": None,
+    }
+    await _arm(client, mailbox["id"], "draft")
+    armed = steps(await _status(client))
+    assert (armed["waiting"], armed["next_step"]) == ("no_draft", "send_test")
+
+    factory: sessionmaker[Session] = running_app.state.session_factory
+    with session_scope(factory, write=True) as session:
+        [row] = session.scalars(unscoped(select(Mailbox))).all()
+        row.message_id_verified_at = row.armed_at
+    ready = steps(await _status(client))
+    assert (ready["waiting"], ready["can_arm_send"], ready["next_step"]) == (
+        None,
+        True,
+        "arm_send",
+    )
+    assert (await _arm(client, mailbox["id"], "send")).status_code == 200
+    sending = steps(await _status(client))
+    assert (sending["armed_to_send"], sending["can_arm_send"], sending["next_step"]) == (
+        True,
+        False,
+        None,
+    )
+
+
+async def test_check_now_on_an_armed_mailbox_asks_for_the_drafts_check(
+    client: httpx.AsyncClient, fake_google: FakeGoogle, running_app: FastAPI
+) -> None:
+    """#510: the card's Check now refreshes the token, then asks the running sender for
+    the drafts check at the next tick. It never opens Gmail itself."""
+    from netkeeper.services.campaign_sender import GmailSender
+
+    await _set_client(client)
+    await _connect(client, fake_google)
+    [mailbox] = (await client.get("/api/v1/mailboxes")).json()
+    sender = GmailSender(running_app.state.session_factory, opener=_no_gmail)
+    running_app.state.campaign_engine = _Engine(sender)
+    factory: sessionmaker[Session] = running_app.state.session_factory
+    with session_scope(factory) as session:
+        user_id = session.scalars(select(User)).one().id
+
+    await client.post(f"/api/v1/mailboxes/{mailbox['id']}/check", headers=CSRF)
+    assert sender.drafts_poll_requested_at(user_id) is None  # disarmed: nothing to check
+
+    await _arm(client, mailbox["id"], "draft")
+    response = await client.post(f"/api/v1/mailboxes/{mailbox['id']}/check", headers=CSRF)
+    assert response.status_code == 200, response.text
+    asked = sender.drafts_poll_requested_at(user_id)
+    assert asked is not None
+    steps = _arm_steps(await _status(client))
+    assert steps["checks_running"] is True
+    assert steps["check_requested_at"] is not None
+
+    fake_google.revoke_all()
+    sender._drafts_requested.clear()
+    await client.post(f"/api/v1/mailboxes/{mailbox['id']}/check", headers=CSRF)
+    assert sender.drafts_poll_requested_at(user_id) is None  # needs signing in again
+    steps = _arm_steps(await _status(client))
+    assert (steps["waiting"], steps["next_step"]) == ("reauth_required", "reauthorize")
 
 
 async def test_arming_needs_the_csrf_header(

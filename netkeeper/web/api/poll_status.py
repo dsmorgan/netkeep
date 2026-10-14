@@ -11,8 +11,9 @@ outside active hours, the session flagged, Gmail not connected, not built yet)
 answers its state and a reason instead of a time.
 
 "Check now" never calls Gmail either: it sets the running sender's "poll on the next
-tick" flag, and the poll runs in the campaign tick, with the same arming, mailbox
-checks and read budget as any other. Repeated presses before that tick are one poll.
+tick" flags, for replies and for drafts (#510), and the polls run in the campaign
+tick, with the same arming, mailbox checks and read budget as any other. Repeated
+presses before that tick are one poll.
 """
 
 from __future__ import annotations
@@ -109,6 +110,7 @@ def _serving(request: Request, user_id: int) -> service.Serving:
         drafts_polled_at=None if gmail is None else gmail.drafts_polled_at(user_id),
         drafts_every=DRAFTS_POLL_EVERY if gmail is None else gmail.drafts_every,
         replies_requested_at=None if gmail is None else gmail.replies_poll_requested_at(user_id),
+        drafts_requested_at=None if gmail is None else gmail.drafts_poll_requested_at(user_id),
     )
 
 
@@ -169,7 +171,8 @@ def check_gmail_replies_now(
     request: Request, user: CurrentUser, session: SessionDep
 ) -> CheckNowOut:
     """Poll Gmail for replies at the next campaign tick (within a minute), not at the end
-    of the interval. Never calls Gmail itself: the tick runs the poll, gated as usual.
+    of the interval, and run the drafts check (with its Message-ID check) then too. Never
+    calls Gmail itself: the tick runs both polls, gated as usual.
     Refused, with the reason, while ``serve`` isn't running, no mailbox is armed or
     connected, or every armed mailbox needs signing in again."""
     serving = _serving(request, user.id)
@@ -180,4 +183,5 @@ def check_gmail_replies_now(
     if refused is not None:
         raise HTTPException(status_code=409, detail=refused)
     assert gmail is not None
+    gmail.request_drafts_poll(user.id)
     return CheckNowOut(already_requested=not gmail.request_replies_poll(user.id))

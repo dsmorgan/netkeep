@@ -626,6 +626,18 @@
         "title": "ArchiveReportOut",
         "type": "object"
       },
+      "ArmNextStep": {
+        "description": "The button that moves a mailbox along.",
+        "enum": [
+          "arm_drafts",
+          "reauthorize",
+          "send_test",
+          "check_now",
+          "arm_send"
+        ],
+        "title": "ArmNextStep",
+        "type": "string"
+      },
       "AutoSendHoldOut": {
         "description": "An auto-send hold (ADR 0008): fixed words, never page text.",
         "properties": {
@@ -8338,6 +8350,113 @@
         "title": "MailboxArmIn",
         "type": "object"
       },
+      "MailboxArmStepsOut": {
+        "description": "Where a mailbox is on the way to arming to send (#510): armed for drafts, then\nnetkeeper finding its own draft by Message-ID, then a person arming it to send.",
+        "properties": {
+          "armed_for_drafts": {
+            "title": "Armed For Drafts",
+            "type": "boolean"
+          },
+          "armed_to_send": {
+            "title": "Armed To Send",
+            "type": "boolean"
+          },
+          "can_arm_send": {
+            "title": "Can Arm Send",
+            "type": "boolean"
+          },
+          "check_requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Check Requested At"
+          },
+          "checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked At"
+          },
+          "checks_running": {
+            "title": "Checks Running",
+            "type": "boolean"
+          },
+          "mailbox_id": {
+            "title": "Mailbox Id",
+            "type": "integer"
+          },
+          "next_step": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArmNextStep"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "test_campaign_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Test Campaign Id"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          },
+          "waiting": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MessageIdWait"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "mailbox_id",
+          "armed_for_drafts",
+          "armed_to_send",
+          "verified_at",
+          "waiting",
+          "checked_at",
+          "check_requested_at",
+          "checks_running",
+          "can_arm_send",
+          "next_step",
+          "test_campaign_id"
+        ],
+        "title": "MailboxArmStepsOut",
+        "type": "object"
+      },
       "MailboxOut": {
         "description": "A connected Gmail account. Never its token: that is in the Keychain.",
         "properties": {
@@ -8407,6 +8526,18 @@
             "title": "Label Prefix",
             "type": "string"
           },
+          "message_id_checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Id Checked At"
+          },
           "message_id_verified_at": {
             "anyOf": [
               {
@@ -8468,6 +8599,7 @@
           "send_armed_at",
           "armed_by",
           "message_id_verified_at",
+          "message_id_checked_at",
           "created_at",
           "updated_at"
         ],
@@ -8597,6 +8729,14 @@
       "MailboxStatusOut": {
         "description": "What the Settings page and the re-auth banner read.",
         "properties": {
+          "arm_steps": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/MailboxArmStepsOut"
+            },
+            "title": "Arm Steps",
+            "type": "array"
+          },
           "client_configured": {
             "title": "Client Configured",
             "type": "boolean"
@@ -8880,6 +9020,20 @@
           "in"
         ],
         "title": "MessageDirection",
+        "type": "string"
+      },
+      "MessageIdWait": {
+        "description": "Why the Message-ID check has not passed yet, in the order it is read.",
+        "enum": [
+          "disconnected",
+          "not_armed",
+          "reauth_required",
+          "no_draft",
+          "test_draft_not_found",
+          "not_checked",
+          "not_found"
+        ],
+        "title": "MessageIdWait",
         "type": "string"
       },
       "MessagePreviewOut": {
@@ -21405,7 +21559,7 @@
     },
     "/api/v1/mailboxes/status": {
       "get": {
-        "description": "Whether a client is set, every mailbox, and whether any needs re-authorizing.",
+        "description": "Whether a client is set, every mailbox, whether any needs re-authorizing, and how\nfar each connected one is on the way to arming to send.",
         "operationId": "mailbox_status_api_v1_mailboxes_status_get",
         "responses": {
           "200": {
@@ -21489,7 +21643,7 @@
     },
     "/api/v1/mailboxes/{mailbox_id}/check": {
       "post": {
-        "description": "Refresh the token now, as the background poll does; answers the mailbox after.",
+        "description": "Refresh the token now, as the background poll does; answers the mailbox after.\n\nWhile ``serve`` runs and the mailbox is armed and ``ok``, it also asks for the\ndrafts check, with its Message-ID check, at the next tick (#510). That never calls\nGmail here: the tick runs the check, gated as usual.",
         "operationId": "check_mailbox_api_v1_mailboxes__mailbox_id__check_post",
         "parameters": [
           {
@@ -21821,7 +21975,7 @@
     },
     "/api/v1/poll-status/gmail-replies/check-now": {
       "post": {
-        "description": "Poll Gmail for replies at the next campaign tick (within a minute), not at the end\nof the interval. Never calls Gmail itself: the tick runs the poll, gated as usual.\nRefused, with the reason, while ``serve`` isn't running, no mailbox is armed or\nconnected, or every armed mailbox needs signing in again.",
+        "description": "Poll Gmail for replies at the next campaign tick (within a minute), not at the end\nof the interval, and run the drafts check (with its Message-ID check) then too. Never\ncalls Gmail itself: the tick runs both polls, gated as usual.\nRefused, with the reason, while ``serve`` isn't running, no mailbox is armed or\nconnected, or every armed mailbox needs signing in again.",
         "operationId": "check_gmail_replies_now",
         "responses": {
           "202": {

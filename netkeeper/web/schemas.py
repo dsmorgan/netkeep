@@ -61,6 +61,7 @@ from netkeeper.models import (
     single_address,
 )
 from netkeeper.models.imports import FILENAME_MAX_LENGTH, PRESET_NAME_MAX_LENGTH
+from netkeeper.services.message_id_check import ArmNextStep, MessageIdWait
 from netkeeper.services.tasks import TaskStatus
 
 
@@ -2412,6 +2413,9 @@ class MailboxOut(BaseModel):
     """Who took the latest arming step: ``cli (<login>)`` or ``web (user <id>)``."""
     message_id_verified_at: datetime | None
     """When a draft made there was first found by its Message-ID; arming for send needs it."""
+    message_id_checked_at: datetime | None
+    """When the drafts check last searched Gmail for one of its drafts by Message-ID and
+    got an answer, found or not."""
     created_at: datetime
     updated_at: datetime
 
@@ -2420,6 +2424,31 @@ class MailboxArmIn(BaseModel):
     """Arm a mailbox: ``draft`` first, then ``send`` as a separate step."""
 
     mode: MailboxArm
+
+
+class MailboxArmStepsOut(BaseModel):
+    """Where a mailbox is on the way to arming to send (#510): armed for drafts, then
+    netkeeper finding its own draft by Message-ID, then a person arming it to send."""
+
+    mailbox_id: int
+    armed_for_drafts: bool
+    armed_to_send: bool
+    verified_at: datetime | None
+    """When netkeeper first found one of its drafts there by Message-ID."""
+    waiting: MessageIdWait | None
+    """Why that hasn't happened yet; None once it has."""
+    checked_at: datetime | None
+    """When the last Message-ID check got an answer from Gmail."""
+    check_requested_at: datetime | None
+    """When a "Check now" asked for the next drafts check; None when none waits."""
+    checks_running: bool
+    """Whether this process runs the drafts check at all (``netkeeper serve``)."""
+    can_arm_send: bool
+    """Exactly what arming to send allows now."""
+    next_step: ArmNextStep | None
+    """The button that moves the mailbox along; None when there is none."""
+    test_campaign_id: int | None
+    """A campaign in review on this mailbox, where you can send a test."""
 
 
 class MailboxStatusOut(BaseModel):
@@ -2432,6 +2461,8 @@ class MailboxStatusOut(BaseModel):
     mailboxes: list[MailboxOut]
     reauth_required: bool
     """Whether any mailbox needs someone to authorize it again."""
+    arm_steps: list[MailboxArmStepsOut] = []
+    """Each connected mailbox's way to arming to send, in the order of ``mailboxes``."""
 
 
 class OAuthClientIn(BaseModel):
