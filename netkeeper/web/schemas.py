@@ -61,6 +61,7 @@ from netkeeper.models import (
     single_address,
 )
 from netkeeper.models.imports import FILENAME_MAX_LENGTH, PRESET_NAME_MAX_LENGTH
+from netkeeper.services.attention import ActivityState
 from netkeeper.services.message_id_check import ArmNextStep, MessageIdWait
 from netkeeper.services.tasks import TaskStatus
 
@@ -2556,3 +2557,57 @@ class InboundOut(BaseModel):
     count: int
     since: datetime
     reply_detection: bool
+
+
+class AttentionCountsOut(BaseModel):
+    """The nav's number badges: each is the count its page lists (#508)."""
+
+    inbox: int
+    """Unhandled replies, unsubscribes and bounces: ``GET /inbox``'s ``unhandled``."""
+    dashboard: int
+    """``waiting`` and ``try_again`` together."""
+    waiting: int
+    """LinkedIn messages waiting for you: ``GET /campaigns/linkedin/waiting``'s total."""
+    try_again: int
+    """Steps waiting for Try again: ``GET /campaigns/linkedin/ready``'s ``try_again``."""
+    triage: int
+    """Contacts waiting for a triage decision: ``GET /triage/next``'s ``remaining``."""
+    imports: int
+    """Draft import runs: ``GET /imports?status=draft``'s total."""
+
+
+class AttentionFlagsOut(BaseModel):
+    """The nav's dots: a sentence while a state blocks something, null otherwise."""
+
+    dashboard: str | None
+    """Auto-send is held."""
+    gmail: str | None
+    """A mailbox needs you to sign in again (a disconnected one never counts)."""
+    linkedin: str | None
+    """The session is flagged, or heat tripped."""
+    settings: str | None
+    """A breaker tripped. Breakers only, not the full posture check."""
+
+
+class ActivityOut(BaseModel):
+    """What LinkedIn is doing (#347). LinkedIn runs only: a campaign send batch or a Gmail
+    reply poll never shows as running."""
+
+    state: ActivityState
+    """The first that applies, in this order: running, stopped, paused, armed, idle."""
+    label: str
+    """The state as one plain sentence."""
+    run_id: int | None
+    """The running run, while ``state`` is ``running``."""
+    run_kind: SyncRunKind | None
+
+
+class AttentionOut(BaseModel):
+    """Everything the app shell shows about what needs you (#508, #347)."""
+
+    checked_at: datetime
+    counts: AttentionCountsOut
+    flags: AttentionFlagsOut
+    activity: ActivityOut
+    title_total: int
+    """The browser tab's ``(N)``: every number badge but Triage's."""

@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Final
 
-from sqlalchemy import ColumnElement, and_, case, func, or_
+from sqlalchemy import ColumnElement, Select, and_, case, func, or_
 from sqlalchemy.orm import Session
 
 from netkeeper.db import is_writer
@@ -97,6 +97,17 @@ def _contact_name(contact: Contact) -> str:
     return f"{contact.preferred_name or contact.first_name} {contact.last_name}".strip()
 
 
+def _inbox(user: User) -> Select[Message]:
+    return scoped(user, Message).where(or_(_IS_REPLY, _IS_BOUNCE))
+
+
+def unhandled_count(session: Session, user: User) -> int:
+    """Unhandled items of every kind: :attr:`InboxPage.unhandled`, the Inbox nav count
+    (#508). One query. Read-only."""
+    statement = _inbox(user).with_only_columns(func.count(Message.id))
+    return session.scalar(statement.where(Message.handled_at.is_(None))) or 0
+
+
 def list_inbox(
     session: Session,
     user: User,
@@ -113,13 +124,8 @@ def list_inbox(
     ``kind`` keeps one kind; ``enrollment_id`` keeps one enrollment's."""
     limit = max(1, min(limit, PAGE_MAX))
     offset = max(0, offset)
-    inbox = scoped(user, Message).where(or_(_IS_REPLY, _IS_BOUNCE))
-    unhandled = (
-        session.scalar(
-            inbox.with_only_columns(func.count(Message.id)).where(Message.handled_at.is_(None))
-        )
-        or 0
-    )
+    inbox = _inbox(user)
+    unhandled = unhandled_count(session, user)
     stmt = inbox
     if handled is not None:
         stmt = stmt.where(

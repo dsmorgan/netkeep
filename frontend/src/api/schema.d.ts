@@ -4,6 +4,26 @@
  */
 
 export interface paths {
+    "/api/v1/attention": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Attention
+         * @description Each nav count and flag, and what LinkedIn is doing. Read-only.
+         */
+        get: operations["get_attention"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/autotag-rules": {
         parameters: {
             query?: never;
@@ -3447,6 +3467,25 @@ export interface components {
             /** Missing */
             missing: components["schemas"]["MissingOut"][];
         };
+        /**
+         * ActivityOut
+         * @description What LinkedIn is doing (#347). LinkedIn runs only: a campaign send batch or a Gmail
+         *     reply poll never shows as running.
+         */
+        ActivityOut: {
+            /** Label */
+            label: string;
+            /** Run Id */
+            run_id: number | null;
+            run_kind: components["schemas"]["SyncRunKind"] | null;
+            state: components["schemas"]["ActivityState"];
+        };
+        /**
+         * ActivityState
+         * @description What LinkedIn is doing, in precedence order: the first that applies wins.
+         * @enum {string}
+         */
+        ActivityState: "running" | "stopped" | "paused" | "armed" | "idle";
         /** AdoptIn */
         AdoptIn: {
             /**
@@ -3699,6 +3738,54 @@ export interface components {
          * @enum {string}
          */
         ArmNextStep: "arm_drafts" | "reauthorize" | "send_test" | "check_now" | "arm_send";
+        /**
+         * AttentionCountsOut
+         * @description The nav's number badges: each is the count its page lists (#508).
+         */
+        AttentionCountsOut: {
+            /** Dashboard */
+            dashboard: number;
+            /** Imports */
+            imports: number;
+            /** Inbox */
+            inbox: number;
+            /** Triage */
+            triage: number;
+            /** Try Again */
+            try_again: number;
+            /** Waiting */
+            waiting: number;
+        };
+        /**
+         * AttentionFlagsOut
+         * @description The nav's dots: a sentence while a state blocks something, null otherwise.
+         */
+        AttentionFlagsOut: {
+            /** Dashboard */
+            dashboard: string | null;
+            /** Gmail */
+            gmail: string | null;
+            /** Linkedin */
+            linkedin: string | null;
+            /** Settings */
+            settings: string | null;
+        };
+        /**
+         * AttentionOut
+         * @description Everything the app shell shows about what needs you (#508, #347).
+         */
+        AttentionOut: {
+            activity: components["schemas"]["ActivityOut"];
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            counts: components["schemas"]["AttentionCountsOut"];
+            flags: components["schemas"]["AttentionFlagsOut"];
+            /** Title Total */
+            title_total: number;
+        };
         /**
          * AutoSendHoldOut
          * @description An auto-send hold (ADR 0008): fixed words, never page text.
@@ -8736,6 +8823,26 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_attention: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttentionOut"];
+                };
+            };
+        };
+    };
     list_autotag_rules: {
         parameters: {
             query?: never;

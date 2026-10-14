@@ -42,6 +42,59 @@
         "title": "ActivationRefusedOut",
         "type": "object"
       },
+      "ActivityOut": {
+        "description": "What LinkedIn is doing (#347). LinkedIn runs only: a campaign send batch or a Gmail\nreply poll never shows as running.",
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "run_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SyncRunKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/ActivityState"
+          }
+        },
+        "required": [
+          "state",
+          "label",
+          "run_id",
+          "run_kind"
+        ],
+        "title": "ActivityOut",
+        "type": "object"
+      },
+      "ActivityState": {
+        "description": "What LinkedIn is doing, in precedence order: the first that applies wins.",
+        "enum": [
+          "running",
+          "stopped",
+          "paused",
+          "armed",
+          "idle"
+        ],
+        "title": "ActivityState",
+        "type": "string"
+      },
       "AdoptIn": {
         "properties": {
           "confirm": {
@@ -637,6 +690,134 @@
         ],
         "title": "ArmNextStep",
         "type": "string"
+      },
+      "AttentionCountsOut": {
+        "description": "The nav's number badges: each is the count its page lists (#508).",
+        "properties": {
+          "dashboard": {
+            "title": "Dashboard",
+            "type": "integer"
+          },
+          "imports": {
+            "title": "Imports",
+            "type": "integer"
+          },
+          "inbox": {
+            "title": "Inbox",
+            "type": "integer"
+          },
+          "triage": {
+            "title": "Triage",
+            "type": "integer"
+          },
+          "try_again": {
+            "title": "Try Again",
+            "type": "integer"
+          },
+          "waiting": {
+            "title": "Waiting",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "inbox",
+          "dashboard",
+          "waiting",
+          "try_again",
+          "triage",
+          "imports"
+        ],
+        "title": "AttentionCountsOut",
+        "type": "object"
+      },
+      "AttentionFlagsOut": {
+        "description": "The nav's dots: a sentence while a state blocks something, null otherwise.",
+        "properties": {
+          "dashboard": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dashboard"
+          },
+          "gmail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gmail"
+          },
+          "linkedin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linkedin"
+          },
+          "settings": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settings"
+          }
+        },
+        "required": [
+          "dashboard",
+          "gmail",
+          "linkedin",
+          "settings"
+        ],
+        "title": "AttentionFlagsOut",
+        "type": "object"
+      },
+      "AttentionOut": {
+        "description": "Everything the app shell shows about what needs you (#508, #347).",
+        "properties": {
+          "activity": {
+            "$ref": "#/components/schemas/ActivityOut"
+          },
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/AttentionCountsOut"
+          },
+          "flags": {
+            "$ref": "#/components/schemas/AttentionFlagsOut"
+          },
+          "title_total": {
+            "title": "Title Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "checked_at",
+          "counts",
+          "flags",
+          "activity",
+          "title_total"
+        ],
+        "title": "AttentionOut",
+        "type": "object"
       },
       "AutoSendHoldOut": {
         "description": "An auto-send hold (ADR 0008): fixed words, never page text.",
@@ -14791,6 +14972,28 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/attention": {
+      "get": {
+        "description": "Each nav count and flag, and what LinkedIn is doing. Read-only.",
+        "operationId": "get_attention",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttentionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Attention",
+        "tags": [
+          "attention"
+        ]
+      }
+    },
     "/api/v1/autotag-rules": {
       "get": {
         "description": "Every rule in position order.",

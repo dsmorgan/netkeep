@@ -631,18 +631,8 @@ class TryAgainPrefill:
     held_until: datetime | None
 
 
-def try_again(
-    session: Session,
-    user: User,
-    *,
-    now: datetime,
-    settings: Settings,
-    campaign_id: int | None = None,
-) -> list[TryAgainPrefill]:
-    """Steps whose latest prefill ended ``not_typed``, oldest try first, at most
-    :data:`READY_PAGE_MAX`: an ``active`` enrollment of an ``active`` campaign that has
-    started, its next step on LinkedIn and not claimed, whatever its due time. Each waits
-    for a person to click Try again. Read-only."""
+def _try_again_statement(user: User, now: datetime, campaign_id: int | None) -> Select[Enrollment]:
+    """The enrollments :func:`try_again` lists and :func:`try_again_count` counts."""
     statement = (
         scoped(user, Enrollment)
         .join(Campaign, Campaign.id == Enrollment.campaign_id)
@@ -671,6 +661,29 @@ def try_again(
     )
     if campaign_id is not None:
         statement = statement.where(Enrollment.campaign_id == campaign_id)
+    return statement
+
+
+def try_again_count(session: Session, user: User, *, now: datetime) -> int:
+    """How many steps wait for Try again: :func:`try_again`'s rows, not capped at
+    :data:`READY_PAGE_MAX` (the Dashboard nav count, #508). One query. Read-only."""
+    statement = _try_again_statement(user, now, None)
+    return session.scalar(statement.with_only_columns(func.count(Enrollment.id))) or 0
+
+
+def try_again(
+    session: Session,
+    user: User,
+    *,
+    now: datetime,
+    settings: Settings,
+    campaign_id: int | None = None,
+) -> list[TryAgainPrefill]:
+    """Steps whose latest prefill ended ``not_typed``, oldest try first, at most
+    :data:`READY_PAGE_MAX`: an ``active`` enrollment of an ``active`` campaign that has
+    started, its next step on LinkedIn and not claimed, whatever its due time. Each waits
+    for a person to click Try again. Read-only."""
+    statement = _try_again_statement(user, now, campaign_id)
     rows = session.execute(
         statement.add_columns(Campaign, CampaignStep, Contact)
         .order_by(Enrollment.not_sent_since, Enrollment.id)
@@ -1488,14 +1501,8 @@ class WaitingPrefill:
         return self.message.send_clicked_at is not None
 
 
-def waiting_for_you(
-    session: Session, user: User, *, limit: int, offset: int = 0, campaign_id: int | None = None
-) -> tuple[list[WaitingPrefill], int]:
-    """``prefilled``, ``stale``, interrupted (claimed, their run not running) and partly
-    typed LinkedIn messages (:data:`PARTLY_TYPED_PREFIXES`), oldest first, and how many;
-    one campaign's with ``campaign_id`` (#383). An interrupted or
-    partly typed one blocks every later prefill (one open at a time) until the person
-    discards it. Read-only."""
+def _waiting_statement(user: User, campaign_id: int | None) -> Select[Message]:
+    """The messages :func:`waiting_for_you` lists and :func:`waiting_count` counts."""
     run_running = and_(
         SyncRun.id == Message.sync_run_id,
         SyncRun.user_id == user.id,
@@ -1525,6 +1532,25 @@ def waiting_for_you(
     )
     if campaign_id is not None:
         statement = statement.where(Enrollment.campaign_id == campaign_id)
+    return statement
+
+
+def waiting_count(session: Session, user: User) -> int:
+    """How many LinkedIn messages wait for you: :func:`waiting_for_you`'s total (the
+    Dashboard nav count, #508). One query. Read-only."""
+    statement = _waiting_statement(user, None)
+    return session.scalar(statement.with_only_columns(func.count(Message.id))) or 0
+
+
+def waiting_for_you(
+    session: Session, user: User, *, limit: int, offset: int = 0, campaign_id: int | None = None
+) -> tuple[list[WaitingPrefill], int]:
+    """``prefilled``, ``stale``, interrupted (claimed, their run not running) and partly
+    typed LinkedIn messages (:data:`PARTLY_TYPED_PREFIXES`), oldest first, and how many;
+    one campaign's with ``campaign_id`` (#383). An interrupted or
+    partly typed one blocks every later prefill (one open at a time) until the person
+    discards it. Read-only."""
+    statement = _waiting_statement(user, campaign_id)
     total = session.scalar(statement.with_only_columns(func.count(Message.id)).order_by(None))
     rows = session.execute(
         statement.add_columns(Enrollment, Campaign, Contact)
