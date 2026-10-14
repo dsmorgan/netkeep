@@ -284,6 +284,9 @@ class StepResultsOut(BaseModel):
     """Enrollments whose first reply came after this step, before the next one sent."""
     bounced: int
     opted_out: int
+    replied_outside: int
+    """Of ``replied``, the replies that came outside netkeeper: a response a person
+    recorded (#512)."""
 
 
 class ResultTotalsOut(BaseModel):
@@ -295,6 +298,8 @@ class ResultTotalsOut(BaseModel):
     """``replied / contacted``, from 0 to 1; None while nobody has been sent anything."""
     bounced: int
     opted_out: int
+    replied_outside: int
+    """Of ``replied``, the replies that came outside netkeeper (#512)."""
 
 
 class CampaignResultsOut(BaseModel):
@@ -323,6 +328,7 @@ def results_out(results: campaign_results.CampaignResults) -> CampaignResultsOut
                 replied=s.replied,
                 bounced=s.bounced,
                 opted_out=s.opted_out,
+                replied_outside=s.replied_outside,
             )
             for s in results.steps
         ],
@@ -333,6 +339,7 @@ def results_out(results: campaign_results.CampaignResults) -> CampaignResultsOut
             reply_rate=t.reply_rate,
             bounced=t.bounced,
             opted_out=t.opted_out,
+            replied_outside=t.replied_outside,
         ),
     )
 

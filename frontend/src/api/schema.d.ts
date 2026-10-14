@@ -1087,6 +1087,26 @@ export interface paths {
         patch: operations["update_contact_email"];
         trace?: never;
     };
+    "/api/v1/contacts/{contact_id}/enrollments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Contact Enrollments
+         * @description The contact's enrollments in every campaign, newest first.
+         */
+        get: operations["list_contact_enrollments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/contacts/{contact_id}/interactions": {
         parameters: {
             query?: never;
@@ -1103,6 +1123,8 @@ export interface paths {
         /**
          * Create Interaction
          * @description Record an interaction. An outbound kind moves the contact's `last_contacted_at`.
+         *     For a call or a meeting on a contact with an enrollment that could still send,
+         *     `ask_if_response` is true: ask whether it was their response. Nothing ends here.
          */
         post: operations["create_interaction"];
         delete?: never;
@@ -1209,6 +1231,28 @@ export interface paths {
          */
         put: operations["set_contact_notes"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/contacts/{contact_id}/outside-response": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record Outside Response
+         * @description Record a response that came outside netkeeper, and end the enrollments it answers
+         *     ``replied`` (``opted_out`` for an opt-out), as a detected reply does. No later step
+         *     sends. ``422`` for a time in the future, or ``do_not_contact`` without an opt-out.
+         */
+        post: operations["record_outside_response"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4437,6 +4481,24 @@ export interface components {
             kind?: components["schemas"]["EmailKind"] | null;
             status?: components["schemas"]["EmailStatus"] | null;
         };
+        /** ContactEnrollmentOut */
+        ContactEnrollmentOut: {
+            /** Campaign Id */
+            campaign_id: number;
+            /** Campaign Name */
+            campaign_name: string;
+            /** Can Still Send */
+            can_still_send: boolean;
+            /** Current Step */
+            current_step: number | null;
+            /** Exit Reason */
+            exit_reason: string | null;
+            /** Id */
+            id: number;
+            /** Replied At */
+            replied_at: string | null;
+            status: components["schemas"]["EnrollmentStatus"];
+        };
         /** ContactLinkIn */
         ContactLinkIn: {
             /** @default other */
@@ -4815,6 +4877,42 @@ export interface components {
             /** Expected Count */
             expected_count: number;
         };
+        /**
+         * CreatedInteractionOut
+         * @description A new interaction, and whether to ask if it was a response (#512).
+         */
+        CreatedInteractionOut: {
+            /**
+             * Ask If Response
+             * @default false
+             */
+            ask_if_response: boolean;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Contact Id */
+            contact_id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            kind: components["schemas"]["InteractionKind"];
+            /** Message Id */
+            message_id: number | null;
+            source: components["schemas"]["ContactSource"];
+            /** Summary */
+            summary: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
         /** DaySendsOut */
         DaySendsOut: {
             /**
@@ -4957,6 +5055,16 @@ export interface components {
          * @enum {string}
          */
         EmailStatus: "ok" | "bounced" | "invalid";
+        /** EndedEnrollmentOut */
+        EndedEnrollmentOut: {
+            /** Campaign Id */
+            campaign_id: number;
+            /** Id */
+            id: number;
+            /** Message Id */
+            message_id: number;
+            status: components["schemas"]["EnrollmentStatus"];
+        };
         /**
          * EnrollIn
          * @description ``list_id`` or ``filter`` replaces the audience source first (a ``draft`` only),
@@ -5662,6 +5770,8 @@ export interface components {
             kind: components["schemas"]["InboxKind"];
             /** Li Conversation Urn */
             li_conversation_urn: string | null;
+            outside_outcome?: components["schemas"]["ResponseOutcome"] | null;
+            outside_via?: components["schemas"]["ResponseVia"] | null;
             /** Received At */
             received_at: string | null;
             /** Snippet */
@@ -5701,10 +5811,14 @@ export interface components {
         };
         /**
          * InteractionKind
-         * @description What happened between you and a contact. ``*_out`` is you reaching out.
+         * @description What happened between you and a contact. ``*_out`` is you reaching out, ``*_in``
+         *     them reaching you. ``call`` and ``meeting`` are ones you logged, either way;
+         *     ``call_in``, ``meeting_in`` and ``other_in`` are a response to a campaign that came
+         *     outside netkeeper (#512; 0043): a call, meeting them in person, or a text or another
+         *     app. One by email from another address is ``email_in``.
          * @enum {string}
          */
-        InteractionKind: "note" | "call" | "meeting" | "email_out" | "email_in" | "li_out" | "li_in" | "li_view";
+        InteractionKind: "note" | "call" | "meeting" | "email_out" | "email_in" | "li_out" | "li_in" | "li_view" | "call_in" | "meeting_in" | "other_in";
         /** InteractionOut */
         InteractionOut: {
             /**
@@ -6493,6 +6607,39 @@ export interface components {
             op: "or";
         };
         /**
+         * OutsideResponseIn
+         * @description A response outside netkeeper. ``at`` must carry a timezone and not be in the
+         *     future. ``outcome`` is optional; ``do_not_contact`` goes with ``opt_out`` only.
+         *     Without ``enrollment_id``, every enrollment of the contact that could still send
+         *     ends; with it, that one only (a ``completed`` one may be picked too, and stays
+         *     ``completed``).
+         */
+        OutsideResponseIn: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /**
+             * Do Not Contact
+             * @default false
+             */
+            do_not_contact: boolean;
+            /** Enrollment Id */
+            enrollment_id?: number | null;
+            /** Note */
+            note?: string | null;
+            outcome?: components["schemas"]["ResponseOutcome"] | null;
+            via: components["schemas"]["ResponseVia"];
+        };
+        /** OutsideResponseOut */
+        OutsideResponseOut: {
+            /** Enrollments */
+            enrollments: components["schemas"]["EndedEnrollmentOut"][];
+            /** Interaction Id */
+            interaction_id: number;
+        };
+        /**
          * OverlapOut
          * @description Genuine you-and-them overlap: the same company, and the years it is known to overlap.
          *
@@ -6883,6 +7030,20 @@ export interface components {
              */
             op: "replied_in";
         };
+        /**
+         * ResponseOutcome
+         * @description What a response outside netkeeper said, when the person records it (#512).
+         *     ``opt_out`` ends the enrollments ``opted_out``; the rest end them ``replied``.
+         * @enum {string}
+         */
+        ResponseOutcome: "positive" | "neutral" | "not_interested" | "opt_out";
+        /**
+         * ResponseVia
+         * @description How a contact responded outside netkeeper (#512): a person records it, since
+         *     neither poll can see it.
+         * @enum {string}
+         */
+        ResponseVia: "call" | "text" | "other_email" | "other_app" | "in_person" | "other";
         /** ResultTotalsOut */
         ResultTotalsOut: {
             /** Bounced */
@@ -6893,6 +7054,8 @@ export interface components {
             opted_out: number;
             /** Replied */
             replied: number;
+            /** Replied Outside */
+            replied_outside: number;
             /** Reply Rate */
             reply_rate: number | null;
             /** Sent */
@@ -7582,6 +7745,8 @@ export interface components {
             position: number;
             /** Replied */
             replied: number;
+            /** Replied Outside */
+            replied_outside: number;
             /** Sent */
             sent: number;
             /** Step Id */
@@ -10767,6 +10932,44 @@ export interface operations {
             };
         };
     };
+    list_contact_enrollments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contact_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactEnrollmentOut"][];
+                };
+            };
+            /** @description No such contact, or no such enrollment of it */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_interactions: {
         parameters: {
             query?: {
@@ -10831,7 +11034,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InteractionOut"];
+                    "application/json": components["schemas"]["CreatedInteractionOut"];
                 };
             };
             /** @description No such contact */
@@ -11121,6 +11324,55 @@ export interface operations {
             };
             /** @description No such contact */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_outside_response: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contact_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OutsideResponseIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutsideResponseOut"];
+                };
+            };
+            /** @description No such contact, or no such enrollment of it */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Nothing left to end */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

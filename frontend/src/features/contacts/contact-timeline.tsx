@@ -8,6 +8,17 @@ import { contactsKeys, fetchTimelinePage } from './api'
 import { formatDateTime } from './format'
 import type { ContactDetail, TimelineEntry } from './types'
 
+/** Kinds whose name alone would not say who reached whom (#512): the rest read fine. */
+const KIND_LABELS: Record<string, string> = {
+  call_in: 'call from them',
+  meeting_in: 'met them in person',
+  other_in: 'response from them',
+}
+
+function kindLabel(kind: string): string {
+  return KIND_LABELS[kind] ?? kind.replace(/_/g, ' ')
+}
+
 /**
  * Interactions and snapshots interleaved, newest first (spec 8.1, 10.1).
  *
@@ -52,7 +63,7 @@ export function ContactTimeline({ contact }: { contact: ContactDetail }) {
               <div className="text-xs text-muted-foreground">{formatDateTime(entry.at)}</div>
               {entry.kind === 'interaction' ? (
                 <div>
-                  <span className="font-medium">{entry.interaction.kind.replace(/_/g, ' ')}</span>
+                  <span className="font-medium">{kindLabel(entry.interaction.kind)}</span>
                   {/* A text child, never markup: a message summary is someone else's
                       words and can still carry tag-shaped text (issue #75). */}
                   {entry.interaction.summary ? ` · ${entry.interaction.summary}` : ''}

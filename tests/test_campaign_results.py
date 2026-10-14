@@ -389,6 +389,7 @@ async def test_results_endpoint_answers_the_numbers(
             "replied": 1,
             "bounced": 0,
             "opted_out": 0,
+            "replied_outside": 0,
         },
         {
             "step_id": step_ids[1],
@@ -397,6 +398,7 @@ async def test_results_endpoint_answers_the_numbers(
             "replied": 0,
             "bounced": 1,
             "opted_out": 0,
+            "replied_outside": 0,
         },
         {
             "step_id": step_ids[2],
@@ -405,6 +407,7 @@ async def test_results_endpoint_answers_the_numbers(
             "replied": 0,
             "bounced": 0,
             "opted_out": 0,
+            "replied_outside": 0,
         },
     ]
     assert body["totals"] == {
@@ -414,6 +417,7 @@ async def test_results_endpoint_answers_the_numbers(
         "reply_rate": pytest.approx(1 / 3),
         "bounced": 1,
         "opted_out": 0,
+        "replied_outside": 0,
     }
     # The detail's own sent count agrees: a bounced message went out.
     detail = (await client.get(f"/api/v1/campaigns/{campaign_id}")).json()

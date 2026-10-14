@@ -299,8 +299,17 @@ export function results(overrides: Partial<CampaignResults> = {}): CampaignResul
       replied: 0,
       bounced: 0,
       opted_out: 0,
+      replied_outside: 0,
     })),
-    totals: { sent: 0, contacted: 0, replied: 0, reply_rate: null, bounced: 0, opted_out: 0 },
+    totals: {
+      sent: 0,
+      contacted: 0,
+      replied: 0,
+      reply_rate: null,
+      bounced: 0,
+      opted_out: 0,
+      replied_outside: 0,
+    },
     ...overrides,
   }
 }

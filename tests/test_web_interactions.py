@@ -88,6 +88,8 @@ async def _create(
     )
     assert response.status_code == 201, response.text
     body: dict[str, Any] = response.json()
+    # Only the create answers it (#512); the list and the timeline hold the row alone.
+    assert isinstance(body.pop("ask_if_response"), bool)
     return body
 
 

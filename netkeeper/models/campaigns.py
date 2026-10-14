@@ -171,6 +171,29 @@ class MessageStatus(enum.StrEnum):
     RECEIVED = "received"
 
 
+class ResponseVia(enum.StrEnum):
+    """How a contact responded outside netkeeper (#512): a person records it, since
+    neither poll can see it."""
+
+    CALL = "call"
+    TEXT = "text"
+    OTHER_EMAIL = "other_email"
+    """By email, from an address the contact does not hold, so the Gmail poll missed it."""
+    OTHER_APP = "other_app"
+    IN_PERSON = "in_person"
+    OTHER = "other"
+
+
+class ResponseOutcome(enum.StrEnum):
+    """What a response outside netkeeper said, when the person records it (#512).
+    ``opt_out`` ends the enrollments ``opted_out``; the rest end them ``replied``."""
+
+    POSITIVE = "positive"
+    NEUTRAL = "neutral"
+    NOT_INTERESTED = "not_interested"
+    OPT_OUT = "opt_out"
+
+
 class CampaignMailboxLocked(ValueError):
     """A campaign's mailbox changes only while the campaign is a ``draft`` (#269)."""
 
@@ -479,6 +502,16 @@ class Message(UserOwned, TimestampMixin, Base):
     send_clicked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     sync_run_id: Mapped[int | None] = mapped_column(
         ForeignKey("sync_runs.id", ondelete="SET NULL"), index=True
+    )
+    # A response that came outside netkeeper (#512; 0043): how, and what it said, when
+    # the person recorded one. Set only on an inbound message a person recorded, which
+    # has no Gmail or LinkedIn id; its ``channel`` is the channel of the step it answers.
+    # NULL for everything the polls found, and for every outbound message.
+    outside_via: Mapped[ResponseVia | None] = mapped_column(
+        string_enum(ResponseVia, "message_outside_via")
+    )
+    outside_outcome: Mapped[ResponseOutcome | None] = mapped_column(
+        string_enum(ResponseOutcome, "message_outside_outcome")
     )
     # One line on why a send failed. Never a message body, a token, or a header.
     error: Mapped[str | None] = mapped_column(String(500))

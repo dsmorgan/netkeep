@@ -72,6 +72,8 @@ import {
 } from './format'
 import { ENROLLMENTS_ANCHOR, ResultsCard } from './results-card'
 import { RecentContactOverride } from './recent-contact-override'
+import { RecordResponseButton } from './record-response'
+import { canRecordOn } from './response-labels'
 import { ReviewPanel } from './review-panel'
 import { UNCHOSEN, startIso, type StartChoice } from './start'
 import { StartPicker } from './start-picker'
@@ -122,7 +124,12 @@ export function CampaignDetailPage({
       {onLinkedIn && !reviewable && <LinkedInStepsSection campaignId={data.id} />}
       {reviewable && <AudienceCard campaign={data} />}
       {reviewable && <ReviewPanel campaign={data} />}
-      <EnrollmentsCard campaignId={data.id} status={status} onStatus={onStatus} />
+      <EnrollmentsCard
+        campaignId={data.id}
+        campaignName={data.name}
+        status={status}
+        onStatus={onStatus}
+      />
     </div>
   )
 }
@@ -1041,10 +1048,12 @@ function AudienceCard({ campaign }: { campaign: Campaign }) {
 
 function EnrollmentsCard({
   campaignId,
+  campaignName,
   status,
   onStatus,
 }: {
   campaignId: number
+  campaignName: string
   /** The status filter; the results tiles set it too. */
   status: EnrollmentStatus | ''
   onStatus: (status: EnrollmentStatus | '') => void
@@ -1224,6 +1233,17 @@ function EnrollmentsCard({
                         >
                           View in inbox
                         </Link>
+                      )}
+                      {canRecordOn(row.status) && (
+                        <span className="mt-1 block">
+                          <RecordResponseButton
+                            size="xs"
+                            contactId={row.contact_id}
+                            contactName={row.contact_name}
+                            targets={[{ id: row.id, campaignName, status: row.status }]}
+                            preferred={row.id}
+                          />
+                        </span>
                       )}
                     </td>
                   </tr>

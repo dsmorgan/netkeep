@@ -3405,3 +3405,64 @@ def test_0041_downgrades_to_runs_without_a_heartbeat(migration_engine: Engine) -
     with migration_engine.begin() as connection:
         assert _count(connection, "sync_runs") == 1
     migrations.upgrade(migration_engine, "0041")
+
+
+# --- a response from outside the app (0043, #512) -------------------------------------
+
+
+def test_0043_adds_outside_columns_checked_and_inbound_kinds(migration_engine: Engine) -> None:
+    migrations.upgrade(migration_engine, "0041")
+    with migration_engine.begin() as connection:
+        _seed_a_sent_campaign(connection)
+    migrations.upgrade(migration_engine, "0043")
+    with migration_engine.begin() as connection:
+        row = connection.execute(
+            text("SELECT outside_via, outside_outcome FROM messages WHERE id = 1")
+        ).one()
+        assert tuple(row) == (None, None)
+        connection.execute(
+            text(
+                "UPDATE messages SET outside_via = 'call', outside_outcome = 'opt_out' WHERE id = 1"
+            )
+        )
+        for kind in ("call_in", "meeting_in", "other_in"):
+            connection.execute(
+                text(
+                    "INSERT INTO interactions (user_id, contact_id, kind, at, source,"
+                    " observed_at, created_at, updated_at)"
+                    " VALUES (1, 1, :kind, :t, 'manual', :t, :t, :t)"
+                ),
+                {"kind": kind, "t": STAMP},
+            )
+    for statement in (
+        "UPDATE messages SET outside_via = 'pigeon' WHERE id = 1",
+        "UPDATE messages SET outside_outcome = 'maybe' WHERE id = 1",
+        "UPDATE interactions SET kind = 'shout_in'",
+    ):
+        with pytest.raises(IntegrityError), migration_engine.begin() as connection:
+            connection.execute(text(statement))
+    # The partial index of 0039 survives the rebuild: one open prefill per user.
+    names = {i["name"] for i in inspect(migration_engine).get_indexes("messages")}
+    assert "uq_messages_one_open_prefill" in names
+
+
+def test_0043_downgrades_the_inbound_kinds_to_notes(migration_engine: Engine) -> None:
+    migrations.upgrade(migration_engine, "0043")
+    with migration_engine.begin() as connection:
+        _seed_a_sent_campaign(connection)
+        connection.execute(
+            text(
+                "INSERT INTO interactions (id, user_id, contact_id, kind, at, source,"
+                " observed_at, created_at, updated_at)"
+                " VALUES (9, 1, 1, 'call_in', :t, 'manual', :t, :t, :t)"
+            ),
+            {"t": STAMP},
+        )
+    migrations.downgrade(migration_engine, "0041")
+    columns = {c["name"] for c in inspect(migration_engine).get_columns("messages")}
+    assert not {"outside_via", "outside_outcome"} & columns
+    with migration_engine.begin() as connection:
+        kind = connection.execute(text("SELECT kind FROM interactions WHERE id = 9")).scalar()
+        assert kind == "note"
+        assert _count(connection, "messages") == 1
+    migrations.upgrade(migration_engine, "0043")

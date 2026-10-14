@@ -147,7 +147,11 @@ class LinkKind(enum.StrEnum):
 
 
 class InteractionKind(enum.StrEnum):
-    """What happened between you and a contact. ``*_out`` is you reaching out."""
+    """What happened between you and a contact. ``*_out`` is you reaching out, ``*_in``
+    them reaching you. ``call`` and ``meeting`` are ones you logged, either way;
+    ``call_in``, ``meeting_in`` and ``other_in`` are a response to a campaign that came
+    outside netkeeper (#512; 0043): a call, meeting them in person, or a text or another
+    app. One by email from another address is ``email_in``."""
 
     NOTE = "note"
     CALL = "call"
@@ -157,6 +161,9 @@ class InteractionKind(enum.StrEnum):
     LI_OUT = "li_out"
     LI_IN = "li_in"
     LI_VIEW = "li_view"
+    CALL_IN = "call_in"
+    MEETING_IN = "meeting_in"
+    OTHER_IN = "other_in"
 
 
 def linkedin_profile_url(public_id: str) -> str:

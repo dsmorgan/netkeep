@@ -134,6 +134,8 @@ export function mockApi(handler: ApiHandler): SeenRequest[] {
       })
     }
     if (pathname === '/api/v1/tags') return jsonResponse([])
+    // The contact page's campaigns card (#512): in none unless a test says otherwise.
+    if (/^\/api\/v1\/contacts\/\d+\/enrollments$/.test(pathname)) return jsonResponse([])
     return new Response('not found', { status: 404 })
   })
   return seen

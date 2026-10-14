@@ -2925,6 +2925,75 @@
         "title": "ContactEmailPatch",
         "type": "object"
       },
+      "ContactEnrollmentOut": {
+        "properties": {
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "integer"
+          },
+          "campaign_name": {
+            "title": "Campaign Name",
+            "type": "string"
+          },
+          "can_still_send": {
+            "title": "Can Still Send",
+            "type": "boolean"
+          },
+          "current_step": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Step"
+          },
+          "exit_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Reason"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "replied_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replied At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/EnrollmentStatus"
+          }
+        },
+        "required": [
+          "id",
+          "campaign_id",
+          "campaign_name",
+          "status",
+          "current_step",
+          "replied_at",
+          "exit_reason",
+          "can_still_send"
+        ],
+        "title": "ContactEnrollmentOut",
+        "type": "object"
+      },
       "ContactLinkIn": {
         "additionalProperties": false,
         "properties": {
@@ -4153,6 +4222,80 @@
         "title": "CountMismatch",
         "type": "object"
       },
+      "CreatedInteractionOut": {
+        "description": "A new interaction, and whether to ask if it was a response (#512).",
+        "properties": {
+          "ask_if_response": {
+            "default": false,
+            "title": "Ask If Response",
+            "type": "boolean"
+          },
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "contact_id": {
+            "title": "Contact Id",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/InteractionKind"
+          },
+          "message_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Id"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ContactSource"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "contact_id",
+          "kind",
+          "at",
+          "summary",
+          "message_id",
+          "source",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "CreatedInteractionOut",
+        "type": "object"
+      },
       "DaySendsOut": {
         "properties": {
           "date": {
@@ -4450,6 +4593,33 @@
         ],
         "title": "EmailStatus",
         "type": "string"
+      },
+      "EndedEnrollmentOut": {
+        "properties": {
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/EnrollmentStatus"
+          }
+        },
+        "required": [
+          "id",
+          "campaign_id",
+          "status",
+          "message_id"
+        ],
+        "title": "EndedEnrollmentOut",
+        "type": "object"
       },
       "EnrollIn": {
         "description": "``list_id`` or ``filter`` replaces the audience source first (a ``draft`` only),\nremoving the pending enrollments the new source does not hold; its contacts, and\nany ``contact_ids``, are then enrolled through the guards.",
@@ -7111,6 +7281,26 @@
             ],
             "title": "Li Conversation Urn"
           },
+          "outside_outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResponseOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outside_via": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResponseVia"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "received_at": {
             "anyOf": [
               {
@@ -7242,7 +7432,7 @@
         "type": "object"
       },
       "InteractionKind": {
-        "description": "What happened between you and a contact. ``*_out`` is you reaching out.",
+        "description": "What happened between you and a contact. ``*_out`` is you reaching out, ``*_in``\nthem reaching you. ``call`` and ``meeting`` are ones you logged, either way;\n``call_in``, ``meeting_in`` and ``other_in`` are a response to a campaign that came\noutside netkeeper (#512; 0043): a call, meeting them in person, or a text or another\napp. One by email from another address is ``email_in``.",
         "enum": [
           "note",
           "call",
@@ -7251,7 +7441,10 @@
           "email_in",
           "li_out",
           "li_in",
-          "li_view"
+          "li_view",
+          "call_in",
+          "meeting_in",
+          "other_in"
         ],
         "title": "InteractionKind",
         "type": "string"
@@ -9280,6 +9473,84 @@
         "title": "Or",
         "type": "object"
       },
+      "OutsideResponseIn": {
+        "description": "A response outside netkeeper. ``at`` must carry a timezone and not be in the\nfuture. ``outcome`` is optional; ``do_not_contact`` goes with ``opt_out`` only.\nWithout ``enrollment_id``, every enrollment of the contact that could still send\nends; with it, that one only (a ``completed`` one may be picked too, and stays\n``completed``).",
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "do_not_contact": {
+            "default": false,
+            "title": "Do Not Contact",
+            "type": "boolean"
+          },
+          "enrollment_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enrollment Id"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResponseOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "via": {
+            "$ref": "#/components/schemas/ResponseVia"
+          }
+        },
+        "required": [
+          "via",
+          "at"
+        ],
+        "title": "OutsideResponseIn",
+        "type": "object"
+      },
+      "OutsideResponseOut": {
+        "properties": {
+          "enrollments": {
+            "items": {
+              "$ref": "#/components/schemas/EndedEnrollmentOut"
+            },
+            "title": "Enrollments",
+            "type": "array"
+          },
+          "interaction_id": {
+            "title": "Interaction Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "interaction_id",
+          "enrollments"
+        ],
+        "title": "OutsideResponseOut",
+        "type": "object"
+      },
       "OverlapOut": {
         "description": "Genuine you-and-them overlap: the same company, and the years it is known to overlap.\n\nThe actual LinkedIn \"you both worked at X\" signal (#84), computed from the\nuser's own job history (``/me/positions``) against this contact's. Unlike\n:class:`SharedCompanyOut`, a match here means the two sides are not\nprovably disjoint -- a stint known to have ended before the other started\nis excluded.\n\n``confirmed`` says whether ``started_on``/``ended_on`` are real: they are\nonly ever filled in from a pairing where **both** sides carry an actual\ndate. Most contacts today carry no dated position at all, only a current\ncompany with no known start, which is why most matches come back\nunconfirmed: real evidence that the company matches, but no evidence of\n*when*, so `started_on` and `ended_on` are both `null` rather than\nborrowed from whichever side happens to have a date -- a client must not\nrender years next to an unconfirmed match, or show one as fact.",
         "properties": {
@@ -10174,6 +10445,30 @@
         "title": "RepliedIn",
         "type": "object"
       },
+      "ResponseOutcome": {
+        "description": "What a response outside netkeeper said, when the person records it (#512).\n``opt_out`` ends the enrollments ``opted_out``; the rest end them ``replied``.",
+        "enum": [
+          "positive",
+          "neutral",
+          "not_interested",
+          "opt_out"
+        ],
+        "title": "ResponseOutcome",
+        "type": "string"
+      },
+      "ResponseVia": {
+        "description": "How a contact responded outside netkeeper (#512): a person records it, since\nneither poll can see it.",
+        "enum": [
+          "call",
+          "text",
+          "other_email",
+          "other_app",
+          "in_person",
+          "other"
+        ],
+        "title": "ResponseVia",
+        "type": "string"
+      },
       "ResultTotalsOut": {
         "properties": {
           "bounced": {
@@ -10190,6 +10485,10 @@
           },
           "replied": {
             "title": "Replied",
+            "type": "integer"
+          },
+          "replied_outside": {
+            "title": "Replied Outside",
             "type": "integer"
           },
           "reply_rate": {
@@ -10214,7 +10513,8 @@
           "replied",
           "reply_rate",
           "bounced",
-          "opted_out"
+          "opted_out",
+          "replied_outside"
         ],
         "title": "ResultTotalsOut",
         "type": "object"
@@ -12005,6 +12305,10 @@
             "title": "Replied",
             "type": "integer"
           },
+          "replied_outside": {
+            "title": "Replied Outside",
+            "type": "integer"
+          },
           "sent": {
             "title": "Sent",
             "type": "integer"
@@ -12020,7 +12324,8 @@
           "sent",
           "replied",
           "bounced",
-          "opted_out"
+          "opted_out",
+          "replied_outside"
         ],
         "title": "StepResultsOut",
         "type": "object"
@@ -17202,6 +17507,56 @@
         ]
       }
     },
+    "/api/v1/contacts/{contact_id}/enrollments": {
+      "get": {
+        "description": "The contact's enrollments in every campaign, newest first.",
+        "operationId": "list_contact_enrollments",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "title": "Contact Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ContactEnrollmentOut"
+                  },
+                  "title": "Response List Contact Enrollments",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such contact, or no such enrollment of it"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Contact Enrollments",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
     "/api/v1/contacts/{contact_id}/interactions": {
       "get": {
         "description": "The contact's interactions, newest first.",
@@ -17275,7 +17630,7 @@
         ]
       },
       "post": {
-        "description": "Record an interaction. An outbound kind moves the contact's `last_contacted_at`.",
+        "description": "Record an interaction. An outbound kind moves the contact's `last_contacted_at`.\nFor a call or a meeting on a contact with an enrollment that could still send,\n`ask_if_response` is true: ask whether it was their response. Nothing ends here.",
         "operationId": "create_interaction",
         "parameters": [
           {
@@ -17303,7 +17658,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InteractionOut"
+                  "$ref": "#/components/schemas/CreatedInteractionOut"
                 }
               }
             },
@@ -17680,6 +18035,65 @@
         "summary": "Set Contact Notes",
         "tags": [
           "interactions"
+        ]
+      }
+    },
+    "/api/v1/contacts/{contact_id}/outside-response": {
+      "post": {
+        "description": "Record a response that came outside netkeeper, and end the enrollments it answers\n``replied`` (``opted_out`` for an opt-out), as a detected reply does. No later step\nsends. ``422`` for a time in the future, or ``do_not_contact`` without an opt-out.",
+        "operationId": "record_outside_response",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "title": "Contact Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OutsideResponseIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutsideResponseOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such contact, or no such enrollment of it"
+          },
+          "409": {
+            "description": "Nothing left to end"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Outside Response",
+        "tags": [
+          "campaigns"
         ]
       }
     },

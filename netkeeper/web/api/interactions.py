@@ -15,8 +15,11 @@ from pydantic import AwareDatetime
 
 from netkeeper.crm import interactions as service
 from netkeeper.crm.interactions import MISSING, NoSuchMessage, NotFound
+from netkeeper.models import InteractionKind
+from netkeeper.services.outside_responses import stoppable_count
 from netkeeper.web.deps import CurrentUser, SessionDep
 from netkeeper.web.schemas import (
+    CreatedInteractionOut,
     InteractionIn,
     InteractionOut,
     InteractionPage,
@@ -28,6 +31,11 @@ from netkeeper.web.schemas import (
 )
 
 router = APIRouter(tags=["interactions"])
+
+ASK_IF_RESPONSE: frozenset[InteractionKind] = frozenset(
+    {InteractionKind.CALL, InteractionKind.MEETING}
+)
+"""A hand-logged kind that may have been the contact's response to a campaign (#512)."""
 
 Responses = dict[int | str, dict[str, Any]]
 NO_SUCH_CONTACT: Responses = {404: {"description": "No such contact"}}
@@ -71,8 +79,10 @@ def list_interactions(
 )
 def create_interaction(
     contact_id: int, body: InteractionIn, user: CurrentUser, session: SessionDep
-) -> InteractionOut:
-    """Record an interaction. An outbound kind moves the contact's `last_contacted_at`."""
+) -> CreatedInteractionOut:
+    """Record an interaction. An outbound kind moves the contact's `last_contacted_at`.
+    For a call or a meeting on a contact with an enrollment that could still send,
+    `ask_if_response` is true: ask whether it was their response. Nothing ends here."""
     try:
         row = service.add_interaction(
             session,
@@ -87,7 +97,8 @@ def create_interaction(
         raise _no_such_contact() from None
     except NoSuchMessage:
         raise _no_such_message() from None
-    return InteractionOut.model_validate(row)
+    ask = row.kind in ASK_IF_RESPONSE and stoppable_count(session, user, row.contact_id) > 0
+    return CreatedInteractionOut.model_validate(row).model_copy(update={"ask_if_response": ask})
 
 
 @router.patch(
