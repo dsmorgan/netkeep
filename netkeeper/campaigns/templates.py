@@ -314,10 +314,20 @@ def spelling_warnings(
     Never stored in ``lint_json`` and never part of :func:`activation_errors`: the
     dictionary changes after a save, so the editor and the activation review ask again,
     and a warning never blocks. A blank subject is no subject, as in :func:`lint_draft`.
+
+    Fails soft: spelling is advice, so an error in the check, the word list or the
+    dictionary means no spelling warnings, never a failed lint, review or activation.
+    Only the exception's type is logged: its message could hold a word. The dictionary
+    is read in a savepoint, so a failed read leaves the caller's transaction usable.
     """
-    return spelling_issues(
-        channel, _clean_subject(subject), body, user_dictionary.known_words(session, user)
-    )
+    try:
+        # A savepoint, so a failed read leaves the caller's transaction usable.
+        with session.begin_nested():
+            known = user_dictionary.known_words(session, user)
+        return spelling_issues(channel, _clean_subject(subject), body, known)
+    except Exception as exc:  # spelling is advice: see the docstring
+        log.warning("spelling check failed (%s); no spelling warnings", type(exc).__name__)
+        return []
 
 
 # --- writes -----------------------------------------------------------------

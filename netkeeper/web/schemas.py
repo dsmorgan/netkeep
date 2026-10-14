@@ -2357,9 +2357,9 @@ class TemplateCreate(BaseModel):
 class DictionaryWordsIn(BaseModel):
     """Words to add to your dictionary for the template spelling check (#522)."""
 
-    words: list[Annotated[str, Field(min_length=1, max_length=64)]] = Field(
-        min_length=1, max_length=100
-    )
+    # No length limit on a word here: a 422 from validation would echo the word, so
+    # user_dictionary.clean_word refuses a long one without naming it.
+    words: list[str] = Field(min_length=1, max_length=100)
 
 
 class TemplateLintIn(BaseModel):

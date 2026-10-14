@@ -40,15 +40,22 @@ from netkeeper.models import TemplateChannel
 MAX_SUGGESTIONS: Final = 3
 MAX_FINDINGS_PER_PART: Final = 50
 
-# Blanked out before words are found, so nothing in them is checked. Each is replaced by
-# spaces of the same length, which keeps every later offset, and so every line, right.
-_SKIPPED: Final = re.compile(
-    r"`[^`\r\n]*`"  # a code span
-    r"|(?:\b[a-z][a-z0-9+.-]*://|\bhttps?:|\bmailto:|\bwww\.)\S*"  # a URL, broken ones too
-    r"|\S*@\S*"  # an email address (or an @handle)
-    r"|\S*\w\.\w\S*",  # a dotted name: example.com, e.g., v1.2
-    re.IGNORECASE,
+MAX_WORD_LENGTH: Final = 40
+"""A longer run of letters is no English word, and its suggestions would cost one string
+per edit of it, so it is skipped rather than checked."""
+
+# A code span, blanked out before words are found, so nothing in it is checked. It is
+# replaced by spaces of the same length, which keeps every later offset, and so every
+# line, right. Capped, so a line of unmatched backticks stays linear.
+_CODE_SPAN: Final = re.compile(r"`[^`\r\n]{0,200}`")
+# Everything else that is skipped is skipped a whole whitespace-separated chunk at a time,
+# so no pattern ever scans past the chunk it started in (#535 review: unbounded ``\S*``
+# branches were quadratic on a long text with no spaces).
+_CHUNK: Final = re.compile(r"\S+")
+_URL_START: Final = re.compile(
+    r"[^\w]{0,8}(?:[a-z][a-z0-9+.-]{0,31}://|https?:|mailto:|www\.)", re.IGNORECASE
 )
+_DOTTED: Final = re.compile(r"\w\.\w")  # example.com, e.g., v1.2
 # A run of letters, digits, apostrophes and hyphens: one word, or a hyphenated compound.
 _TOKEN: Final = re.compile(r"[\w'\u2019-]+")
 _LINE_BREAK: Final = re.compile(r"\r\n|\r|\n")
@@ -72,19 +79,28 @@ def words(text: str) -> Iterator[tuple[int, str]]:
 
     Also how the user dictionary splits a contact's name or company into words.
     """
-    blanked = _SKIPPED.sub(lambda match: " " * len(match.group()), text)
-    for match in _TOKEN.finditer(blanked):
+    blanked = _CODE_SPAN.sub(lambda match: " " * len(match.group()), text)
+    for chunk in _CHUNK.finditer(blanked):
+        value = chunk.group()
+        # A URL (broken ones too), an email address or @handle, or a dotted name.
+        if "@" in value or _URL_START.match(value) or _DOTTED.search(value):
+            continue
+        yield from _chunk_words(value, chunk.start())
+
+
+def _chunk_words(chunk: str, base: int) -> Iterator[tuple[int, str]]:
+    for match in _TOKEN.finditer(chunk):
         token = match.group()
         if any(char.isdigit() or char == "_" for char in token):
             continue
-        offset = match.start()
+        offset = base + match.start()
         for part in token.split("-"):
             stripped = part.strip("'\u2019")
             start = offset + part.find(stripped) if stripped else offset
             offset += len(part) + 1
             if stripped.endswith(("'s", "\u2019s")):
                 stripped = stripped[:-2]
-            if len(stripped) < 2 or stripped.isupper():
+            if not 2 <= len(stripped) <= MAX_WORD_LENGTH or stripped.isupper():
                 continue
             yield start, stripped
 

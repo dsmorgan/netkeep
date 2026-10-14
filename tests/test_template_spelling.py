@@ -13,7 +13,7 @@ import factories
 import httpx
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 from time_limit import Stopwatch, scaled
 from typer.testing import CliRunner
@@ -27,6 +27,7 @@ from netkeeper.db import database_url, make_engine, make_session_factory, sessio
 from netkeeper.models import TemplateChannel, User, UserKind
 from netkeeper.scoping import install_scope_guard
 from netkeeper.services import user_dictionary
+from netkeeper.services.settings_kv import set_setting
 from netkeeper.services.users import ensure_local_user
 
 CSRF = {"X-Netkeeper-Client": "1"}
@@ -137,6 +138,25 @@ def test_an_8000_character_template_is_checked_in_under_50_ms() -> None:
     assert best < scaled(0.05), f"best of 5 runs took {best * 1000:.1f} ms"
 
 
+@pytest.mark.parametrize(
+    "body",
+    ["a" * 20_000, "a-" * 10_000, "x." * 10_000, "@" * 20_000, "`" * 20_000, "http" * 5_000],
+    ids=["letters", "hyphens", "dots", "ats", "backticks", "schemes"],
+)
+def test_a_long_text_with_no_spaces_is_checked_quickly(body: str) -> None:
+    """#535 review: no skip pattern scans past its chunk, and an overlong word is not
+    checked, so 20,000 characters with no space stay fast. Warmed up and best of three,
+    like the 8,000-character test; the bound is generous but far under the seconds the
+    quadratic patterns took."""
+    _check("warm up")
+    best = float("inf")
+    for _ in range(3):
+        watch = Stopwatch()
+        _check(body)
+        best = min(best, watch.elapsed)
+    assert best < scaled(0.1), f"best of 3 runs took {best * 1000:.1f} ms"
+
+
 # --- the user dictionary -------------------------------------------------------------
 
 
@@ -220,6 +240,43 @@ def test_spelling_never_reaches_stored_lint_or_the_activation_gate(
         assert [i.field for i in warnings] == ["Qestion", "teh"]
 
 
+def _broken_check(*_args: object, **_kwargs: object) -> list[LintIssue]:
+    raise RuntimeError("the word Glimmerwick broke it")
+
+
+def test_spelling_fails_soft_and_logs_only_the_error_type(
+    session: Session, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    user = factories.make_user(session)
+    monkeypatch.setattr(template_service, "spelling_issues", _broken_check)
+    assert template_service.spelling_warnings(session, user, EMAIL, "Hi", "recieve") == []
+    assert "RuntimeError" in caplog.text
+    assert "Glimmerwick" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "stored", ['{"not": "a list"}', '[1, null, "gloopa"]', '"gloopa"', "not json at all"]
+)
+def test_a_malformed_dictionary_row_reads_as_its_valid_words_or_none(
+    session_factory: sessionmaker[Session], stored: str
+) -> None:
+    with session_scope(session_factory, write=True) as session:
+        user = factories.make_user(session)
+        set_setting(session, user, user_dictionary.SETTING_KEY, [])
+        session.execute(
+            text("UPDATE settings_kv SET value = :value WHERE key = :key"),
+            {"value": stored, "key": user_dictionary.SETTING_KEY},
+        )
+        session.expire_all()
+        expected = ["gloopa"] if stored.startswith("[") else []
+        assert user_dictionary.added_words(session, user) == expected
+        warnings = template_service.spelling_warnings(session, user, EMAIL, None, "gloopa recieve")
+        assert [i.field for i in warnings] == (["recieve"] if expected else ["gloopa", "recieve"])
+        # The row can still be written: adding a word replaces what was unreadable.
+        user_dictionary.add_words(session, user, ["Snorfle"])
+        assert "snorfle" in user_dictionary.added_words(session, user)
+
+
 # --- the API -----------------------------------------------------------------------------
 
 
@@ -273,12 +330,28 @@ async def test_saved_template_lint_has_no_spelling(client: httpx.AsyncClient) ->
     assert response.json()["lint"] == []
 
 
-async def test_adding_a_word_that_is_not_one_is_422(client: httpx.AsyncClient) -> None:
+@pytest.mark.parametrize("word", ["two words", "Zorbleplox" * 7])
+async def test_adding_a_word_that_is_not_one_is_422_without_echoing_it(
+    client: httpx.AsyncClient, word: str
+) -> None:
     response = await client.post(
-        "/api/v1/templates/dictionary", json={"words": ["two words"]}, headers=CSRF
+        "/api/v1/templates/dictionary", json={"words": [word]}, headers=CSRF
     )
     assert response.status_code == 422
-    assert "two words" not in response.text
+    assert word not in response.text
+    assert "zorbleplox" not in response.text.lower()
+
+
+async def test_editor_lint_keeps_its_errors_when_spelling_fails(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#535 review: spelling fails soft, so the editor still gets lint's real findings."""
+    monkeypatch.setattr(template_service, "spelling_issues", _broken_check)
+    draft = {"channel": "email", "subject": "Hi", "body": "Hi {{ compnay }} recieve"}
+    response = await client.post("/api/v1/templates/lint", json=draft, headers=CSRF)
+    assert response.status_code == 200, response.text
+    assert [i["rule"] for i in response.json()] == ["undefined_variable", "no_contact_field"]
+    assert "RuntimeError" in caplog.text and "Glimmerwick" not in caplog.text
 
 
 # --- the CLI -------------------------------------------------------------------------------
