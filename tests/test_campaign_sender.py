@@ -2321,6 +2321,153 @@ def test_check_now_runs_the_drafts_check_at_the_next_tick(drafts: Mail) -> None:
     assert drafts.sender.drafts_poll_requested_at(drafts.user.id) is None
 
 
+class LooseSearch(LostAnswers):
+    """A Gmail whose ``rfc822msgid:`` search answers every message it holds, whatever
+    Message-ID it was asked for."""
+
+    def search(self, query: str, *, max_results: int = 100, purpose: str) -> list[MessageRef]:
+        if "rfc822msgid:" not in query:
+            return super().search(query, max_results=max_results, purpose=purpose)
+        self._call("messages.list", purpose)
+        stored = list(self._messages.values())[:max_results]
+        return [MessageRef(m.id, m.thread_id) for m in stored]
+
+
+def test_a_search_answering_another_message_id_verifies_nothing(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """The check reads the found message's own Message-ID header: a search that matched
+    something else (Gmail's answer, not netkeeper's message) never verifies."""
+    drafts = make_mail(session_factory, modes=(StepMode.DRAFT,), same_thread=(False,))
+    loose = LooseSearch("me@example.com", mailbox_id=drafts.mailbox.id, clock=drafts.clock)
+    drafts.gmail = loose
+    drafts.sender = GmailSender(
+        drafts.factory,
+        opener=lambda user_id, mailbox_id: loose,
+        clock=drafts.clock,
+        drafts_every=timedelta(0),
+        replies_every=NO_REPLY_POLL,
+    )
+    set_arm(drafts, MailboxArm.DRAFT, verified=False)
+    enrollment_id = drafts.enroll()
+    drafts.tick()
+    [message] = drafts.messages(enrollment_id)
+    assert message.gmail_draft_id is not None
+    stored = loose._messages[loose.drafts()[message.gmail_draft_id].id]
+    stored.parsed.replace_header("Message-ID", "<someone-else@mail.example>")
+    drafts.tick(NOW + timedelta(minutes=1))
+    assert _message_id_searches(drafts) >= 1  # it searched, and the search answered
+    assert _verified_at(drafts) is None
+    assert _mailbox_row(drafts).message_id_checked_at == NOW + timedelta(minutes=1)
+
+
+def test_a_draft_sent_more_than_14_days_ago_is_never_searched_for(
+    session_factory: sessionmaker[Session],
+) -> None:
+    drafts = make_mail(session_factory, modes=(StepMode.DRAFT,), same_thread=(False,))
+    set_arm(drafts, MailboxArm.DRAFT, verified=False)
+    enrollment_id = drafts.enroll()
+    drafts.tick()
+    [message] = drafts.messages(enrollment_id)
+    assert message.gmail_draft_id is not None
+    drafts.gmail.send_draft(message.gmail_draft_id, at=NOW + timedelta(minutes=1))
+    drafts.gmail.lag = 1000  # never found, so the mailbox stays unverified
+    drafts.tick(NOW + timedelta(minutes=2))
+    assert drafts.messages(enrollment_id)[0].status is MessageStatus.SENT
+    inside = _message_id_searches(drafts)
+    drafts.tick(NOW + timedelta(days=13))
+    assert _message_id_searches(drafts) == inside + 1  # still in the window
+    outside = _message_id_searches(drafts)
+    drafts.tick(NOW + timedelta(days=14, minutes=2))
+    assert _message_id_searches(drafts) == outside  # its only candidate is too old
+    assert _verified_at(drafts) is None
+
+
+def test_one_check_searches_for_at_most_five_campaign_drafts(drafts: Mail) -> None:
+    """Seven candidates: the oldest waiting, three seen sent this poll, three seen sent
+    before. Exactly five are searched."""
+    set_arm(drafts, MailboxArm.DRAFT, verified=False)
+    drafts.gmail.lag = 10_000  # nothing is ever found
+    enrollments = [drafts.enroll(f"c{n}@example.test") for n in range(7)]
+    at = NOW
+    while len(drafts.messages()) < 7:  # one claim per tick at most, spaced
+        assert at < NOW + timedelta(days=3)
+        drafts.tick(at)
+        at += timedelta(hours=1)
+    rows = [drafts.messages(e)[0] for e in enrollments]
+    assert all(r.status is MessageStatus.DRAFTED and r.gmail_draft_id for r in rows)
+    for row in rows[1:4]:
+        assert row.gmail_draft_id is not None
+        drafts.gmail.send_draft(row.gmail_draft_id, at=at)
+    drafts.tick(at + timedelta(minutes=1))  # three seen sent: now sent before
+    for row in rows[4:7]:
+        assert row.gmail_draft_id is not None
+        drafts.gmail.send_draft(row.gmail_draft_id, at=at + timedelta(minutes=2))
+    before = _message_id_searches(drafts)
+    drafts.tick(at + timedelta(minutes=3))
+    assert sum(1 for r in drafts.messages() if r.status is MessageStatus.SENT) == 6
+    assert _message_id_searches(drafts) - before == 5
+
+
+def test_a_gmail_error_mid_check_records_neither_checked_nor_verified(drafts: Mail) -> None:
+    """The first search fails: the check stops there, even though the next candidate
+    (a draft seen sent this poll) would be found."""
+    set_arm(drafts, MailboxArm.DRAFT, verified=False)
+    drafts.gmail.lag = 2  # the polls that make the two drafts find nothing
+    first = drafts.enroll("ada@example.test")
+    second = drafts.enroll("bob@example.test")
+    drafts.tick()
+    drafts.tick(NOW + timedelta(hours=1))
+    [newer] = drafts.messages(second)
+    assert newer.gmail_draft_id is not None
+    drafts.gmail.send_draft(newer.gmail_draft_id, at=NOW + timedelta(hours=1, minutes=1))
+    drafts.gmail.lag = 0
+    drafts.gmail.fail_next("messages.list", GmailTransient("down", code="unavailable"))
+    before = _mailbox_row(drafts).message_id_checked_at
+    drafts.tick(NOW + timedelta(hours=1, minutes=2))
+    assert drafts.messages(first)[0].status is MessageStatus.DRAFTED
+    assert drafts.messages(second)[0].status is MessageStatus.SENT
+    assert _verified_at(drafts) is None
+    assert _mailbox_row(drafts).message_id_checked_at == before
+
+
+def test_another_mailboxs_sent_draft_never_verifies_this_one(drafts: Mail) -> None:
+    """Two mailboxes on one domain derive Message-IDs the same way. Mailbox A's sent
+    draft, delivered into mailbox B, is searched for only in A."""
+    set_arm(drafts, MailboxArm.DRAFT, verified=False)
+
+    def add_b(session: Session) -> int:
+        user = session.get(User, drafts.user.id)
+        assert user is not None
+        return make_mailbox(
+            session, user, email="other@example.com", armed_at=NOW - WEEK, armed_by="test"
+        ).id
+
+    b_id = drafts.write(add_b)
+    b_gmail = LostAnswers("other@example.com", mailbox_id=b_id, clock=drafts.clock)
+    a_gmail = drafts.gmail
+    drafts.sender = GmailSender(
+        drafts.factory,
+        opener=lambda user_id, mailbox_id: b_gmail if mailbox_id == b_id else a_gmail,
+        clock=drafts.clock,
+        drafts_every=timedelta(0),
+        replies_every=NO_REPLY_POLL,
+    )
+    enrollment_id = drafts.enroll()
+    drafts.tick()
+    [message] = drafts.messages(enrollment_id)
+    assert message.gmail_draft_id is not None
+    ref = a_gmail.send_draft(message.gmail_draft_id, at=NOW + timedelta(minutes=1))
+    b_gmail.deliver(a_gmail.raw(ref.id), at=NOW + timedelta(minutes=1))
+    a_gmail.lag = 1000  # never found in A, so A stays unverified and keeps looking
+    for minute in (2, 3):
+        drafts.tick(NOW + timedelta(minutes=minute))
+    b = drafts.read(lambda s: get_scoped(s, drafts.user, Mailbox, b_id))
+    assert b is not None
+    assert b.message_id_verified_at is None
+    assert not [c for c in b_gmail.calls if "Message-ID check" in c[1]]
+
+
 def test_the_message_id_check_limits_are_pinned() -> None:
     from netkeeper.services import message_id_check
 

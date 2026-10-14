@@ -249,8 +249,21 @@ def _message_id_query(rfc822_message_id: str, folder: str) -> str:
     return f"rfc822msgid:{rfc822_message_id.strip('<>')} in:{folder}"
 
 
-def find_by_message_id(gmail: Gmail, rfc822_message_id: str, *, purpose: str) -> Found | None:
+def _carries(message: Message, rfc822_message_id: str) -> bool:
+    """Whether the message's own ``Message-ID`` header is ``rfc822_message_id``, compared
+    with the angle brackets stripped from both."""
+    header = (message.header("Message-ID") or "").strip().strip("<>")
+    return header == rfc822_message_id.strip().strip("<>")
+
+
+def find_by_message_id(
+    gmail: Gmail, rfc822_message_id: str, *, purpose: str, strict: bool = False
+) -> Found | None:
     """The message Gmail holds with this Message-ID, in any folder, or None.
+
+    ``strict`` (the Message-ID check, #510) also keeps only a message whose own
+    ``Message-ID`` header is ``rfc822_message_id``, so a search that matched anything
+    else never verifies a mailbox.
 
     A message that is neither a draft nor waiting in Scheduled counts as sent,
     whatever else its labels say (a sent message the person moved to Trash is still
@@ -261,9 +274,12 @@ def find_by_message_id(gmail: Gmail, rfc822_message_id: str, *, purpose: str) ->
     messages: list[Message] = []
     for ref in gmail.search(query, max_results=FIND_MAX, purpose=purpose):
         try:
-            messages.append(gmail.get_message(ref.id, purpose=purpose))
+            message = gmail.get_message(ref.id, purpose=purpose)
         except GmailNotFound:  # deleted between the search and the read
             continue
+        if strict and not _carries(message, rfc822_message_id):
+            continue
+        messages.append(message)
     sent = sorted(
         (m for m in messages if not m.label_ids & _UNSENT),
         key=lambda m: m.internal_date,
@@ -1010,7 +1026,7 @@ class _Reconcile:
         for message_id, rfc822 in wanted:
             purpose = f"Message-ID check of message {message_id}"
             try:
-                found = find_by_message_id(gmail, rfc822, purpose=purpose) is not None
+                found = find_by_message_id(gmail, rfc822, purpose=purpose, strict=True) is not None
             except GmailError as exc:
                 log.warning(
                     "message %d could not be looked up in Gmail (%s); the Message-ID check waits",
@@ -1043,7 +1059,9 @@ class _Reconcile:
         for check in checks:
             purpose = f"Message-ID check of test draft {check.test_send_id}"
             try:
-                found = find_by_message_id(gmail, check.rfc822_message_id, purpose=purpose)
+                found = find_by_message_id(
+                    gmail, check.rfc822_message_id, purpose=purpose, strict=True
+                )
             except GmailError as exc:
                 log.warning(
                     "test draft %d could not be looked up in Gmail (%s); it waits",

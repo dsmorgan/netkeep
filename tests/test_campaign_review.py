@@ -1470,6 +1470,27 @@ async def test_a_test_draft_not_found_leaves_the_mailbox_unverified(
     assert all(m in {"drafts.create", "messages.list"} for m, p in s.gmail.calls if "test" in p)
 
 
+async def test_a_search_answering_another_message_id_never_verifies_from_a_test_draft(
+    client: httpx.AsyncClient, running_app: FastAPI
+) -> None:
+    """#510: the found message's own Message-ID header must be the test draft's."""
+    s = _build(running_app, arm=ARMED_FOR_DRAFTS)
+    await _test_send_all(client, s)
+    for ref in s.gmail.drafts().values():
+        s.gmail.raw(ref.id).replace_header("Message-ID", "<someone-else@mail.example>")
+    real_search = s.gmail.search
+
+    def loose(query: str, *, max_results: int = 100, purpose: str) -> list[Any]:
+        if "rfc822msgid:" not in query:
+            return real_search(query, max_results=max_results, purpose=purpose)
+        real_search("in:drafts", max_results=max_results, purpose=purpose)  # logs the call
+        return list(s.gmail.drafts().values())[:max_results]
+
+    s.gmail.search = loose  # type: ignore[method-assign]
+    _drafts_check(s, running_app, at=utcnow())
+    assert _mailbox(s).message_id_verified_at is None
+
+
 @pytest.mark.parametrize(
     "arm",
     [
