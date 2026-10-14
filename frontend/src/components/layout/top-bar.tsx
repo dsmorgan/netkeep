@@ -1,12 +1,15 @@
+import { useQuery } from '@tanstack/react-query'
 import { useRouterState } from '@tanstack/react-router'
 import { Menu } from 'lucide-react'
 import type { RefObject } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { attentionQuery, needsYou } from '@/features/attention/api'
 import { PollStatusHeader } from '@/features/poll-status/poll-status-header'
 
 import { BackendHealth } from './backend-health'
 import { sectionLabel } from './nav'
+import { AttentionDot } from './nav-badge'
 
 interface TopBarProps {
   menuButtonRef: RefObject<HTMLButtonElement | null>
@@ -17,6 +20,9 @@ interface TopBarProps {
 
 export function TopBar({ menuButtonRef, navId, navOpen, onToggleNav }: TopBarProps) {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
+  const attention = useQuery(attentionQuery)
+  // At phone width the badges are inside the closed drawer; the menu button stands in.
+  const marked = needsYou(attention.data)
   return (
     <header className="flex h-11 items-center justify-between gap-2 border-b px-4">
       <div className="flex min-w-0 items-center gap-2">
@@ -25,13 +31,14 @@ export function TopBar({ menuButtonRef, navId, navOpen, onToggleNav }: TopBarPro
           ref={menuButtonRef}
           variant="ghost"
           size="icon-sm"
-          className="-ml-2 sm:hidden"
-          aria-label="Open navigation"
+          className="relative -ml-2 sm:hidden"
+          aria-label={marked ? 'Open navigation, something needs you' : 'Open navigation'}
           aria-expanded={navOpen}
           aria-controls={navId}
           onClick={onToggleNav}
         >
           <Menu aria-hidden="true" />
+          {marked && <AttentionDot className="absolute top-1 right-1 ring-background" />}
         </Button>
         <h1 className="truncate font-medium">{sectionLabel(pathname)}</h1>
       </div>

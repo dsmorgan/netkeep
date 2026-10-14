@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
+import { useAttentionRefresh } from '@/features/attention/api'
 import { ReauthBanner } from '@/features/mailboxes/reauth-banner'
 
 import { Sidebar } from './sidebar'
 import { TopBar } from './top-bar'
+import { useDocumentTitle } from './use-document-title'
 
 /**
  * Sidebar, top bar, content. Every page renders inside `children`.
@@ -23,6 +25,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [navOpen, setNavOpen] = useState(false)
   const menuButton = useRef<HTMLButtonElement>(null)
   const navId = useId()
+  useAttentionRefresh()
+  useDocumentTitle()
 
   // Focus can only go back to the menu button once it is no longer inert, which
   // is after the render that closes the drawer, so the request waits for it.

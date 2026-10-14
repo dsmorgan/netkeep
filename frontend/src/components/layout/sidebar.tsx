@@ -1,11 +1,14 @@
-import { Link } from '@tanstack/react-router'
+import { useQuery } from '@tanstack/react-query'
+import { Link, useRouterState } from '@tanstack/react-router'
 import { X } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { attentionQuery, type Attention } from '@/features/attention/api'
 import { cn } from '@/lib/utils'
 
-import { NAV_ITEMS } from './nav'
+import { NAV_ITEMS, navStateText, type NavItem } from './nav'
+import { NavBadge } from './nav-badge'
 
 interface SidebarProps {
   id: string
@@ -31,6 +34,8 @@ interface SidebarProps {
 export function Sidebar({ id, open, onClose }: SidebarProps) {
   const nav = useRef<HTMLElement>(null)
   const drawer = useRef<HTMLElement>(null)
+  const attention = useQuery(attentionQuery)
+  const pathname = useRouterState({ select: (state) => state.location.pathname })
 
   useEffect(() => {
     if (!open) return
@@ -85,18 +90,61 @@ export function Sidebar({ id, open, onClose }: SidebarProps) {
       </div>
       <nav ref={nav} aria-label="Primary" className="flex flex-col gap-px p-2">
         {NAV_ITEMS.map((item) => (
-          <Link
+          <NavLink
             key={item.to}
-            to={item.to}
-            activeOptions={{ exact: item.to === '/' }}
-            onClick={() => onClose(false)}
-            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-[status=active]:bg-sidebar-accent data-[status=active]:font-medium data-[status=active]:text-sidebar-accent-foreground"
-          >
-            <item.icon className="size-4" aria-hidden="true" />
-            {item.label}
-          </Link>
+            item={item}
+            attention={attention.data}
+            pathname={pathname}
+            onFollow={() => onClose(false)}
+          />
         ))}
       </nav>
     </aside>
+  )
+}
+
+const LINK_CLASS =
+  'flex items-center gap-2 rounded-md px-2 py-1.5 text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-[status=active]:bg-sidebar-accent data-[status=active]:font-medium data-[status=active]:text-sidebar-accent-foreground'
+
+function owns(item: NavItem, pathname: string): boolean {
+  return item.to === '/' ? pathname === '/' : pathname.startsWith(item.to)
+}
+
+/**
+ * One nav link with its badges (#508). Its accessible name carries their state
+ * ("Inbox, 3 unhandled"). While a badge with a `countTo` shows, the link goes there,
+ * and it still reads as current anywhere in its section.
+ */
+function NavLink({
+  item,
+  attention,
+  pathname,
+  onFollow,
+}: {
+  item: NavItem
+  attention: Attention | undefined
+  pathname: string
+  onFollow: () => void
+}) {
+  const countKey = 'count' in item ? item.count : undefined
+  const flagKey = 'flag' in item ? item.flag : undefined
+  const count = countKey === undefined || attention === undefined ? 0 : attention.counts[countKey]
+  const flag = flagKey === undefined || attention === undefined ? null : attention.flags[flagKey]
+  const elsewhere = 'countTo' in item && count > 0 ? item.countTo : undefined
+  return (
+    <Link
+      to={elsewhere ?? item.to}
+      activeOptions={{ exact: item.to === '/' }}
+      onClick={onFollow}
+      className={LINK_CLASS}
+      {...(elsewhere !== undefined && owns(item, pathname)
+        ? { 'data-status': 'active', 'aria-current': 'page' as const }
+        : {})}
+    >
+      <item.icon className="size-4" aria-hidden="true" />
+      {item.label}
+      <span className="sr-only">{navStateText(countKey, count, flag)}</span>
+      <NavBadge count={count} flag={flag !== null} />
+    </Link>
   )
 }

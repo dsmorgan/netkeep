@@ -1581,3 +1581,68 @@ describe('the auto-send outlook in words', () => {
     expect(autoSendStepText(null, step, now)).toBe('Sends on its own.')
   })
 })
+
+describe('when the page lists only part of a queue (#508)', () => {
+  function attentionWith(tryAgain: number) {
+    return {
+      checked_at: '2026-10-14T15:00:00Z',
+      counts: {
+        inbox: 0,
+        dashboard: tryAgain,
+        waiting: 0,
+        try_again: tryAgain,
+        triage: 0,
+        imports: 0,
+      },
+      flags: { dashboard: null, gmail: null, linkedin: null, settings: null },
+      activity: { state: 'idle', label: 'Idle.', run_id: null, run_kind: null },
+      title_total: tryAgain,
+    }
+  }
+  const retries = Array.from({ length: 50 }, (_, n) =>
+    tryAgainItem({ enrollment_id: 100 + n, contact_id: 200 + n }),
+  )
+
+  it('says how many wait for you when there are more than the page holds', async () => {
+    const items = Array.from({ length: 50 }, (_, n) =>
+      waitingItem({ message_id: 300 + n, enrollment_id: 400 + n, contact_id: 500 + n }),
+    )
+    renderSection({
+      'GET /api/v1/campaigns/linkedin/waiting': () => jsonResponse({ items, total: 64 }),
+    })
+
+    expect(await screen.findByText('Showing 50 of 64, oldest first.')).toBeVisible()
+  })
+
+  it('says nothing more when the page holds them all', async () => {
+    renderSection({
+      'GET /api/v1/campaigns/linkedin/waiting': () => jsonResponse(waitingPage([waitingItem()])),
+    })
+
+    await screen.findByRole('list', { name: 'Waiting for you' })
+    expect(screen.queryByText(/^Showing \d+ of/)).toBeNull()
+  })
+
+  it('says how many wait for Try again on the dashboard, from the nav count', async () => {
+    renderSection({
+      'GET /api/v1/campaigns/linkedin/ready': () => jsonResponse(readyPage([], retries)),
+      'GET /api/v1/attention': () => jsonResponse(attentionWith(73)),
+    })
+
+    expect(await screen.findByText('Showing 50 of 73, oldest try first.')).toBeVisible()
+  })
+
+  it('leaves the note off a campaign page, whose list is that campaign’s alone', async () => {
+    const { calls } = renderSection(
+      {
+        'GET /api/v1/campaigns/linkedin/ready': () => jsonResponse(readyPage([], retries)),
+        'GET /api/v1/attention': () => jsonResponse(attentionWith(73)),
+      },
+      5,
+    )
+
+    await screen.findByRole('list', { name: 'Try again' })
+    expect(screen.queryByText(/oldest try first/)).toBeNull()
+    expect(calls.some((call) => call.path === '/api/v1/attention')).toBe(false)
+  })
+})
