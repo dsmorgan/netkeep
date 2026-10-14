@@ -71,7 +71,10 @@ function Tiles({ campaignId, results }: { campaignId: number; results: CampaignR
     {
       label: 'Reply rate',
       value: formatRate(t.reply_rate),
-      detail: `${t.replied} replied`,
+      detail:
+        t.replied_outside > 0
+          ? `${t.replied} replied, ${t.replied_outside} outside netkeeper`
+          : `${t.replied} replied`,
       status: 'replied',
     },
     { label: 'Bounced', value: String(t.bounced), detail: 'enrollments', status: 'bounced' },

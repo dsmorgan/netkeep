@@ -13,7 +13,10 @@ What counts:
   in between that sent nothing. A campaign that has sent nothing has no days.
 - **A reply** is the enrollment's ``replied_at``, its first reply. It counts
   against the last step sent to that enrollment at or before that time, so a
-  reply that arrives while step 3 waits to send counts against step 2.
+  reply that arrives while step 3 waits to send counts against step 2. A reply
+  whose first inbound message is a response a person recorded from outside
+  netkeeper (``outside_via``, #512) is counted in ``replied`` and again in
+  ``replied_outside``, so the page can say which came outside netkeeper.
 - **A bounce** is the enrollment's earliest bounced message (by ``bounced_at``),
   and counts against that message's own step: a bounce is a fact about the
   message, so step 1's bounce found after step 2 sent is still step 1's. This
@@ -75,6 +78,8 @@ class StepResults:
     replied: int
     bounced: int
     opted_out: int
+    replied_outside: int = 0
+    """Of ``replied``, the replies that came outside netkeeper (#512)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +92,8 @@ class ResultTotals:
     """``replied / contacted``, from 0 to 1; None while nobody has been sent anything."""
     bounced: int
     opted_out: int
+    replied_outside: int = 0
+    """Of ``replied``, the replies that came outside netkeeper (#512)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,7 +177,21 @@ def campaign_results(
             if enrollment_id not in first_bounce or at < first_bounce[enrollment_id][0]:
                 first_bounce[enrollment_id] = (at, step_id)
 
+    first_inbound_outside: dict[int, bool] = {}
+    for enrollment_id, outside_via in session.execute(
+        scoped(user, Message)
+        .with_only_columns(Message.enrollment_id, Message.outside_via)
+        .where(
+            Message.enrollment_id.in_(enrollment_ids.scalar_subquery()),
+            Message.direction == MessageDirection.IN,
+            Message.sent_at.is_not(None),
+        )
+        .order_by(Message.sent_at, Message.id)
+    ):
+        first_inbound_outside.setdefault(enrollment_id, outside_via is not None)
+
     replied: Counter[int] = Counter()
+    replied_outside: Counter[int] = Counter()
     for enrollment_id, replied_at in session.execute(
         scoped(user, Enrollment)
         .with_only_columns(Enrollment.id, Enrollment.replied_at)
@@ -180,6 +201,8 @@ def campaign_results(
         step_id = _attribute(sends.get(enrollment_id, []), replied_at)
         if step_id is not None:
             replied[step_id] += 1
+            if first_inbound_outside.get(enrollment_id, False):
+                replied_outside[step_id] += 1
 
     bounced: Counter[int] = Counter()
     for _at, own_step in first_bounce.values():
@@ -229,6 +252,7 @@ def campaign_results(
             replied=replied[s.id],
             bounced=bounced[s.id],
             opted_out=opted_out[s.id],
+            replied_outside=replied_outside[s.id],
         )
         for s in steps
     )
@@ -241,5 +265,6 @@ def campaign_results(
         reply_rate=None if contacted == 0 else total_replied / contacted,
         bounced=sum(r.bounced for r in step_rows),
         opted_out=sum(r.opted_out for r in step_rows),
+        replied_outside=sum(r.replied_outside for r in step_rows),
     )
     return CampaignResults(campaign.id, zone_name, tuple(days), step_rows, totals)

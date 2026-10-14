@@ -113,6 +113,8 @@ async def test_lists_every_kind_newest_first(
         "enrollment_id": seed["replied"],
         "enrollment_status": "replied",
         "channel": "email",
+        "outside_via": None,
+        "outside_outcome": None,
         "li_conversation_urn": None,
         "subject": "Re: Catching up",
         "snippet": "Good to hear <b>from</b> you",  # as stored: the page shows it as text

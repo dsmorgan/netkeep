@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { EnrollmentStatusBadge } from '@/features/campaigns/badges'
 import { formatWhen } from '@/features/campaigns/format'
+import { OUTCOME_LABELS, VIA_LABELS } from '@/features/campaigns/response-labels'
 import { contactsKeys } from '@/features/contacts/api'
 import { EmptyState, ErrorNote, LoadingNote } from '@/features/crm/controls'
 import { threadUrl } from '@/features/linkedin-steps/format'
@@ -37,19 +38,32 @@ const KIND_CLASSES: Record<InboxKind, string> = {
   bounce: 'bg-destructive/10 text-destructive',
 }
 
-function ChannelBadge({ channel }: { channel: InboxItem['channel'] }) {
+function ChannelBadge({ item }: { item: InboxItem }) {
+  const outside = item.outside_via != null
   return (
     <span
       className={cn(
         'inline-flex h-5 shrink-0 items-center rounded-4xl px-2 text-xs font-medium whitespace-nowrap',
-        channel === 'linkedin'
-          ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300'
-          : 'bg-muted text-muted-foreground',
+        outside
+          ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+          : item.channel === 'linkedin'
+            ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300'
+            : 'bg-muted text-muted-foreground',
       )}
     >
-      {channel === 'linkedin' ? 'LinkedIn' : 'Email'}
+      {outside ? 'Outside netkeeper' : item.channel === 'linkedin' ? 'LinkedIn' : 'Email'}
     </span>
   )
+}
+
+/** What an item is called: an email's subject, or what a message without one is. */
+function itemTitle(item: InboxItem): string {
+  if (item.outside_via != null) {
+    const outcome = item.outside_outcome == null ? '' : ` · ${OUTCOME_LABELS[item.outside_outcome]}`
+    return `${VIA_LABELS[item.outside_via]}${outcome}`
+  }
+  // A LinkedIn message has no subject: it is named for what it is.
+  return item.channel === 'linkedin' ? 'LinkedIn message' : (item.subject ?? '(no subject)')
 }
 
 function KindBadge({ kind }: { kind: InboxKind }) {
@@ -277,11 +291,11 @@ function InboxRow({ item }: { item: InboxItem }) {
 
   return (
     <li
-      aria-label={`${KIND_LABELS[item.kind]} from ${item.contact_name || 'Unnamed contact'}${item.channel === 'linkedin' ? ' on LinkedIn' : ''}`}
+      aria-label={`${KIND_LABELS[item.kind]} from ${item.contact_name || 'Unnamed contact'}${item.outside_via != null ? ' outside netkeeper' : item.channel === 'linkedin' ? ' on LinkedIn' : ''}`}
       className="flex flex-col gap-1.5 border-t border-border/60 py-3 first:border-t-0"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <ChannelBadge channel={item.channel} />
+        <ChannelBadge item={item} />
         <KindBadge kind={item.kind} />
         <Link
           to="/contacts/$contactId"
@@ -303,14 +317,17 @@ function InboxRow({ item }: { item: InboxItem }) {
       </div>
       <p className="font-medium">
         {item.kind === 'bounce' ? 'Bounced: ' : ''}
-        {/* A LinkedIn message has no subject: it is named for what it is. */}
-        {item.channel === 'linkedin' ? 'LinkedIn message' : (item.subject ?? '(no subject)')}
+        {itemTitle(item)}
       </p>
       {/* Plain text: React escapes it, and nothing here renders HTML. */}
       {item.snippet !== null && item.snippet !== '' && (
         <p className="text-muted-foreground">{item.snippet}</p>
       )}
-      {item.channel === 'email' ? (
+      {item.outside_via != null ? (
+        <p className="text-xs text-muted-foreground">
+          You recorded this response; it came outside netkeeper.
+        </p>
+      ) : item.channel === 'email' ? (
         <p className="text-xs text-muted-foreground">Open the thread in Gmail to read the rest.</p>
       ) : (
         <LinkedInThreadLink urn={item.li_conversation_urn} />

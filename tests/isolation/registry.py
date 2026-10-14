@@ -601,6 +601,14 @@ def _seed_inbox(session: Session, user: User) -> int:
     return 2
 
 
+def _seed_contact_enrollments(session: Session, user: User) -> int:
+    """One contact of ``user``'s enrolled in two campaigns (#512)."""
+    contact = factories.make_contact(session, user)
+    for _ in range(2):
+        factories.make_enrollment(session, factories.make_campaign(session, user), contact)
+    return 2
+
+
 def _seed_do_not_send(session: Session, user: User) -> int:
     """Two of ``user``'s addresses on the do-not-send list (#238): one by hand, one bounced."""
     do_not_send.add_by_hand(session, user, f"hand-{user.id}@example.test")
@@ -652,6 +660,12 @@ REGISTRY: list[ListEndpoint] = [
     ListEndpoint(
         f"{API_PREFIX}/contacts/{{contact_id}}/tags",
         _seed_contact_tags,
+        array_count,
+        path_params=own_contact,
+    ),
+    ListEndpoint(
+        f"{API_PREFIX}/contacts/{{contact_id}}/enrollments",
+        _seed_contact_enrollments,
         array_count,
         path_params=own_contact,
     ),

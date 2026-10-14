@@ -638,19 +638,29 @@ def record_reply(session: Session, user: User, reply: Reply) -> bool:
 
 
 def _after_reply(
-    session: Session, user: User, enrollment: Enrollment, row: MessageRow, *, at: datetime
+    session: Session,
+    user: User,
+    enrollment: Enrollment,
+    row: MessageRow,
+    *,
+    at: datetime,
+    do_not_contact: bool = True,
 ) -> None:
-    """What a recorded reply does, on either channel: ``replied_at``; for one asking to
-    unsubscribe, the contact ``do_not_contact`` and every address of theirs on the
-    do-not-send list; and a live enrollment ends ``replied`` or ``opted_out``. A completed
-    enrollment stays ``completed``."""
+    """What a recorded reply does, on either channel and from outside netkeeper
+    (:mod:`netkeeper.services.outside_responses`, #512): ``replied_at``; for one asking
+    to unsubscribe, the contact ``do_not_contact`` and every address of theirs on the
+    do-not-send list (unless ``do_not_contact`` is False: a person recording an opt-out
+    may decline it); and a live enrollment ends ``replied`` or ``opted_out``. A
+    completed enrollment stays ``completed``."""
     enrollment.replied_at = enrollment.replied_at or at
-    if row.asks_unsubscribe:
+    if row.asks_unsubscribe and do_not_contact:
         contact = get_scoped_contact(session, user, enrollment.contact_id)
         if contact is not None and not contact.do_not_contact:
             contact.do_not_contact = True
             contact.do_not_contact_reason = (
                 f"asked to unsubscribe in a reply to a campaign (message {row.id})"
+                if row.outside_via is None
+                else f"asked to stop outside netkeeper, answering a campaign (message {row.id})"
             )
         if contact is not None:
             # Every address of theirs, so another contact holding one is not mailed (#238).

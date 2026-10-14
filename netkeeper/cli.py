@@ -73,6 +73,8 @@ from netkeeper.models import (
     Mailbox,
     MailboxArm,
     MailboxStatus,
+    ResponseOutcome,
+    ResponseVia,
     StepMode,
     SyncRun,
     SyncRunKind,
@@ -95,6 +97,7 @@ from netkeeper.services import (
     keychain,
     linkedin_steps,
     message_check,
+    outside_responses,
     route_breaker,
     run_diagnostics,
     runs,
@@ -3391,8 +3394,9 @@ def _rate(rate: float | None) -> str:
 def _results_lines(results: campaign_results.CampaignResults) -> list[str]:
     """The totals, then the sends per local day, as `campaigns status` prints them."""
     t = results.totals
+    outside = f", {t.replied_outside} outside netkeeper" if t.replied_outside else ""
     lines = [
-        f"results: {t.sent} sent to {t.contacted}, {t.replied} replied"
+        f"results: {t.sent} sent to {t.contacted}, {t.replied} replied{outside}"
         f" (reply rate {_rate(t.reply_rate)}), {t.bounced} bounced, {t.opted_out} opted out"
     ]
     if not results.sends_per_day:
@@ -4351,6 +4355,79 @@ def campaigns_resume(
         user = _local_user_or_exit(session)
         campaign_service.resume(session, user, campaign_id)
     typer.echo(f"campaign {campaign_id} resumed")
+
+
+@campaigns_app.command("record-response")
+def campaigns_record_response(
+    contact_id: Annotated[int, typer.Argument(help="The contact's ID.")],
+    via: Annotated[
+        ResponseVia,
+        typer.Option("--via", help="How they responded.", case_sensitive=False),
+    ],
+    at: Annotated[
+        datetime | None,
+        typer.Option(
+            "--at",
+            help="When they responded (ISO 8601, in your time zone unless it says). Default: now.",
+            formats=START_FORMATS,
+            show_default=False,
+        ),
+    ] = None,
+    enrollment: Annotated[
+        int | None,
+        typer.Option(
+            "--enrollment",
+            help="End this enrollment only. Default: every one of theirs that could still send.",
+            show_default=False,
+        ),
+    ] = None,
+    note: Annotated[str | None, typer.Option("--note", help="A note.", show_default=False)] = None,
+    outcome: Annotated[
+        ResponseOutcome | None,
+        typer.Option("--outcome", help="What they said.", case_sensitive=False),
+    ] = None,
+    do_not_contact: Annotated[
+        bool,
+        typer.Option(
+            "--do-not-contact",
+            help="With --outcome opt_out: mark the contact do-not-contact too.",
+        ),
+    ] = False,
+) -> None:
+    """Record a response that came outside netkeeper: a call, a text, in person ...
+    (POST /contacts/{id}/outside-response).
+
+    It ends the contact's enrollments that could still send as `replied` (`opted_out`
+    for `--outcome opt_out`), as a detected reply does, so no later step sends. It shows
+    on the timeline and, already handled, in the inbox.
+    """
+    with _campaign_db() as factory, session_scope(factory, write=True) as session:
+        user = _local_user_or_exit(session)
+        now = datetime.now(UTC)
+        when = _start_or_exit(at, at is None, timezone=user.timezone, now=now)
+        assert when is not None  # --at, or now
+        try:
+            result = outside_responses.record_outside_response(
+                session,
+                user,
+                contact_id,
+                via=via,
+                at=when,
+                now=now,
+                note=note,
+                outcome=outcome,
+                do_not_contact=do_not_contact,
+                enrollment_id=enrollment,
+            )
+        except (LookupError, ValueError) as exc:
+            typer.echo(f"error: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        lines = [
+            f"enrollment {e.id} (campaign {e.campaign_id}) is {e.status.value}"
+            for e in result.enrollments
+        ]
+    typer.echo(f"response recorded for contact {contact_id}")
+    typer.echo("\n".join(lines))
 
 
 _YES = typer.Option("--yes", help="Skip the confirmation prompt.")

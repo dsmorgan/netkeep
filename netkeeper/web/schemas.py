@@ -148,6 +148,16 @@ class InteractionOut(BaseModel):
     updated_at: datetime
 
 
+class CreatedInteractionOut(InteractionOut):
+    """A new interaction, and whether to ask if it was a response (#512)."""
+
+    ask_if_response: bool = False
+    """A call or a meeting, logged on a contact with an enrollment that could still send:
+    ask the person whether it was their response to the campaign, and if so record it
+    (``POST /contacts/{id}/outside-response``). netkeeper never infers it: a call you
+    logged ends nothing."""
+
+
 class InteractionPage(BaseModel):
     """One page of a contact's interactions, newest first, and the total count."""
 

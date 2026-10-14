@@ -7,6 +7,10 @@ An inbox item is a campaign message of one of three kinds:
 - ``bounce``: an outbound message detection marked ``bounced``. The notice itself is
   not stored, so the item carries what was sent: its subject, and no snippet.
 
+A response a person recorded from outside netkeeper (#512,
+:mod:`netkeeper.services.outside_responses`) is an inbound message too, a ``reply`` or an
+``unsubscribe``, with ``outside_via`` set; it is recorded already handled.
+
 An item's time is when it arrived: an inbound message's own date (``sent_at``, Gmail's
 ``internalDate``), a bounce's ``bounced_at``. Handling an item only sets
 ``handled_at``; nothing here touches Gmail, an enrollment, or the contact.

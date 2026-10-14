@@ -44,6 +44,11 @@ export type StepResults = Schemas['StepResultsOut']
 export type DaySends = Schemas['DaySendsOut']
 export type DeletePlan = Schemas['DeletePlanOut']
 export type LeftoverDraft = Schemas['LeftoverDraftOut']
+export type ContactEnrollment = Schemas['ContactEnrollmentOut']
+export type OutsideResponseIn = Schemas['OutsideResponseIn']
+export type OutsideResponse = Schemas['OutsideResponseOut']
+export type ResponseVia = Schemas['ResponseVia']
+export type ResponseOutcome = Schemas['ResponseOutcome']
 
 /** A request the backend refused: its status, its sentence, and `missing` when it sent one. */
 export class CampaignApiError extends Error {
@@ -98,6 +103,8 @@ export const campaignKeys = {
     [...campaignKeys.all, 'start-options', id, at] as const,
   results: (id: number) => [...campaignKeys.all, 'results', id] as const,
   deletePlan: (id: number) => [...campaignKeys.all, 'delete-plan', id] as const,
+  contactEnrollments: (contactId: number) =>
+    [...campaignKeys.all, 'contact-enrollments', contactId] as const,
   adoption: (id: number, stepId: number) => [...campaignKeys.all, 'adoption', id, stepId] as const,
 }
 
@@ -254,6 +261,37 @@ export function enrollmentsQuery(
       return data
     },
   })
+}
+
+/** A contact's enrollments in every campaign, newest first (#512). */
+export function contactEnrollmentsQuery(contactId: number) {
+  return queryOptions({
+    queryKey: campaignKeys.contactEnrollments(contactId),
+    queryFn: async ({ signal }): Promise<ContactEnrollment[]> => {
+      const { data, error, response } = await api.GET('/api/v1/contacts/{contact_id}/enrollments', {
+        params: { path: { contact_id: contactId } },
+        signal,
+      })
+      if (data === undefined) fail(response.status, error, 'could not load the enrollments')
+      return data
+    },
+  })
+}
+
+/**
+ * Record a response that came outside netkeeper (#512): it ends the enrollments it
+ * answers as a detected reply does, so no later step sends.
+ */
+export async function recordOutsideResponse(
+  contactId: number,
+  body: OutsideResponseIn,
+): Promise<OutsideResponse> {
+  const { data, error, response } = await api.POST(
+    '/api/v1/contacts/{contact_id}/outside-response',
+    { params: { path: { contact_id: contactId } }, body },
+  )
+  if (data === undefined) fail(response.status, error, 'could not record the response')
+  return data
 }
 
 export async function createCampaign(body: CampaignCreate): Promise<Campaign> {

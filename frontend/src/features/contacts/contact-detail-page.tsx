@@ -11,6 +11,7 @@ import { Facts } from '@/components/facts'
 import { cn } from '@/lib/utils'
 
 import { contactQuery, reviewContact, setArchived } from './api'
+import { ContactCampaigns } from './contact-campaigns'
 import { ContactChildren } from './contact-children'
 import { ContactTags } from './contact-tags'
 import { ContactTimeline } from './contact-timeline'
@@ -292,6 +293,18 @@ export function ContactDetailPage({ contactId }: { contactId: number }) {
         </Card>
 
         <div className="grid content-start gap-4">
+          <Card size="sm">
+            <CardHeader>
+              <CardTitle level={3}>Campaigns</CardTitle>
+              <CardDescription>
+                Did they respond by phone, text or in person? Record it so no later step sends.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ContactCampaigns contactId={contact.id} name={name} />
+            </CardContent>
+          </Card>
+
           <Card size="sm">
             <CardHeader>
               <CardTitle level={3}>Timeline</CardTitle>

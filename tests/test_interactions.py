@@ -115,6 +115,9 @@ def test_outbound_kinds_are_the_ones_where_you_reached_out() -> None:
         InteractionKind.EMAIL_IN,
         InteractionKind.LI_IN,
         InteractionKind.LI_VIEW,
+        InteractionKind.CALL_IN,
+        InteractionKind.MEETING_IN,
+        InteractionKind.OTHER_IN,
     } == INBOUND_KINDS
     for kind in InteractionKind:
         assert is_outbound(kind) is (kind in OUTBOUND_KINDS)

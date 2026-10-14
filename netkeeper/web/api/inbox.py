@@ -6,6 +6,9 @@
 A note on an item is the contact's own ``note`` interaction
 (``POST /contacts/{contact_id}/interactions``); nothing here adds a second way.
 A message that is not the user's, or not an inbox item, answers ``404``.
+
+A response a person recorded from outside netkeeper (#512) is a reply item with
+``outside_via`` set, already handled.
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from netkeeper.models import EnrollmentStatus, TemplateChannel
+from netkeeper.models import EnrollmentStatus, ResponseOutcome, ResponseVia, TemplateChannel
 from netkeeper.services import inbox as service
 from netkeeper.services.inbox import InboxKind
 from netkeeper.web.deps import CurrentUser, SessionDep
@@ -41,7 +44,14 @@ class InboxItemOut(BaseModel):
     enrollment_id: int
     enrollment_status: EnrollmentStatus
     channel: TemplateChannel
-    """Where it arrived: ``email`` (Gmail) or ``linkedin`` (the inbox poll, P4-02)."""
+    """Where it arrived: ``email`` (Gmail) or ``linkedin`` (the inbox poll, P4-02). For a
+    response from outside netkeeper, the channel of the step it answers."""
+    outside_via: ResponseVia | None = None
+    """How a response from outside netkeeper came (#512), which a person recorded; the
+    item shows "outside netkeeper" and has no thread to open. ``null`` for one a poll
+    found, and for a bounce."""
+    outside_outcome: ResponseOutcome | None = None
+    """What that response said, when the person recorded it."""
     li_conversation_urn: str | None
     """A LinkedIn item's conversation, for a plain link to the thread (#383); ``null``
     for email, or when the poll did not know the conversation."""
@@ -78,6 +88,8 @@ def _out(item: service.InboxItem) -> InboxItemOut:
         enrollment_id=m.enrollment_id,
         enrollment_status=item.enrollment_status,
         channel=m.channel,
+        outside_via=m.outside_via,
+        outside_outcome=m.outside_outcome,
         li_conversation_urn=(
             m.li_conversation_urn if m.channel is TemplateChannel.LINKEDIN else None
         ),

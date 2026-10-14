@@ -16,10 +16,34 @@ const SOME_RESULTS = results({
     { date: '2030-06-05', sent: 2 },
   ],
   steps: [
-    { step_id: 101, position: 1, sent: 4, replied: 1, bounced: 1, opted_out: 0 },
-    { step_id: 102, position: 2, sent: 2, replied: 2, bounced: 0, opted_out: 1 },
+    {
+      step_id: 101,
+      position: 1,
+      sent: 4,
+      replied: 1,
+      bounced: 1,
+      opted_out: 0,
+      replied_outside: 0,
+    },
+    {
+      step_id: 102,
+      position: 2,
+      sent: 2,
+      replied: 2,
+      bounced: 0,
+      opted_out: 1,
+      replied_outside: 1,
+    },
   ],
-  totals: { sent: 6, contacted: 4, replied: 3, reply_rate: 0.75, bounced: 1, opted_out: 1 },
+  totals: {
+    sent: 6,
+    contacted: 4,
+    replied: 3,
+    reply_rate: 0.75,
+    bounced: 1,
+    opted_out: 1,
+    replied_outside: 1,
+  },
 })
 
 function backend(calls: Call[] = [], answer = SOME_RESULTS) {
@@ -45,6 +69,10 @@ describe('campaign results', () => {
     const card = within(await resultsCard())
     expect(await card.findByRole('link', { name: /^Sent: 6\./ })).toHaveTextContent('to 4 contacts')
     expect(card.getByRole('link', { name: /^Reply rate: 75%\./ })).toHaveTextContent('3 replied')
+    // A response recorded from outside netkeeper is a reply, and says so (#512).
+    expect(card.getByRole('link', { name: /^Reply rate: 75%\./ })).toHaveTextContent(
+      '3 replied, 1 outside netkeeper',
+    )
     expect(card.getByRole('link', { name: /^Bounced: 1\./ })).toBeVisible()
     expect(card.getByRole('link', { name: /^Opted out: 1\./ })).toBeVisible()
 

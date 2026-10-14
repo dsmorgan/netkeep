@@ -23,7 +23,7 @@ import { formatDay, formatMinute, plural } from './format'
 import { toPlainText, truncate } from './plain-text'
 import type { Interaction, TimelineEntry, TriageCard } from './api'
 
-const INBOUND_KINDS = new Set(['li_in', 'email_in'])
+const INBOUND_KINDS = new Set(['li_in', 'email_in', 'call_in', 'meeting_in', 'other_in'])
 
 const KIND_LABELS: Record<string, string> = {
   note: 'Note',
@@ -34,6 +34,9 @@ const KIND_LABELS: Record<string, string> = {
   li_out: 'LinkedIn sent',
   li_in: 'LinkedIn received',
   li_view: 'Profile view',
+  call_in: 'Call from them',
+  meeting_in: 'Met in person',
+  other_in: 'Response',
 }
 
 function kindLabel(kind: string): string {
