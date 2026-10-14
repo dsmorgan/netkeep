@@ -7,6 +7,7 @@ recorded directly: what the runner writes is ``tests/test_enrichment.py``'s.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -179,6 +180,20 @@ def test_a_run_from_before_405_has_nothing_to_show(writer: Session) -> None:
     run = _run(session, user, counts={"planned": 3, "unreadable": 2, "lost": 0})
     found = run_diagnostics.diagnose(session, user, run)
     assert found.unreadable_visits == () and found.lost_answers == ()
+
+
+@pytest.mark.parametrize("key", ["lost", "lost_visits"])
+def test_an_enrichment_runs_lost_count_is_not_a_lost_answer_list(
+    writer: Session, caplog: pytest.LogCaptureFixture, key: str
+) -> None:
+    """#517: runs from before the rename keep an int under ``lost``; neither key warns."""
+    session = writer
+    user = factories.make_user(session)
+    run = _run(session, user, counts={"planned": 3, key: 1})
+    with caplog.at_level("WARNING", logger="netkeeper.services.run_diagnostics"):
+        found = run_diagnostics.diagnose(session, user, run)
+    assert found.lost_answers == ()
+    assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
 
 
 def test_a_connections_runs_lost_answers_read_back(writer: Session) -> None:

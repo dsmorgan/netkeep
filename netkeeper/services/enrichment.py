@@ -210,7 +210,9 @@ class EnrichRunReport:
             "not_found": self.result.not_found,
             "unreadable": self.result.unreadable,
             "mismatched": self.result.mismatched,
-            "lost": len(self.result.lost),
+            # #517: not "lost", the connections sync's list of lost answers. Runs before this
+            # stored the count under "lost"; nothing reads that key from an enrichment run.
+            "lost_visits": len(self.result.lost),
             "contact_info_lost": self.result.contact_info_lost,
             "copied": len(self.result.copied),
             "skipped": self.skipped,

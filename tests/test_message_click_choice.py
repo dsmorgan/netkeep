@@ -444,7 +444,8 @@ async def test_minimized_bubbles_from_earlier_prefills_refuse_before_the_click()
     assert_no_keys(ran)
     assert site.tab.clicks == [] and not ran.run.message_click_attempted
     assert ran.result.outcome.reason == (
-        "a message bubble is already open in Chrome, minimized ones included;"
+        "a message bubble is already open in this or another LinkedIn tab in the netkeeper"
+        " Chrome window, minimized ones included;"
         " close it, then try again"
     )
     assert site.geometry_sessions == []  # nothing read past the refusal

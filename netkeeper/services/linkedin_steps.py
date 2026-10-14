@@ -330,9 +330,9 @@ AUTO_SEND_HOLD_TAB: Final = "a tab is left open in Chrome"
 
 #: What the person does to let auto-send go again.
 AUTO_SEND_HOLD_CLEAR: Final = (
-    "Close every LinkedIn message bubble (and the tab netkeeper left) in the netkeeper"
-    " Chrome window, sending or discarding what is in it first, and anything covering"
-    " a profile's Message button. Then resume auto-send:"
+    "Close every LinkedIn message bubble, in this or another LinkedIn tab in the netkeeper"
+    " Chrome window (and the tab netkeeper left), sending or discarding what is in it"
+    " first, and anything covering a profile's Message button. Then resume auto-send:"
     ' click "I fixed it in Chrome, resume auto-send" on the LinkedIn queue, or run'
     " `netkeeper linkedin auto-send-resume`."
 )

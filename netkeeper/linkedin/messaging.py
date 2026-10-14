@@ -85,6 +85,11 @@ class MessageOutcome:
     recipient_name_checked: bool | None = None
 
 
+#: The run's check entry, and the words of its one INFO log line, when the never-messaged
+#: chip's name check is skipped for lack of a single profile heading (#517). No name.
+NAME_CHECK_SKIPPED: Final = "recipient name checked: skipped (no single profile heading)"
+
+
 @dataclass(frozen=True, slots=True)
 class MessageJobSpec:
     """One prefill's input (P4-03's contract). ``body`` is the rendered message: it is left

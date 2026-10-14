@@ -84,6 +84,7 @@ from netkeeper.linkedin.messaging import (
     COMPOSE_OPTIONS_PATH,
     MESSAGES_CREATE_PATH,
     MESSAGING_GRAPHQL_PATH,
+    NAME_CHECK_SKIPPED,
     Cancelled,
     ComposeKind,
     ComposeOption,
@@ -352,7 +353,7 @@ class PagePrefill:
             if layout is BubbleLayout.NEVER_MESSAGED:
                 name_checked = profile_name is not None
                 if not name_checked:
-                    log.info("prefill: the chip's name check is skipped (no single readable h1)")
+                    log.info("prefill: %s", NAME_CHECK_SKIPPED)
             recipient = BubbleRecipient(
                 layout, spec.profile_id, spec.recipient_public_id, profile_name
             )

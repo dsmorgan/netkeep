@@ -2553,12 +2553,14 @@ LATE_DIALOG = '<div hidden role="dialog" aria-label="Messaging"><header></header
     [
         (
             LATE_COMPOSER,
-            "another message composer is on the page, in an open or minimized bubble;"
+            "another message composer is on the page, in an open or minimized bubble,"
+            " in this or another LinkedIn tab in the netkeeper Chrome window;"
             " close the other bubbles",
         ),
         (
             LATE_DIALOG,
-            "another message bubble is on the page, open or minimized; close the others",
+            "another message bubble is on the page, open or minimized, in this or another"
+            " LinkedIn tab in the netkeeper Chrome window; close the others",
         ),
     ],
     ids=["second composer", "second dialog"],

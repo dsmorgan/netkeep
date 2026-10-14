@@ -56,6 +56,7 @@ from netkeeper.config import Settings
 from netkeeper.db import off_loop, session_scope
 from netkeeper.linkedin.classify import Outcome
 from netkeeper.linkedin.messaging import (
+    NAME_CHECK_SKIPPED,
     MessageJobSpec,
     MessageOutcome,
     MessageOutcomeKind,
@@ -314,6 +315,12 @@ def record(
                 "typed_chars": outcome.typed_chars,
                 # For CP8: how often the never-messaged chip was checked against the h1.
                 "recipient_name_checked": outcome.recipient_name_checked,
+                # #517: the skipped check in words, for a run's record. No name in it.
+                **(
+                    {"checks": [NAME_CHECK_SKIPPED]}
+                    if outcome.recipient_name_checked is False
+                    else {}
+                ),
                 # For the UI: whether a message bubble may be open (ADR 0007). Left out
                 # when the path doesn't know, so the UI falls back to the reason's words
                 # instead of reading "no bubble". Only a source that ran says either.
