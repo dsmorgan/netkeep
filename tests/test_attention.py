@@ -348,7 +348,9 @@ def test_resuming_auto_send_clears_the_dashboard_flag(world: World) -> None:
         )
     found = world.read()
     assert found.flags.dashboard == service.AUTO_SEND_HELD
-    assert found.activity.state is A.STOPPED
+    assert found.activity == service.Activity(
+        A.STOPPED, service.AUTO_SEND_HELD_ACTIVITY, None, None
+    ), "the hold blocks auto-send only, and says so"
     assert found.title_total == 0, "a flag is a dot, not a number"
 
     with world.write() as (session, user):
@@ -499,6 +501,7 @@ def test_every_run_kind_has_a_name() -> None:
 def test_flag_labels_are_plain_sentences() -> None:
     labels = (
         service.AUTO_SEND_HELD,
+        service.AUTO_SEND_HELD_ACTIVITY,
         service.REAUTH_REQUIRED,
         service.SESSION_FLAGGED,
         service.HEAT_TRIPPED,

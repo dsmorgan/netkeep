@@ -40,7 +40,6 @@ import { cn } from '@/lib/utils'
 
 import {
   LinkedInStepError,
-  QUEUE_PAGE,
   checkSent,
   discard,
   linkedinStepKeys,
@@ -271,7 +270,7 @@ export function LinkedInQueueCard({ campaignId, run }: { campaignId?: number; ru
                 />
               ))}
             </ul>
-            {retries.length >= QUEUE_PAGE && retriesTotal > retries.length && (
+            {retries.length >= TRY_AGAIN_MAX && retriesTotal > retries.length && (
               <p className="text-muted-foreground">
                 Showing {retries.length} of {retriesTotal}, oldest try first.
               </p>
@@ -322,6 +321,10 @@ export function LinkedInQueueCard({ campaignId, run }: { campaignId?: number; ru
     </Card>
   )
 }
+
+/** The most Try again rows `GET /campaigns/linkedin/ready` lists; mirrors the backend's
+ * `READY_PAGE_MAX` in `services/linkedin_steps.py`. */
+const TRY_AGAIN_MAX = 50
 
 /** Held by the sending hours: due, but not until `held_until`. */
 function held(item: ReadyItem | TryAgainItem, now: Date): boolean {

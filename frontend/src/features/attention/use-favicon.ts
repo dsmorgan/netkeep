@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useEffect } from 'react'
 
 import { attentionQuery } from './api'
-import { faviconFor } from './activity'
+import { FAVICON, faviconFor } from './activity'
 
 /**
  * Gives the tab's icon a dot while a LinkedIn run is in progress (#347), and only
@@ -13,6 +13,11 @@ export function useFavicon(): void {
   const href = faviconFor(attention.data)
   useEffect(() => {
     const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
-    if (link !== null) link.href = href
+    if (link === null) return
+    link.href = href
+    // Unmounted (or about to change), the tab goes back to the plain mark.
+    return () => {
+      link.href = FAVICON
+    }
   }, [href])
 }
