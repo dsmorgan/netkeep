@@ -1250,7 +1250,8 @@ export interface paths {
          * Record Outside Response
          * @description Record a response that came outside netkeeper, and end the enrollments it answers
          *     ``replied`` (``opted_out`` for an opt-out), as a detected reply does. No later step
-         *     sends. ``422`` for a time in the future, or ``do_not_contact`` without an opt-out.
+         *     sends. ``422``, with the reason, for a time in the future or before the first send of
+         *     an enrollment it would end, or ``do_not_contact`` without an opt-out.
          */
         post: operations["record_outside_response"];
         delete?: never;
@@ -5814,7 +5815,7 @@ export interface components {
          * @description What happened between you and a contact. ``*_out`` is you reaching out, ``*_in``
          *     them reaching you. ``call`` and ``meeting`` are ones you logged, either way;
          *     ``call_in``, ``meeting_in`` and ``other_in`` are a response to a campaign that came
-         *     outside netkeeper (#512; 0043): a call, meeting them in person, or a text or another
+         *     outside netkeeper (#512; 0042): a call, meeting them in person, or a text or another
          *     app. One by email from another address is ``email_in``.
          * @enum {string}
          */
@@ -6608,11 +6609,11 @@ export interface components {
         };
         /**
          * OutsideResponseIn
-         * @description A response outside netkeeper. ``at`` must carry a timezone and not be in the
-         *     future. ``outcome`` is optional; ``do_not_contact`` goes with ``opt_out`` only.
-         *     Without ``enrollment_id``, every enrollment of the contact that could still send
-         *     ends; with it, that one only (a ``completed`` one may be picked too, and stays
-         *     ``completed``).
+         * @description A response outside netkeeper. ``at`` must carry a timezone, and be neither in the
+         *     future nor before the first message of an enrollment it ends went out. ``outcome``
+         *     is optional; ``do_not_contact`` goes with ``opt_out`` only. Without
+         *     ``enrollment_id``, every enrollment of the contact that could still send ends; with
+         *     it, that one only (a ``completed`` one may be picked too, and stays ``completed``).
          */
         OutsideResponseIn: {
             /**
@@ -6620,11 +6621,8 @@ export interface components {
              * Format: date-time
              */
             at: string;
-            /**
-             * Do Not Contact
-             * @default false
-             */
-            do_not_contact: boolean;
+            /** Do Not Contact */
+            do_not_contact?: boolean | null;
             /** Enrollment Id */
             enrollment_id?: number | null;
             /** Note */

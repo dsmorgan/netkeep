@@ -4387,12 +4387,16 @@ def campaigns_record_response(
         typer.Option("--outcome", help="What they said.", case_sensitive=False),
     ] = None,
     do_not_contact: Annotated[
-        bool,
+        bool | None,
         typer.Option(
-            "--do-not-contact",
-            help="With --outcome opt_out: mark the contact do-not-contact too.",
+            "--do-not-contact/--no-do-not-contact",
+            help=(
+                "With --outcome opt_out: mark the contact do-not-contact and their addresses"
+                " do-not-send. Default: yes for an opt-out, as a detected unsubscribe does."
+            ),
+            show_default=False,
         ),
-    ] = False,
+    ] = None,
 ) -> None:
     """Record a response that came outside netkeeper: a call, a text, in person ...
     (POST /contacts/{id}/outside-response).

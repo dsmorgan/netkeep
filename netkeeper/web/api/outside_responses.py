@@ -45,17 +45,20 @@ class ContactEnrollmentOut(BaseModel):
 
 
 class OutsideResponseIn(BaseModel):
-    """A response outside netkeeper. ``at`` must carry a timezone and not be in the
-    future. ``outcome`` is optional; ``do_not_contact`` goes with ``opt_out`` only.
-    Without ``enrollment_id``, every enrollment of the contact that could still send
-    ends; with it, that one only (a ``completed`` one may be picked too, and stays
-    ``completed``)."""
+    """A response outside netkeeper. ``at`` must carry a timezone, and be neither in the
+    future nor before the first message of an enrollment it ends went out. ``outcome``
+    is optional; ``do_not_contact`` goes with ``opt_out`` only. Without
+    ``enrollment_id``, every enrollment of the contact that could still send ends; with
+    it, that one only (a ``completed`` one may be picked too, and stays ``completed``)."""
 
     via: ResponseVia
     at: AwareDatetime
     note: str | None = Field(default=None, max_length=service.NOTE_MAX_LENGTH)
     outcome: ResponseOutcome | None = None
-    do_not_contact: bool = False
+    do_not_contact: bool | None = None
+    """With ``opt_out``: set the contact do-not-contact and put their addresses on the
+    do-not-send list. Omitted or ``null``, an opt-out does, as a detected unsubscribe
+    does; ``false`` keeps them contactable."""
     enrollment_id: int | None = None
 
 
@@ -111,7 +114,8 @@ def record_outside_response(
 ) -> OutsideResponseOut:
     """Record a response that came outside netkeeper, and end the enrollments it answers
     ``replied`` (``opted_out`` for an opt-out), as a detected reply does. No later step
-    sends. ``422`` for a time in the future, or ``do_not_contact`` without an opt-out."""
+    sends. ``422``, with the reason, for a time in the future or before the first send of
+    an enrollment it would end, or ``do_not_contact`` without an opt-out."""
     try:
         result = service.record_outside_response(
             session,

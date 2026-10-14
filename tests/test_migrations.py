@@ -3407,14 +3407,14 @@ def test_0041_downgrades_to_runs_without_a_heartbeat(migration_engine: Engine) -
     migrations.upgrade(migration_engine, "0041")
 
 
-# --- a response from outside the app (0043, #512) -------------------------------------
+# --- a response from outside the app (0042, #512) -------------------------------------
 
 
-def test_0043_adds_outside_columns_checked_and_inbound_kinds(migration_engine: Engine) -> None:
+def test_0042_adds_outside_columns_checked_and_inbound_kinds(migration_engine: Engine) -> None:
     migrations.upgrade(migration_engine, "0041")
     with migration_engine.begin() as connection:
         _seed_a_sent_campaign(connection)
-    migrations.upgrade(migration_engine, "0043")
+    migrations.upgrade(migration_engine, "0042")
     with migration_engine.begin() as connection:
         row = connection.execute(
             text("SELECT outside_via, outside_outcome FROM messages WHERE id = 1")
@@ -3441,13 +3441,39 @@ def test_0043_adds_outside_columns_checked_and_inbound_kinds(migration_engine: E
     ):
         with pytest.raises(IntegrityError), migration_engine.begin() as connection:
             connection.execute(text(statement))
-    # The partial index of 0039 survives the rebuild: one open prefill per user.
-    names = {i["name"] for i in inspect(migration_engine).get_indexes("messages")}
-    assert "uq_messages_one_open_prefill" in names
+    # The partial index of 0039 survives the rebuild, unique and with its WHERE intact.
+    [index] = [
+        i
+        for i in inspect(migration_engine).get_indexes("messages")
+        if i["name"] == "uq_messages_one_open_prefill"
+    ]
+    assert index["unique"] and index["column_names"] == ["user_id"]
+    with migration_engine.begin() as connection:
+        if migration_engine.dialect.name == "postgresql":
+            definition = connection.execute(
+                text("SELECT indexdef FROM pg_indexes WHERE indexname = :n"),
+                {"n": "uq_messages_one_open_prefill"},
+            ).scalar_one()
+        else:
+            definition = connection.execute(
+                text("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = :n"),
+                {"n": "uq_messages_one_open_prefill"},
+            ).scalar_one()
+    where = " ".join(definition.split("WHERE", 1)[1].split()).lower()
+    for part in (
+        "channel",
+        "'linkedin'",
+        "direction",
+        "'out'",
+        "'scheduled'",
+        "'prefilled'",
+        "send_clicked_at is null",
+    ):
+        assert part in where, (part, where)
 
 
-def test_0043_downgrades_the_inbound_kinds_to_notes(migration_engine: Engine) -> None:
-    migrations.upgrade(migration_engine, "0043")
+def test_0042_downgrades_the_inbound_kinds_to_notes(migration_engine: Engine) -> None:
+    migrations.upgrade(migration_engine, "0042")
     with migration_engine.begin() as connection:
         _seed_a_sent_campaign(connection)
         connection.execute(
@@ -3465,4 +3491,4 @@ def test_0043_downgrades_the_inbound_kinds_to_notes(migration_engine: Engine) ->
         kind = connection.execute(text("SELECT kind FROM interactions WHERE id = 9")).scalar()
         assert kind == "note"
         assert _count(connection, "messages") == 1
-    migrations.upgrade(migration_engine, "0043")
+    migrations.upgrade(migration_engine, "0042")

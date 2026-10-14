@@ -503,7 +503,7 @@ class Message(UserOwned, TimestampMixin, Base):
     sync_run_id: Mapped[int | None] = mapped_column(
         ForeignKey("sync_runs.id", ondelete="SET NULL"), index=True
     )
-    # A response that came outside netkeeper (#512; 0043): how, and what it said, when
+    # A response that came outside netkeeper (#512; 0042): how, and what it said, when
     # the person recorded one. Set only on an inbound message a person recorded, which
     # has no Gmail or LinkedIn id; its ``channel`` is the channel of the step it answers.
     # NULL for everything the polls found, and for every outbound message.

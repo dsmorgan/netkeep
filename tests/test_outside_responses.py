@@ -58,7 +58,7 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.scoping import get_scoped, install_scope_guard, scoped
+from netkeeper.scoping import get_scoped, install_scope_guard, scoped, unscoped
 from netkeeper.services import campaign_replies, campaign_results, inbox, linkedin_steps, runs
 from netkeeper.services import outside_responses as outside
 from netkeeper.services.campaign_engine import SendOutcome
@@ -299,9 +299,13 @@ def test_the_kinds_and_statuses_are_pinned() -> None:
 # --- opting out -------------------------------------------------------------------------
 
 
-def test_an_opt_out_ends_opted_out_without_do_not_contact_unless_chosen(world: World) -> None:
+def test_an_opt_out_told_not_to_ends_opted_out_and_leaves_them_contactable(
+    world: World,
+) -> None:
     enrollment_id = _sent_enrollment(world)
-    world.write(respond(enrollment_id, at=NOW, outcome=ResponseOutcome.OPT_OUT))
+    world.write(
+        respond(enrollment_id, at=NOW, outcome=ResponseOutcome.OPT_OUT, do_not_contact=False)
+    )
     enrollment = world.enrollment(enrollment_id)
     assert (enrollment.status, enrollment.exit_reason) == (
         EnrollmentStatus.OPTED_OUT,
@@ -319,14 +323,12 @@ def test_an_opt_out_ends_opted_out_without_do_not_contact_unless_chosen(world: W
     )
 
 
-def test_an_opt_out_with_do_not_contact_does_what_an_unsubscribe_reply_does(
-    world: World,
-) -> None:
+@pytest.mark.parametrize("flag", [None, True], ids=["by default", "when told"])
+def test_an_opt_out_does_what_an_unsubscribe_reply_does(world: World, flag: bool | None) -> None:
     enrollment_id = _sent_enrollment(world)
     [pending] = _also_enrolled(world, enrollment_id, EnrollmentStatus.PENDING)
-    world.write(
-        respond(enrollment_id, at=NOW, outcome=ResponseOutcome.OPT_OUT, do_not_contact=True)
-    )
+    fields: dict[str, Any] = {} if flag is None else {"do_not_contact": flag}
+    world.write(respond(enrollment_id, at=NOW, outcome=ResponseOutcome.OPT_OUT, **fields))
     for ended in (enrollment_id, pending):
         assert world.enrollment(ended).status is EnrollmentStatus.OPTED_OUT
     contact = _contact(world, enrollment_id)
@@ -400,6 +402,31 @@ def test_refusals(world: World) -> None:
                 at=NOW,
                 now=NOW,
             )
+
+
+def test_a_response_before_the_first_send_is_refused(world: World) -> None:
+    enrollment_id = _sent_enrollment(world)  # step 1 went out eight days ago
+    [pending] = _also_enrolled(world, enrollment_id, EnrollmentStatus.PENDING)
+    too_early = NOW - timedelta(days=9)
+    with pytest.raises(outside.TooEarly, match="before the first message"):
+        world.write(respond(enrollment_id, at=too_early))
+    with pytest.raises(outside.TooEarly):
+        world.write(respond(enrollment_id, at=too_early, pick=True))
+    # Nothing changed: not the sent one, and not the pending one beside it.
+    assert world.enrollment(enrollment_id).status is EnrollmentStatus.ACTIVE
+    assert world.enrollment(pending).status is EnrollmentStatus.PENDING
+    assert world.inbound(enrollment_id) == world.inbound(pending) == []
+    # At the very time of the send, it answers it.
+    world.write(respond(enrollment_id, at=NOW - timedelta(days=8)))
+    assert world.enrollment(enrollment_id).status is EnrollmentStatus.REPLIED
+
+
+def test_a_pending_enrollment_takes_any_past_time(world: World) -> None:
+    enrollment_id = world.enroll(status=EnrollmentStatus.PENDING)
+    world.write(respond(enrollment_id, at=NOW - timedelta(days=400)))
+    assert world.enrollment(enrollment_id).status is EnrollmentStatus.REPLIED
+    with pytest.raises(NothingToEnd):
+        world.write(respond(enrollment_id, at=NOW))
 
 
 def test_another_users_contact_is_not_found(world: World) -> None:
@@ -918,6 +945,85 @@ async def test_the_api_refuses_what_it_cannot_record(
         assert enrollment is not None and enrollment.status is EnrollmentStatus.ACTIVE
 
 
+def _sent_at(app: FastAPI, enrollment_id: int, at: datetime) -> None:
+    factory: sessionmaker[Session] = app.state.session_factory
+    with session_scope(factory, write=True) as session:
+        user = session.scalars(select(User).where(User.kind == UserKind.LOCAL)).one()
+        enrollment = get_scoped(session, user, Enrollment, enrollment_id)
+        assert enrollment is not None
+        factories.make_message(session, enrollment, sent_at=at)
+
+
+async def test_the_api_refuses_a_time_before_the_first_send_in_plain_words(
+    running_app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    contact_id, (active,) = _local_seed(running_app, EnrollmentStatus.ACTIVE)
+    sent = datetime.now(UTC) - timedelta(days=3)
+    _sent_at(running_app, active, sent)
+    response = await client.post(
+        f"/api/v1/contacts/{contact_id}/outside-response",
+        json={"via": "call", "at": (sent - timedelta(hours=1)).isoformat()},
+        headers=CSRF,
+    )
+    assert response.status_code == 422
+    assert "before the first message" in response.json()["detail"]
+
+
+async def test_another_users_enrollment_is_404(
+    running_app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    contact_id, (active,) = _local_seed(running_app, EnrollmentStatus.ACTIVE)
+    factory: sessionmaker[Session] = running_app.state.session_factory
+    with session_scope(factory, write=True) as session:
+        other = factories.make_user(session, UserKind.HOSTED)
+        theirs = factories.make_enrollment(
+            session, factories.make_campaign(session, other), factories.make_contact(session, other)
+        ).id
+    response = await client.post(
+        f"/api/v1/contacts/{contact_id}/outside-response",
+        json={"via": "call", "at": datetime.now(UTC).isoformat(), "enrollment_id": theirs},
+        headers=CSRF,
+    )
+    assert response.status_code == 404
+    with session_scope(factory) as session:
+        enrollment = session.scalars(
+            unscoped(select(Enrollment).where(Enrollment.id.in_([theirs, active])))
+        ).all()
+        assert {e.status for e in enrollment} == {EnrollmentStatus.ACTIVE}
+        assert session.scalar(unscoped(select(func.count(Message.id)))) == 0
+
+
+@pytest.mark.parametrize(
+    ("body", "marked"),
+    [({}, True), ({"do_not_contact": None}, True), ({"do_not_contact": False}, False)],
+    ids=["omitted", "null", "false"],
+)
+async def test_the_api_opt_out_marks_do_not_contact_unless_told_not_to(
+    running_app: FastAPI, client: httpx.AsyncClient, body: dict[str, Any], marked: bool
+) -> None:
+    factory: sessionmaker[Session] = running_app.state.session_factory
+    with session_scope(factory, write=True) as session:
+        user = session.scalars(select(User).where(User.kind == UserKind.LOCAL)).one()
+        contact = factories.make_contact(session, user, emails=["invented-optout@example.test"])
+        factories.make_enrollment(session, factories.make_campaign(session, user), contact)
+        contact_id = contact.id
+    response = await client.post(
+        f"/api/v1/contacts/{contact_id}/outside-response",
+        json={"via": "text", "at": datetime.now(UTC).isoformat(), "outcome": "opt_out", **body},
+        headers=CSRF,
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["enrollments"][0]["status"] == "opted_out"
+    with session_scope(factory) as session:
+        user = session.scalars(select(User).where(User.kind == UserKind.LOCAL)).one()
+        found = get_scoped(session, user, Contact, contact_id)
+        assert found is not None and found.do_not_contact is marked
+        listed = session.scalar(
+            scoped(user, DoNotSendAddress).with_only_columns(func.count(DoNotSendAddress.id))
+        )
+        assert listed == (1 if marked else 0)
+
+
 async def test_a_logged_call_asks_whether_it_was_the_response_and_ends_nothing(
     running_app: FastAPI, client: httpx.AsyncClient
 ) -> None:
@@ -1023,3 +1129,41 @@ def test_the_cli_records_a_response(cli_db: sessionmaker[Session]) -> None:
     )
     assert again.exit_code == 1
     assert "already ended" in again.output
+
+
+@pytest.mark.parametrize(
+    ("flag", "marked"),
+    [([], True), (["--do-not-contact"], True), (["--no-do-not-contact"], False)],
+    ids=["omitted", "--do-not-contact", "--no-do-not-contact"],
+)
+def test_the_cli_opt_out_marks_do_not_contact_unless_told_not_to(
+    cli_db: sessionmaker[Session], flag: list[str], marked: bool
+) -> None:
+    with session_scope(cli_db, write=True) as session:
+        user = session.scalars(select(User).where(User.kind == UserKind.LOCAL)).one()
+        contact = factories.make_contact(session, user, emails=["invented-cli@example.test"])
+        factories.make_enrollment(session, factories.make_campaign(session, user), contact)
+        contact_id = contact.id
+    result = CliRunner().invoke(
+        cli,
+        [
+            "campaigns",
+            "record-response",
+            str(contact_id),
+            "--via",
+            "call",
+            "--outcome",
+            "opt_out",
+            *flag,
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "opted_out" in result.output
+    with session_scope(cli_db) as session:
+        user = session.scalars(select(User).where(User.kind == UserKind.LOCAL)).one()
+        found = get_scoped(session, user, Contact, contact_id)
+        assert found is not None and found.do_not_contact is marked
+        listed = session.scalar(
+            scoped(user, DoNotSendAddress).with_only_columns(func.count(DoNotSendAddress.id))
+        )
+        assert listed == (1 if marked else 0)
