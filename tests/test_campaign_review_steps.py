@@ -19,7 +19,8 @@ import pytest
 from campaign_fakes import ARMED_FOR_SEND, NOW, SETTINGS, FakeSender, make_mailbox
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.campaigns.render import LintRule, Severity, lint
+from netkeeper.campaigns import templates as template_service
+from netkeeper.campaigns.render import LintIssue, LintRule, Severity, lint
 from netkeeper.campaigns.templates import activation_errors
 from netkeeper.crm import do_not_send
 from netkeeper.crm import lists as list_service
@@ -556,6 +557,33 @@ def test_spelling_warnings_show_in_the_review_and_never_block_activation(
         campaign = campaign_review.get_campaign(session, user, campaign_id)
         gaps = campaign_review.missing(session, user, campaign, now=NOW)
         assert "lint" not in {g.requirement for g in gaps}
+
+
+def test_a_failing_spelling_check_still_records_the_lint(
+    session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#535 review: spelling fails soft, so an error in it never keeps a clean lint from
+    being recorded, and only the error's type is logged."""
+
+    def broken(*_args: object, **_kwargs: object) -> list[LintIssue]:
+        raise RuntimeError("Glimmerwick")
+
+    monkeypatch.setattr(template_service, "spelling_issues", broken)
+    user, campaign_id = _linkedin_reviewing(
+        session_factory, subject=None, body="Hi {{ first_name }}, I hope you recieve this"
+    )
+    with session_scope(session_factory, write=True) as session:
+        result = campaign_review.record_lint(session, user, campaign_id, now=NOW)
+        assert result.clean
+        assert result.warnings == ((1, ()),)
+    with session_scope(session_factory) as session:
+        campaign = campaign_review.get_campaign(session, user, campaign_id)
+        assert campaign.lint_checked_at is not None
+        gaps = campaign_review.missing(session, user, campaign, now=NOW)
+        assert "lint" not in {g.requirement for g in gaps}
+    assert "RuntimeError" in caplog.text and "Glimmerwick" not in caplog.text
 
 
 def test_a_legacy_linkedin_subject_is_a_warning_that_does_not_block_activation(

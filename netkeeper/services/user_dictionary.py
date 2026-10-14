@@ -66,8 +66,12 @@ def clean_word(word: str) -> str:
 
 
 def added_words(session: Session, user: User) -> list[str]:
-    """The words ``user`` added, sorted."""
-    stored = get_setting(session, user, SETTING_KEY, [])
+    """The words ``user`` added, sorted. A malformed row (not JSON, not a list) reads as
+    none, and the items in it that are not strings are ignored."""
+    try:
+        stored = get_setting(session, user, SETTING_KEY, [])
+    except ValueError:  # a row that is not JSON: treated as no added words
+        return []
     if not isinstance(stored, list):
         return []
     return sorted({item for item in stored if isinstance(item, str)})

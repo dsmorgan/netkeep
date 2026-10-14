@@ -994,12 +994,15 @@ def record_lint(session: Session, user: User, campaign_id: int, *, now: datetime
     _require_writer(session, "record_lint")
     campaign = _reviewing(session, user, campaign_id)
     found = _lint_errors(session, user, campaign_id)
+    # Before the record is written, and never raising (spelling_warnings fails soft), so a
+    # warning can't keep a clean lint from being recorded.
+    warnings = _lint_warnings(session, user, campaign_id)
     clean = not any(issues for _, issues in found)
     if clean:
         campaign.lint_checked_at = now
         campaign.lint_fingerprint = content_fingerprint(session, user, campaign)
         session.flush()
-    return LintResult(clean, found, _lint_warnings(session, user, campaign_id))
+    return LintResult(clean, found, warnings)
 
 
 def _lint_warnings(
