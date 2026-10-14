@@ -4687,6 +4687,17 @@
         "title": "DoNotSendReason",
         "type": "string"
       },
+      "DraftWarning": {
+        "description": "Why sending the draft would be wrong, strongest first.",
+        "enum": [
+          "opted_out",
+          "bounced",
+          "do_not_contact",
+          "do_not_send"
+        ],
+        "title": "DraftWarning",
+        "type": "string"
+      },
       "DuplicateContact": {
         "description": "The ``409`` body of adding someone already in the address book (#303).\n\n``contact_id`` is the contact to open, the first of ``contact_ids``.\n``matched_by``: ``linkedin`` (the profile URL), ``email``, or ``name``\n(first name, last name, and company; send ``allow_name_match`` to add anyway).",
         "properties": {
@@ -6104,6 +6115,171 @@
           "recent"
         ],
         "title": "GmailActivityOut",
+        "type": "object"
+      },
+      "GmailLeftoverDraftOut": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "integer"
+          },
+          "campaign_name": {
+            "title": "Campaign Name",
+            "type": "string"
+          },
+          "contact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Id"
+          },
+          "contact_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Name"
+          },
+          "enrollment_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EnrollmentStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "keep_for_check": {
+            "title": "Keep For Check",
+            "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/LeftoverKind"
+          },
+          "low_priority": {
+            "title": "Low Priority",
+            "type": "boolean"
+          },
+          "mailbox_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mailbox Email"
+          },
+          "message_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Id"
+          },
+          "rfc822_message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rfc822 Message Id"
+          },
+          "step_position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Position"
+          },
+          "test_send_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Test Send Id"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DraftWarning"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "message_id",
+          "test_send_id",
+          "campaign_id",
+          "campaign_name",
+          "step_position",
+          "contact_id",
+          "contact_name",
+          "enrollment_status",
+          "warning",
+          "low_priority",
+          "at",
+          "mailbox_email",
+          "rfc822_message_id",
+          "keep_for_check"
+        ],
+        "title": "GmailLeftoverDraftOut",
+        "type": "object"
+      },
+      "GmailLeftoverDraftsOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GmailLeftoverDraftOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "more": {
+            "title": "More",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "more"
+        ],
+        "title": "GmailLeftoverDraftsOut",
         "type": "object"
       },
       "GmailSetupIn": {
@@ -8040,6 +8216,16 @@
         ],
         "title": "LeftoverDraftOut",
         "type": "object"
+      },
+      "LeftoverKind": {
+        "enum": [
+          "discarded",
+          "ended",
+          "waiting",
+          "test"
+        ],
+        "title": "LeftoverKind",
+        "type": "string"
       },
       "LinkKind": {
         "enum": [
@@ -19504,6 +19690,28 @@
           }
         },
         "summary": "Get Gmail Activity",
+        "tags": [
+          "gmail"
+        ]
+      }
+    },
+    "/api/v1/gmail/leftover-drafts": {
+      "get": {
+        "description": "Drafts netkeeper left in Gmail, for you to clean up by hand. Read-only: it never\ncalls Gmail, and netkeeper deletes nothing there.",
+        "operationId": "get_gmail_leftover_drafts",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GmailLeftoverDraftsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Leftover Drafts",
         "tags": [
           "gmail"
         ]

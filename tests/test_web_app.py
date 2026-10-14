@@ -27,6 +27,7 @@ API_PATHS = {
     "/api/v1/health",
     "/api/v1/gmail-setup",
     "/api/v1/gmail/activity",
+    "/api/v1/gmail/leftover-drafts",
     "/api/v1/me",
     "/api/v1/me/positions",
     "/api/v1/me/positions/{position_id}",
