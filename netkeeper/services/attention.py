@@ -59,11 +59,15 @@ class ActivityState(enum.StrEnum):
 
 
 AUTO_SEND_HELD: Final = "Auto-send is held until you resume it."
+AUTO_SEND_HELD_ACTIVITY: Final = (
+    "Auto-send is held until you resume it. Other scheduled runs continue."
+)
+"""The activity sentence when the hold alone blocks: it holds auto-send, not the rest."""
 REAUTH_REQUIRED: Final = "A mailbox needs you to sign in again."
 SESSION_FLAGGED: Final = "The LinkedIn session is flagged; clear it on the LinkedIn page."
 HEAT_TRIPPED: Final = "LinkedIn heat is high, so runs wait until it cools."
 BREAKER_TRIPPED: Final = (
-    "A breaker is tripped, so scheduled runs can't start; reset it on the Settings page."
+    "A breaker is tripped, so some scheduled runs can't start; reset it on the Settings page."
 )
 
 PAUSED: Final = "The LinkedIn schedule is paused."
@@ -180,7 +184,11 @@ def attention(session: Session, user: User, *, now: datetime, settings: Settings
         settings=BREAKER_TRIPPED if breaker else None,
     )
 
-    stopped = flags.linkedin or (BREAKER_TRIPPED if breaker else None) or flags.dashboard
+    stopped = (
+        flags.linkedin
+        or (BREAKER_TRIPPED if breaker else None)
+        or (AUTO_SEND_HELD_ACTIVITY if held else None)
+    )
     running = None if account is None else runs.running_run(session, user, account.id)
     if running is not None:
         activity = Activity(

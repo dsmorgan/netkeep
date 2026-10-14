@@ -288,6 +288,16 @@ describe('a partial answer', () => {
     expect(odd.title_total).toBe(0)
   })
 
+  it('reads an unknown activity state as idle', () => {
+    const odd = normalize({
+      ...attention(),
+      activity: { state: 'exploded', label: 'Boom.', run_id: null, run_kind: null },
+    } as unknown as Attention)
+
+    expect(odd.activity.state).toBe('idle')
+    expect(odd.activity.label).toBe('Boom.')
+  })
+
   it('shows no stray dot and no empty name for it', async () => {
     serve(() => ({ checked_at: 'x', counts: { inbox: null }, flags: { gmail: {} } }))
     await renderApp('/exports')
@@ -399,6 +409,32 @@ describe('the activity indicator (#347)', () => {
     expect(screen.getAllByTestId('activity-live')).toHaveLength(1)
   })
 
+  it('stays silent when only the sentence changes within one state', async () => {
+    let current = activity(
+      'stopped',
+      'The LinkedIn session is flagged; clear it on the LinkedIn page.',
+    )
+    serve(() => current)
+    await renderApp('/exports')
+    const chip = await screen.findByTestId('activity-indicator')
+    const live = screen.getByTestId('activity-live')
+
+    current = activity(
+      'stopped',
+      'Auto-send is held until you resume it. Other scheduled runs continue.',
+    )
+    act(() => FakeEventSource.instances.at(-1)?.emit('run.finished', {}))
+
+    await waitFor(() =>
+      expect(chip).toHaveAttribute(
+        'title',
+        'Auto-send is held until you resume it. Other scheduled runs continue.',
+      ),
+    )
+    expect(chip).toHaveTextContent('LinkedIn: blocked')
+    expect(live).toHaveTextContent('')
+  })
+
   it('shows on the LinkedIn page’s Scheduled runs card too, with one live region', async () => {
     serve(() => activity('paused', 'The LinkedIn schedule is paused.'))
     await renderApp('/linkedin')
@@ -414,6 +450,24 @@ describe('the running favicon', () => {
     expect(faviconFor(activity('running', 'x'))).toBe(FAVICON_RUNNING)
     expect(faviconFor(activity('stopped', 'x'))).toBe(FAVICON)
     expect(faviconFor(activity('armed', 'x'))).toBe(FAVICON)
+  })
+
+  it('puts the plain icon back when the app unmounts', async () => {
+    const link = document.createElement('link')
+    link.rel = 'icon'
+    link.href = FAVICON
+    document.head.append(link)
+    try {
+      serve(() => activity('running', 'A LinkedIn enrichment run is running.'))
+      const { unmount } = await renderApp('/exports')
+      await waitFor(() => expect(link.getAttribute('href')).toBe(FAVICON_RUNNING))
+
+      unmount()
+
+      expect(link.getAttribute('href')).toBe(FAVICON)
+    } finally {
+      link.remove()
+    }
   })
 
   it('swaps the tab icon while running and back after', async () => {
