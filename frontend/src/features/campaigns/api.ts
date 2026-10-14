@@ -540,3 +540,43 @@ export async function setStepSchedule(
   if (data === undefined) fail(response.status, error, 'could not change the step timing')
   return data
 }
+
+export type StepModePreview = Schemas['ModePreviewOut']
+export type StepModeSwitch = Schemas['ModeSwitchOut']
+
+/** A LinkedIn step's mode and what switching it now would change (#536). Changes nothing. */
+export function stepModeQuery(id: number, stepId: number) {
+  return queryOptions({
+    queryKey: [...campaignKeys.all, 'step-mode', id, stepId] as const,
+    queryFn: async ({ signal }): Promise<StepModePreview> => {
+      const { data, error, response } = await api.GET(
+        '/api/v1/campaigns/{campaign_id}/steps/{step_id}/mode',
+        { params: { path: { campaign_id: id, step_id: stepId } }, signal },
+      )
+      if (data === undefined) fail(response.status, error, 'could not check the step mode')
+      return data
+    },
+    staleTime: 0,
+  })
+}
+
+/**
+ * Switch a LinkedIn step between Prefill and Auto-send (#536). Auto-send needs
+ * `confirm`, which only the confirm dialog passes; the switch itself sends nothing.
+ */
+export async function setStepMode(
+  id: number,
+  stepId: number,
+  mode: 'prefill' | 'auto_send',
+  confirm = false,
+): Promise<StepModeSwitch> {
+  const { data, error, response } = await api.PUT(
+    '/api/v1/campaigns/{campaign_id}/steps/{step_id}/mode',
+    {
+      params: { path: { campaign_id: id, step_id: stepId } },
+      body: { mode, confirm },
+    },
+  )
+  if (data === undefined) fail(response.status, error, 'could not change the step mode')
+  return data
+}

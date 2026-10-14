@@ -213,6 +213,9 @@ class StepOut(BaseModel):
     budget: str | None = None
     """The LinkedIn budget the step spends: ``li_messages_auto`` for an ``auto_send`` step
     while auto-send is on, ``li_prefills`` for any other LinkedIn step; null for email."""
+    kept_prefill: int = 0
+    """Contacts that keep this step as a prefill: they were already queued for it when it
+    switched to ``auto_send`` (#536), so a person prefills them as before."""
 
 
 class CampaignOut(BaseModel):
@@ -466,6 +469,7 @@ def _campaign_out(detail: service.CampaignDetail, settings: Settings) -> Campaig
                 template_adopted_by=s.step.template_adopted_by,
                 template_adopted_from_version=s.step.template_adopted_from_version,
                 budget=_budget(s.step, settings),
+                kept_prefill=s.kept_prefill,
             )
             for s in detail.steps
         ],

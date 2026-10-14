@@ -522,6 +522,10 @@ class StepStatus:
     newest_version: int | None = None
     """The newest version of the step's template, when it is newer than the one the step
     uses: the step can adopt it (#397, :mod:`netkeeper.services.template_adoption`)."""
+    kept_prefill: int = 0
+    """Live enrollments that keep the step as a prefill, because they were already queued
+    for it when it switched to auto-send, and have not had it yet (#536,
+    :mod:`netkeeper.services.step_mode`)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -575,6 +579,22 @@ def campaign_status(
             by_status.setdefault(step_id, {})[status] = n
             if status in (MessageStatus.SENT, MessageStatus.BOUNCED):
                 outbound[step_id, True] += n
+    kept: Counter[int] = Counter()
+    for step_id, current, n in session.execute(
+        scoped(user, Enrollment)
+        .with_only_columns(
+            Enrollment.prefill_kept_step_id, Enrollment.current_step, func.count(Enrollment.id)
+        )
+        .where(
+            Enrollment.campaign_id == campaign_id,
+            Enrollment.prefill_kept_step_id.is_not(None),
+            Enrollment.status.in_((EnrollmentStatus.ACTIVE, EnrollmentStatus.PAUSED)),
+        )
+        .group_by(Enrollment.prefill_kept_step_id, Enrollment.current_step)
+    ):
+        position = next((s.position for s in steps if s.id == step_id), None)
+        if step_id is not None and position is not None and (current or 0) < position:
+            kept[step_id] += n
     step_rows = []
     for step in steps:
         template = template_service.get_template(session, user, step.template_id)
@@ -588,6 +608,7 @@ def campaign_status(
                 outbound[step.id, True],
                 by_status.get(step.id, {}),
                 newest.version if newest.id != template.id else None,
+                kept[step.id],
             )
         )
     next_at = None

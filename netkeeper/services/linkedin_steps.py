@@ -51,7 +51,9 @@ scheduler (never a person) claims a due ``auto_send`` step through
 A person may still prefill an ``auto_send`` step by hand; that never clicks Send. An
 auto-sent message (``send_clicked``) is recorded ``prefilled`` with ``send_clicked_at``:
 it waits on the inbox poll, not on the person, so it holds no open slot, and
-:func:`waiting_for_you` lists it only once it goes ``stale``.
+:func:`waiting_for_you` lists it only once it goes ``stale``. An enrollment that was
+already queued for a step when it switched to ``auto_send`` keeps the step as a prefill
+(#536, :func:`effective_mode`): the auto-send claim never takes it.
 
 **Step approvals** (#339) are the review gate's: a campaign is ``active`` only once
 every step, LinkedIn steps included, was approved, so a claim on a campaign that is
@@ -498,6 +500,25 @@ def sending_hours_hold(
     )
 
 
+def effective_mode(step: CampaignStep, enrollment: Enrollment) -> StepMode:
+    """The mode ``step`` has for ``enrollment`` (#536): the step's own, except ``prefill``
+    for an enrollment that keeps the step as a prefill (``prefill_kept_step_id``), because
+    it was already queued for the step when the step switched to ``auto_send``
+    (:mod:`netkeeper.services.step_mode`). Pure."""
+    if step.mode is StepMode.AUTO_SEND and enrollment.prefill_kept_step_id == step.id:
+        return StepMode.PREFILL
+    return step.mode
+
+
+def _kept_as_prefill_sql() -> ColumnElement[bool]:
+    """SQL: the enrollment keeps its next step (the joined ``CampaignStep``) as a prefill,
+    as :func:`effective_mode` reads it."""
+    return and_(
+        Enrollment.prefill_kept_step_id.is_not(None),
+        Enrollment.prefill_kept_step_id == CampaignStep.id,
+    )
+
+
 def step_budget(step: CampaignStep, settings: Settings) -> budgets.ActionClass | None:
     """The LinkedIn budget a step spends: ``li_messages_auto`` for an ``auto_send`` step
     while ``[campaigns] linkedin_auto_send`` is on (the scheduler claims it,
@@ -941,7 +962,9 @@ class _Claimer:
             return self.refuse(enrollment, Refusal.NOT_A_LINKEDIN_STEP)
         if self.auto and not self.settings.campaigns.linkedin_auto_send:
             return self.refuse(enrollment, Refusal.AUTO_SEND_OFF)
-        if self.auto and step.mode is not StepMode.AUTO_SEND:
+        if self.auto and effective_mode(step, enrollment) is not StepMode.AUTO_SEND:
+            # An enrollment queued before its step switched to auto-send keeps it as a
+            # prefill (#536): only a person prefills it.
             return self.refuse(enrollment, Refusal.NOT_AUTO_SEND)
         # Try again (#445): a step whose latest prefill typed nothing is claimed only by a
         # retry, and a retry claims only such a step. Neither refusal changes anything.
@@ -1251,10 +1274,11 @@ def auto_send_precheck(
 
 def auto_send_ready_statement(user: User, now: datetime) -> Select[Enrollment]:
     """The enrollments an auto-send claim tries, in its order: only ``auto_send`` steps,
-    oldest due first, so a long queue of prefill steps never hides one (#458 review)."""
+    oldest due first, so a long queue of prefill steps never hides one (#458 review).
+    Never an enrollment that keeps its step as a prefill (#536, :func:`effective_mode`)."""
     return (
         _ready_statement(user, now, None)
-        .where(CampaignStep.mode == StepMode.AUTO_SEND)
+        .where(CampaignStep.mode == StepMode.AUTO_SEND, ~_kept_as_prefill_sql())
         .order_by(Enrollment.next_action_at, Enrollment.id)
         .limit(READY_PAGE_MAX)
     )

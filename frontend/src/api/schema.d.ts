@@ -483,6 +483,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/campaigns/{campaign_id}/mode-changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Mode Changes
+         * @description The campaign's step mode switches, newest first (at most 200).
+         */
+        get: operations["list_step_mode_changes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/campaigns/{campaign_id}/pause": {
         parameters: {
             query?: never;
@@ -789,6 +809,32 @@ export interface paths {
          */
         get: operations["step_template_adoption"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/campaigns/{campaign_id}/steps/{step_id}/mode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Mode
+         * @description The step's mode and what switching it now would change. Changes nothing.
+         */
+        get: operations["step_mode_preview"];
+        /**
+         * Set Mode
+         * @description Switch a LinkedIn step between ``prefill`` and ``auto_send``. Nothing is sent by the
+         *     switch; contacts already queued for the step keep Prefill. ``auto_send`` needs
+         *     ``confirm: true``.
+         */
+        put: operations["set_step_mode"];
         post?: never;
         delete?: never;
         options?: never;
@@ -6709,6 +6755,82 @@ export interface components {
             step_positions?: number[];
         };
         /**
+         * ModeChangeOut
+         * @description One switch, as the campaign's history keeps it. Never message text.
+         */
+        ModeChangeOut: {
+            /** Auto Send On */
+            auto_send_on: boolean;
+            /**
+             * Changed At
+             * Format: date-time
+             */
+            changed_at: string;
+            /** Changed By */
+            changed_by: number;
+            from_mode: components["schemas"]["StepMode"];
+            /** Id */
+            id: number;
+            /** Kept Prefill */
+            kept_prefill: number;
+            /** Position */
+            position: number;
+            /** Step Id */
+            step_id: number;
+            to_mode: components["schemas"]["StepMode"];
+        };
+        /** ModeIn */
+        ModeIn: {
+            /**
+             * Confirm
+             * @default false
+             */
+            confirm: boolean;
+            mode: components["schemas"]["StepMode"];
+        };
+        /** ModePreviewOut */
+        ModePreviewOut: {
+            /** Auto Send On */
+            auto_send_on: boolean;
+            /** Campaign Id */
+            campaign_id: number;
+            campaign_status: components["schemas"]["CampaignStatus"];
+            /** Claimed */
+            claimed: number;
+            /** Confirm Text */
+            confirm_text: string;
+            /** Kept Prefill */
+            kept_prefill: number;
+            mode: components["schemas"]["StepMode"];
+            /** Position */
+            position: number;
+            /** Prefilled */
+            prefilled: number;
+            /** Queued */
+            queued: number;
+            /** Refusal */
+            refusal: string | null;
+            /** Step Id */
+            step_id: number;
+        };
+        /** ModeSwitchOut */
+        ModeSwitchOut: {
+            /** Auto Send On */
+            auto_send_on: boolean;
+            campaign: components["schemas"]["CampaignOut"];
+            /** Changed */
+            changed: boolean;
+            /**
+             * Changed At
+             * Format: date-time
+             */
+            changed_at: string;
+            from_mode: components["schemas"]["StepMode"];
+            /** Kept Prefill */
+            kept_prefill: number;
+            to_mode: components["schemas"]["StepMode"];
+        };
+        /**
          * MovedOut
          * @description The loser's rows of one kind: how many move, how many the survivor already holds.
          */
@@ -7997,6 +8119,11 @@ export interface components {
             fired: number;
             /** Id */
             id: number;
+            /**
+             * Kept Prefill
+             * @default 0
+             */
+            kept_prefill: number;
             mode: components["schemas"]["StepMode"];
             /** Newest Template Version */
             newest_template_version?: number | null;
@@ -9908,6 +10035,44 @@ export interface operations {
             };
         };
     };
+    list_step_mode_changes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModeChangeOut"][];
+                };
+            };
+            /** @description No such campaign, template, mailbox or list */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     pause_campaign: {
         parameters: {
             query?: never;
@@ -10585,6 +10750,93 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    step_mode_preview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: number;
+                step_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModePreviewOut"];
+                };
+            };
+            /** @description No such campaign, template, mailbox or list */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_step_mode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: number;
+                step_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModeSwitchOut"];
+                };
+            };
+            /** @description No such campaign, template, mailbox or list */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Refused in the campaign's state, or a name taken */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A value a campaign cannot be made from */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

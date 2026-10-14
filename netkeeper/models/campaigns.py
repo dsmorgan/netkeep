@@ -417,6 +417,13 @@ class Enrollment(UserOwned, TimestampMixin, Base):
     # The user id, without a foreign key: ``UserOwned``'s ``user`` relationship needs
     # ``user_id`` to be the only key to ``users``. Today it is always ``user_id``.
     recent_contact_override_by: Mapped[int | None] = mapped_column(Integer)
+    # A LinkedIn step this enrollment keeps as a prefill (#536; 0044): the step was
+    # switched to auto-send while the enrollment was already queued for it, so it still
+    # waits for a person. It counts only for that step, which fires once; NULL otherwise.
+    # :mod:`netkeeper.services.step_mode` sets and clears it.
+    prefill_kept_step_id: Mapped[int | None] = mapped_column(
+        ForeignKey("campaign_steps.id", ondelete="SET NULL")
+    )
 
     campaign: Mapped[Campaign] = relationship()
 
@@ -639,6 +646,38 @@ class TestSend(UserOwned, TimestampMixin, Base):
     rfc822_message_id: Mapped[str | None] = mapped_column(String(200))
     not_found_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     sent_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+
+
+class StepModeChange(UserOwned, TimestampMixin, Base):
+    """One switch of a LinkedIn step between ``prefill`` and ``auto_send`` (#536): the
+    campaign's record of who changed what can send, and when. Never message text.
+
+    ``kept_prefill`` is how many enrollments, already queued for the step, kept it as a
+    prefill on a switch to ``auto_send`` (``enrollments.prefill_kept_step_id``), and
+    ``auto_send_on`` whether ``[campaigns] linkedin_auto_send`` was on at the switch.
+    """
+
+    __tablename__ = "campaign_step_mode_changes"
+
+    id: Mapped[int] = mapped_column(primary_key=True, sort_order=-100)
+    campaign_id: Mapped[int] = mapped_column(
+        ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    step_id: Mapped[int] = mapped_column(
+        ForeignKey("campaign_steps.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    from_mode: Mapped[StepMode] = mapped_column(
+        string_enum(StepMode, "mode_change_from"), nullable=False
+    )
+    to_mode: Mapped[StepMode] = mapped_column(
+        string_enum(StepMode, "mode_change_to"), nullable=False
+    )
+    changed_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+    # The user id, without a foreign key, as ``template_adopted_by``.
+    changed_by: Mapped[int] = mapped_column(Integer, nullable=False)
+    kept_prefill: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    auto_send_on: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
 
 REVIEW_TABLES: tuple[type[UserOwned], ...] = (ReviewPreview, StepApproval, TestSend)

@@ -3522,3 +3522,26 @@ def test_0043_downgrades_to_mailboxes_without_it(migration_engine: Engine) -> No
     with migration_engine.begin() as connection:
         assert _count(connection, "mailboxes") == 1
     migrations.upgrade(migration_engine, "0043")
+
+
+# --- a LinkedIn step's mode switch (0044, #536) -------------------------------------------
+
+
+def test_0044_keeps_no_step_and_starts_an_empty_history(migration_engine: Engine) -> None:
+    migrations.upgrade(migration_engine, "0043")
+    with migration_engine.begin() as connection:
+        _seed_users(connection, 1)
+    migrations.upgrade(migration_engine, "0044")
+    columns = {c["name"] for c in inspect(migration_engine).get_columns("enrollments")}
+    assert "prefill_kept_step_id" in columns
+    with migration_engine.begin() as connection:
+        assert _count(connection, "campaign_step_mode_changes") == 0
+
+
+def test_0044_downgrades_to_enrollments_without_it(migration_engine: Engine) -> None:
+    migrations.upgrade(migration_engine, "0044")
+    migrations.downgrade(migration_engine, "0043")
+    columns = {c["name"] for c in inspect(migration_engine).get_columns("enrollments")}
+    assert "prefill_kept_step_id" not in columns
+    assert "campaign_step_mode_changes" not in inspect(migration_engine).get_table_names()
+    migrations.upgrade(migration_engine, "0044")
