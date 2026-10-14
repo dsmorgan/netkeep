@@ -44,7 +44,7 @@ from netkeeper.models import (
 from netkeeper.models.base import utcnow
 from netkeeper.scoping import scoped
 from netkeeper.services import campaigns as campaign_service
-from netkeeper.services import enrich_plan, run_contacts, runs
+from netkeeper.services import enrich_plan, run_contacts, runs, user_dictionary
 from netkeeper.services import mailboxes as mailbox_service
 from netkeeper.services.linkedin_accounts import ensure_account
 from netkeeper.web.app import API_PREFIX
@@ -343,6 +343,12 @@ def poll_status_count(body: Any) -> int:
     items = body["items"]
     assert isinstance(mailboxes, list) and isinstance(items, list)
     return len(mailboxes) + sum(1 for item in items if item["last_at"] is not None)
+
+
+def _seed_dictionary(session: Session, user: User) -> int:
+    """Two words added to the user's dictionary (#522); the seeded words are not listed."""
+    user_dictionary.add_words(session, user, [f"zorblat{chr(ord('a') + user.id % 26)}", "quuxly"])
+    return 2
 
 
 def _seed_templates(session: Session, user: User) -> int:
@@ -689,6 +695,7 @@ REGISTRY: list[ListEndpoint] = [
     ),
     ListEndpoint(f"{API_PREFIX}/views", _seed_views, array_count),
     ListEndpoint(f"{API_PREFIX}/templates", _seed_templates, array_count),
+    ListEndpoint(f"{API_PREFIX}/templates/dictionary", _seed_dictionary, array_count),
     ListEndpoint(f"{API_PREFIX}/triage/suggestions", _seed_triage_suggestions, array_count),
     ListEndpoint(
         f"{API_PREFIX}/triage/suggestions/{{key}}/contacts",

@@ -172,6 +172,8 @@ API_PATHS = {
     "/api/v1/mailboxes/{mailbox_id}/disconnect",
     "/api/v1/templates",
     "/api/v1/templates/lint",
+    "/api/v1/templates/dictionary",
+    "/api/v1/templates/dictionary/{word}",
     "/api/v1/templates/merge-fields",
     "/api/v1/templates/{template_id}",
     "/api/v1/templates/{template_id}/preview",

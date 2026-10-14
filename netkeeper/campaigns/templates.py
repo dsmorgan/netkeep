@@ -54,6 +54,7 @@ from netkeeper.campaigns.render import (
     placeholder_example,
     render,
 )
+from netkeeper.campaigns.spelling import spelling_issues
 from netkeeper.crm.positions import last_position_change
 from netkeeper.db import is_writer
 from netkeeper.localtime import local_today
@@ -70,6 +71,7 @@ from netkeeper.models import (
 )
 from netkeeper.models.base import utcnow
 from netkeeper.scoping import get_scoped, scoped
+from netkeeper.services import user_dictionary
 
 log = logging.getLogger(__name__)
 
@@ -297,6 +299,25 @@ def lint_draft(channel: TemplateChannel, subject: str | None, body: str) -> list
     cleaned_subject = _clean_subject(subject)
     _check_body(body)
     return lint(channel, cleaned_subject, body)
+
+
+def spelling_warnings(
+    session: Session,
+    user: User,
+    channel: TemplateChannel,
+    subject: str | None,
+    body: str,
+) -> list[LintIssue]:
+    """A spelling warning for each word of the template's text that may be misspelled,
+    against the English list and ``user``'s dictionary (#522).
+
+    Never stored in ``lint_json`` and never part of :func:`activation_errors`: the
+    dictionary changes after a save, so the editor and the activation review ask again,
+    and a warning never blocks. A blank subject is no subject, as in :func:`lint_draft`.
+    """
+    return spelling_issues(
+        channel, _clean_subject(subject), body, user_dictionary.known_words(session, user)
+    )
 
 
 # --- writes -----------------------------------------------------------------

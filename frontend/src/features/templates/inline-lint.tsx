@@ -23,9 +23,21 @@ interface InlineLintProps {
   text?: string
   /** Moves the cursor to a line of the field; offered for a finding with a line. */
   onGoToLine?: (line: number) => void
+  /** Adds a word to your dictionary; offered on each spelling warning (#522). */
+  onAddWord?: (word: string) => void
+  /** The word being added right now, whose button waits for the answer. */
+  addingWord?: string | null
 }
 
-export function InlineLint({ id, label, shown, text, onGoToLine }: InlineLintProps) {
+export function InlineLint({
+  id,
+  label,
+  shown,
+  text,
+  onGoToLine,
+  onAddWord,
+  addingWord = null,
+}: InlineLintProps) {
   if (shown.length === 0) return null
   const lines = text === undefined ? undefined : splitLines(text)
   return (
@@ -62,6 +74,19 @@ export function InlineLint({ id, label, shown, text, onGoToLine }: InlineLintPro
               )}
               <p className="text-xs text-muted-foreground">Why it matters: {item.why}</p>
             </div>
+            {onAddWord !== undefined && issue.rule === 'spelling' && issue.field != null && (
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                className="self-start"
+                aria-label={`Add ${issue.field} to dictionary`}
+                disabled={addingWord !== null}
+                onClick={() => onAddWord(issue.field ?? '')}
+              >
+                {addingWord === issue.field ? 'Adding…' : 'Add to dictionary'}
+              </Button>
+            )}
             {onGoToLine !== undefined && line !== null && (
               <Button
                 type="button"

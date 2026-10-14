@@ -57,6 +57,8 @@ export const WHY_IT_MATTERS: Readonly<Record<LintRule, string>> = {
     "The prefill never presses Enter, so a message with a line break can't be typed safely.",
   linkedin_untypable:
     "The prefill types what a person could type, and this character isn't something they could.",
+  spelling:
+    'A misspelled word reads as careless. Fix it, or add the word to your dictionary if it is right.',
 }
 
 /**
@@ -91,6 +93,7 @@ export const PROMPT_RULES: Readonly<Record<LintRule, string | null>> = {
     'Write each LinkedIn message as one paragraph on one line, with no line breaks.',
   linkedin_untypable:
     'Use no tabs, control characters, or invisible formatting characters in a LinkedIn message.',
+  spelling: 'Check the spelling of every word.',
 }
 
 const LINE_PREFIX = /^line (\d+): /

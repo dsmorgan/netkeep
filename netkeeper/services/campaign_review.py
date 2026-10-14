@@ -83,10 +83,11 @@ from netkeeper.campaigns.render import (
     Rendered,
     Severity,
     TemplateRenderError,
+    lint,
     render,
     uses_personal_line,
 )
-from netkeeper.campaigns.templates import activation_errors, contact_fields
+from netkeeper.campaigns.templates import activation_errors, contact_fields, spelling_warnings
 from netkeeper.config import Settings
 from netkeeper.crm import lists as crm_lists
 from netkeeper.crm.contacts import sendable_email
@@ -979,12 +980,17 @@ def approve_messages(
 
 @dataclass(frozen=True, slots=True)
 class LintResult:
+    """``steps`` holds each step's errors, which block; ``warnings`` each step's lint
+    warnings and spelling warnings (#522), which never do."""
+
     clean: bool
     steps: tuple[tuple[int, tuple[LintIssue, ...]], ...]
+    warnings: tuple[tuple[int, tuple[LintIssue, ...]], ...] = ()
 
 
 def record_lint(session: Session, user: User, campaign_id: int, *, now: datetime) -> LintResult:
-    """Lint every step's template; recorded only when none has an error."""
+    """Lint every step's template; recorded only when none has an error. Warnings are
+    returned for the review to show, and never change whether the lint is clean."""
     _require_writer(session, "record_lint")
     campaign = _reviewing(session, user, campaign_id)
     found = _lint_errors(session, user, campaign_id)
@@ -993,7 +999,27 @@ def record_lint(session: Session, user: User, campaign_id: int, *, now: datetime
         campaign.lint_checked_at = now
         campaign.lint_fingerprint = content_fingerprint(session, user, campaign)
         session.flush()
-    return LintResult(clean, found)
+    return LintResult(clean, found, _lint_warnings(session, user, campaign_id))
+
+
+def _lint_warnings(
+    session: Session, user: User, campaign_id: int
+) -> tuple[tuple[int, tuple[LintIssue, ...]], ...]:
+    out = []
+    for step in _steps(session, user, campaign_id):
+        template = _template(session, user, step)
+        if template is None:
+            continue  # _lint_errors has already refused this
+        warnings = [
+            issue
+            for issue in lint(template.channel, template.subject, template.body)
+            if issue.severity is Severity.WARNING
+        ]
+        warnings += spelling_warnings(
+            session, user, template.channel, template.subject, template.body
+        )
+        out.append((step.position, tuple(warnings)))
+    return tuple(out)
 
 
 def _lint_errors(

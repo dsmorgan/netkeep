@@ -19,7 +19,7 @@ import pytest
 from campaign_fakes import ARMED_FOR_SEND, NOW, SETTINGS, FakeSender, make_mailbox
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.campaigns.render import LintRule, lint
+from netkeeper.campaigns.render import LintRule, Severity, lint
 from netkeeper.campaigns.templates import activation_errors
 from netkeeper.crm import do_not_send
 from netkeeper.crm import lists as list_service
@@ -534,6 +534,28 @@ def test_a_long_linkedin_message_is_a_warning_that_does_not_block_lint(
         result = campaign_review.record_lint(session, user, campaign_id, now=NOW)
         assert result.clean
         assert result.steps == ((1, ()),)
+
+
+def test_spelling_warnings_show_in_the_review_and_never_block_activation(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """#522: a misspelling is a warning the lint review returns; the lint is still clean
+    and recorded, so activation is not held for it."""
+    user, campaign_id = _linkedin_reviewing(
+        session_factory, subject=None, body="Hi {{ first_name }}, I hope you recieve this"
+    )
+    with session_scope(session_factory, write=True) as session:
+        result = campaign_review.record_lint(session, user, campaign_id, now=NOW)
+        assert result.clean
+        assert result.steps == ((1, ()),)
+        [(position, warnings)] = result.warnings
+        assert position == 1
+        assert [(i.rule, i.severity, i.field) for i in warnings] == [
+            (LintRule.SPELLING, Severity.WARNING, "recieve")
+        ]
+        campaign = campaign_review.get_campaign(session, user, campaign_id)
+        gaps = campaign_review.missing(session, user, campaign, now=NOW)
+        assert "lint" not in {g.requirement for g in gaps}
 
 
 def test_a_legacy_linkedin_subject_is_a_warning_that_does_not_block_activation(

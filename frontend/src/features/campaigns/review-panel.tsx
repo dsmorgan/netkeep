@@ -478,6 +478,23 @@ function LintSection({
             )}
           </ul>
         ))}
+      {result !== null && result.steps.some((step) => step.warnings.length > 0) && (
+        <div className="space-y-1 text-sm">
+          <p className="text-muted-foreground">
+            Warnings, such as possible misspellings, never block activation.
+          </p>
+          <ul aria-label="Lint warnings" className="space-y-0.5">
+            {result.steps.flatMap((step) =>
+              step.warnings.map((issue, index) => (
+                <li key={`${step.position}-${index}`}>
+                  Step {step.position}, {issue.part}
+                  {issue.line != null && `, line ${issue.line}`}: {issue.message}
+                </li>
+              )),
+            )}
+          </ul>
+        </div>
+      )}
     </Section>
   )
 }

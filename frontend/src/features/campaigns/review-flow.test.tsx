@@ -104,6 +104,7 @@ describe('review flow', () => {
                     message: '`nickname` is not a merge field',
                   },
                 ],
+                warnings: [],
               },
             ],
           }),
@@ -115,6 +116,44 @@ describe('review flow', () => {
 
     expect(await section('Lint').findByRole('alert')).toHaveTextContent(
       'Step 2, body: `nickname` is not a merge field',
+    )
+    expect(section('Lint').queryByRole('list', { name: 'Lint warnings' })).toBeNull()
+  })
+
+  it('shows spelling warnings that never block a clean lint (#522)', async () => {
+    mockFetch(
+      campaignBackend(reviewing(), {
+        'POST /api/v1/campaigns/5/review/lint': () =>
+          jsonResponse({
+            clean: true,
+            steps: [
+              {
+                position: 1,
+                errors: [],
+                warnings: [
+                  {
+                    rule: 'spelling',
+                    severity: 'warning',
+                    part: 'body',
+                    field: 'recieve',
+                    line: 3,
+                    message: '"recieve" may be misspelled; did you mean receive, relieve?',
+                  },
+                ],
+              },
+            ],
+          }),
+      }),
+    )
+    await renderApp('/campaigns/5')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Run lint' }))
+
+    expect(await section('Lint').findByText('Lint is clean.')).toBeVisible()
+    expect(section('Lint').queryByRole('alert')).toBeNull()
+    expect(section('Lint').getByText(/never block activation/)).toBeVisible()
+    expect(section('Lint').getByRole('list', { name: 'Lint warnings' })).toHaveTextContent(
+      'Step 1, body, line 3: "recieve" may be misspelled; did you mean receive, relieve?',
     )
   })
 

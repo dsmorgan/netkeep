@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from netkeeper import __version__, migrations
 from netkeeper.campaigns import gmail_oauth
 from netkeeper.campaigns import schedule as schedule_module
+from netkeeper.campaigns.spelling import normalize as normalize_word
 from netkeeper.config import ConfigError, Settings, load_settings, render_toml
 from netkeeper.crm import do_not_send, import_runs, inbox_apply, new_contact
 from netkeeper.crm.archive import ArchiveImport, import_archive
@@ -107,6 +108,7 @@ from netkeeper.services import (
     simulate_campaign,
     template_adoption,
     ui_settings,
+    user_dictionary,
 )
 from netkeeper.services import campaigns as campaign_service
 from netkeeper.services import config_adopt as config_adopt_service
@@ -227,6 +229,13 @@ history_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(history_app, name="history")
+templates_app = typer.Typer(help="Message templates.", no_args_is_help=True)
+app.add_typer(templates_app, name="templates")
+dictionary_app = typer.Typer(
+    help="Your dictionary: words the template spelling check accepts (#522).",
+    no_args_is_help=True,
+)
+templates_app.add_typer(dictionary_app, name="dictionary")
 
 
 @dataclass(frozen=True, slots=True)
@@ -5814,6 +5823,57 @@ def _print_history_scan(report: history_scan.ScanReport, *, applied: bool) -> No
             " Run it again later to continue.",
             err=True,
         )
+
+
+@dictionary_app.command("add")
+def templates_dictionary_add(
+    words: Annotated[list[str], typer.Argument(help="The words to add.", show_default=False)],
+) -> None:
+    """Add words to your dictionary, so the template spelling check no longer flags them.
+
+    Your contacts' names and companies, your own name, and LinkedIn, InMail and
+    netkeeper are accepted already, without adding them.
+    """
+    with _campaign_db() as factory, session_scope(factory, write=True) as session:
+        user = _local_user_or_exit(session)
+        try:
+            added = user_dictionary.add_words(session, user, words)
+        except (user_dictionary.InvalidWord, user_dictionary.DictionaryFull) as exc:
+            typer.echo(f"error: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+    skipped = len({user_dictionary.clean_word(word) for word in words}) - len(added)
+    typer.echo(
+        f"added {len(added)} word{'' if len(added) == 1 else 's'}"
+        + (f"; {skipped} already there" if skipped > 0 else "")
+    )
+
+
+@dictionary_app.command("list")
+def templates_dictionary_list() -> None:
+    """List the words you added, one per line. Seeded words are accepted but not listed."""
+    with _campaign_db() as factory, session_scope(factory) as session:
+        user = _local_user_or_exit(session)
+        added = user_dictionary.added_words(session, user)
+    if not added:
+        typer.echo("no words added")
+        return
+    for word in added:
+        typer.echo(word)
+
+
+@dictionary_app.command("remove")
+def templates_dictionary_remove(
+    words: Annotated[list[str], typer.Argument(help="The words to remove.", show_default=False)],
+) -> None:
+    """Remove words you added. A seeded word, such as a contact's name, can't be removed."""
+    with _campaign_db() as factory, session_scope(factory, write=True) as session:
+        user = _local_user_or_exit(session)
+        removed = user_dictionary.remove_words(session, user, words)
+    missing = len({normalize_word(word) for word in words}) - len(removed)
+    typer.echo(
+        f"removed {len(removed)} word{'' if len(removed) == 1 else 's'}"
+        + (f"; {missing} not in your added words" if missing > 0 else "")
+    )
 
 
 if __name__ == "__main__":

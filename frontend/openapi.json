@@ -4392,6 +4392,27 @@
         "title": "DeletePlanOut",
         "type": "object"
       },
+      "DictionaryWordsIn": {
+        "description": "Words to add to your dictionary for the template spelling check (#522).",
+        "properties": {
+          "words": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Words",
+            "type": "array"
+          }
+        },
+        "required": [
+          "words"
+        ],
+        "title": "DictionaryWordsIn",
+        "type": "object"
+      },
       "DiscardedOut": {
         "properties": {
           "enrollment_id": {
@@ -8003,12 +8024,14 @@
           "linkedin_typing_time",
           "linkedin_long",
           "linkedin_newline",
-          "linkedin_untypable"
+          "linkedin_untypable",
+          "spelling"
         ],
         "title": "LintRule",
         "type": "string"
       },
       "LintStepOut": {
+        "description": "One step's lint: ``errors`` block activation; ``warnings``, spelling's included\n(#522), never do.",
         "properties": {
           "errors": {
             "items": {
@@ -8020,6 +8043,14 @@
           "position": {
             "title": "Position",
             "type": "integer"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/LintIssueOut"
+            },
+            "title": "Warnings",
+            "type": "array"
           }
         },
         "required": [
@@ -22463,9 +22494,111 @@
         ]
       }
     },
+    "/api/v1/templates/dictionary": {
+      "get": {
+        "description": "The words you added to your dictionary, sorted. The seeded words (your contacts'\nnames and companies, your own name, and a few built in) are accepted too, but they\nare not stored, so they are not listed.",
+        "operationId": "list_dictionary_words",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "title": "Response List Dictionary Words",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Dictionary Words",
+        "tags": [
+          "templates"
+        ]
+      },
+      "post": {
+        "description": "Add words to your dictionary, so the spelling check no longer flags them.\nAnswers with every word you added, sorted.",
+        "operationId": "add_dictionary_words",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DictionaryWordsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "title": "Response Add Dictionary Words",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "A word the dictionary refuses, or a full dictionary"
+          }
+        },
+        "summary": "Add Dictionary Words",
+        "tags": [
+          "templates"
+        ]
+      }
+    },
+    "/api/v1/templates/dictionary/{word}": {
+      "delete": {
+        "description": "Remove a word you added. A seeded word can't be removed: it is not stored.",
+        "operationId": "remove_dictionary_word",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "word",
+            "required": true,
+            "schema": {
+              "title": "Word",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "You did not add that word"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Dictionary Word",
+        "tags": [
+          "templates"
+        ]
+      }
+    },
     "/api/v1/templates/lint": {
       "post": {
-        "description": "Lint a template's text without saving it, as a save of it would.\n\nThe editor calls this as you type, so a lint error shows before you save. It\nstores nothing and reads no rows; ``user`` is there so the route authenticates\nlike every other.",
+        "description": "Lint a template's text without saving it, as a save of it would, plus a spelling\nwarning for each word that may be misspelled (#522).\n\nThe editor calls this as you type, so a lint error shows before you save. It\nstores nothing. Spelling warnings are checked against your dictionary, so they are\nnever stored with a saved template's lint, and they never block anything.",
         "operationId": "lint_template",
         "requestBody": {
           "content": {

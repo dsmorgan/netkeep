@@ -221,8 +221,12 @@ class MessagesApproveIn(BaseModel):
 
 
 class LintStepOut(BaseModel):
+    """One step's lint: ``errors`` block activation; ``warnings``, spelling's included
+    (#522), never do."""
+
     position: int
     errors: list[LintIssueOut]
+    warnings: list[LintIssueOut] = []
 
 
 class LintOut(BaseModel):
@@ -421,12 +425,16 @@ def lint_campaign(
     """Lint every step's template; the result is recorded only when there is no error."""
     with translate_errors():
         result = service.record_lint(session, user, campaign_id, now=utcnow())
+    warnings = dict(result.warnings)
     return LintOut(
         clean=result.clean,
         steps=[
             LintStepOut(
                 position=position,
                 errors=[LintIssueOut.model_validate(i.to_json()) for i in issues],
+                warnings=[
+                    LintIssueOut.model_validate(i.to_json()) for i in warnings.get(position, ())
+                ],
             )
             for position, issues in result.steps
         ],

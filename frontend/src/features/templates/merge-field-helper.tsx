@@ -100,6 +100,7 @@ function FieldRow({
         size="xs"
         variant="outline"
         className="font-mono"
+        spellCheck={false}
         aria-label={`Insert ${token}`}
         aria-describedby={describedBy}
         disabled={disabled}
