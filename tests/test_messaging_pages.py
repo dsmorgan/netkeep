@@ -248,11 +248,13 @@ def test_the_compose_answers_name_the_recipient_where_captured() -> None:
 
 
 def test_the_bubbles_have_the_captured_controls() -> None:
-    existing = mp.existing_bubble_html(mp.ZEPHYRINE, mp.THREAD_ONE_TO_ONE)
+    existing = mp.existing_bubble_html(mp.ZEPHYRINE, mp.THREAD_ONE_TO_ONE, draft="x")
     assert 'role="dialog"' in existing and 'aria-label="Messaging"' in existing
     assert f'<h2 tabindex="-1"><a href="/in/{mp.ZEPHYRINE.profile_id}/">' in existing
     assert existing.count('role="textbox"') == 1 and "Write a message…" in existing
     assert '<button type="submit">Send</button>' in existing
+    # Send has a plain ``disabled`` while the composer is empty (#519).
+    assert '<button disabled type="submit">Send</button>' in mp.existing_bubble_html(mp.ZEPHYRINE)
     new = mp.never_messaged_bubble_html([mp.THADDEUS])
     assert f'aria-label="Remove {mp.THADDEUS.name}"' in new and 'role="combobox"' in new
     assert '<button disabled type="submit">Send</button>' in new

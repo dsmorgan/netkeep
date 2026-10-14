@@ -132,7 +132,21 @@ The answer is small (about 36 KB, ten model rows). One row holds a `div` with a 
 
 After the sections, a `p` with `Connected since` and the date as text.
 
-Each value is a link element (`$L<n>`) whose `action` is one `Navigate` → `NavigateToUrl` (`urlValue.url`), with `openInNewTab`, `urlType`, and `presentation` fields, and whose `children` are the text shown. The captured profile shared a website and an email and no phone, so **the phone, address, birthday, and messaging sections are unverified**; by analogy they are probably `contact-phone` and so on, and the fixtures use `contact-phone` for that reason, marked invented. The first live enrichment (#203) met a `contact-instant-message` section; the capture holds no instance of it, and the CRM has no field for a messaging handle, so it is recognized and not read.
+### The overlay as rendered
+
+The CP8c captures (#484, #519) showed the overlay on the page:
+
+- `header#dialog-header` holds an `h2` that reads exactly "Contact info", with no hidden text.
+- The profile row is a real `/in/<slug>/` link.
+- Each row pairs an `aria-hidden` icon with a label `p` and a value `p`:
+  - The phone is plain text with "(Mobile)", not a `tel:` link.
+  - The email is a `mailto:` link.
+  - The birthday reads `<Month> <D>`.
+  - Connected since reads `<Mon> <D>, <YYYY>`.
+
+Enrichment doesn't read this DOM. It reads the overlay's network answer (`parse_contact_info`), as the rest of this note describes.
+
+Each value is a link element (`$L<n>`) whose `action` is one `Navigate` → `NavigateToUrl` (`urlValue.url`), with `openInNewTab`, `urlType`, and `presentation` fields, and whose `children` are the text shown. The #149 capture's profile shared a website and an email and no phone, so the section names for the phone, address, birthday, and messaging rows are still unverified; by analogy they are probably `contact-phone` and so on, and the fixtures use `contact-phone` for that reason, marked invented. The CP8c rendering above confirms the phone and birthday rows exist and what they show. The first live enrichment (#203) met a `contact-instant-message` section; the capture holds no instance of it, and the CRM has no field for a messaging handle, so it is recognized and not read.
 
 ## What enrichment reads, and what it assumes
 
@@ -153,7 +167,9 @@ Added by #190, from the structure above and nothing else. **Captured** means the
 | Whose overlay | The `contact-your-profile` section's link must name the profile's slug | Captured | Missing or another slug: unreadable |
 | Email | `contact-email` links, `mailto:<address>` | Captured | Any other link there: unreadable |
 | Websites | `contact-website` links, unwrapped from `linkedin.com/safety/go?url=` (captured) or `/redir/redirect?url=` (the older client's) | Captured | A wrapper without one site: unreadable. A link on LinkedIn's own host that is not a wrapper is a site the person listed (#203): kept, unless it is their own profile (on LinkedIn's host only) or carries a `url` parameter, which are skipped and counted at INFO. A site that is not an absolute `http` or `https` url with a host is skipped and counted too (#206 review) |
-| Phone, Twitter, birthday, address | `contact-phone` (`tel:` links or number-shaped text), `contact-twitter`, `contact-birthday`, `contact-address` | **Assumed**; the captured profile shared none of them | A value that does not read is left out. The birthday and the address have no column and are not stored |
+| Phone | `contact-phone` (`tel:` links or number-shaped text; the number must arrive as its own text run; a run that joins it with `(Mobile)` doesn't read, and the phone is left out) | Row as rendered: captured (CP8c, #519). Section name in the network answer: **assumed** | A value that does not read is left out |
+| Birthday | `contact-birthday`, `<Month> <D>` | Row as rendered: captured (CP8c, #519). Section name: **assumed** | A value that does not read is left out. The birthday has no column and is not stored |
+| Twitter, address | `contact-twitter`, `contact-address` | **Assumed**; no capture shared either | A value that does not read is left out. The address has no column and is not stored |
 | Messaging | `contact-instant-message` | Seen live (#203), not captured | Not read: no CRM field. Logged at DEBUG only |
 | Connected since | The text after a `Connected since` run | Captured | An unknown phrasing leaves it unknown; it is not stored either way |
 | The Contact info control | A link whose accessible name is exactly `Contact info`, alone on the page, whose `href` is the profile's `overlay/contact-info/` | The link and its url: captured. That it renders as an `<a>` with that `href`: **assumed** | None, two, or pointing elsewhere: nothing is clicked, and the visit is unreadable |
