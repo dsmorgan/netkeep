@@ -366,7 +366,7 @@ const AFTER_CLICK: readonly Rule[] = [
   },
   {
     match: /another message (composer|bubble) is on the page/,
-    text: 'Another message bubble is on the page in Chrome, open or minimized. Close it before you prefill again. Closing a bubble deletes any draft in it.',
+    text: 'Another message bubble is on the page, open or minimized, in this or another LinkedIn tab in the netkeeper Chrome window. Close it before you prefill again. Closing a bubble deletes any draft in it.',
     bubble: 'open',
   },
   {
