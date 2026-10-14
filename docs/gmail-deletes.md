@@ -1,12 +1,14 @@
 # Gmail drafts netkeeper leaves behind
 
-netkeeper deletes nothing in Gmail ([ADR 0003](adr/0003-gmail-api-over-smtp.md)). Its Gmail interface has no delete or trash call (`netkeeper/campaigns/gmail.py:247-310`), and its one label write, `modify_labels`, is called only to add the campaign's label (`netkeeper/services/campaign_sender.py:720`). This page lists every case where netkeeper stops caring about something it put in Gmail, so a future switch that trashes drafts can be designed once (#279). The rules that switch must follow are in [ADR 0009](adr/0009-gmail-deletes.md).
+netkeeper deletes nothing in Gmail ([ADR 0003](adr/0003-gmail-api-over-smtp.md)). The guarantee rests on the code, not the OAuth scope: `gmail.modify` allows `drafts.delete`, and a label change could add `TRASH`. netkeeper's Gmail interface has no delete or trash call (`netkeeper/campaigns/gmail.py:247-310`), and `modify_labels` has one caller, which only adds the campaign's label (`netkeeper/services/campaign_sender.py:720`). `tests/test_gmail_never_deletes.py` pins both. This page lists every case where netkeeper stops caring about something it put in Gmail, so a future switch that trashes drafts can be designed once (#279). The rules that switch must follow are in [ADR 0009](adr/0009-gmail-deletes.md).
 
 Each case says:
 
 - **Today:** what netkeeper does now, with the code that does it.
 - **Trash?** Whether trashing the draft would ever be right.
 - **By hand:** whether you can see the leftover draft in netkeeper's UI and clean it up yourself.
+
+Every **Yes** under **Trash?** depends on the open question in ADR 0009: whether Gmail can trash a draft at all.
 
 Line numbers are as of `acfe01b5` on `main`.
 
@@ -27,11 +29,12 @@ Line numbers are as of `acfe01b5` on `main`.
 | 11. Review and arming test drafts | Kept; searched for, never touched | Yes, the safest candidate | Only on campaign delete |
 | 12. A mailbox is disconnected or its token expires | Token forgotten; drafts stay `drafted` | No | No |
 | 13. Import rollback | Refused if a created contact has any message | Never needed | Not applicable |
-| 14. A contact is archived or rejected | Contact archived; draft stays `drafted` | No | No |
+| 14. A contact is archived | Contact archived; draft stays `drafted` | No | No |
 | 15. Schedule send (#278) | Tracked in Scheduled; stays `drafted` | No | Not applicable |
 | 16. A draft edited into a new thread (#280) | Reads as `discarded`; enrollment `removed` | No | Not applicable |
 | 17. A step adopts a new template version | Waiting draft keeps its text | No | Partly: adoption preview |
 | 18. A LinkedIn step changes mode (#536) | No Gmail draft involved | Not applicable | Not applicable |
+| 19. Reconcile gives up on a leftover | `discarded` or `failed`; a draft Gmail made may remain | Yes, a candidate, once confirmed | No |
 
 No list of leftover drafts exists in the UI. See [The cleanup list](#the-cleanup-list).
 
@@ -45,7 +48,7 @@ No list of leftover drafts exists in the UI. See [The cleanup list](#the-cleanup
 
 ### 2. A detected reply ends the enrollment
 
-- **Today:** the reply poll ends the enrollment `replied` (`netkeeper/services/campaign_replies.py:640-677`), and ending an enrollment changes no message (`netkeeper/services/campaign_engine.py:872-891`). The waiting draft stays `drafted`, and the drafts poll still records it `sent` if you send it.
+- **Today:** the reply poll ends the enrollment `replied` (`_after_reply`, `netkeeper/services/campaign_replies.py:640-677`), and ending an enrollment changes no message (`netkeeper/services/campaign_engine.py:872-891`). The waiting draft stays `drafted`, and the drafts poll still records it `sent` if you send it.
 - **Trash?** No. You may want to edit the draft and send it as your answer.
 - **By hand:** no. The campaign's enrollment table shows the status, the exit reason, and a link to the inbox (`frontend/src/features/campaigns/campaign-detail-page.tsx:1210-1235`), but not that a draft waits.
 
@@ -69,7 +72,7 @@ No list of leftover drafts exists in the UI. See [The cleanup list](#the-cleanup
 
 ### 6. You record an outside response (#512)
 
-- **Today:** a response you record (a call, a text, in person) ends every live enrollment of the contact through the same path as a detected reply, or as an opt-out when you say so (`netkeeper/services/outside_responses.py:33-40`, `:272-283`). Drafts stay `drafted`.
+- **Today:** a response you record (a call, a text, in person) ends every live enrollment of the contact through `_after_reply`, the path a detected reply takes (`netkeeper/services/campaign_replies.py:640-677`), or as an opt-out when you say so. A `pending` enrollment, which detection never sees, ends the same way (`netkeeper/services/outside_responses.py:33-40`, `:272-283`). Drafts stay `drafted`.
 - **Trash?** As case 2 for a response, and as case 3 for an opt-out.
 - **By hand:** no. The record-response dialog doesn't mention waiting drafts.
 
@@ -115,10 +118,10 @@ No list of leftover drafts exists in the UI. See [The cleanup list](#the-cleanup
 - **Trash?** Never needed.
 - **By hand:** not applicable.
 
-### 14. A contact is archived or rejected
+### 14. A contact is archived
 
-- **Today:** archiving or rejecting sets `archived_at` only (`netkeeper/crm/contacts.py:487-494`, `:524-541`). The guards skip the contact at the next step fire (`netkeeper/services/campaign_guards.py:253-254`). A waiting draft stays `drafted` and is still tracked.
-- **Trash?** No. Archiving is undone with one click; a trash isn't.
+- **Today:** archiving sets `archived_at` only (`netkeeper/crm/contacts.py:487-494`). The guards skip the contact at the next step fire (`netkeeper/services/campaign_guards.py:253-254`). A waiting draft stays `drafted` and is still tracked. Rejecting a contact read off a card (`contacts.py:524-541`) can't leave a draft: a contact waiting for review is never enrolled (`campaign_guards.py`, `not_waiting_for_review`).
+- **Trash?** No. You undo an archive with one click in netkeeper; a trash is a step in Gmail you'd have to undo yourself.
 - **By hand:** no.
 
 ### 15. Schedule send (#278)
@@ -141,13 +144,19 @@ No list of leftover drafts exists in the UI. See [The cleanup list](#the-cleanup
 
 ### 18. A LinkedIn step changes mode (#536)
 
-- **Today:** the switch in PR #539 applies only to LinkedIn steps and refuses an email step. An email step's mode is fixed when the campaign is built, and a mailbox taken back to drafts only changes how the next steps fire.
+- **Today:** on `main`, a step's mode is fixed when the campaign is built, and a mailbox taken back to drafts only changes how the next steps fire. PR #539 (open) proposes a switch for LinkedIn steps only, and refuses an email step.
 - **Trash?** Not applicable: no Gmail draft is involved.
 - **By hand:** not applicable.
 
+### 19. Reconcile gives up on a leftover
+
+- **Today:** a message left `scheduled` by a crash or an unknown outcome is searched for by its Message-ID. After enough empty searches, it's `discarded` when nothing would send it, or `failed` for a person (`netkeeper/services/campaign_engine.py:2448-2509`). If the write was a `drafts.create` that did reach Gmail, and Gmail's search never found it, the draft stays in Drafts with no `gmail_draft_id` recorded.
+- **Trash?** Yes, a candidate, but only once the draft is found by its Message-ID and matched as ADR 0009 requires. A draft netkeeper never recorded can't meet the draft id rule, so today the switch would leave it.
+- **By hand:** no. The enrollment table shows a `failed` message's error, not a draft that may remain.
+
 ## The cleanup list
 
-The issue expected P3-11 to list drafts whose message is `discarded` or whose enrollment has ended. P3-11 shipped without one ([implementation guide](implementation-guide.md), P3-11), and no such list exists. Until a switch exists, you can't find these drafts in netkeeper. A follow-up issue should add the list. The data is there:
+The issue expected P3-11 to list drafts whose message is `discarded` or whose enrollment has ended. P3-11's goal in the [implementation guide](implementation-guide.md#phase-3-email-campaigns) (campaign list, builder, review, enrollment table, and inbox) doesn't include one, and no such list exists in the UI. Until a switch exists, you can't find these drafts in netkeeper. A follow-up issue should add the list. The data is there:
 
 - `discarded` messages that still have a `gmail_draft_id` (case 1).
 - `drafted` messages whose enrollment isn't `pending`, `active`, or `paused` (cases 2 to 7), opt-outs and bounces first.

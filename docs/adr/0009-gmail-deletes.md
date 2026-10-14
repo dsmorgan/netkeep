@@ -16,14 +16,16 @@ The maintainer decided on #273 that netkeeper deletes nothing in Gmail for now, 
 
 ## Decision
 
-netkeeper deletes and trashes nothing in Gmail, and that stays the default. Its Gmail interface has no delete or trash call, and its only label write adds the campaign's label. A draft netkeeper stops tracking stays in your Drafts, and netkeeper records what happened in its own database.
+netkeeper deletes and trashes nothing in Gmail, and that stays the default. The guarantee rests on the code, not the OAuth scope, since `gmail.modify` would allow a delete: netkeeper's Gmail interface has no delete or trash call, and its one label write only adds the campaign's label. A test pins both. A draft netkeeper stops tracking stays in your Drafts, and netkeeper records what happened in its own database.
 
 If removing drafts is built later, it's a switch, and the switch follows these rules:
 
 1. **Off by default.** Your mailbox is yours, and a draft disappearing when you didn't ask is the mistake you can't see coming.
 2. **Set per mailbox, for one user, and recorded when changed** (who, when, old and new value). A mailbox is the unit you trust or don't, and the record answers "why is my draft gone?"
 3. **Trash, never delete.** You can restore an item from Trash, so a wrong call can be undone; a Gmail delete is permanent. Where Gmail offers no trash for a draft, the switch leaves the draft; it never falls back to a permanent delete.
-4. **Only drafts netkeeper created, matched by draft id and thread.** The draft id and thread id netkeeper stored must both match what Gmail returns when it's read just before the trash. A draft id alone can follow a canceled Schedule send to a new draft (#278), and you may have moved a draft to another thread (#280). Anything that doesn't match exactly is yours.
+
+   *Open question.* Gmail's API has no trash method for drafts, and deleting a draft is permanent. Trashing a draft would mean trashing the draft's message, and nobody has confirmed what Gmail does then. It needs a live check before any switch is built, and every case the catalogue marks as a trash candidate depends on the answer.
+4. **Only drafts netkeeper created, matched by draft id and thread.** The draft id, thread id, and Message-ID netkeeper stored must all match what Gmail returns when it's read just before the trash, and the message must carry no `SENT` or `SCHEDULED` label. A draft id alone can follow a canceled Schedule send to a new draft (#278), and you may have moved a draft to another thread (#280). Anything that doesn't match exactly is yours.
 5. **Only drafts.** Never a sent or scheduled message, a reply, or a thread. Those are the record of what you sent and received.
 6. **Only from a state netkeeper recorded, never from a guess about Gmail.** A draft that's missing from Drafts may be scheduled, and a draft that reads as discarded may have been sent (#278, #280). netkeeper's reading can be wrong in both, so it never acts on one.
 7. **Only the cases the switch names.** Each case in the catalogue says whether trashing is ever right. A draft left by a reply is never trashed: you may still want to send it. Adding a case is an amendment to this ADR.
