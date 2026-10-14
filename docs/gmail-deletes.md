@@ -1,6 +1,6 @@
 # Gmail drafts netkeeper leaves behind
 
-netkeeper deletes nothing in Gmail ([ADR 0003](adr/0003-gmail-api-over-smtp.md)). Its Gmail interface has no delete or trash call (`netkeeper/campaigns/gmail.py:247-310`), and its one label write, `modify_labels`, is called only to add the campaign's label (`netkeeper/services/campaign_sender.py:720`). This page lists every case where netkeeper stops caring about something it put in Gmail, so a future switch that trashes drafts can be designed once (#279). The rules that switch must follow are in the 2026-10-14 amendment to ADR 0003.
+netkeeper deletes nothing in Gmail ([ADR 0003](adr/0003-gmail-api-over-smtp.md)). Its Gmail interface has no delete or trash call (`netkeeper/campaigns/gmail.py:247-310`), and its one label write, `modify_labels`, is called only to add the campaign's label (`netkeeper/services/campaign_sender.py:720`). This page lists every case where netkeeper stops caring about something it put in Gmail, so a future switch that trashes drafts can be designed once (#279). The rules that switch must follow are in [ADR 0009](adr/0009-gmail-deletes.md).
 
 Each case says:
 
