@@ -501,6 +501,7 @@ def test_the_cause_codes_are_pinned() -> None:
         "contact_info_deferred",
         "profile_status",
         "id_mismatch",
+        "not_found_discounted",
         "unknown",
     }
 

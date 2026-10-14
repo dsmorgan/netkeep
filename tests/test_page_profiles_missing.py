@@ -39,6 +39,7 @@ from netkeeper.linkedin.enrich import (
     UnreadableCause,
 )
 from netkeeper.linkedin.flagship_profile import has_top_card, is_missing_page
+from netkeeper.linkedin.observe import Observation, ObservedResponse
 from netkeeper.linkedin.voyager import RouteChanged
 from netkeeper.models import Contact, User
 from netkeeper.scoping import get_scoped
@@ -406,3 +407,30 @@ async def test_three_missing_visits_across_fourteen_days_mark_the_contact_gone(
         contact = get_scoped(session, owner, Contact, contact_id)
         assert contact is not None
         assert contact.li_disconnected_at is not None
+
+
+# --- the poll ends when the observation does (#514 review) -------------------------------
+
+
+async def test_an_observation_that_ended_does_not_spin_the_poll(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After the missing document, an observation that ended answers ``None`` at once.
+    The landing wait ends there, rather than ask again and again until its deadline."""
+    real = Observation.next
+    calls = 0
+
+    async def ended_after_one(self: Observation, timeout_s: float) -> ObservedResponse | None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return await real(self, timeout_s)
+        return None  # as Observation.next answers once it is closed: no await
+
+    monkeypatch.setattr(Observation, "next", ended_after_one)
+    site = ProfileSite([missing(QUORBELLE, tab_after_load=None)])
+    clock = Stopwatch()
+    out = await visit(site, [target(QUORBELLE)], landing_wait_s=5.0)
+    assert out.outcomes == [Outcome.ROUTE_CHANGED]
+    assert out.harvests[0].unreadable_cause is UnreadableCause.NO_PROFILE_SCREEN
+    assert calls <= 3 and clock.elapsed < 4.0
