@@ -703,24 +703,24 @@ class PageConnections:
         # #525 review: the checks above rest on the captured layout (cards inline in
         # row 0). The flight structure check enrichment enforces (page_profiles) is
         # only reported here until live runs show a real rescued copy passes it.
+        # A check that is only reported must never abort a rescue: any exception
+        # from it reads as "not whole", logged by its type name only, never its value.
         try:
             whole = is_whole(
                 parse_flight(pending.streamed, endpoint=self.endpoint), endpoint=self.endpoint
             )
-        except RouteChanged:
+            check = "yes" if whole else "no"
+        except Exception as exc:
             whole = False
+            check = f"no ({type(exc).__name__})"
         if not whole:
             self._rescued_not_whole += 1
         log.info(
-            "connections: rescued answer at start %d: whole by flight check: %s",
-            pending.start,
-            "yes" if whole else "no",
-        )
-        log.info(
             "connections: the page's answer for start %d was read from the copy streamed"
-            " as it arrived (%d bytes); nothing was lost",
+            " as it arrived (%d bytes); nothing was lost; whole by flight check: %s",
             pending.start,
             len(pending.streamed),
+            check,
         )
         self._last_bytes = len(pending.streamed)
         self._take(chunk)

@@ -40,6 +40,12 @@ describe('formatFields', () => {
     expect(fields.map((f) => f.value)).toEqual(['623', '626', '3', '3'])
   })
 
+  it('shows the rescued copies not found whole right after the hidden members (#525)', () => {
+    const fields = formatFields({ zeta: 1, rescued_not_whole: 0, hidden: 3, total: 46 })
+    expect(fields.map((f) => f.label)).toEqual(['Total', 'Hidden', 'Rescued Not Whole', 'Zeta'])
+    expect(fields.map((f) => f.value)).toEqual(['46', '3', '0', '1'])
+  })
+
   it('appends unknown keys, alphabetically, after the known ones', () => {
     const fields = formatFields({ visited: 1, zeta: 'z', alpha: 'a' })
     expect(fields.map((f) => f.label)).toEqual(['Visited', 'Alpha', 'Zeta'])
