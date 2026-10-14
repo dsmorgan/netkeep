@@ -190,7 +190,7 @@ describe('campaign builder', () => {
     )
   })
 
-  it('offers auto-send only when the config flag is on, with the risk sentence (#383)', async () => {
+  it('makes a LinkedIn step pick Prefill or Auto-send while auto-send is on (#494)', async () => {
     const calls: Call[] = []
     mockFetch(
       campaignBackend(
@@ -208,19 +208,60 @@ describe('campaign builder', () => {
     await screen.findAllByRole('option', { name: 'LinkedIn hello (LinkedIn)' })
     const step = within(screen.getByRole('listitem', { name: 'Step 1' }))
     fireEvent.change(step.getByLabelText('Template'), { target: { value: '13' } })
-    await waitFor(() =>
-      expect(
-        within(step.getByLabelText('Mode'))
-          .getAllByRole('option')
-          .map((o) => o.textContent),
-      ).toEqual(['Prefill (you send it)', 'Auto-send']),
-    )
+    const group = within(await step.findByRole('group', { name: 'Mode' }))
+    const prefill = group.getByRole('radio', { name: /Prefill \(you send it\)/ })
+    const auto = group.getByRole('radio', { name: /Auto-send/ })
+    // Both modes, each with what it does, and neither picked for you.
+    expect(prefill).not.toBeChecked()
+    expect(auto).not.toBeChecked()
+    expect(group.getByText(/Waits for you: netkeeper types the message/)).toBeVisible()
+    expect(group.getByText(/Sends on its own: netkeeper types the message/)).toBeVisible()
+    const save = screen.getByRole('button', { name: 'Save draft' })
+    expect(save).toBeDisabled()
+    expect(screen.getByText(/Pick Prefill or Auto-send for each LinkedIn step\./)).toBeVisible()
     expect(step.queryByText(/restricts hardest/)).toBeNull()
 
-    fireEvent.change(step.getByLabelText('Mode'), { target: { value: 'auto_send' } })
+    fireEvent.click(auto)
     expect(
       step.getByText(/An automated send is the action LinkedIn restricts hardest/),
     ).toBeVisible()
+    expect(step.getByText(/restricts hardest/).textContent).not.toMatch(/ADR/)
+
+    fireEvent.click(prefill)
+    expect(step.queryByText(/restricts hardest/)).toBeNull()
+    expect(save).toBeEnabled()
+    fireEvent.click(save)
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === 'POST' && c.path === '/api/v1/campaigns')).toBe(true),
+    )
+    const post = calls.find((c) => c.method === 'POST' && c.path === '/api/v1/campaigns')
+    expect((post?.body as { steps: { mode: string }[] }).steps[0]?.mode).toBe('prefill')
+  })
+
+  it('keeps an unpicked mode out of the request when the template changes (#494)', async () => {
+    mockFetch(
+      campaignBackend(
+        { campaign: campaign(), review: review() },
+        { 'GET /api/v1/campaigns/linkedin/options': () => jsonResponse({ auto_send: true }) },
+      ),
+    )
+    await renderApp('/campaigns/new')
+
+    fireEvent.change(await screen.findByLabelText('Name'), { target: { value: 'Hello' } })
+    await screen.findAllByRole('option', { name: 'LinkedIn hello (LinkedIn)' })
+    const step = within(screen.getByRole('listitem', { name: 'Step 1' }))
+    fireEvent.change(step.getByLabelText('Template'), { target: { value: '13' } })
+    fireEvent.click(
+      within(await step.findByRole('group', { name: 'Mode' })).getByRole('radio', {
+        name: /Auto-send/,
+      }),
+    )
+    // A new template is a new pick: the old one is not carried over as Auto-send.
+    fireEvent.change(step.getByLabelText('Template'), { target: { value: '' } })
+    fireEvent.change(step.getByLabelText('Template'), { target: { value: '13' } })
+    const group = within(step.getByRole('group', { name: 'Mode' }))
+    expect(group.getByRole('radio', { name: /Auto-send/ })).not.toBeChecked()
+    expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled()
   })
 
   it("shows a step's template lint findings under the step (#383)", async () => {
@@ -582,6 +623,8 @@ describe('a campaign with a LinkedIn step (#383)', () => {
       expect(counts).toHaveTextContent('4 ready · 1 prefilled · 3 sent · 2 stale'),
     )
     expect(screen.getByText('Prefill (you send it)')).toBeVisible()
+    // The step says it waits for you (#494).
+    expect(screen.getByText('Waits for you to prefill.')).toBeVisible()
     expect(screen.getByRole('heading', { name: 'LinkedIn queue' })).toBeVisible()
     expect(screen.getByRole('heading', { name: 'Waiting for you' })).toBeVisible()
     const ready = calls.filter((c) => c.path === '/api/v1/campaigns/linkedin/ready')
@@ -589,8 +632,11 @@ describe('a campaign with a LinkedIn step (#383)', () => {
   })
 
   it.each([
-    [true, 'on: netkeeper clicks Send itself'],
-    [false, 'off in config.toml: waits for you to prefill'],
+    [true, 'Sends on its own. netkeeper clicks Send itself.'],
+    [
+      false,
+      'Auto-send step, but auto-send is off in config.toml, so it waits for you to prefill it.',
+    ],
   ])('says whether an auto-send step sends itself (flag %s)', async (on, text) => {
     mockFetch(
       campaignBackend(

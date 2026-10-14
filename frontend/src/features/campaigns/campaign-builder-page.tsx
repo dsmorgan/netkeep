@@ -34,7 +34,7 @@ import {
 } from './api'
 import { sourceBody, sourceProblem, type AudienceSource } from './audience'
 import { AudiencePicker } from './audience-picker'
-import { AUTO_SEND_RISK, CONDITION_LABELS, MODE_LABELS } from './format'
+import { AUTO_SEND_RISK, CONDITION_LABELS, MODE_HINTS, MODE_LABELS } from './format'
 
 const MAX_STEPS = 10
 
@@ -62,14 +62,26 @@ function modesFor(channel: TemplateOut['channel'] | null, autoSend: boolean): St
   return autoSend ? LINKEDIN_MODES_WITH_AUTO : LINKEDIN_MODES
 }
 
-/** The step's mode as offered: its choice if still offered, else the first one offered. */
+/**
+ * Whether the step's mode is a pick the person must make: a LinkedIn step while auto-send
+ * is on. Nothing is picked for them, so a step never becomes Auto-send by default.
+ */
+function mustPickMode(channel: TemplateOut['channel'] | null, autoSend: boolean): boolean {
+  return channel === 'linkedin' && autoSend
+}
+
+/**
+ * The step's mode as offered: its choice if still offered, else the first one offered.
+ * Null for a step whose mode must be picked ({@link mustPickMode}) and is not yet.
+ */
 function modeOf(
   step: StepDraft,
   channel: TemplateOut['channel'] | null,
   autoSend: boolean,
-): StepMode {
+): StepMode | null {
   const modes = modesFor(channel, autoSend)
-  return step.mode !== null && modes.includes(step.mode) ? step.mode : (modes[0] as StepMode)
+  if (step.mode !== null && modes.includes(step.mode)) return step.mode
+  return mustPickMode(channel, autoSend) ? null : (modes[0] as StepMode)
 }
 
 function channelOf(step: StepDraft, templates: readonly TemplateOut[]) {
@@ -123,6 +135,9 @@ export function CampaignBuilderPage() {
   if (name.trim() === '') problems.push('Give the campaign a name.')
   if (steps.some((s) => s.templateId === null)) problems.push('Pick a template for every step.')
   if (anyEmail && mailboxId === null) problems.push('Email steps need a mailbox.')
+  if (steps.some((s) => modeOf(s, channelOf(s, templateRows), autoSend) === null)) {
+    problems.push('Pick Prefill or Auto-send for each LinkedIn step.')
+  }
   const audienceProblem = sourceProblem(source)
   if (audienceProblem !== null) problems.push(audienceProblem)
 
@@ -130,8 +145,9 @@ export function CampaignBuilderPage() {
     mutationFn: () => {
       const body: StepIn[] = steps.map((s, index) => {
         const channel = channelOf(s, templateRows)
-        // What the Mode select shows, so what you see is what is saved.
-        const mode = modeOf(s, channel, autoSend)
+        // What the Mode control shows, so what you see is what is saved. An unpicked
+        // mode never gets here: it is a problem above, and Save draft is disabled.
+        const mode = modeOf(s, channel, autoSend) as StepMode
         return {
           template_id: s.templateId as number,
           delay_days: s.delayDays,
@@ -281,22 +297,31 @@ export function CampaignBuilderPage() {
                         }
                       />
                     </div>
-                    <div className="flex flex-col gap-1">
-                      <Label htmlFor={`step-${step.key}-mode`}>Mode</Label>
-                      <Select
-                        id={`step-${step.key}-mode`}
+                    {mustPickMode(channel, autoSend) ? (
+                      <ModePicker
+                        name={`step-${step.key}-mode`}
                         value={mode}
-                        onChange={(event) =>
-                          update(index, { mode: event.target.value as StepMode })
-                        }
-                      >
-                        {modes.map((m) => (
-                          <option key={m} value={m}>
-                            {MODE_LABELS[m]}
-                          </option>
-                        ))}
-                      </Select>
-                    </div>
+                        modes={modes}
+                        onChange={(m) => update(index, { mode: m })}
+                      />
+                    ) : (
+                      <div className="flex flex-col gap-1">
+                        <Label htmlFor={`step-${step.key}-mode`}>Mode</Label>
+                        <Select
+                          id={`step-${step.key}-mode`}
+                          value={mode ?? ''}
+                          onChange={(event) =>
+                            update(index, { mode: event.target.value as StepMode })
+                          }
+                        >
+                          {modes.map((m) => (
+                            <option key={m} value={m}>
+                              {MODE_LABELS[m]}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                    )}
                     <div className="flex flex-col gap-1">
                       <Label htmlFor={`step-${step.key}-condition`}>Condition</Label>
                       <Select
@@ -413,5 +438,48 @@ export function CampaignBuilderPage() {
         )}
       </div>
     </form>
+  )
+}
+
+/**
+ * A LinkedIn step's mode while auto-send is on: both modes, each with what it does, and
+ * neither picked until you pick one.
+ */
+function ModePicker({
+  name,
+  value,
+  modes,
+  onChange,
+}: {
+  name: string
+  value: StepMode | null
+  modes: readonly StepMode[]
+  onChange: (mode: StepMode) => void
+}) {
+  return (
+    <fieldset className="flex basis-full flex-col gap-1">
+      <legend className="text-sm font-medium">Mode</legend>
+      {value === null && (
+        <p className="text-xs text-muted-foreground">
+          Pick one. netkeeper doesn&apos;t pick a mode for you.
+        </p>
+      )}
+      {modes.map((m) => (
+        <label key={m} className="flex items-start gap-2 text-sm">
+          <input
+            type="radio"
+            name={name}
+            value={m}
+            className="mt-1"
+            checked={value === m}
+            onChange={() => onChange(m)}
+          />
+          <span>
+            {MODE_LABELS[m]}
+            <span className="block text-xs text-muted-foreground">{MODE_HINTS[m]}</span>
+          </span>
+        </label>
+      ))}
+    </fieldset>
   )
 }

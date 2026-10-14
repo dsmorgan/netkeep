@@ -716,7 +716,7 @@ GAPS: Final[tuple[str, ...]] = (
     " that the code which will do the work remembers to ask."
     f"{_UNWIRED_SENTENCE}"
     " The LinkedIn prefill's runner spends `li_prefills` and `profile_visits` before"
-    " it opens the profile, and for an auto-send (ADR 0008) `li_messages_auto` in place"
+    " it opens the profile, and for an auto-send `li_messages_auto` in place"
     " of `li_prefills`. Heat pauses both outright at its skip threshold. The connections"
     " sync and enrichment runners are wired: `netkeeper linkedin sync` and `enrich`,"
     " the runs API, and `netkeeper serve`'s scheduler reach them. The inbox poll's"
@@ -745,23 +745,23 @@ GAPS: Final[tuple[str, ...]] = (
     " `netkeeper serve` that has since exited still reads as scheduled.",
     "the heat skip gate reported is the one this report was handed, not one it"
     " goes and inspects. Run from the command line, or read from the Settings"
-    " page's `GET /api/v1/posture` (P2-12) -- which now runs inside the same"
+    " page's `GET /api/v1/posture` -- which now runs inside the same"
     " process `netkeeper serve` starts the scheduler in -- that is still only"
     " the gate this config would build a scheduler with; neither rereads the"
     " live scheduler's own gate object, so a gate passed some other way than"
     " `[linkedin.heat]` is not seen either way. `netkeeper serve` passes the"
     " configured `[linkedin.heat]`.",
     "whether a LinkedIn session is not merely present but still accepted is"
-    " something only a real job learns, from the response classification in"
-    " spec 9.7. This reports the cookie jar and the last flag raised, which is"
-    " everything that can be known without sending a request.",
+    " something only a real job learns, from how LinkedIn answers it. This reports"
+    " the cookie jar and the last flag raised, which is everything that can be known"
+    " without sending a request.",
     "the connections sync reads what LinkedIn's own connections page loads as it is"
-    " scrolled (ADR 0006); it sends no request of its own and alters none. Whether the"
+    " scrolled; it sends no request of its own and alters none. Whether the"
     " page still loads the list the way the 2026-09-24 capture showed is something"
     " only a run learns: a page it cannot read stops the run as `route_changed`, and"
     " a run that could not prove the end of the list ages nobody.",
     "enrichment reads each profile from what the page loads, and clicks Contact info"
-    " once per visit, only on a profile whose id is the contact's (ADR 0006). Which"
+    " once per visit, only on a profile whose id is the contact's. Which"
     " answers carry the profile's id, the education and phone sections, and how a"
     " missing profile answers were not in the 2026-09-24 capture: an unreadable"
     " profile counts toward the run's cap and stops it as `route_changed` after two"
@@ -780,8 +780,8 @@ def _browser_mode(mode: str, cdp_url: str) -> Protection:
         status = Status.OFF
         warnings.append(
             f"the browser provider reports mode {mode!r}, not {ATTACH_ONLY!r}. A browser"
-            " netkeeper starts is a second device on your LinkedIn account, which is the"
-            " restriction trigger ADR 0002 exists to avoid"
+            " netkeeper starts is a second device on your LinkedIn account, which can get the"
+            " account restricted. netkeeper attaches to your own Chrome to avoid that"
         )
     host = _host_of(cdp_url)
     if host not in LOOPBACK_HOSTS:
@@ -1296,7 +1296,7 @@ def _auto_send(settings: Settings, hold: AutoSendHold | None = None) -> Protecti
         return Protection(
             name="manual linkedin sends",
             status=Status.ON,
-            value="auto-send off (ADR 0004)",
+            value="auto-send off",
             key=KEY_MANUAL_LINKEDIN_SENDS,
         )
     return Protection(
@@ -1329,7 +1329,7 @@ def _budget(action: ActionClass, snapshot: BudgetSnapshot, settings: Settings) -
     asked_day = configured_default(action, budget, "day")
     if asked_day is not None and asked_day > hard_day:
         warnings.append(
-            f"config asks for {asked_day} a day, above spec 9.6's hard max of {hard_day}."
+            f"config asks for {asked_day} a day, above netkeeper's hard max of {hard_day}."
             f" The clamp holds and {hard_day} is what is enforced, but the config file"
             " says something the tool will not do"
         )
@@ -1348,7 +1348,7 @@ def _budget(action: ActionClass, snapshot: BudgetSnapshot, settings: Settings) -
     asked_week = configured_default(action, budget, "week")
     if hard_week is not None and asked_week is not None and asked_week > hard_week:
         warnings.append(
-            f"config asks for {asked_week} a week, above spec 9.6's hard max of"
+            f"config asks for {asked_week} a week, above netkeeper's hard max of"
             f" {hard_week}. The clamp holds and {hard_week} is what is enforced"
         )
     if snapshot.day.over:

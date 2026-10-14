@@ -23,7 +23,11 @@ import { Callout, EmptyState, ErrorNote, LoadingNote } from '@/features/crm/cont
 import { listsQuery } from '@/features/crm/api'
 import { budgetQuery, scheduleQuery } from '@/features/linkedin/api'
 import { readyQuery, stepOptionsQuery } from '@/features/linkedin-steps/api'
-import { autoSendStepText } from '@/features/linkedin-steps/format'
+import {
+  AUTO_SEND_STEP_OFF,
+  WAITS_FOR_PREFILL,
+  autoSendStepText,
+} from '@/features/linkedin-steps/format'
 import { LinkedInStepsSection } from '@/features/linkedin-steps/linkedin-steps-section'
 import { sendingHoursQuery } from '@/features/settings/api'
 import { stepTimeWarning } from '@/features/settings/sending-hours'
@@ -642,6 +646,7 @@ function StepRow({
         <td className="py-2 pr-3 text-muted-foreground">
           {MODE_LABELS[step.mode]}
           {step.mode === 'auto_send' && <AutoSendStepState />}
+          {step.mode === 'prefill' && <span className="block text-xs">{WAITS_FOR_PREFILL}</span>}
           {step.channel === 'linkedin' && <LinkedInStepCounts step={step} ready={ready} />}
         </td>
         <td className="py-2 pr-3 tabular-nums">{step.fired}</td>
@@ -682,10 +687,10 @@ function AutoSendStepState() {
   if (!options.isSuccess) return null
   return options.data.auto_send ? (
     <span className="block text-xs font-medium text-destructive">
-      on: netkeeper clicks Send itself
+      Sends on its own. netkeeper clicks Send itself.
     </span>
   ) : (
-    <span className="block text-xs">off in config.toml: waits for you to prefill</span>
+    <span className="block text-xs">{AUTO_SEND_STEP_OFF}</span>
   )
 }
 

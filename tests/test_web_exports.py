@@ -211,7 +211,7 @@ async def test_a_predicate_the_compiler_refuses_is_422_not_a_500(client: httpx.A
     tree = {"where": {"op": "enrolled_in", "campaign_id": 1}}
     response = await client.get("/api/v1/exports", params={"filter": json.dumps(tree)})
     assert response.status_code == 422
-    assert "P3-04" in response.text
+    assert "enrolled_in is not available yet" in response.text
 
 
 async def test_a_refused_filter_never_starts_a_body(

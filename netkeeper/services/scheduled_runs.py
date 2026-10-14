@@ -490,7 +490,7 @@ def start_serve_scheduler(
     log.info("scheduler started: %s", ", ".join(kind.value for kind in schedules))
     if JobKind.AUTO_SEND in schedules:
         log.warning(
-            "LinkedIn auto-send is on: netkeeper clicks Send itself for auto_send steps (ADR 0008)"
+            "LinkedIn auto-send is on: netkeeper clicks Send itself for steps set to Auto-send"
         )
         warning = auto_send_budget_warning(whole)
         if warning is not None:

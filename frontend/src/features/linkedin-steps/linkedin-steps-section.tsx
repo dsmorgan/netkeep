@@ -53,13 +53,16 @@ import {
   type WaitingItem,
 } from './api'
 import {
+  AUTO_SEND_ON_NOTE,
   AUTO_SEND_STEP_OFF,
   AUTO_SENT_STALE,
   ONE_AT_A_TIME,
   PREFILL_IT_YOURSELF,
   REVIEW_AND_SEND,
+  WAITS_FOR_PREFILL,
   ageText,
   autoSendStepText,
+  heldText,
   openPrefill,
   reasonText,
   waitingState,
@@ -157,7 +160,7 @@ function AutoSendBadge() {
       className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-2 py-1 text-destructive"
     >
       <Badge variant="destructive">Auto-send on</Badge>
-      netkeeper sends LinkedIn messages itself. See Settings, Posture.
+      {AUTO_SEND_ON_NOTE}
       {options.data.auto_send_warning != null && (
         <span className="block w-full">{options.data.auto_send_warning}</span>
       )}
@@ -210,7 +213,8 @@ export function LinkedInQueueCard({ campaignId, run }: { campaignId?: number; ru
       <CardHeader>
         <CardTitle level={2}>LinkedIn queue</CardTitle>
         <CardDescription>
-          Due LinkedIn steps. Prefill one while you watch Chrome; you send it yourself.
+          Due LinkedIn steps. Each row says whether it waits for you to prefill it or sends on its
+          own. When you prefill one, watch Chrome, and then click Send yourself.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3 text-sm">
@@ -356,7 +360,7 @@ function ReadyRow({
         </>
       )}
       <span className="text-muted-foreground">step {item.step_position}</span>
-      {item.auto_send && (
+      {item.auto_send ? (
         <span className="flex flex-wrap items-center gap-2">
           <Badge variant={autoSendOn ? 'destructive' : 'outline'}>
             {autoSendOn ? 'Auto-send' : 'Auto-send step'}
@@ -367,11 +371,11 @@ function ReadyRow({
               : AUTO_SEND_STEP_OFF}
           </span>
         </span>
+      ) : (
+        <span className="text-muted-foreground">{WAITS_FOR_PREFILL}</span>
       )}
       {item.held_until !== null && (
-        <span className="text-muted-foreground">
-          held by your sending hours until {formatWhen(item.held_until)}
-        </span>
+        <span className="text-muted-foreground">{heldText(item.held_until)}</span>
       )}
       <Button
         size="sm"
@@ -457,9 +461,7 @@ function TryAgainRow({
         {last.at !== null && ` Last try ${formatWhen(last.at)}.`}
       </p>
       {item.held_until !== null && (
-        <p className="text-muted-foreground">
-          held by your sending hours until {formatWhen(item.held_until)}
-        </p>
+        <p className="text-muted-foreground">{heldText(item.held_until)}</p>
       )}
       <ConfirmDialog
         open={confirming}

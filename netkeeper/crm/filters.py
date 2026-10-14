@@ -790,7 +790,7 @@ class UnsupportedPredicate(FilterError):
     def __init__(self, op: str, path: str, item: str) -> None:
         self.op = op
         self.item = item
-        super().__init__([FilterIssue(path, f"{op} is not available yet; {item} delivers it")])
+        super().__init__([FilterIssue(path, f"{op} is not available yet")])
 
 
 class ListReferenceError(FilterError):

@@ -127,7 +127,7 @@ describe('every predicate is reachable from the builder', () => {
       expect(element?.tagName).not.toBe('BUTTON')
     }
     expect(container.querySelector('[data-op="list_member"]')?.tagName).toBe('BUTTON')
-    expect(screen.getAllByText(/P3-04/).length).toBe(2)
+    expect(screen.getAllByText(/can.t filter by campaign yet/).length).toBe(2)
   })
 })
 
@@ -237,7 +237,7 @@ describe('an existing filter', () => {
     )
     expect(screen.getByText(/campaign #4/)).toBeInTheDocument()
     // Once beside the node and once in the "not ready to run" summary.
-    expect(screen.getAllByText(/P3-04/)).toHaveLength(2)
+    expect(screen.getAllByText(/can.t filter by campaign yet/)).toHaveLength(2)
     expect(screen.getByRole('status')).toHaveTextContent(/finish the conditions/i)
   })
 })

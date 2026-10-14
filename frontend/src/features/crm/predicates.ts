@@ -258,7 +258,7 @@ export const PREDICATES: readonly PredicateSpec[] = [
     group: 'logic',
     hint: 'Anyone a campaign has enrolled.',
     unavailable:
-      'Campaigns arrive with P3-04. The predicate parses so the language is complete, but the server refuses to compile it.',
+      "netkeeper can't filter by campaign yet, so this condition isn't available. The server refuses a filter that uses it.",
     create: () => ({ op: 'enrolled_in', campaign_id: 0 }),
     example: { op: 'enrolled_in', campaign_id: 1 },
   },
@@ -268,7 +268,7 @@ export const PREDICATES: readonly PredicateSpec[] = [
     group: 'logic',
     hint: 'Anyone who answered a campaign.',
     unavailable:
-      'Campaigns arrive with P3-04. The predicate parses so the language is complete, but the server refuses to compile it.',
+      "netkeeper can't filter by campaign yet, so this condition isn't available. The server refuses a filter that uses it.",
     create: () => ({ op: 'replied_in', campaign_id: 0 }),
     example: { op: 'replied_in', campaign_id: 1 },
   },
