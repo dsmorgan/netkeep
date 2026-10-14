@@ -233,6 +233,16 @@ async def test_kinds_are_counted_and_skipped_and_an_accepted_inmail_is_kept() ->
     assert delta.complete
 
 
+async def test_a_pending_inmail_filed_as_spam_is_skipped_and_never_attributed() -> None:
+    """``INMAIL`` + ``SPAM`` + ``PENDING`` (rule 4) counts as ``skipped_other`` (#519)."""
+    site = InboxSite([mp.INMAIL_SPAM], behavior=Behavior(first=1))
+    delta, _ = await read(site, spec(open_for=frozenset({mp.INMAIL_SPAM.urn})))
+
+    assert delta.conversations == ()
+    assert delta.skipped_other == 1 and delta.skipped_group == 0
+    assert site.thread_navigations == []
+
+
 async def test_a_third_sender_in_a_one_to_one_thread_is_a_stop_not_a_skipped_group() -> None:
     """The list said two participants: a third voice is an unknown shape, and a reply of the
     contact's could be hiding in it."""

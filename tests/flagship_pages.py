@@ -15,7 +15,10 @@ the choice is marked as invented.
   are the profile, a lazy experience card, and the contact-info overlay, which
   :mod:`netkeeper.linkedin.flagship_profile` reads (#190). Where the capture was silent
   (where the member's id sits on a profile, grouped roles, education, the phone,
-  Twitter, birthday, and address sections), the shape is marked as invented.
+  Twitter, birthday, and address sections), the shape is marked as invented. The
+  Contact info fixtures follow the CP8c overlay as rendered (#519): the phone as plain
+  text with ``(Mobile)``, the birthday as ``<Month> <D>``, ``Connected since`` as
+  ``<Mon> <D>, <YYYY>``.
 """
 
 from __future__ import annotations
@@ -958,15 +961,19 @@ def contact_info_payload(
     email_urls: Sequence[str] | None = None,
     website_urls: Sequence[str] | None = None,
     extra_sections: Sequence[str] = (),
+    phone_labels: Sequence[str] = (),
 ) -> bytes:
     """The contact-info overlay's answer (``POST .../actions/navigation``), trimmed.
 
     One section per kind, each an element with ``viewTrackingSpecs.viewName`` of
     ``contact-your-profile``, ``contact-website``, ``contact-email`` (captured) or
     ``contact-phone``, ``contact-twitter``, ``contact-birthday``, ``contact-address``
-    (**invented**: the capture's profile shared none of them, so the names are guesses
-    by analogy), a ``p`` heading, and one link per value whose action is a
-    ``NavigateToUrl`` (or, for the birthday and the address, a text). Websites point
+    (**invented** section names: the #149 capture's profile shared none of them, so the
+    names are guesses by analogy; the CP8c overlay as rendered, #519, showed the phone as
+    plain text with a ``(Mobile)`` label and the birthday as ``<Month> <D>``), a ``p``
+    heading, and one link per value whose action is a ``NavigateToUrl`` (or, for the
+    birthday and the address, a text). ``phone_labels`` renders each phone as plain text
+    followed by that label (``(Mobile)``) instead of a ``tel:`` link. Websites point
     through a ``linkedin.com`` wrapper (``/safety/go``) in the capture, and so do these. Use
     example.test addresses only. ``profile_slug`` makes the profile link name another
     slug; ``email_urls``/``website_urls`` replace the links' urls to spoil the shape.
@@ -1054,7 +1061,10 @@ def contact_info_payload(
                 list(zip(urls, shown, strict=False)),
             )
         )
-    if phones:
+    if phones and phone_labels:
+        texts = [t for pair in zip(phones, phone_labels, strict=True) for t in pair]
+        sections.append(section("contact-phone", "contact_phone", "Phone", [], texts))
+    elif phones:
         sections.append(
             section("contact-phone", "contact_phone", "Phone", [(f"tel:{p}", p) for p in phones])
         )
