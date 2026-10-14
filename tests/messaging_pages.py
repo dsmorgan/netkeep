@@ -1111,6 +1111,7 @@ INBOX_OLDER_PAGE: Final = (
     INMAIL_ACCEPTED_VERIFIED,
     INMAIL_ACCEPTED_LABELLED,
     SPONSORED_IN_INBOX,
+    # Defense in depth: the spam InMail sits in the list, so the poll proves it skips it.
     INMAIL_SPAM,
     GROUP,
     NO_MESSAGES,
