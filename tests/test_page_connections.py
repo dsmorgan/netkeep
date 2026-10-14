@@ -1174,7 +1174,7 @@ async def test_a_whole_copy_of_an_answer_with_a_hidden_member_is_used(
     assert out.result.losses == () and out.result.hidden == 1
     assert out.urns == _visible(people, hide)
     assert "answer for start 40 was read from the copy streamed as it arrived" in caplog.text
-    assert "rescued answer at start 40: whole by flight check: yes" in caplog.text
+    assert "nothing was lost; whole by flight check: yes" in caplog.text
     assert out.result.rescued_not_whole == 0
 
 
@@ -1192,7 +1192,29 @@ async def test_a_rescued_copy_the_flight_check_finds_not_whole_is_counted_not_re
     out = await sync(site)
     assert out.result.complete and out.result.losses == ()
     assert out.result.rescued_not_whole == 1 and out.urns == _visible(people, hide)
-    assert "rescued answer at start 40: whole by flight check: no" in caplog.text
+    assert "start 40 was read from the copy streamed" in caplog.text
+    assert "nothing was lost; whole by flight check: no" in caplog.text
+
+
+async def test_a_flight_check_that_raises_never_aborts_the_rescue(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#525 re-review: the check is only reported, so any exception from it reads as
+    not whole -- logged by its type name, never its message -- and the copy is used."""
+    caplog.set_level(logging.INFO, logger="netkeeper")
+
+    def raises(payload: object, *, endpoint: str) -> bool:
+        raise ValueError("fake-secret-detail-0000")
+
+    monkeypatch.setattr(page_connections, "is_whole", raises)
+    people = many(90)
+    hide = {40: 1}
+    site = FlagshipSite(people, tap=True, hide=hide, lost={40: Lost("move_on", streamed="whole")})
+    out = await sync(site)
+    assert out.result.complete and out.result.losses == ()
+    assert out.result.rescued_not_whole == 1 and out.urns == _visible(people, hide)
+    assert "whole by flight check: no (ValueError)" in caplog.text
+    assert "fake-secret-detail-0000" not in caplog.text
 
 
 class _MovesShort(FlagshipSite):

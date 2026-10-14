@@ -59,7 +59,9 @@ function titleCase(key: string): string {
  * `ProgressEvent`): enrichment's (`planned`, `visited`, `harvested`, `not_found`,
  * `unreadable`, `stopped`) or a connections sync's (`mode`, `pages`, `connections`,
  * `total`, `stopped`; a finished sync's counts also carry `hidden`, the places
- * LinkedIn's total counts that no answer held a card for, #515). Both are
+ * LinkedIn's total counts that no answer held a card for, #515, and
+ * `rescued_not_whole`, answers read from a streamed copy the flight check did
+ * not find whole, #525). Both are
  * `dict[str, Any]` on the wire — untyped on purpose,
  * since a job's own progress dataclass is free to change — so this only orders
  * whichever of these keys shows up and appends anything else after, rather than
@@ -77,6 +79,7 @@ const KNOWN_ORDER = [
   'unreadable',
   'total',
   'hidden',
+  'rescued_not_whole',
   'stopped',
 ]
 
