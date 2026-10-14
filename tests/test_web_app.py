@@ -123,6 +123,7 @@ API_PATHS = {
     "/api/v1/triage/suggestions/{key}/apply",
     "/api/v1/poll-status",
     "/api/v1/poll-status/gmail-replies/check-now",
+    "/api/v1/attention",
     "/api/v1/posture",
     "/api/v1/settings/self-contact",
     "/api/v1/settings/sending-hours",
@@ -344,6 +345,7 @@ def test_serve_app_logs_the_linkedin_message_risk_once_above_20_a_day(
 
 def test_known_api_modules_are_discovered() -> None:
     assert [name for name, _ in discover_routers()] == [
+        "attention",
         "autotag_rules",
         "campaign_review",
         "campaigns",
