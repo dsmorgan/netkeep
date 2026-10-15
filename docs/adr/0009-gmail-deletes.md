@@ -4,7 +4,7 @@ Date: 2026-10-14
 
 ## Status
 
-Proposed (#279).
+Accepted (#279). Proposed 2026-10-14; accepted by the maintainer the same day.
 
 Builds on [ADR 0003](0003-gmail-api-over-smtp.md), which says netkeeper never deletes mail. This ADR keeps that rule and sets the rules any later removal of drafts must follow.
 
