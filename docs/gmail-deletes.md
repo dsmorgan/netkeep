@@ -150,7 +150,7 @@ The Gmail page lists the leftover drafts (#543). See [The cleanup list](#the-cle
 
 ### 19. Reconcile gives up on a leftover
 
-- **Today:** a message left `scheduled` by a crash or an unknown outcome is searched for by its Message-ID. After enough empty searches, it's `discarded` when nothing would send it, or `failed` for a person (`netkeeper/services/campaign_engine.py:2448-2509`). If the write was a `drafts.create` that did reach Gmail, and Gmail's search never found it, the draft stays in Drafts with no `gmail_draft_id` recorded.
+- **Today:** a message left `scheduled` by a crash or an unknown outcome is searched for by its Message-ID. After enough empty searches, it's `discarded` when nothing would send it, or `failed` for a person (`netkeeper/services/campaign_engine.py:2524-2584`). If the write was a `drafts.create` that did reach Gmail, and Gmail's search never found it, the draft stays in Drafts with no `gmail_draft_id` recorded.
 - **Trash?** Yes, a candidate, but only once the draft is found by its Message-ID and matched as ADR 0009 requires. A draft netkeeper never recorded can't meet the draft id rule, so today the switch would leave it.
 - **By hand:** no. The enrollment table shows a `failed` message's error, not a draft that may remain.
 
