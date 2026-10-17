@@ -1506,9 +1506,10 @@ def linkedin_inbox_forget_owner(
     A poll that shows another mailbox than the one it recorded stops as `owner_mismatch`
     and writes nothing. If Chrome is signed in to another account, sign back in to yours
     first. If you moved netkeeper to a different LinkedIn account on purpose, run this,
-    then run `netkeeper linkedin inbox` by hand: that poll records the new mailbox. It
-    touches no browser and visits nothing. (If your own contact has a LinkedIn ID, that
-    is compared first and this command does not change it.)
+    then run `netkeeper linkedin inbox` by hand: that poll records the new mailbox, and
+    scheduled polls wait for it (#592). It touches no browser and visits nothing. (If
+    your own contact has a LinkedIn ID, that is compared first and this command does not
+    change it.)
     """
     state = ctx.ensure_object(CliState)
     _file_settings_or_exit(state)
@@ -1528,7 +1529,8 @@ def linkedin_inbox_forget_owner(
     finally:
         engine.dispose()
     typer.echo(
-        "forgotten: the next inbox poll records the mailbox it shows"
+        "forgotten: scheduled inbox polls wait until you run `netkeeper linkedin inbox` by"
+        " hand, which records the mailbox it shows"
         if cleared
         else "nothing to forget: no mailbox was recorded"
     )

@@ -900,6 +900,9 @@ STOP_REASON_TEXT: Final[Mapping[str, str]] = {
         " ID, it does not match this mailbox and netkeeper cannot edit it yet)"
     ),
     "first_inbox_poll": "refused: the first LinkedIn inbox poll is run by hand",
+    "inbox_owner_by_hand": (
+        "refused: the inbox owner was forgotten, so the poll that records it again is run by hand"
+    ),
     "browser_busy": "the browser was busy with another run",
     "browser_unavailable": "Chrome was not reachable or went away mid-run",
     "interrupted": "the netkeeper process running it stopped",

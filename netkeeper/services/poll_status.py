@@ -503,6 +503,12 @@ def _linkedin(
                 CheckState.BLOCKED,
                 "The first LinkedIn inbox poll is run by hand: run `netkeeper linkedin inbox`",
             )
+        if blocked is None and kind is JobKind.INBOX and inbox_apply.owner_hold(session, user):
+            blocked = (
+                CheckState.BLOCKED,
+                "The inbox owner was forgotten, so the next LinkedIn inbox poll is run by hand:"
+                " click Check inbox now on the LinkedIn page, or run `netkeeper linkedin inbox`",
+            )
         if blocked is None:
             blocked = _outside_hours(settings, now=now)
         if blocked is not None:

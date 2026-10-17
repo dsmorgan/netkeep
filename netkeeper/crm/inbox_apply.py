@@ -343,10 +343,35 @@ def owner_recorded(session: Session, user: User) -> bool:
     return get_setting(session, user, OWNER_KEY) is not None
 
 
+#: The ``settings_kv`` key set while scheduled inbox polls wait for a poll by hand after
+#: :func:`forget_owner` (#592): the next poll records whichever mailbox the page shows,
+#: so a person watches it, as they watch the first poll.
+OWNER_BY_HAND_KEY: Final = "linkedin.inbox.owner_by_hand"
+
+
 def forget_owner(session: Session, user: User) -> bool:
     """Forget the recorded mailbox owner, so the next poll records the account's new one.
-    Needs a writer. ``True`` when one was recorded."""
-    return delete_setting(session, user, OWNER_KEY)
+    Needs a writer. ``True`` when one was recorded.
+
+    Forgetting one also holds scheduled inbox polls (#592) until a poll a person starts
+    passes the owner check (:func:`release_owner_hold`): whichever account Chrome shows
+    then is recorded, and a person should be watching."""
+    forgotten = delete_setting(session, user, OWNER_KEY)
+    if forgotten:
+        set_setting(session, user, OWNER_BY_HAND_KEY, True)
+    return forgotten
+
+
+def owner_hold(session: Session, user: User) -> bool:
+    """Whether scheduled inbox polls wait for a poll by hand after a forgotten owner
+    (#592). Any stored value holds (fail closed). Read-only."""
+    return get_setting(session, user, OWNER_BY_HAND_KEY) is not None
+
+
+def release_owner_hold(session: Session, user: User) -> bool:
+    """A poll a person started passed the owner check: scheduled polls may run again.
+    Needs a writer. ``True`` when a hold was released."""
+    return delete_setting(session, user, OWNER_BY_HAND_KEY)
 
 
 # --- a first poll that could not read back far enough ------------------------------------

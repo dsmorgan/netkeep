@@ -817,7 +817,8 @@ def forget_inbox_owner(
 ) -> InboxOwnerForgottenOut:
     """Forget which LinkedIn mailbox the inbox poll recorded, after you changed accounts
     (#583): ``netkeeper linkedin inbox-forget-owner``. The next poll records whichever
-    mailbox the page shows. Touches no browser and visits nothing, and leaves your own
+    mailbox the page shows, so scheduled polls wait until a person runs one (#592).
+    Touches no browser and visits nothing, and leaves your own
     contact's LinkedIn ID as it is."""
     if not body.confirm:
         raise HTTPException(

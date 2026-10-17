@@ -57,7 +57,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from netkeeper.config import LinkedInSettings, Settings
-from netkeeper.crm.inbox_apply import has_anything_to_watch
+from netkeeper.crm.inbox_apply import has_anything_to_watch, owner_hold
 from netkeeper.db import off_loop, session_scope
 from netkeeper.models import SyncRun, SyncRunKind, SyncRunTrigger, User, UserKind
 from netkeeper.models.base import utcnow
@@ -172,6 +172,11 @@ def _handler(
             user = session.get(User, ctx.user_id)
             return user is not None and not runs.has_completed_inbox_poll(session, user)
 
+    def owner_is_unsupervised(ctx: JobContext) -> bool:
+        with session_scope(factory) as session:
+            user = session.get(User, ctx.user_id)
+            return user is not None and owner_hold(session, user)
+
     def record(ctx: JobContext) -> int | None:
         with session_scope(factory, write=True) as session:
             user = session.get(User, ctx.user_id)
@@ -199,6 +204,13 @@ def _handler(
                 run_kind.value,
             )
             return JobOutcome.FIRST_POLL_BY_HAND
+        if watch_check and await off_loop(owner_is_unsupervised, ctx):
+            log.info(
+                "scheduled %s not started: the inbox owner was forgotten, so the poll"
+                " that records it again is run by hand (`netkeeper linkedin inbox`)",
+                run_kind.value,
+            )
+            return JobOutcome.OWNER_BY_HAND
         try:
             # Off the event loop, in one writer session as before (#259).
             run_id = await off_loop(record, ctx)
