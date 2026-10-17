@@ -6,7 +6,9 @@
   create`` does.
 
 Restore stays in the terminal (``netkeeper restore``): it needs ``serve`` stopped.
-Backups belong to the database, not to a user, so the list is the same for everyone.
+Backups belong to the database, not to a user, so only the local owner account may list
+or take them (403 for any other user, #616), and the prune uses the owner's ``keep``, the
+nightly job's value, never the requester's.
 """
 
 from __future__ import annotations
@@ -15,11 +17,13 @@ import os
 import shlex
 from datetime import datetime
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import Engine
 
+from netkeeper.models import User
 from netkeeper.paths import DATA_ENV, data_dir
 from netkeeper.services.backup import (
     BACKUPS_DIRNAME,
@@ -30,6 +34,7 @@ from netkeeper.services.backup import (
     prune_backups,
 )
 from netkeeper.services.backup_job import backs_up
+from netkeeper.services.users import local_owner
 from netkeeper.web.deps import CurrentUser, SessionDep, effective_settings, read_only
 
 router = APIRouter(tags=["backups"])
@@ -81,6 +86,17 @@ def _backup_out(info: BackupInfo) -> BackupOut:
     )
 
 
+def _owner(session: SessionDep, user: CurrentUser) -> User:
+    """The requester, when they are the local owner; 403 for anyone else."""
+    owner = local_owner(session)
+    if owner is None or owner.id != user.id:
+        raise HTTPException(status_code=403, detail="only the local owner account manages backups")
+    return owner
+
+
+Owner = Annotated[User, Depends(_owner)]
+
+
 def _out(request: Request) -> BackupsOut:
     engine: Engine = request.app.state.engine
     directory = _directory()
@@ -92,7 +108,7 @@ def _out(request: Request) -> BackupsOut:
 
 
 @router.get("/backups", operation_id="list_backups")
-def get_backups(request: Request, user: CurrentUser) -> BackupsOut:
+def get_backups(request: Request, owner: Owner) -> BackupsOut:
     """The backups, newest first."""
     return _out(request)
 
@@ -101,12 +117,15 @@ def get_backups(request: Request, user: CurrentUser) -> BackupsOut:
     "/backups",
     operation_id="create_backup",
     status_code=201,
-    responses={409: {"description": "No backup could be made: the reason is in detail"}},
+    responses={
+        403: {"description": "Only the local owner account manages backups"},
+        409: {"description": "No backup could be made: the reason is in detail"},
+    },
 )
 @read_only  # it writes a file, never a row, so it never takes the database's write lock
-def post_backup(request: Request, session: SessionDep, user: CurrentUser) -> BackupsOut:
-    """Back up the database now, then delete the oldest past ``backup.keep``."""
-    keep = effective_settings(request, session, user).backup.keep
+def post_backup(request: Request, session: SessionDep, owner: Owner) -> BackupsOut:
+    """Back up the database now, then delete the oldest past the owner's ``backup.keep``."""
+    keep = effective_settings(request, session, owner).backup.keep
     if keep < 1:
         raise HTTPException(status_code=409, detail=f"backup.keep must be at least 1, got {keep}")
     engine: Engine = request.app.state.engine

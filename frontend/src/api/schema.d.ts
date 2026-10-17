@@ -172,7 +172,7 @@ export interface paths {
         put?: never;
         /**
          * Post Backup
-         * @description Back up the database now, then delete the oldest past ``backup.keep``.
+         * @description Back up the database now, then delete the oldest past the owner's ``backup.keep``.
          */
         post: operations["create_backup"];
         delete?: never;
@@ -9928,6 +9928,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["BackupsOut"];
                 };
+            };
+            /** @description Only the local owner account manages backups */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description No backup could be made: the reason is in detail */
             409: {

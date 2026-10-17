@@ -16666,7 +16666,7 @@
         ]
       },
       "post": {
-        "description": "Back up the database now, then delete the oldest past ``backup.keep``.",
+        "description": "Back up the database now, then delete the oldest past the owner's ``backup.keep``.",
         "operationId": "create_backup",
         "responses": {
           "201": {
@@ -16678,6 +16678,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "Only the local owner account manages backups"
           },
           "409": {
             "description": "No backup could be made: the reason is in detail"

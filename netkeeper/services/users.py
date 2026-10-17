@@ -13,6 +13,17 @@ from netkeeper.models import User, UserKind
 log = logging.getLogger(__name__)
 
 
+def local_owner(session: Session) -> User | None:
+    """The owner account: the first ``local`` user, or None before one exists.
+
+    The one query behind "the local user" for anything that acts on the whole install
+    rather than on one user's rows: the nightly backup's settings, the ``/backups`` API.
+    """
+    return session.scalars(
+        select(User).where(User.kind == UserKind.LOCAL).order_by(User.id)
+    ).first()
+
+
 def ensure_local_user(session: Session, *, settings: Settings | None = None) -> User:
     """Return the local user, creating it on first start and keeping its timezone current.
 
@@ -38,9 +49,7 @@ def ensure_local_user(session: Session, *, settings: Settings | None = None) -> 
     user and not to one machine's config file (ADR 0005). This writes, so it
     needs the writer session every caller already uses.
     """
-    existing = session.scalars(
-        select(User).where(User.kind == UserKind.LOCAL).order_by(User.id)
-    ).first()
+    existing = local_owner(session)
     if existing is not None:
         if settings is not None and existing.timezone != settings.linkedin.timezone:
             log.info(
