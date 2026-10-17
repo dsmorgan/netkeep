@@ -13,7 +13,10 @@ a slug or URN, a URL or file name that can carry one) is logged as
 ``personal(value)``. The terminal shows it as it is; the file shows it between
 :data:`PERSONAL_OPEN` and :data:`PERSONAL_CLOSE`, so a support bundle (#603) can
 redact every such span (:data:`PERSONAL_PATTERN`) without guessing. Message text is
-never logged at all, personal or not (#517).
+never logged at all, personal or not (#517). Exception text can carry the same values,
+so a log call that interpolates an exception wraps it in :func:`personal_exc`: the file
+shows the type name unmarked and the message marked (#628). A test scans ``netkeeper/``
+for a call that does not.
 
 The access log never shows the query string of a path in
 :data:`REDACTED_QUERY_PATHS`: the Gmail OAuth callback carries the authorization
@@ -162,13 +165,15 @@ class _MarkedExc:
         self.exc = exc
 
     def __str__(self) -> str:
-        return f"{type(self.exc).__name__} {_mark(str(self.exc))}"
+        name = type(self.exc).__name__
+        text = str(self.exc)
+        return f"{name} {_mark(text)}" if text else name
 
     def __repr__(self) -> str:
         name = type(self.exc).__name__
         text = repr(self.exc)
         rest = text[len(name) :] if text.startswith(name) else text
-        return f"{name}{_mark(rest)}"
+        return f"{name}{_mark(rest)}" if rest not in ("", "()") else name
 
 
 def personal_exc(exc: BaseException) -> PersonalExc:
