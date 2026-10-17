@@ -14,7 +14,6 @@ import logging
 import os
 import re
 import sqlite3
-import uuid
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, tzinfo
@@ -33,7 +32,12 @@ BACKUPS_DIRNAME = "backups"
 STAMP_FORMAT = "%Y%m%dT%H%M%SZ"
 # ISO 8601 basic form: sorts chronologically as text and has no characters that
 # any filesystem or shell objects to (colons in particular).
-_NAME = re.compile(r"^netkeeper-(?P<stamp>\d{8}T\d{6}Z)\.sqlite3$")
+_NAME = re.compile(r"^netkeeper-(?P<stamp>\d{8}T\d{6}Z)(?P<pre>-pre-restore)?\.sqlite3$")
+PRE_RESTORE_SUFFIX = "-pre-restore"
+"""Marks the backup ``netkeeper restore`` takes of the database it replaces."""
+
+PRE_RESTORE_KEEP_DAYS = 30
+"""How long the newest pre-restore backup (a restore's undo) is exempt from pruning."""
 
 NIGHTLY_HOUR = 3
 """The local hour (in ``linkedin.timezone``) from which a night's backup is due."""
@@ -46,8 +50,13 @@ class BackupError(Exception):
 
 
 class RestoreError(Exception):
-    """A backup could not be restored. The database in place was not changed, unless the
-    message says the restore went through and only ``db upgrade`` after it failed."""
+    """A backup could not be restored, and the database in place holds what it held
+    before, unless the message says the restore went through and only ``db upgrade``
+    after it failed."""
+
+
+class DatabaseInUse(RestoreError):
+    """Another connection has the database open, so restore refused before changing it."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,11 +79,14 @@ class BackupInfo:
     path: Path
     created_at: datetime
     size: int
+    pre_restore: bool = False
+    """``netkeeper restore``'s backup of the database it replaced."""
 
 
-def backup_name(created_at: datetime) -> str:
+def backup_name(created_at: datetime, *, pre_restore: bool = False) -> str:
     """The file name of a backup taken at ``created_at`` (timezone-aware)."""
-    return f"netkeeper-{_utc(created_at).strftime(STAMP_FORMAT)}.sqlite3"
+    suffix = PRE_RESTORE_SUFFIX if pre_restore else ""
+    return f"netkeeper-{_utc(created_at).strftime(STAMP_FORMAT)}{suffix}.sqlite3"
 
 
 def parse_backup_name(name: str) -> datetime | None:
@@ -117,18 +129,25 @@ def create_backup(
     return target
 
 
-def prune_backups(backups_dir: Path, keep: int) -> list[Path]:
+def prune_backups(backups_dir: Path, keep: int, *, now: datetime | None = None) -> list[Path]:
     """Delete all but the newest ``keep`` backups in ``backups_dir``; return what was removed.
 
     Newest means by the timestamp in the name, not by mtime. Only files named like
     a backup are considered, so anything else in the directory (a renamed backup
-    someone wants to keep, notes, a restore in progress) is left alone. Removed
-    paths come back oldest first.
+    someone wants to keep, notes, a restore in progress) is left alone. The newest
+    pre-restore backup, the last restore's undo, is neither pruned nor counted until
+    it is :data:`PRE_RESTORE_KEEP_DAYS` days old (at ``now``) or a later restore takes
+    its place. Removed paths come back oldest first.
     """
     if keep < 1:
         raise ValueError(f"keep must be at least 1, got {keep}")
+    found = list_backups(backups_dir)
+    undo = next((info for info in found if info.pre_restore), None)
+    at = datetime.now(UTC) if now is None else _utc(now)
+    if undo is not None and at - undo.created_at < timedelta(days=PRE_RESTORE_KEEP_DAYS):
+        found.remove(undo)
     removed: list[Path] = []
-    for info in reversed(list_backups(backups_dir)[keep:]):
+    for info in reversed(found[keep:]):
         info.path.unlink(missing_ok=True)
         log.info("pruned backup %s", info.path)
         removed.append(info.path)
@@ -144,7 +163,14 @@ def list_backups(backups_dir: Path) -> list[BackupInfo]:
         created_at = parse_backup_name(path.name)
         if created_at is None or not path.is_file():
             continue
-        found.append(BackupInfo(path=path, created_at=created_at, size=path.stat().st_size))
+        found.append(
+            BackupInfo(
+                path=path,
+                created_at=created_at,
+                size=path.stat().st_size,
+                pre_restore=path.name.endswith(f"{PRE_RESTORE_SUFFIX}.sqlite3"),
+            )
+        )
     found.sort(key=lambda info: info.created_at, reverse=True)
     return found
 
@@ -155,7 +181,8 @@ def nightly_due(newest: datetime | None, now: datetime, timezone: str) -> bool:
 
     So the night's backup is taken at the first check after 03:00, and a machine asleep
     then takes it at its first check after waking. A backup made by hand after 03:00
-    counts as that night's. A zone that cannot be read counts as UTC.
+    counts as that night's; ``newest`` leaves out pre-restore backups, which never do.
+    A zone that cannot be read counts as UTC.
     """
     tz: tzinfo = find_zone(timezone) or UTC
     local = _utc(now).astimezone(tz)
@@ -181,16 +208,24 @@ def restore_backup(
 ) -> RestoreResult:
     """Put the backup at ``source`` in place of the SQLite database at ``database_url``.
 
-    The caller makes sure nothing has the database open (``netkeeper restore`` holds the
-    serve lock). In order: the backup is checked (an intact SQLite file at a revision
-    this netkeeper knows), the database in place is backed up into ``backups_dir``, the
-    backup is copied with SQLite's backup API to a temporary file beside the database
-    and checked again, the old database's WAL is checkpointed and cleared, the copy is
-    renamed over the database, and the migrations run to head (``db upgrade``). Up to
-    the rename, a failure leaves the database as it was (:class:`RestoreError`); the
-    rename itself is atomic, so the database is always either the old file or the
-    whole restored one. Nothing is pruned: the backup of the database replaced must
-    outlive the restore.
+    ``netkeeper restore`` holds the serve lock, so no ``serve`` starts meanwhile. In
+    order:
+
+    1. The backup is checked: SQLite's integrity check, and a revision these
+       migrations know.
+    2. The database in place is opened and locked exclusively
+       (:func:`_lock_exclusively`). Any other connection to it, from any process,
+       makes this fail with :class:`DatabaseInUse`, before anything is written.
+    3. Through that connection, the database is backed up into ``backups_dir`` as a
+       pre-restore backup, then the backup at ``source`` is written over it with
+       SQLite's backup API: one transaction under a rollback journal, so a crash or a
+       failure leaves the old contents and a success leaves all of the new ones.
+       Because it is the same file, a symlinked database stays a symlink, and a
+       process that opened the path while the lock was held reads the restored
+       database once it gets in.
+    4. The migrations run to head (``db upgrade``).
+
+    Nothing is pruned: the backup of the database replaced must outlive the restore.
     """
     try:
         target = _sqlite_path(database_url)
@@ -200,25 +235,24 @@ def restore_backup(
     if target.exists() and source == target.resolve():
         raise RestoreError(f"{source} is the database itself")
     source_revision = _check_restorable(source)
+    stamp = datetime.now(UTC) if now is None else _utc(now)
+    created = not target.exists()
+    target.parent.mkdir(parents=True, exist_ok=True)
     previous: Path | None = None
-    if target.is_file():
-        try:
-            previous = create_backup(database_url, backups_dir, now=now)
-        except BackupError as exc:
-            raise RestoreError(f"could not back up the database in place first: {exc}") from exc
-    temporary = target.with_name(f".{target.name}.restore-{uuid.uuid4().hex}")
     try:
-        _copy_database(source, temporary)
-        if target.is_file():
-            _clear_wal(target)
-        temporary.replace(target)
-    except (OSError, sqlite3.Error) as exc:
-        raise RestoreError(f"restoring {source} failed; {target} is unchanged: {exc}") from exc
-    finally:
-        temporary.unlink(missing_ok=True)
-        for suffix in ("-wal", "-shm", "-journal"):
-            Path(f"{temporary}{suffix}").unlink(missing_ok=True)
-    _fsync_directory(target.parent)
+        with closing(_lock_exclusively(target)) as connection:
+            if not created:
+                previous = _pre_restore_backup(connection, target, backups_dir, stamp)
+            try:
+                _write_over(connection, source)
+            except sqlite3.Error as exc:
+                raise RestoreError(
+                    f"restoring {source} failed, and {target} holds what it held before: {exc}"
+                ) from exc
+    except BaseException:
+        if created:
+            target.unlink(missing_ok=True)
+        raise
     log.info("restored %s over %s", source, target)
     engine = make_engine(database_url)
     try:
@@ -241,6 +275,72 @@ def restore_backup(
         source_revision=source_revision,
         revision=revision,
     )
+
+
+IN_USE = "another netkeeper process has the database open; stop it and retry"
+
+
+def _lock_exclusively(database: Path) -> sqlite3.Connection:
+    """A connection holding ``database`` exclusively until it closes, or
+    :class:`DatabaseInUse` when any other connection has it open.
+
+    ``locking_mode=EXCLUSIVE`` and ``BEGIN EXCLUSIVE`` (never waiting: ``timeout=0``)
+    fail while another connection is open, even an idle one, and write nothing. Then
+    the write-ahead log is folded in, every frame of it (``busy`` 0, all frames
+    checkpointed), and the database leaves WAL mode (``journal_mode=DELETE``), which
+    SQLite itself refuses while anyone else could still read the log. Only then is the
+    log gone, by SQLite's own hand. Up to this point the database's contents are
+    unchanged; a refusal after the checkpoint leaves the same rows in the main file.
+    The next ``make_engine`` puts it back in WAL mode.
+    """
+    connection = sqlite3.connect(database, isolation_level=None, timeout=0)
+    try:
+        try:
+            connection.execute("PRAGMA locking_mode=EXCLUSIVE")
+            connection.execute("BEGIN EXCLUSIVE")
+            connection.execute("COMMIT")
+            busy, frames, copied = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            if busy != 0 or frames != copied:
+                raise DatabaseInUse(
+                    f"{database}: {IN_USE} (its write-ahead log could not be folded in:"
+                    f" busy={busy}, {copied} of {frames} frames)"
+                )
+            (mode,) = connection.execute("PRAGMA journal_mode=DELETE").fetchone()
+        except sqlite3.OperationalError as exc:
+            raise DatabaseInUse(f"{database}: {IN_USE} ({exc})") from exc
+        if str(mode).lower() != "delete":
+            raise DatabaseInUse(f"{database}: {IN_USE} (it stayed in {mode} mode)")
+    except BaseException:
+        connection.close()
+        raise
+    return connection
+
+
+def _write_over(connection: sqlite3.Connection, source: Path) -> None:
+    """Copy ``source`` over the database ``connection`` holds, in one transaction: a
+    failure rolls back to what was there. (``source`` passed the integrity check.)"""
+    with closing(sqlite3.connect(f"{source.as_uri()}?mode=ro", uri=True)) as reader:
+        reader.backup(connection)
+
+
+def _pre_restore_backup(
+    connection: sqlite3.Connection, database: Path, backups_dir: Path, stamp: datetime
+) -> Path:
+    """``VACUUM INTO`` a pre-restore backup through the exclusive ``connection``, so it
+    holds exactly what the restore replaces."""
+    backups_dir.mkdir(parents=True, exist_ok=True)
+    target = backups_dir / backup_name(stamp, pre_restore=True)
+    if target.exists():
+        raise RestoreError(f"could not back up {database} first: {target} already exists")
+    log.info("backing up %s to %s before the restore", database, target)
+    try:
+        connection.execute("VACUUM INTO ?", (str(target),))
+    except sqlite3.Error as exc:
+        target.unlink(missing_ok=True)
+        raise RestoreError(
+            f"could not back up {database} first, and it holds what it held before: {exc}"
+        ) from exc
+    return target
 
 
 def _check_restorable(source: Path) -> str:
@@ -268,44 +368,6 @@ def _check_restorable(source: Path) -> str:
             " netkeeper made it); upgrade netkeeper first"
         )
     return revision
-
-
-def _copy_database(source: Path, destination: Path) -> None:
-    """A consistent copy of ``source`` at ``destination`` through SQLite's backup API,
-    checked and synced to disk."""
-    uri = f"{source.as_uri()}?mode=ro"
-    with (
-        closing(sqlite3.connect(uri, uri=True)) as reader,
-        closing(sqlite3.connect(destination)) as writer,
-    ):
-        reader.backup(writer)
-        if writer.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
-            raise sqlite3.DatabaseError(f"the copy at {destination} failed its check")
-    fd = os.open(destination, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-
-
-def _clear_wal(database: Path) -> None:
-    """Fold ``database``'s write-ahead log into it and remove the log, so a WAL the old
-    file left behind is never replayed into the restored one. Its content is already in
-    the backup taken first."""
-    with closing(sqlite3.connect(database, isolation_level=None)) as connection:
-        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    for suffix in ("-wal", "-shm"):
-        Path(f"{database}{suffix}").unlink(missing_ok=True)
-
-
-def _fsync_directory(directory: Path) -> None:
-    fd = os.open(directory, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    except OSError:
-        pass  # some filesystems refuse a directory fsync; the rename is still atomic
-    finally:
-        os.close(fd)
 
 
 def _sqlite_path(engine_or_url: Engine | str) -> Path:

@@ -8,8 +8,14 @@ import type { Backup, Backups } from './api'
 import { humanSize } from './backup-size'
 import { BackupsSection } from './backups-section'
 
-function backup(name: string, createdAt: string, size: number): Backup {
-  return { name, created_at: createdAt, size, restore_command: `netkeeper restore ${name}` }
+function backup(name: string, createdAt: string, size: number, preRestore = false): Backup {
+  return {
+    name,
+    created_at: createdAt,
+    size,
+    restore_command: `netkeeper restore /data/backups/${name}`,
+    pre_restore: preRestore,
+  }
 }
 
 const OLDER = backup('netkeeper-20261015T030500Z.sqlite3', '2026-10-15T03:05:00Z', 2048)
@@ -43,14 +49,26 @@ describe('BackupsSection', () => {
   it('lists each backup with its size and the command that restores it', async () => {
     renderSection({ directory: '/data/backups', available: true, backups: [NEWER, OLDER] })
     expect(
-      await screen.findByText('netkeeper restore netkeeper-20261016T031000Z.sqlite3'),
+      await screen.findByText('netkeeper restore /data/backups/netkeeper-20261016T031000Z.sqlite3'),
     ).toBeInTheDocument()
     expect(
-      screen.getByText('netkeeper restore netkeeper-20261015T030500Z.sqlite3'),
+      screen.getByText('netkeeper restore /data/backups/netkeeper-20261015T030500Z.sqlite3'),
     ).toBeInTheDocument()
     expect(screen.getByText(/1\.5 MB/)).toBeInTheDocument()
     expect(screen.getByText(/2\.0 KB/)).toBeInTheDocument()
     expect(screen.getByText('/data/backups')).toBeInTheDocument()
+  })
+
+  it('marks the backup a restore took of the database it replaced', async () => {
+    const undo = backup(
+      'netkeeper-20261016T120000Z-pre-restore.sqlite3',
+      '2026-10-16T12:00:00Z',
+      96,
+      true,
+    )
+    renderSection({ directory: '/data/backups', available: true, backups: [undo, OLDER] })
+    expect(await screen.findByText(/taken before a restore/)).toBeInTheDocument()
+    expect(screen.getAllByText(/taken before a restore/)).toHaveLength(1)
   })
 
   it('says so when there are none', async () => {
@@ -62,7 +80,7 @@ describe('BackupsSection', () => {
     const { posts } = renderSection({ directory: '/d', available: true, backups: [OLDER] })
     fireEvent.click(await screen.findByRole('button', { name: 'Back up now' }))
     expect(
-      await screen.findByText('netkeeper restore netkeeper-20261017T120000Z.sqlite3'),
+      await screen.findByText('netkeeper restore /data/backups/netkeeper-20261017T120000Z.sqlite3'),
     ).toBeInTheDocument()
     expect(posts()).toBe(1)
   })

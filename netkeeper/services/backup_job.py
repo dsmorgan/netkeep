@@ -93,12 +93,13 @@ class NightlyBackups:
             log.warning("nightly backup skipped: backup.keep must be at least 1, got %d", keep)
             return None
         now = self._clock()
-        found = list_backups(self.backups_dir)
+        # A pre-restore backup holds the database a restore replaced, not tonight's.
+        found = [info for info in list_backups(self.backups_dir) if not info.pre_restore]
         newest = found[0].created_at if found else None
         if not nightly_due(newest, now, settings.linkedin.timezone):
             return None
         written = create_backup(self._engine, self.backups_dir, now=now)
-        removed = prune_backups(self.backups_dir, keep)
+        removed = prune_backups(self.backups_dir, keep, now=now)
         log.info("nightly backup wrote %s; pruned %d (keeping %d)", written, len(removed), keep)
         return written
 

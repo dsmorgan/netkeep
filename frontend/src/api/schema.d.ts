@@ -4141,6 +4141,8 @@ export interface components {
             created_at: string;
             /** Name */
             name: string;
+            /** Pre Restore */
+            pre_restore: boolean;
             /** Restore Command */
             restore_command: string;
             /** Size */

@@ -1350,6 +1350,10 @@
             "title": "Name",
             "type": "string"
           },
+          "pre_restore": {
+            "title": "Pre Restore",
+            "type": "boolean"
+          },
           "restore_command": {
             "title": "Restore Command",
             "type": "string"
@@ -1363,7 +1367,8 @@
           "name",
           "created_at",
           "size",
-          "restore_command"
+          "restore_command",
+          "pre_restore"
         ],
         "title": "BackupOut",
         "type": "object"
