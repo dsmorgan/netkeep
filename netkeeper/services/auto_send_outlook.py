@@ -10,8 +10,8 @@ step, and if not, the first check that stops it.
 **One source of truth.** Nothing here re-implements a check. The outlook calls the
 functions the fire itself calls, in the fire's order, at the fire's time:
 
-1. ``[campaigns] linkedin_auto_send``, as ``netkeeper serve`` reads it, and whether the
-   job has a due time at all;
+1. ``[campaigns] linkedin_auto_send``, as the fire reads it (``config.toml``, then the
+   Settings page, #598), and whether the job has a due time at all;
 2. the scheduler's gate (:func:`netkeeper.services.scheduler.gate_skip_reason`): disarmed,
    paused, the session flag, heat;
 3. the handler's checks (:func:`netkeeper.services.scheduled_runs.auto_send_fire_check`):
@@ -207,8 +207,8 @@ def outlook(session: Session, user: User, *, now: datetime, settings: Settings) 
     def waits(wait: Wait | None, **fields: object) -> AutoSendOutlook:
         return replace(blank, wait=wait, **fields)  # type: ignore[arg-type]
 
-    # 1. The flag, as serve reads it: off, the job has no handler and no fire.
-    if not settings.campaigns.linkedin_auto_send:
+    # 1. The flag, as the fire reads it (#598): off, the fire claims nothing.
+    if not ui_settings.auto_send_on(session, user, settings):
         return waits(Wait.AUTO_SEND_OFF)
     if next_fire is None:
         return waits(Wait.NOT_SCHEDULED)
@@ -360,8 +360,8 @@ SPACING_MAX_MINUTES: Final = round(AUTO_SEND_SPACING_MAX)
 #: Each wait in plain words; ``{until}`` is filled in where the wait has an end.
 WORDS: Final[dict[Wait, str]] = {
     Wait.AUTO_SEND_OFF: (
-        "auto-send is off ([campaigns] linkedin_auto_send in config.toml), so nothing sends"
-        " on its own"
+        "auto-send is off (LinkedIn auto-send on the Settings page, or"
+        " campaigns.linkedin_auto_send in config.toml), so nothing sends on its own"
     ),
     Wait.NOT_SCHEDULED: (
         "the auto-send check isn't scheduled yet; `netkeeper serve` schedules it when it starts"

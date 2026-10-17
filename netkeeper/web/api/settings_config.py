@@ -8,8 +8,9 @@ is optional and wins for any key it sets; each field says where its value comes 
   here, when a change applies, and the warnings and notes the value in force earns.
 - ``PUT /settings/config`` stores ``values`` (a key to a value, or ``null`` to go back
   to the default): every one, or none. ``422`` names each value refused: above its hard
-  maximum, below its minimum, the wrong type, a key the file sets, a key the page never
-  changes (``campaigns.linkedin_auto_send``), or an unknown key.
+  maximum, below its minimum, the wrong type, a key the file sets, or an unknown key.
+  Turning ``campaigns.linkedin_auto_send`` on also needs ``confirm: true``: you read
+  the field's ``confirm_text`` (#598). Turning it off needs nothing and applies at once.
 - ``POST /settings/restart`` restarts ``netkeeper serve`` (#597), for a field marked
   ``restart_pending`` or a config.toml changed since it started: ``202``, then serve
   stops cleanly and comes back. ``409`` when this process cannot restart itself, when
@@ -76,6 +77,9 @@ class ConfigFieldOut(BaseModel):
     """Where ``value`` comes from. The file wins over the page, the page over the default."""
     editable: bool
     locked_reason: str | None
+    confirm_text: str | None
+    """What turning this field on means; a ``PUT`` that turns it on needs ``confirm``.
+    Null for a field that needs no confirmation."""
     restart_pending: bool
     """The running ``serve`` still uses another value; restart it to apply this one."""
     stored_unreadable: bool
@@ -121,6 +125,9 @@ class ConfigIn(BaseModel):
     values: dict[str, Any] = Field(min_length=1)
     """Keys to new values; ``null`` goes back to the default (automatic, for the
     weekly profile-visit limit)."""
+    confirm: bool = False
+    """Required to turn ``campaigns.linkedin_auto_send`` on: you read its
+    ``confirm_text``. Ignored otherwise."""
 
 
 def _on_disk(base: Settings) -> tuple[Settings | None, str | None]:
@@ -179,6 +186,7 @@ def _out(request: Request, session: SessionDep, user: User) -> ConfigOut:
                     if not owner and view.spec.group in OWNER_ONLY_GROUPS
                     else view.locked_reason
                 ),
+                confirm_text=view.spec.confirm_text,
                 restart_pending=view.restart_pending,
                 stored_unreadable=view.stored_unreadable,
                 warnings=list(view.warnings),
@@ -215,7 +223,7 @@ def set_config_settings(
         if any(key in body.values for key in owner_only):
             raise HTTPException(status_code=403, detail=NOT_OWNER_NOTE)
     try:
-        ui_settings.write(session, user, base, body.values)
+        ui_settings.write(session, user, base, body.values, confirm_auto_send=body.confirm)
     except ui_settings.SettingsRefused as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     # The log file is this process's: new rotation limits apply from the next record.

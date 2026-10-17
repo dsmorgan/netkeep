@@ -720,10 +720,7 @@ describe('a campaign with a LinkedIn step (#383)', () => {
 
   it.each([
     [true, 'Sends on its own. netkeeper clicks Send itself.'],
-    [
-      false,
-      'Auto-send step, but auto-send is off in config.toml, so it waits for you to prefill it.',
-    ],
+    [false, 'Auto-send step, but auto-send is off in Settings, so it waits for you to prefill it.'],
   ])('says whether an auto-send step sends itself (flag %s)', async (on, text) => {
     mockFetch(
       campaignBackend(

@@ -50,9 +50,82 @@ async def test_every_field_answers_its_default_with_its_source(client: httpx.Asy
         "maximum": 50,
         "warn_above": 20,
     }
-    auto = _field(body, "campaigns.linkedin_auto_send")
-    assert auto["editable"] is False and auto["locked_reason"]
+    auto = _field(body, AUTO)
+    assert (auto["value"], auto["source"], auto["editable"]) == (False, "default", True)
+    assert auto["locked_reason"] is None
+    assert auto["confirm_text"] == ui_settings.AUTO_SEND_CONFIRM
+    assert _field(body, PREFILLS)["confirm_text"] is None
     assert all(f["key"] for f in body["fields"])
+
+
+AUTO = "campaigns.linkedin_auto_send"
+
+
+async def _on_everywhere(client: httpx.AsyncClient) -> dict[str, bool]:
+    """Whether each reader the UI shows says auto-send is on."""
+    options = (await client.get("/api/v1/campaigns/linkedin/options")).json()
+    schedule = (await client.get("/api/v1/linkedin/schedule")).json()
+    settings = _field((await client.get(URL)).json(), AUTO)
+    return {
+        "options": options["auto_send"],
+        "schedule": schedule["auto_send"]["on"],
+        "settings": settings["value"],
+    }
+
+
+async def test_the_switch_turns_auto_send_on_only_with_confirm(client: httpx.AsyncClient) -> None:
+    """#598: the API refuses to turn auto-send on without ``confirm``, and says why."""
+    refused = await _put(client, {AUTO: True})
+    assert refused.status_code == 422, refused.text
+    assert "needs your confirmation" in refused.json()["detail"]
+    assert "can't be taken back" in refused.json()["detail"]
+    explicit = await client.put(URL, json={"values": {AUTO: True}, "confirm": False}, headers=CSRF)
+    assert explicit.status_code == 422
+    assert await _on_everywhere(client) == dict.fromkeys(("options", "schedule", "settings"), False)
+
+    on = await client.put(URL, json={"values": {AUTO: True}, "confirm": True}, headers=CSRF)
+    assert on.status_code == 200, on.text
+    field = _field(on.json(), AUTO)
+    assert (field["value"], field["source"], field["restart_pending"]) == (True, "ui", False)
+    assert "steps set to Auto-send" in field["warnings"][0]
+    # Every reader sees it at once, with no restart.
+    assert await _on_everywhere(client) == dict.fromkeys(("options", "schedule", "settings"), True)
+
+
+async def test_the_switch_turns_auto_send_off_with_no_confirm(client: httpx.AsyncClient) -> None:
+    on = await client.put(URL, json={"values": {AUTO: True}, "confirm": True}, headers=CSRF)
+    assert on.status_code == 200, on.text
+    off = await _put(client, {AUTO: False})
+    assert off.status_code == 200, off.text
+    assert await _on_everywhere(client) == dict.fromkeys(("options", "schedule", "settings"), False)
+
+
+@pytest.mark.parametrize("file_value", [False, True])
+async def test_config_toml_locks_the_auto_send_switch(
+    running_app: FastAPI, client: httpx.AsyncClient, file_value: bool
+) -> None:
+    """One source of truth: the file's value is what every reader and the page show."""
+    on = await client.put(
+        URL, json={"values": {AUTO: not file_value}, "confirm": True}, headers=CSRF
+    )
+    assert on.status_code == 200, on.text
+    base = running_app.state.settings
+    running_app.state.settings = replace(
+        base,
+        source_path=Path("/etc/netkeeper.toml"),
+        file_keys=frozenset({AUTO}),
+        campaigns=replace(base.campaigns, linkedin_auto_send=file_value),
+    )
+    field = _field((await client.get(URL)).json(), AUTO)
+    assert (field["value"], field["source"], field["editable"]) == (file_value, "file", False)
+    assert field["locked_reason"].startswith("Set in /etc/netkeeper.toml")
+    readers = await _on_everywhere(client)
+    assert readers == dict.fromkeys(("options", "schedule", "settings"), file_value)
+    refused = await client.put(
+        URL, json={"values": {AUTO: not file_value}, "confirm": True}, headers=CSRF
+    )
+    assert refused.status_code == 422
+    assert "the file wins" in refused.json()["detail"]
 
 
 async def test_a_saved_value_is_in_force_on_the_next_request(client: httpx.AsyncClient) -> None:

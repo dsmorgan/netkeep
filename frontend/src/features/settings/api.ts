@@ -181,11 +181,15 @@ export const configSettingsQuery = queryOptions({
 
 /**
  * Store new values, all or none: `null` goes back to the default. 422 names each value
- * refused (above its hard maximum, a key config.toml sets, and so on).
+ * refused (above its hard maximum, a key config.toml sets, and so on). `confirm` says the
+ * person confirmed a field's `confirm_text`: turning LinkedIn auto-send on needs it (#598).
  */
-export async function saveConfigSettings(values: Record<string, unknown>): Promise<ConfigSettings> {
+export async function saveConfigSettings(
+  values: Record<string, unknown>,
+  { confirm = false }: { confirm?: boolean } = {},
+): Promise<ConfigSettings> {
   const { data, error, response } = await api.PUT('/api/v1/settings/config', {
-    body: { values },
+    body: { values, confirm },
   })
   if (data === undefined) throw failure(error, response, 'PUT /settings/config')
   return data

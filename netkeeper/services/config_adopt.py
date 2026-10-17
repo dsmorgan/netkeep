@@ -4,7 +4,9 @@ A one-time helper. For each key the file sets that the Settings page can change,
 value is checked the way the page checks it: one above its hard maximum is stored at
 the maximum (and reported); one the page cannot hold otherwise (below its minimum, the
 wrong type, a window that is not a window) stays in the file, and is reported. Keys the
-page never changes (``campaigns.linkedin_auto_send``, ``web.*``, pacing, ...) stay too.
+page never changes (``web.*``, pacing, ...) stay too, and so does
+``campaigns.linkedin_auto_send``: the page turns it on only with a person's confirmation
+(#598), so adopting never moves it.
 
 The file is edited line by line, so its comments and layout survive: each moved key's
 line (and the continuation lines of a value that spans several) is removed, and nothing
@@ -78,7 +80,9 @@ def plan(text: str, settings: Settings) -> AdoptPlan:
     clamped: dict[str, tuple[Any, JsonValue]] = {}
     kept: dict[str, str] = {}
     for spec in ui_settings.FIELDS:
-        if spec.key not in file_keys or not spec.editable:
+        if spec.key not in file_keys or not spec.editable or spec.confirm_text is not None:
+            # A field that needs a confirmation to turn on (auto-send, #598) stays in the
+            # file: adopting it would store the page's value with nobody confirming it.
             continue
         value = _lookup(raw, spec.key)
         try:

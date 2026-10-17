@@ -4188,7 +4188,8 @@ export interface components {
          * AutoSendOutlookOut
          * @description When the next auto-send goes out, or why it waits. Read-only.
          *
-         *     ``on`` is ``[campaigns] linkedin_auto_send``. ``next_fire`` is the auto-send job's next
+         *     ``on`` is ``[campaigns] linkedin_auto_send`` in force (config.toml, then the Settings
+         *     page). ``next_fire`` is the auto-send job's next
          *     due time; ``checked_at`` is the time the checks were read for (``next_fire``, or now
          *     once that has passed). ``wait`` is null when that fire would claim a step, and
          *     ``enrollment_id`` is then the one it tries first; otherwise it names the first check
@@ -4825,6 +4826,8 @@ export interface components {
             applies: "now" | "restart";
             /** Applies Note */
             applies_note: string;
+            /** Confirm Text */
+            confirm_text: string | null;
             /** Default */
             default: unknown;
             /** Editable */
@@ -4875,6 +4878,11 @@ export interface components {
         };
         /** ConfigIn */
         ConfigIn: {
+            /**
+             * Confirm
+             * @default false
+             */
+            confirm: boolean;
             /** Values */
             values: {
                 [key: string]: unknown;

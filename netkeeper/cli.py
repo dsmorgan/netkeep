@@ -2398,8 +2398,8 @@ def _auto_send_lines(seen: auto_send_outlook.AutoSendOutlook, *, on: bool) -> li
     how the last one ended. One line while auto-send is off."""
     if not on:
         return [
-            "auto-send: off ([campaigns] linkedin_auto_send in config.toml), so nothing sends"
-            " on its own"
+            "auto-send: off (LinkedIn auto-send on the Settings page, or"
+            " campaigns.linkedin_auto_send in config.toml), so nothing sends on its own"
         ]
     lines = [
         "auto-send: on"
@@ -4676,8 +4676,8 @@ def _mode_lines(p: step_mode.ModePreview, to: StepMode) -> list[str]:
         )
         if not p.auto_send_on:
             lines.append(
-                "auto-send is off ([campaigns] linkedin_auto_send), so nothing sends on its"
-                " own until you turn it on."
+                "auto-send is off (LinkedIn auto-send on the Settings page), so nothing"
+                " sends on its own until you turn it on."
             )
     else:
         lines.append("nothing more on this step is sent on its own: each message waits for you.")

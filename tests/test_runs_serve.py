@@ -229,7 +229,6 @@ async def test_a_disarmed_serve_never_touches_the_browser_across_a_week(
             user = _local(session)
             user_id, account = user.id, ensure_account(session, user).id
         registry = serve_registry(factory, app.state.executor, app.state.tasks, clock=clock)
-        assert scheduler.JobKind.AUTO_SEND not in registry  # ADR 0008: off by default
         for kind, handler in registry.items():
             outcome = await handler(
                 scheduler.JobContext(
@@ -237,9 +236,13 @@ async def test_a_disarmed_serve_never_touches_the_browser_across_a_week(
                 )
             )
             # The inbox poll (P4-08) has nobody to watch here, so it stops even earlier.
+            # Auto-send is off by default (ADR 0008): its handler, always registered
+            # (#598), reads the flag first and claims nothing.
             expected = (
                 scheduler.JobOutcome.NOTHING_TO_WATCH
                 if kind is scheduler.JobKind.INBOX
+                else scheduler.JobOutcome.NOTHING_TO_SEND
+                if kind is scheduler.JobKind.AUTO_SEND
                 else scheduler.JobOutcome.DISARMED_AFTER_GATE
             )
             assert outcome is expected

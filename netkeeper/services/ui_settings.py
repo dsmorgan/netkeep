@@ -32,12 +32,18 @@ are built once. :func:`describe` reports when the running process still has the 
 one, and the Settings page then offers **Restart netkeeper** (``POST
 /settings/restart``, :mod:`netkeeper.services.restart`).
 
-**What is not here.** ``linkedin_auto_send`` is shown, never written: turning it on
-from a web page would need a confirm step as deliberate as ``schedule arm``. Secrets
-never are settings; they stay in the Keychain. ``web.*`` stays file-only: it is the
-address the page itself is served from, so a wrong value would leave no page to fix
-it with. Pacing and heat stay file-only as safety tuning, and nothing reads the LLM
-keys yet. The inventory is on #597.
+**Auto-send** (``campaigns.linkedin_auto_send``, #598). The page turns it on only with
+a confirmation (:data:`AUTO_SEND_CONFIRM`, the ``confirm_auto_send`` argument to
+:func:`write`), and turns it off with none. Every reader resolves it where it acts, so
+off applies at once: the scheduler's next fire claims nothing, and an auto-send already
+running stops at its next gate, before the navigation or before the Send click. On
+applies from the scheduler's next fire. A key ``config.toml`` sets wins here too, so the
+file and the page never disagree.
+
+**What is not here.** Secrets never are settings; they stay in the Keychain. ``web.*``
+stays file-only: it is the address the page itself is served from, so a wrong value
+would leave no page to fix it with. Pacing and heat stay file-only as safety tuning,
+and nothing reads the LLM keys yet. The inventory is on #597.
 """
 
 from __future__ import annotations
@@ -131,7 +137,23 @@ class FieldSpec:
     editable: bool = True
     locked_reason: str | None = None
     """Why the Settings page never writes this one."""
+    confirm_text: str | None = None
+    """What turning it on means: the page shows it, and :func:`write` turns the field on
+    only with a confirmation that it was read."""
 
+
+AUTO_SEND_KEY: Final = "campaigns.linkedin_auto_send"
+
+AUTO_SEND_CONFIRM: Final = (
+    "With auto-send on, netkeeper clicks Send on LinkedIn by itself for campaign steps set"
+    " to Auto-send, with nobody watching. A message it sends can't be taken back."
+    " Automated messages are what LinkedIn restricts accounts for fastest, and an account"
+    " LinkedIn restricts can't be used with netkeeper at all. Every other check still"
+    " applies: scheduled runs must be armed, the step must be set to Auto-send, and the"
+    " auto-send budget, active hours, spacing and heat all hold. Turning it off here stops"
+    " any auto-send that hasn't clicked Send yet."
+)
+"""What turning LinkedIn auto-send on means, in the words the confirmation shows (#598)."""
 
 _BUDGET_NOTE = (
     "Applies from the next LinkedIn run and the next prefill. A run already going keeps"
@@ -213,10 +235,7 @@ FIELDS: Final[tuple[FieldSpec, ...]] = (
         key="linkedin.budget.li_messages_auto_per_day",
         group="linkedin_budgets",
         label="Auto-sent LinkedIn messages a day",
-        help=(
-            "Only used when LinkedIn auto-send is on, which it is not unless config.toml"
-            " turns it on."
-        ),
+        help="Only used while LinkedIn auto-send is on, which it is not by default.",
         kind="int",
         applies="now",
         applies_note=_BUDGET_NOTE,
@@ -409,7 +428,7 @@ FIELDS: Final[tuple[FieldSpec, ...]] = (
         applies_note="Applies to the next suggestion and the next campaign tick.",
     ),
     FieldSpec(
-        key="campaigns.linkedin_auto_send",
+        key=AUTO_SEND_KEY,
         group="campaigns",
         label="LinkedIn auto-send",
         help=(
@@ -417,13 +436,13 @@ FIELDS: Final[tuple[FieldSpec, ...]] = (
             " sends LinkedIn messages itself for steps set to Auto-send."
         ),
         kind="bool",
-        applies="restart",
-        applies_note="Only config.toml can change it.",
-        editable=False,
-        locked_reason=(
-            "Auto-send is the action LinkedIn restricts hardest, so the Settings page never"
-            " turns it on. Only config.toml can change it."
+        applies="now",
+        applies_note=(
+            "Off applies at once: an auto-send that hasn't clicked Send stops, and due steps"
+            " wait for you to prefill them. On applies from netkeeper serve's next auto-send"
+            " check, within 10 minutes. Turning it on asks you to confirm."
         ),
+        confirm_text=AUTO_SEND_CONFIRM,
     ),
     FieldSpec(
         key="backup.nightly",
@@ -600,6 +619,13 @@ def _replace_path(node: Any, parts: list[str], value: object) -> Any:
     return replace(node, **{head: new})
 
 
+def auto_send_on(session: Session, user: User, base: Settings) -> bool:
+    """Whether LinkedIn auto-send is on for ``user`` now (#598): ``config.toml`` when it
+    sets the key, else the Settings page, else off. Read where a send decides, never kept:
+    off applies from the next read. Read-only."""
+    return resolve(session, user, base).campaigns.linkedin_auto_send
+
+
 # --- validating -------------------------------------------------------------------
 
 
@@ -726,13 +752,21 @@ def to_json(value: object) -> JsonValue:
 # --- writing ----------------------------------------------------------------------
 
 
-def write(session: Session, user: User, base: Settings, changes: Mapping[str, JsonValue]) -> None:
+def write(
+    session: Session,
+    user: User,
+    base: Settings,
+    changes: Mapping[str, JsonValue],
+    *,
+    confirm_auto_send: bool = False,
+) -> None:
     """Store ``changes`` for ``user``: all of them, or none (:class:`SettingsRefused`).
 
     A ``None`` value removes the stored one, so the default applies (for the weekly
     profile-visit limit, that is automatic). A key the config file sets, a key the page
-    never writes, an unknown key, and a value outside its range are each refused.
-    Needs a writer session.
+    never writes, an unknown key, and a value outside its range are each refused, and so
+    is turning LinkedIn auto-send on without ``confirm_auto_send`` (#598): the caller
+    showed :data:`AUTO_SEND_CONFIRM` and the person confirmed it. Needs a writer session.
     """
     problems: dict[str, str] = {}
     parsed: dict[str, JsonValue] = {}
@@ -757,6 +791,9 @@ def write(session: Session, user: User, base: Settings, changes: Mapping[str, Js
             parsed[key] = to_json(parse(spec, raw))
         except ValueError as exc:
             problems[key] = str(exc)
+            continue
+        if key == AUTO_SEND_KEY and parsed[key] is True and not confirm_auto_send:
+            problems[key] = f"turning auto-send on needs your confirmation. {AUTO_SEND_CONFIRM}"
     if not problems:
         problems.update(_cross_field(base, {**stored(session, user), **parsed}, parsed))
     if not problems and "linkedin.timezone" in parsed:
@@ -769,6 +806,12 @@ def write(session: Session, user: User, base: Settings, changes: Mapping[str, Js
         else:
             set_setting(session, user, KEY_PREFIX + key, value)
         log.info("setting %s changed on the Settings page for user %d", key, user.id)
+        if key == AUTO_SEND_KEY and value is True:
+            log.warning(
+                "LinkedIn auto-send turned on on the Settings page for user %d: netkeeper"
+                " clicks Send itself for steps set to Auto-send",
+                user.id,
+            )
     if "linkedin.timezone" in parsed:
         sync_timezone(session, user, resolve(session, user, base))
 

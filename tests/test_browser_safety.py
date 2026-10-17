@@ -22,7 +22,6 @@ The offline behavior tests and the opt-in smoke suite are the other two layers.
 from __future__ import annotations
 
 import ast
-import dataclasses
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from functools import cache
@@ -2591,12 +2590,17 @@ def test_a_send_permit_is_built_only_by_the_runner_after_the_auto_send_budget() 
     body = source[source.index("async def run_prefill") : source.index("def _after_failure")]
     assert "ActionClass.LI_MESSAGES_AUTO if auto else ActionClass.LI_PREFILLS" in body
     assert "auto_send_allowance(" in body and "count >= limit" in body
-    assert "auto_send_refusal(settings, StepMode.AUTO_SEND)" in body
+    # #598: the flag is read from the database at each gate, never from the run's settings.
+    assert "on = ui_settings.auto_send_on(session, user, settings)" in body
+    assert "auto_send_refusal(on, StepMode.AUTO_SEND)" in body
+    assert "campaigns.linkedin_auto_send" not in body
     assert "refuse_if_outside_active_hours" in body
     # And only prepare decides a run is an auto-send: a scheduled run, flag on, step mode.
     prepare = source[source.index("def prepare(") : source.index("def auto_send_refusal")]
     assert 'mode="auto_send" if scheduled else "prefill"' in prepare
-    assert "auto_send_refusal(settings, step_mode)" in prepare
+    assert "auto_on = ui_settings.auto_send_on(session, user, settings)" in prepare
+    assert "auto_send_refusal(auto_on, step_mode)" in prepare
+    assert "campaigns.linkedin_auto_send" not in prepare
 
 
 def test_auto_send_needs_the_flag_and_the_mode() -> None:
@@ -2605,15 +2609,11 @@ def test_auto_send_needs_the_flag_and_the_mode() -> None:
     from netkeeper.models import StepMode
     from netkeeper.services.message_send import auto_send_refusal
 
-    off = Settings()
-    on = dataclasses.replace(
-        off, campaigns=dataclasses.replace(off.campaigns, linkedin_auto_send=True)
-    )
-    assert off.campaigns.linkedin_auto_send is False
-    assert auto_send_refusal(off, StepMode.AUTO_SEND) == "auto-send is off"
-    assert auto_send_refusal(on, StepMode.PREFILL) == "the step is not an auto-send step"
-    assert auto_send_refusal(on, None) == "the step is not an auto-send step"
-    assert auto_send_refusal(on, StepMode.AUTO_SEND) is None
+    assert Settings().campaigns.linkedin_auto_send is False
+    assert auto_send_refusal(False, StepMode.AUTO_SEND) == "auto-send is off"
+    assert auto_send_refusal(True, StepMode.PREFILL) == "the step is not an auto-send step"
+    assert auto_send_refusal(True, None) == "the step is not an auto-send step"
+    assert auto_send_refusal(True, StepMode.AUTO_SEND) is None
 
 
 def test_the_sent_bubble_and_tab_are_closed_only_after_a_landed_send() -> None:

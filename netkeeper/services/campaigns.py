@@ -177,7 +177,8 @@ def _step(
         raise InvalidCampaign(f"step {position}: a {channel.value} step cannot be {mode.value}")
     if mode is StepMode.AUTO_SEND and not settings.campaigns.linkedin_auto_send:
         raise InvalidCampaign(
-            f"step {position}: auto_send needs [campaigns] linkedin_auto_send = true"
+            f"step {position}: auto_send needs LinkedIn auto-send on (the Settings page, or"
+            " [campaigns] linkedin_auto_send = true in config.toml)"
         )
     delay = spec.delay_days
     if delay is None:

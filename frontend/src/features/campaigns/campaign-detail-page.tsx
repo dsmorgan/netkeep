@@ -713,7 +713,7 @@ function StepRow({
 
 /**
  * Whether an `auto_send` step sends on its own (ADR 0008): only while `[campaigns]
- * linkedin_auto_send` is on in config.toml. With it off, the step waits for a prefill.
+ * linkedin_auto_send` is on (Settings, or config.toml). With it off, the step waits for a prefill.
  */
 function AutoSendStepState() {
   const options = useQuery(stepOptionsQuery)

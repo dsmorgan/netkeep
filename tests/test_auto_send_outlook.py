@@ -793,8 +793,8 @@ def _status(*args: str) -> str:
 def test_schedule_status_says_auto_send_is_off(cli_db: Any) -> None:
     output = _status()
     assert (
-        "auto-send: off ([campaigns] linkedin_auto_send in config.toml), so nothing sends on its"
-        " own"
+        "auto-send: off (LinkedIn auto-send on the Settings page, or"
+        " campaigns.linkedin_auto_send in config.toml), so nothing sends on its own"
     ) in output
     assert "auto-send is off" not in output  # said once, not twice
 

@@ -16,8 +16,8 @@
  *   person clicks Try again for one; when the last try clicked Message, it first asks
  *   them to confirm no message bubble for that contact is open in Chrome.
  * - **Auto-send** (ADR 0008): an `auto_send` step is marked in the queue, and says
- *   whether `[campaigns] linkedin_auto_send` is on. Only `config.toml` turns it on;
- *   nothing here does. A stale message auto-send clicked Send for says so.
+ *   whether `[campaigns] linkedin_auto_send` is on. Settings (with a confirmation) or
+ *   `config.toml` turns it on; nothing here does. A stale message auto-send clicked Send for says so.
  *
  * A part-typed prefill is never retried: a person clears the composer in Chrome and
  * discards it. No message text is shown anywhere here; netkeeper never closes the tab.

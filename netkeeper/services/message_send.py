@@ -24,7 +24,10 @@ In order, and nothing later runs when an earlier step refuses:
 **Auto-send** (ADR 0008). A ``message_send`` run the scheduler recorded (``scheduled``,
 :func:`netkeeper.services.linkedin_steps.claim_auto_send`) is an auto-send. Before the
 lock it must still be one: ``[campaigns] linkedin_auto_send`` on and the step's mode
-``auto_send``, or it records ``not_typed`` and nothing opens. Under the lock it must be
+``auto_send``, or it records ``not_typed`` and nothing opens. The flag is read from the
+database at each of its checks (:func:`~netkeeper.services.ui_settings.auto_send_on`,
+#598), never from the settings the run started with, so turning auto-send off on the
+Settings page stops a run already going at its next check. Under the lock it must be
 inside active hours, the session unflagged and heat under its skip threshold (heat pauses
 an auto-send outright, as it does a prefill), and today's ``li_messages_auto`` budget
 (:func:`auto_send_allowance`) not spent;
@@ -86,7 +89,7 @@ from netkeeper.models import (
     User,
 )
 from netkeeper.scoping import get_scoped, scoped
-from netkeeper.services import budgets, runs
+from netkeeper.services import budgets, runs, ui_settings
 from netkeeper.services import campaign_engine as engine
 from netkeeper.services import heat as heat_service
 from netkeeper.services.budgets import ActionClass, BudgetExceeded
@@ -463,6 +466,8 @@ def prepare(
             raise ValueError(f"run {run_id} is a {run.kind.value} run, not message_send")
         account_id = run.linkedin_account_id
         scheduled = run.trigger is SyncRunTrigger.SCHEDULED
+        # #598: the flag as it is now, not as the run started with it.
+        auto_on = ui_settings.auto_send_on(session, user, settings)
         message = _claimed(session, user, run_id)
         if message is None:
             claimed = None
@@ -512,7 +517,7 @@ def prepare(
     if scheduled:
         # ADR 0008: a run nobody watches types only as an auto-send, and only while it
         # still is one. Nothing is opened, spent, or typed otherwise.
-        refusal = auto_send_refusal(settings, step_mode)
+        refusal = auto_send_refusal(auto_on, step_mode)
         if refusal is not None:
             return refuse(_not_typed(refusal), opened=False)
     if not body:
@@ -567,10 +572,11 @@ def still_wanted(session: Session, user: User, run_id: int, *, now: datetime) ->
     return None
 
 
-def auto_send_refusal(settings: Settings, mode: StepMode | None) -> str | None:
-    """Why an auto-send may not run (ADR 0008), in fixed words, or ``None``: the config
-    flag off, or a step whose mode is not ``auto_send``."""
-    if not settings.campaigns.linkedin_auto_send:
+def auto_send_refusal(auto_send_on: bool, mode: StepMode | None) -> str | None:
+    """Why an auto-send may not run (ADR 0008), in fixed words, or ``None``: the flag off
+    (``auto_send_on``, read live by the caller, #598), or a step whose mode is not
+    ``auto_send``."""
+    if not auto_send_on:
         return "auto-send is off"
     if mode is not StepMode.AUTO_SEND:
         return "the step is not an auto-send step"
@@ -639,7 +645,10 @@ async def run_prefill(
         """The gates checked before the navigation and again before an auto-send's click."""
         now = clock()
         if auto:
-            refusal = auto_send_refusal(settings, StepMode.AUTO_SEND)
+            # #598: read from the database at every gate, before the navigation and again
+            # before the click, so turning auto-send off stops this run.
+            on = ui_settings.auto_send_on(session, user, settings)
+            refusal = auto_send_refusal(on, StepMode.AUTO_SEND)
             if refusal is not None:
                 return refusal
             # Live reads, asked again before the click: disarming or pausing scheduled
