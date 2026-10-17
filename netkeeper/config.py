@@ -21,7 +21,7 @@ from dataclasses import dataclass, field, fields, is_dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Union, get_args, get_origin, get_type_hints
 
-from netkeeper.logging_setup import DEFAULT_KEEP, DEFAULT_MAX_MB
+from netkeeper.logging_setup import DEFAULT_KEEP, DEFAULT_MAX_MB, personal
 from netkeeper.paths import config_candidates
 
 if TYPE_CHECKING:
@@ -204,7 +204,7 @@ def load_settings(explicit: Path | None = None) -> Settings:
     for candidate in config_candidates(explicit):
         if candidate.is_file():
             return _load_file(candidate)
-        log.debug("%s: no config file there", candidate)
+        log.debug("%s: no config file there", personal(candidate))
     log.debug("no config file found; using built-in defaults")
     return Settings()
 
@@ -218,7 +218,7 @@ def _load_file(path: Path) -> Settings:
     raw = _drop_deprecated(raw, source=path)
     raw, legacy_me = _drop_me(raw, source=path)
     settings = _from_table(Settings, raw, prefix="", source=path)
-    log.debug("loaded settings from %s", path)
+    log.debug("loaded settings from %s", personal(path))
     file_keys = frozenset(_leaf_keys(raw))
     if "linkedin.active_hours" in file_keys:
         settings = replace(
@@ -246,7 +246,7 @@ def _drop_me(raw: dict[str, Any], *, source: Path) -> tuple[dict[str, Any], Lega
     if "me" not in raw:
         return raw, None
     cleaned = {k: v for k, v in raw.items() if k != "me"}
-    log.warning("%s: ignoring the deprecated [me] section: %s", source, ME_SECTION_ADVICE)
+    log.warning("%s: ignoring the deprecated [me] section: %s", personal(source), ME_SECTION_ADVICE)
     table = raw["me"]
     if not isinstance(table, Mapping):
         return cleaned, None
@@ -272,7 +272,7 @@ def _drop_deprecated(raw: dict[str, Any], *, source: Path) -> dict[str, Any]:
         reasons = sorted({DEPRECATED_KEYS[key] for key in found})
         log.warning(
             "%s: ignoring deprecated %s %s (%s). %s",
-            source,
+            personal(source),
             "key" if len(found) == 1 else "keys",
             ", ".join(found),
             "; ".join(reasons),
@@ -300,9 +300,9 @@ def _from_table[T: DataclassInstance](
             continue
         key = _join(prefix, name)
         if isinstance(raw[name], Mapping):
-            log.warning("%s: ignoring unknown section [%s]", source, key)
+            log.warning("%s: ignoring unknown section [%s]", personal(source), key)
         else:
-            log.warning("%s: ignoring unknown key %s", source, key)
+            log.warning("%s: ignoring unknown key %s", personal(source), key)
     build: Callable[..., T] = cls
     return build(**kwargs)
 

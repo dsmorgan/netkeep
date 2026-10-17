@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from netkeeper.config import Settings
 from netkeeper.db import session_scope
+from netkeeper.logging_setup import personal
 from netkeeper.services import ui_settings
 from netkeeper.services.backup import create_backup, list_backups, nightly_due, prune_backups
 from netkeeper.services.users import local_owner
@@ -100,7 +101,9 @@ class NightlyBackups:
             return None
         written = create_backup(self._engine, self.backups_dir, now=now)
         removed = prune_backups(self.backups_dir, keep, now=now)
-        log.info("nightly backup wrote %s; pruned %d (keeping %d)", written, len(removed), keep)
+        log.info(
+            "nightly backup wrote %s; pruned %d (keeping %d)", personal(written), len(removed), keep
+        )
         return written
 
     def _settings(self) -> Settings:

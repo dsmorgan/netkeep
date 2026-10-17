@@ -19,6 +19,8 @@ from fastapi import FastAPI, HTTPException
 from starlette.responses import FileResponse, HTMLResponse, Response
 from starlette.staticfiles import StaticFiles
 
+from netkeeper.logging_setup import personal
+
 log = logging.getLogger(__name__)
 
 FRONTEND_DIST_ENV = "NETKEEPER_FRONTEND_DIST"
@@ -65,10 +67,10 @@ def mount_frontend(app: FastAPI, dist: Path) -> None:
     """Add the static mount and the SPA fallback, or the not-built page. Call last."""
     index = dist / "index.html"
     if not index.is_file():
-        log.info("frontend build not found at %s; serving the not-built page", dist)
+        log.info("frontend build not found at %s; serving the not-built page", personal(dist))
         _mount_placeholder(app, dist)
         return
-    log.info("serving the frontend build from %s", dist)
+    log.info("serving the frontend build from %s", personal(dist))
     assets = dist / "assets"
     if assets.is_dir():
         app.mount("/assets", StaticFiles(directory=assets), name="assets")

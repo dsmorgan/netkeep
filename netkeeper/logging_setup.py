@@ -18,12 +18,14 @@ never logged at all, personal or not (#517).
 The access log never shows the query string of a path in
 :data:`REDACTED_QUERY_PATHS`: the Gmail OAuth callback carries the authorization
 code there, and a code is a credential until it is spent (CLAUDE.md "Secrets").
-Every other query string (a search can name a person) is marked personal.
+Every other query string (a search can name a person) is marked personal, and so is
+the rest of a path under :data:`PERSONAL_PATH_PREFIXES`.
 """
 
 from __future__ import annotations
 
 import copy
+import fcntl
 import logging
 import os
 import re
@@ -32,7 +34,7 @@ from collections.abc import Mapping
 from io import TextIOWrapper
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Final, TextIO
+from typing import Final, TextIO, cast
 
 from netkeeper.paths import data_dir
 
@@ -53,9 +55,17 @@ _MB: Final = 1024 * 1024
 PERSONAL_OPEN: Final = "\u27e6"  # ⟦
 PERSONAL_CLOSE: Final = "\u27e7"  # ⟧
 PERSONAL_PATTERN: Final = re.compile(
-    f"{PERSONAL_OPEN}[^{PERSONAL_OPEN}{PERSONAL_CLOSE}]*{PERSONAL_CLOSE}"
+    f"{PERSONAL_OPEN}(?:[^{PERSONAL_OPEN}{PERSONAL_CLOSE}]*{PERSONAL_CLOSE}"
+    f"|[^{PERSONAL_OPEN}{PERSONAL_CLOSE}\n]*$)",
+    re.MULTILINE,
 )
-"""One personal value in the log file, markers included."""
+"""One personal value in the log file, markers included. A span a precision format cut
+short (``%.20s``, which drops the closing marker) runs to the end of a line instead, so
+a redactor takes too much rather than too little."""
+
+PERSONAL_PATH_PREFIXES: Final = ("/api/v1/templates/dictionary/", "/api/v1/imports/presets/")
+"""Access-log paths whose rest is a value you typed (a dictionary word, often a name; a
+preset name): marked personal in the file, like every query string."""
 
 #: Paths whose query string the access log replaces with ``?<redacted>``.
 REDACTED_QUERY_PATHS = frozenset({"/api/v1/mailboxes/oauth/callback"})
@@ -118,7 +128,9 @@ def personal(value: object) -> Personal:
     """Mark ``value`` personal for one log call: ``log.info("saved %s", personal(name))``.
 
     It renders as ``str(value)`` (or ``repr`` for ``%r``) on the terminal and between
-    markers in the log file. Use it with ``%s`` or ``%r``, never ``%d``.
+    markers in the log file. Use it with ``%s`` or ``%r``, never ``%d``, and without a
+    precision (``%.20s`` would cut off the closing marker; :data:`PERSONAL_PATTERN` then
+    redacts to the end of the line).
     """
     return Personal(value)
 
@@ -130,20 +142,32 @@ def _mark(text: str) -> str:
     return f"{PERSONAL_OPEN}{cleaned}{PERSONAL_CLOSE}"
 
 
-class _QueryPath(_Tagged):
-    """An access-log path whose query string is personal: ``/api?⟦q=...⟧`` in the file."""
+class _AccessPath(_Tagged):
+    """An access-log path with personal pieces: ``/api/v1/x?⟦q=...⟧`` in the file."""
 
-    __slots__ = ("path", "query")
+    __slots__ = ("pieces",)
 
-    def __init__(self, path: str, query: str) -> None:
-        self.path = path
-        self.query = query
+    def __init__(self, pieces: tuple[tuple[str, bool], ...]) -> None:
+        self.pieces = pieces  # (text, personal)
 
     def __str__(self) -> str:
-        return f"{self.path}?{self.query}"
+        return "".join(text for text, _ in self.pieces)
 
     def tagged(self) -> str:
-        return f"{self.path}?{_mark(self.query)}"
+        return "".join(_mark(text) if mine else text for text, mine in self.pieces)
+
+
+def _access_path(path: str, query: str | None) -> _AccessPath | None:
+    """``path`` (and ``query``) with what is personal marked, or None when nothing is."""
+    pieces: list[tuple[str, bool]] = [(path, False)]
+    lowered = path.lower()
+    for prefix in PERSONAL_PATH_PREFIXES:
+        if lowered.startswith(prefix) and len(path) > len(prefix):
+            pieces = [(path[: len(prefix)], False), (path[len(prefix) :], True)]
+            break
+    if query is not None:
+        pieces += [("?", False), (query, True)]
+    return _AccessPath(tuple(pieces)) if len(pieces) > 1 else None
 
 
 class FileFormatter(logging.Formatter):
@@ -169,13 +193,20 @@ def _tag(arg: object) -> object:
 
 
 class RotatingLogFile(RotatingFileHandler):
-    """``netkeeper.log``: rotated by size, opened on the first record, private (0600).
+    """``netkeeper.log``: rotated by size, opened on the first record, private.
 
-    ``serve`` and a command run beside it write the same file. When one of them rotates
-    it, the other notices at its next record (the path names another file now) and
-    reopens the path rather than writing on into the rotated file. If the file cannot
-    be opened at all, one line on stderr says so and the file is left alone from then
-    on: logging to the terminal keeps working.
+    ``serve`` and commands run beside it write the same file, so each record is written
+    under an exclusive ``flock`` on ``logs/.netkeeper.log.lock``, the lock every
+    netkeeper process takes: under it the handler reopens the path if another process
+    rotated the file away, rotates when the record would pass ``maxBytes``, and
+    writes. Two processes therefore never rotate at once, and none writes into a file
+    another has just rotated. The directory is ``0700`` and every file ``0600``, set on
+    the descriptor as it opens.
+
+    A file that vanished (removed, or rotated between two calls) is opened again at the
+    next record. Only a path that cannot be a file at all (its directory is a file, or
+    is not writable) stops file logging, with one line on stderr: logging to the
+    terminal goes on.
     """
 
     def __init__(
@@ -185,44 +216,101 @@ class RotatingLogFile(RotatingFileHandler):
             path, maxBytes=max_mb * _MB, backupCount=keep, encoding="utf-8", delay=True
         )
         self.failed = False
+        self._lock_path = Path(self.baseFilename).with_name(f".{LOG_FILENAME}.lock")
+        self._lock_fd: int | None = None
 
     def set_limits(self, *, max_mb: int, keep: int) -> None:
         self.maxBytes = max_mb * _MB
         self.backupCount = keep
 
     def _open(self) -> TextIOWrapper:
-        path = Path(self.baseFilename)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        stream = super()._open()
-        path.chmod(0o600)
-        return stream
+        Path(self.baseFilename).parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        stream = open(  # noqa: SIM115 (the handler owns the stream)
+            self.baseFilename,
+            self.mode,
+            encoding=self.encoding,
+            errors=self.errors,
+            opener=_private_opener,
+        )
+        return cast(TextIOWrapper, stream)
+
+    def _cross_process_lock(self) -> int:
+        """The lock file's descriptor, (re)opened when its path names another file."""
+        if self._lock_fd is not None and _fd_moved(str(self._lock_path), self._lock_fd):
+            os.close(self._lock_fd)
+            self._lock_fd = None
+        if self._lock_fd is None:
+            self._lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            self._lock_fd = _private_opener(str(self._lock_path), os.O_RDWR | os.O_CREAT)
+        return self._lock_fd
 
     def emit(self, record: logging.LogRecord) -> None:
         if self.failed:
             return
         try:
-            if self.stream is not None and _moved(self.baseFilename, self.stream):
+            text = self.format(record) + self.terminator
+        except Exception:
+            self.handleError(record)
+            return
+        try:
+            self._write_locked(text)
+        except FileNotFoundError:
+            # The directory went away between the open and the write: once more.
+            try:
+                self._write_locked(text)
+            except OSError as exc:
+                self._give_up(exc)
+        except OSError as exc:
+            self._give_up(exc)
+
+    def _write_locked(self, text: str) -> None:
+        lock = self._cross_process_lock()
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            if self.stream is not None and _fd_moved(self.baseFilename, self.stream.fileno()):
                 self.stream.close()
                 self.stream = None
             if self.stream is None:
                 self.stream = self._open()
-        except OSError as exc:
-            self.failed = True
-            sys.stderr.write(
-                f"netkeeper: cannot write the log file {self.baseFilename}: {exc};"
-                " logging to the terminal only\n"
-            )
-            return
-        super().emit(record)
+            if self.maxBytes > 0:
+                size = self.stream.seek(0, os.SEEK_END)
+                if size > 0 and size + len(text.encode(self.encoding or "utf-8")) > self.maxBytes:
+                    self.doRollover()  # closes the stream; delay leaves it closed
+                    self.stream = self._open()
+            self.stream.write(text)
+            self.stream.flush()
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+    def _give_up(self, exc: OSError) -> None:
+        self.failed = True
+        sys.stderr.write(
+            f"netkeeper: cannot write the log file {self.baseFilename}: {exc};"
+            " logging to the terminal only\n"
+        )
+
+    def close(self) -> None:
+        with self.lock:  # type: ignore[union-attr]
+            if self._lock_fd is not None:
+                os.close(self._lock_fd)
+                self._lock_fd = None
+        super().close()
 
 
-def _moved(path: str, stream: TextIOWrapper) -> bool:
-    """Whether ``path`` no longer names the file ``stream`` writes: rotated or removed."""
+def _private_opener(path: str, flags: int) -> int:
+    """``os.open`` with mode ``0600``, also on a file that already existed (fchmod)."""
+    fd = os.open(path, flags, 0o600)
+    os.fchmod(fd, 0o600)
+    return fd
+
+
+def _fd_moved(path: str, fd: int) -> bool:
+    """Whether ``path`` no longer names the file ``fd`` is open on: rotated or removed."""
     try:
         current = Path(path).stat()
     except FileNotFoundError:
         return True
-    opened = os.fstat(stream.fileno())
+    opened = os.fstat(fd)
     return (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino)
 
 
@@ -279,8 +367,8 @@ class RedactQueryFilter(logging.Filter):
             path, sep, query = args[2].partition("?")
             if sep and _comparable(path) in REDACTED_QUERY_PATHS:
                 record.args = (*args[:2], f"{path}?<redacted>", *args[3:])
-            elif sep:
-                record.args = (*args[:2], _QueryPath(path, query), *args[3:])
+            elif (marked := _access_path(path, query if sep else None)) is not None:
+                record.args = (*args[:2], marked, *args[3:])
         return True
 
 
@@ -293,12 +381,15 @@ def _comparable(path: str) -> str:
     return "/" + "/".join(part for part in path.lower().split("/") if part)
 
 
-def setup_logging(level: str | int | None = None) -> None:
+def setup_logging(level: str | int | None = None, *, log_to_file: bool = True) -> None:
     """Configure the root logger. Safe to call more than once.
 
     ``level`` is a level name (``DEBUG``, ``info``), a number, or None to read
     ``NETKEEPER_LOG_LEVEL``. An unrecognized value logs a warning and uses INFO.
     ``NETKEEPER_LOG_STDERR_LEVEL``, when set, raises the level stderr alone shows.
+
+    ``log_to_file=False`` (``openapi export``, ``version``: build steps that touch no
+    data) writes no log file and closes one an earlier call opened.
 
     The log file follows the data directory in force: a second call after
     ``NETKEEPER_DATA`` changed closes the old file and writes the new one, keeping the
@@ -319,7 +410,10 @@ def setup_logging(level: str | int | None = None) -> None:
     stderr.setLevel(
         stderr_level if os.environ.get(STDERR_LEVEL_ENV, "").strip() else logging.NOTSET
     )
-    _install_file_handler(root)
+    if log_to_file:
+        _install_file_handler(root)
+    else:
+        remove_file_handler()
     root.setLevel(resolved)
     access = logging.getLogger(ACCESS_LOGGER)
     if not any(isinstance(item, RedactQueryFilter) for item in access.filters):

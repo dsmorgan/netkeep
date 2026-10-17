@@ -39,7 +39,8 @@ build-ui:           ## Production frontend build into frontend/dist
 	cd frontend && pnpm install --frozen-lockfile && pnpm build
 
 gen-client:         ## Export the OpenAPI schema and regenerate the TypeScript client
-	$(PY) -m netkeeper.cli openapi export --out frontend/openapi.json
+	@# A scratch data directory: exporting the schema never touches yours (#602).
+	scratch=$$(mktemp -d) && NETKEEPER_DATA="$$scratch" $(PY) -m netkeeper.cli openapi export --out frontend/openapi.json; status=$$?; rm -rf "$$scratch"; exit $$status
 	cd frontend && pnpm gen
 
 changelog-draft:    ## Preview the unreleased changelog assembled from changelog.d/

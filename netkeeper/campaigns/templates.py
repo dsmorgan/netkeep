@@ -59,6 +59,7 @@ from netkeeper.campaigns.spelling import spelling_issues
 from netkeeper.crm.positions import last_position_change
 from netkeeper.db import is_writer
 from netkeeper.localtime import local_today
+from netkeeper.logging_setup import personal
 from netkeeper.models import (
     TEMPLATE_NAME_MAX_LENGTH,
     TEMPLATE_SUBJECT_MAX_LENGTH,
@@ -561,6 +562,31 @@ def describe_removed_field_campaigns(found: Sequence[RemovedFieldCampaign]) -> s
     return (
         f"{named}: a step template uses the removed me.* fields, so those steps send"
         f" nothing. To send it, {FIX_ADVICE}"
+    )
+
+
+def log_removed_field_campaigns(
+    logger: logging.Logger, found: Sequence[RemovedFieldCampaign]
+) -> None:
+    """:func:`describe_removed_field_campaigns` as one warning, each name marked personal
+    for the log file (#602): a campaign is often named for the people it writes to."""
+    parts: list[str] = []
+    args: list[object] = []
+    for c in found:
+        parts.append("%r (campaign %d, %s, step%s %s)")
+        args += [
+            personal(c.name),
+            c.campaign_id,
+            c.status.value,
+            "s" if len(c.step_positions) > 1 else "",
+            ", ".join(str(p) for p in c.step_positions),
+        ]
+    logger.warning(
+        "; ".join(parts)
+        + ": a step template uses the removed me.* fields, so those steps send nothing."
+        + " To send it, %s",
+        *args,
+        FIX_ADVICE,
     )
 
 

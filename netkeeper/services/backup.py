@@ -27,6 +27,7 @@ from sqlalchemy.engine import URL, make_url
 from netkeeper import migrations
 from netkeeper.db import make_engine
 from netkeeper.localtime import find_zone
+from netkeeper.logging_setup import personal
 
 BACKUPS_DIRNAME = "backups"
 STAMP_FORMAT = "%Y%m%dT%H%M%SZ"
@@ -115,7 +116,7 @@ def create_backup(
     target = backups_dir / backup_name(stamp)
     if target.exists():
         raise BackupError(f"{target}: already exists (backups are named to the second)")
-    log.info("backing up %s to %s", source, target)
+    log.info("backing up %s to %s", personal(source), personal(target))
     # A read-only connection cannot touch the source, and autocommit mode
     # (isolation_level=None) keeps pysqlite from opening the transaction that
     # VACUUM refuses to run inside.
@@ -182,7 +183,7 @@ def remove_stale_partials(backups_dir: Path, *, now: datetime | None = None) -> 
         if datetime.fromtimestamp(path.stat().st_mtime, UTC) >= cutoff:
             continue
         path.unlink(missing_ok=True)
-        log.info("removed a partial backup left by an interrupted write: %s", path)
+        log.info("removed a partial backup left by an interrupted write: %s", personal(path))
         removed.append(path)
     return removed
 
@@ -209,7 +210,7 @@ def prune_backups(backups_dir: Path, keep: int, *, now: datetime | None = None) 
     removed: list[Path] = []
     for info in reversed(found[keep:]):
         info.path.unlink(missing_ok=True)
-        log.info("pruned backup %s", info.path)
+        log.info("pruned backup %s", personal(info.path))
         removed.append(info.path)
     return removed
 
@@ -317,7 +318,7 @@ def restore_backup(
         if created:
             target.unlink(missing_ok=True)
         raise
-    log.info("restored %s over %s", source, target)
+    log.info("restored %s over %s", personal(source), personal(target))
     engine = make_engine(database_url)
     try:
         migrations.upgrade(engine)
@@ -396,7 +397,7 @@ def _pre_restore_backup(
     target = backups_dir / backup_name(stamp, pre_restore=True)
     if target.exists():
         raise RestoreError(f"could not back up {database} first: {target} already exists")
-    log.info("backing up %s to %s before the restore", database, target)
+    log.info("backing up %s to %s before the restore", personal(database), personal(target))
     try:
         _vacuum_into(connection, target)
     except (sqlite3.Error, OSError) as exc:

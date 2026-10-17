@@ -394,8 +394,15 @@ def _resolve_included(
 ) -> dict[str, object]:
     entity = included.get(ref)
     if entity is None:
-        raise RouteChanged(endpoint, f"{where}: no 'included' entity for '{ref}'")
+        raise RouteChanged(endpoint, f"{where}: no 'included' entity for '{_urn_shape(ref)}'")
     return entity
+
+
+def _urn_shape(ref: str) -> str:
+    """``ref`` with its id left out: ``urn:li:fsd_profile:…``. A profile URN names a person
+    for good, and a :class:`RouteChanged` detail is logged and stored (#602)."""
+    kind, sep, _ = ref.rpartition(":")
+    return f"{kind}:…" if sep and kind.startswith("urn:") else "a reference that is not a URN"
 
 
 # =============================================================================
