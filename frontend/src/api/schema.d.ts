@@ -4361,6 +4361,11 @@ export interface components {
              * @default false
              */
             deletable: boolean;
+            /**
+             * Email Replies Watched
+             * @default false
+             */
+            email_replies_watched: boolean;
             /** Enrollments */
             enrollments: {
                 [key: string]: number;

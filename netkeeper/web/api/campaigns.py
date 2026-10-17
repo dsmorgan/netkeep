@@ -244,6 +244,10 @@ class CampaignOut(BaseModel):
     takes only a ``completed`` (ended) campaign."""
     deletable: bool = False
     """Whether ``DELETE /campaigns/{id}`` takes it (#345): never activated, no messages."""
+    email_replies_watched: bool = False
+    """Whether an armed mailbox watches its enrollments for email replies (#571): its own
+    mailbox, or for a campaign with none, the user's armed one. False: a contact who
+    answers a LinkedIn step by email is not seen as replied."""
 
 
 class LeftoverDraftOut(BaseModel):
@@ -477,6 +481,7 @@ def _campaign_out(detail: service.CampaignDetail, settings: Settings) -> Campaig
         next_action_at=detail.next_action_at,
         concluded=detail.concluded,
         deletable=detail.deletable,
+        email_replies_watched=detail.email_replies_watched,
         missing=[
             MissingOut(
                 requirement=m.requirement,

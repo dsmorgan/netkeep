@@ -16,6 +16,15 @@ enrollment of an ended (``completed`` or ``archived``) campaign is watched like 
 completed one, for the same window after its latest send (#345). A disarmed mailbox gets no
 Gmail call, as in reconcile (#277).
 
+An enrollment that has sent only on LinkedIn is watched too (#571), on the same terms
+and from its first LinkedIn send, so a contact who answers by email stops it. It is
+watched by its campaign's mailbox, or, for a campaign with none (LinkedIn only), by
+the user's armed mailbox (:func:`watching_mailbox`); with none armed, its email replies
+are not watched, and the campaign page says so. It has no thread, so only mail from
+one of the contact's addresses counts, and it needs at least one address to be
+watched. Its reply is recorded like any other, but not labelled: nothing in Gmail
+changes for a campaign that sends no email.
+
 How it reads Gmail
 ------------------
 - **History.** ``history.list`` from the mailbox's stored ``history_id``, for
@@ -49,8 +58,9 @@ is skipped.
 - **Reply**: from one of the contact's addresses, after the enrollment's first
   send, in its thread or not. Stored as an inbound message (subject, snippet,
   thread; never the body) with an ``email_in`` interaction, labelled with the
-  campaign's label, and a live enrollment becomes ``replied``. The engine's claim
-  reads that inbound message in its writer session, so no later step fires.
+  campaign's label (not for a LinkedIn-only watch), and a live enrollment becomes
+  ``replied``. The engine's claim reads that inbound message in its writer session, so
+  no later step fires.
 - **Unsubscribe**: a reply whose subject or snippet holds one of
   :data:`UNSUBSCRIBE_PHRASES`. The contact is set ``do_not_contact`` with a reason
   (undone from the contact page), and a live enrollment becomes ``opted_out``.
@@ -58,8 +68,8 @@ is skipped.
 An automatic answer (:func:`is_auto_reply`: out of office and the like) is ignored
 (#296 review): it is no answer, and the sender's pre-send thread read ignores it too.
 
-netkeeper deletes nothing in Gmail (ADR 0003): this module reads, and adds the
-campaign label to a reply.
+netkeeper deletes nothing in Gmail (ADR 0003, ADR 0009): this module reads, and adds the
+campaign label to a reply to an email.
 
 LinkedIn
 --------
@@ -73,8 +83,8 @@ contact). Two things follow, in this order:
   :data:`CONFIRM_SKEW` before its ``prefilled_at`` on, whatever its text; every poll
   checks, new messages or not. Its next step is scheduled from that send.
 - **Reply.** An inbound message from the contact dated at or after an enrollment's
-  **first** send, on any channel, is a reply on each enrollment the Gmail poll would
-  watch (:func:`linkedin_watches`): stored as an inbound ``linkedin`` message (its
+  **first** send, on any channel, is a reply on each of the contact's enrollments
+  with a send (:func:`linkedin_watches`): stored as an inbound ``linkedin`` message (its
   snippet, never more), linked to the poll's ``li_in`` interaction, and a live
   enrollment becomes ``replied``, or ``opted_out`` when the snippet holds one of
   :data:`UNSUBSCRIBE_PHRASES`. A completed enrollment's reply is recorded and it
@@ -283,8 +293,11 @@ class Watch:
     enrollment_id: int
     addresses: frozenset[str]
     first_sent_at: datetime
-    sent: tuple[Sent, ...]  # oldest first
-    label: str
+    """The first send on any channel when ``sent`` is empty (LinkedIn only, #571)."""
+    sent: tuple[Sent, ...]  # oldest first; empty for an enrollment sent only on LinkedIn
+    label: str | None
+    """The campaign's Gmail label for a reply; None for a LinkedIn-only watch, whose
+    reply is not labelled (#571)."""
 
     @property
     def threads(self) -> frozenset[str]:
@@ -300,9 +313,30 @@ class MailboxWatch:
     watches: tuple[Watch, ...]
 
 
+def watching_mailbox(campaign: Campaign, armed: Mapping[int, Mailbox]) -> Mailbox | None:
+    """The mailbox that watches ``campaign``'s enrollments for email replies, from the
+    user's ``armed`` mailboxes by id: the campaign's own, or for a campaign with none
+    (LinkedIn only, #571) the armed one with the lowest id (in v1 a user has one). None
+    when it is not armed: nothing reads Gmail for the campaign then."""
+    if campaign.mailbox_id is not None:
+        return armed.get(campaign.mailbox_id)
+    return armed[min(armed)] if armed else None
+
+
+def armed_mailboxes(session: Session, user: User) -> dict[int, Mailbox]:
+    """The user's armed mailboxes by id (#277): the only ones the reply poll reads."""
+    return {m.id: m for m in session.scalars(scoped(user, Mailbox)) if m.arm is not None}
+
+
+def email_replies_watched(session: Session, user: User, campaign: Campaign) -> bool:
+    """Whether a mailbox is armed to watch ``campaign``'s enrollments for email replies
+    (:func:`watching_mailbox`). Read-only."""
+    return watching_mailbox(campaign, armed_mailboxes(session, user)) is not None
+
+
 def reply_work(session: Session, user: User, *, now: datetime) -> list[MailboxWatch]:
     """Each armed mailbox of ``user``, with what it watches (the module docstring)."""
-    mailboxes = {m.id: m for m in session.scalars(scoped(user, Mailbox)) if m.arm is not None}
+    mailboxes = armed_mailboxes(session, user)
     if not mailboxes:
         return []
     enrollments = list(
@@ -336,6 +370,21 @@ def reply_work(session: Session, user: User, *, now: datetime) -> list[MailboxWa
         sent.setdefault(row.enrollment_id, []).append(
             Sent(row.id, row.gmail_message_id, row.gmail_thread_id, row.sent_at)
         )
+    # The first and latest send on any channel, for an enrollment with no sent email (#571).
+    any_sent: dict[int, tuple[datetime, datetime]] = {}
+    for enrollment_id, first, latest in session.execute(
+        scoped(user, MessageRow)
+        .with_only_columns(
+            MessageRow.enrollment_id, func.min(MessageRow.sent_at), func.max(MessageRow.sent_at)
+        )
+        .where(
+            MessageRow.enrollment_id.in_({e.id for e in enrollments} - set(sent)),
+            MessageRow.direction == MessageDirection.OUT,
+            MessageRow.sent_at.is_not(None),
+        )
+        .group_by(MessageRow.enrollment_id)
+    ):
+        any_sent[enrollment_id] = (cast("datetime", first), cast("datetime", latest))
     addresses: dict[int, set[str]] = {}
     for contact_id, address in session.execute(
         scoped(user, ContactEmail)
@@ -346,24 +395,31 @@ def reply_work(session: Session, user: User, *, now: datetime) -> list[MailboxWa
     by_mailbox: dict[int, list[Watch]] = {mailbox_id: [] for mailbox_id in mailboxes}
     for enrollment in enrollments:
         campaign = campaigns[enrollment.campaign_id]
-        mailbox = mailboxes.get(campaign.mailbox_id or 0)
-        messages = sent.get(enrollment.id)
-        if mailbox is None or not messages:
+        mailbox = watching_mailbox(campaign, mailboxes)
+        messages = sent.get(enrollment.id, [])
+        watched = frozenset(addresses.get(enrollment.contact_id, ()))
+        if messages:
+            first, latest = messages[0].sent_at, messages[-1].sent_at
+        elif enrollment.id in any_sent and watched:
+            first, latest = any_sent[enrollment.id]  # sent only on LinkedIn (#571)
+        else:
+            continue  # nothing sent yet, or no address an email reply could come from
+        if mailbox is None:
             continue
         # A live enrollment of an ended or archived campaign (#345) sends nothing more,
         # so it is watched like a completed enrollment: for a while after its last send.
         finished = enrollment.status is EnrollmentStatus.COMPLETED or (
             campaign.status in CAMPAIGN_OVER
         )
-        if finished and now - messages[-1].sent_at > WATCH_AFTER_COMPLETED:
+        if finished and now - latest > WATCH_AFTER_COMPLETED:
             continue
         by_mailbox.setdefault(mailbox.id, []).append(
             Watch(
                 enrollment_id=enrollment.id,
-                addresses=frozenset(addresses.get(enrollment.contact_id, ())),
-                first_sent_at=messages[0].sent_at,
+                addresses=watched,
+                first_sent_at=first,
                 sent=tuple(messages),
-                label=campaign_label(mailbox.label_prefix, campaign.name),
+                label=campaign_label(mailbox.label_prefix, campaign.name) if messages else None,
             )
         )
     return [
@@ -380,7 +436,7 @@ class Reply:
     enrollment_id: int
     message: Message
     unsubscribe: bool
-    label: str
+    label: str | None  # None: not labelled (a LinkedIn-only watch, #571)
 
 
 @dataclass(frozen=True, slots=True)
@@ -834,7 +890,7 @@ def poll_replies(
             _store_poll(session, user, mailbox.mailbox_id, result, now=now)
         if label is not None and gmail is not None:
             for item in new:
-                if isinstance(item, Reply):
+                if isinstance(item, Reply) and item.label is not None:
                     label(gmail, mailbox.mailbox_id, item.label, item.message.id)
     return outcome()
 
@@ -852,11 +908,12 @@ def linkedin_watches(
 ) -> list[tuple[Enrollment, datetime]]:
     """The contact's enrollments a LinkedIn reply counts for, each with its first send.
 
-    The set the Gmail poll watches (:func:`reply_work`), on any channel: an enrollment
-    with at least one sent outbound message, ``active`` or ``paused``, or ``completed``
-    with its latest send under :data:`WATCH_AFTER_COMPLETED` before ``now``. A live
-    enrollment of an ended or archived campaign (#345) is watched like a completed one.
-    Never the self contact's. Read-only.
+    An enrollment with at least one sent outbound message on any channel, ``active`` or
+    ``paused``, or ``completed`` with its latest send under :data:`WATCH_AFTER_COMPLETED`
+    before ``now``. A live enrollment of an ended or archived campaign (#345) is watched
+    like a completed one. Never the self contact's. Read-only. The Gmail poll
+    (:func:`reply_work`) watches these for email replies only through an armed mailbox,
+    and an enrollment sent only on LinkedIn only when its contact has an address (#571).
     """
     rows = session.execute(
         scoped(user, Enrollment)

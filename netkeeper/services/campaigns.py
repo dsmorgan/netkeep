@@ -71,7 +71,7 @@ from netkeeper.models import (
     User,
 )
 from netkeeper.scoping import get_scoped, scoped, scoped_delete
-from netkeeper.services import campaign_engine, campaign_review
+from netkeeper.services import campaign_engine, campaign_replies, campaign_review
 from netkeeper.services import mailboxes as mailbox_service
 from netkeeper.services.campaign_guards import skip_summary
 
@@ -545,6 +545,10 @@ class CampaignDetail:
     needs it ended (``completed``)."""
     deletable: bool = False
     """Whether it can be deleted (#345): never activated, and no message of any status."""
+    email_replies_watched: bool = False
+    """Whether an armed mailbox watches its enrollments for email replies (#571,
+    :func:`~netkeeper.services.campaign_replies.watching_mailbox`). When False, a
+    contact who answers a LinkedIn step by email is not seen as replied."""
 
 
 REVIEWABLE: Final = frozenset({CampaignStatus.DRAFT, CampaignStatus.REVIEWING})
@@ -643,6 +647,7 @@ def campaign_status(
         concluded=concluded(session, user, campaign),
         deletable=campaign.status in REVIEWABLE
         and _delete_refusal(session, user, campaign) is None,
+        email_replies_watched=campaign_replies.email_replies_watched(session, user, campaign),
     )
 
 

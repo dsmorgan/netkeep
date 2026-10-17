@@ -130,6 +130,7 @@ export function campaign(overrides: Partial<Campaign> = {}): Campaign {
     missing: [],
     concluded: false,
     deletable: false,
+    email_replies_watched: true,
     ...overrides,
   }
 }

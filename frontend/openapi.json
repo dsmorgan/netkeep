@@ -1929,6 +1929,11 @@
             "title": "Deletable",
             "type": "boolean"
           },
+          "email_replies_watched": {
+            "default": false,
+            "title": "Email Replies Watched",
+            "type": "boolean"
+          },
           "enrollments": {
             "additionalProperties": {
               "type": "integer"
