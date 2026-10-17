@@ -12,13 +12,13 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from netkeeper.db import is_writer
-from netkeeper.models import DEFAULT_ACCOUNT_LABEL, LinkedInAccount, User, UserKind
+from netkeeper.models import DEFAULT_ACCOUNT_LABEL, LinkedInAccount, User
 from netkeeper.scoping import scoped
 from netkeeper.services.settings_kv import delete_setting, get_setting, set_setting
+from netkeeper.services.users import local_owner
 
 log = logging.getLogger(__name__)
 
@@ -56,9 +56,7 @@ def local_account_id(session: Session) -> int | None:
     browser lock, whatever its id: the one whose hold also claims the legacy
     ``browser-local.lock`` (``linkedin.activity_lock.LEGACY_SHARED_KEY``).
     """
-    user = session.scalars(
-        select(User).where(User.kind == UserKind.LOCAL).order_by(User.id)
-    ).first()
+    user = local_owner(session)
     if user is None:
         return None
     account = find_account(session, user)

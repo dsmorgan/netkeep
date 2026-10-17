@@ -36,7 +36,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Final
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 
 from netkeeper.campaigns import schedule
@@ -86,6 +86,7 @@ from netkeeper.services.simulate_inbox import (
     simulated_delta,
 )
 from netkeeper.services.simulate_run import scratch_database
+from netkeeper.services.users import local_users
 
 MAX_TICKS: Final = 20_000
 """The stall guard: three weeks of a 100-contact campaign takes well under a thousand."""
@@ -290,7 +291,7 @@ class SimulatedLinkedIn:
 
 
 def _local_users(session: Session) -> list[User]:
-    return list(session.scalars(select(User).where(User.kind == UserKind.LOCAL).order_by(User.id)))
+    return local_users(session)
 
 
 def _start_run(session: Session, user: User, now: datetime) -> SyncRun:

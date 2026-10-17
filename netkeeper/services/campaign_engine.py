@@ -147,7 +147,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Final, Protocol, runtime_checkable
 
-from sqlalchemy import ColumnElement, Select, and_, func, or_, select
+from sqlalchemy import ColumnElement, Select, and_, func, or_
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
@@ -175,7 +175,6 @@ from netkeeper.models import (
     Template,
     TemplateChannel,
     User,
-    UserKind,
 )
 from netkeeper.models.base import utcnow
 from netkeeper.scoping import get_scoped, scoped, scoped_contacts
@@ -193,6 +192,7 @@ from netkeeper.services.campaign_guards import (
 from netkeeper.services.events import Event, EventBus
 from netkeeper.services.mailboxes import MAILBOX_HARD_MAX_PER_DAY, mailbox_health
 from netkeeper.services.settings_kv import get_setting, set_setting
+from netkeeper.services.users import local_users
 
 log = logging.getLogger(__name__)
 
@@ -2887,9 +2887,7 @@ def run_tick(
         log.error("campaign sends are held: %s", personal_exc(exc))
         return []
     with session_scope(factory) as session:
-        user_ids = list(
-            session.scalars(select(User.id).where(User.kind == UserKind.LOCAL).order_by(User.id))
-        )
+        user_ids = [user.id for user in local_users(session)]
     results: list[TickResult] = []
     for user_id in user_ids:
         if stopping():

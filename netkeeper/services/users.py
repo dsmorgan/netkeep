@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 
 from netkeeper.config import Settings
 from netkeeper.models import User, UserKind
-from netkeeper.services import ui_settings
 
 log = logging.getLogger(__name__)
 
@@ -20,9 +19,13 @@ def local_owner(session: Session) -> User | None:
     The one query behind "the local user" for anything that acts on the whole install
     rather than on one user's rows: the nightly backup's settings, the ``/backups`` API.
     """
-    return session.scalars(
-        select(User).where(User.kind == UserKind.LOCAL).order_by(User.id)
-    ).first()
+    users = local_users(session)
+    return users[0] if users else None
+
+
+def local_users(session: Session) -> list[User]:
+    """Every ``local`` user, by id. The first is :func:`local_owner`."""
+    return list(session.scalars(select(User).where(User.kind == UserKind.LOCAL).order_by(User.id)))
 
 
 def ensure_local_user(session: Session, *, settings: Settings | None = None) -> User:
@@ -57,6 +60,9 @@ def ensure_local_user(session: Session, *, settings: Settings | None = None) -> 
     existing = local_owner(session)
     if existing is not None:
         if settings is not None:
+            # Imported here: ui_settings reaches linkedin_accounts, which needs local_owner.
+            from netkeeper.services import ui_settings
+
             ui_settings.sync_timezone(
                 session, existing, ui_settings.resolve(session, existing, settings)
             )

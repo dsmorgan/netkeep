@@ -36,8 +36,22 @@ export const postureQuery = queryOptions({
   },
 })
 
-function failure(error: unknown, response: Response, what: string): Error {
-  return new Error(detailMessage(error) ?? `${what} returned ${response.status}`)
+/** A failed Settings call: the server's sentence, and the `status` that keeps a 4xx from being retried. */
+export class SettingsError extends Error {
+  readonly status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'SettingsError'
+    this.status = status
+  }
+}
+
+function failure(error: unknown, response: Response, what: string): SettingsError {
+  return new SettingsError(
+    detailMessage(error) ?? `${what} returned ${response.status}`,
+    response.status,
+  )
 }
 
 /** The posture row's `key` whose warning **Acknowledge** clears (#383). */

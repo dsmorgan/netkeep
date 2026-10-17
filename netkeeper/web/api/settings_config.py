@@ -32,9 +32,17 @@ from netkeeper.models import User
 from netkeeper.services import restart_gate, ui_settings
 from netkeeper.services.restart_gate import RestartHook
 from netkeeper.web.api.health import BOOT_ID
-from netkeeper.web.deps import CurrentUser, SessionDep, file_settings, read_only
+from netkeeper.web.deps import CurrentUser, SessionDep, file_settings, is_owner, read_only
 
 router = APIRouter(tags=["settings"])
+
+# Stored per user like the rest, but the nightly backup and /backups act for the local owner
+# alone, so only the owner's values take effect: anyone else sees the group read-only.
+OWNER_ONLY_GROUPS = frozenset({"backup"})
+NOT_OWNER_NOTE = (
+    "Only the local owner account sets this: backups are made for the whole install,"
+    " from the owner's settings."
+)
 
 
 class ConfigFieldOut(BaseModel):
@@ -135,6 +143,7 @@ def _out(request: Request, session: SessionDep, user: User) -> ConfigOut:
     base = file_settings(request)
     started: Settings | None = getattr(request.app.state, "started_settings", None)
     views = ui_settings.describe(base, ui_settings.stored(session, user), started=started)
+    owner = is_owner(session, user)
     on_disk, error = _on_disk(base)
     changed = error is not None or on_disk != ui_settings.unresolve(base)
     gate: restart_gate.RestartGate | None = getattr(request.app.state, "restart_gate", None)
@@ -164,8 +173,12 @@ def _out(request: Request, session: SessionDep, user: User) -> ConfigOut:
                 ui_value=view.ui_value,
                 file_value=view.file_value,
                 source=view.source,
-                editable=view.editable,
-                locked_reason=view.locked_reason,
+                editable=view.editable and (owner or view.spec.group not in OWNER_ONLY_GROUPS),
+                locked_reason=(
+                    NOT_OWNER_NOTE
+                    if not owner and view.spec.group in OWNER_ONLY_GROUPS
+                    else view.locked_reason
+                ),
                 restart_pending=view.restart_pending,
                 stored_unreadable=view.stored_unreadable,
                 warnings=list(view.warnings),
@@ -185,13 +198,22 @@ def get_config_settings(request: Request, session: SessionDep, user: CurrentUser
 @router.put(
     "/settings/config",
     operation_id="set_config_settings",
-    responses={422: {"description": "A value refused: nothing was stored"}},
+    responses={
+        403: {"description": "A setting only the local owner account changes, from anyone else"},
+        422: {"description": "A value refused: nothing was stored"},
+    },
 )
 def set_config_settings(
     body: ConfigIn, request: Request, session: SessionDep, user: CurrentUser
 ) -> ConfigOut:
     """Store new values, all or none. Each applies as its ``applies_note`` says."""
     base = file_settings(request)
+    if not is_owner(session, user):
+        owner_only = sorted(
+            spec.key for spec in ui_settings.FIELDS if spec.group in OWNER_ONLY_GROUPS
+        )
+        if any(key in body.values for key in owner_only):
+            raise HTTPException(status_code=403, detail=NOT_OWNER_NOTE)
     try:
         ui_settings.write(session, user, base, body.values)
     except ui_settings.SettingsRefused as exc:

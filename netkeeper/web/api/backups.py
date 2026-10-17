@@ -34,8 +34,7 @@ from netkeeper.services.backup import (
     prune_backups,
 )
 from netkeeper.services.backup_job import backs_up
-from netkeeper.services.users import local_owner
-from netkeeper.web.deps import CurrentUser, SessionDep, effective_settings, read_only
+from netkeeper.web.deps import CurrentUser, SessionDep, effective_settings, read_only, require_owner
 
 router = APIRouter(tags=["backups"])
 
@@ -88,10 +87,7 @@ def _backup_out(info: BackupInfo) -> BackupOut:
 
 def _owner(session: SessionDep, user: CurrentUser) -> User:
     """The requester, when they are the local owner; 403 for anyone else."""
-    owner = local_owner(session)
-    if owner is None or owner.id != user.id:
-        raise HTTPException(status_code=403, detail="only the local owner account manages backups")
-    return owner
+    return require_owner(session, user, "only the local owner account manages backups")
 
 
 Owner = Annotated[User, Depends(_owner)]
@@ -107,7 +103,11 @@ def _out(request: Request) -> BackupsOut:
     )
 
 
-@router.get("/backups", operation_id="list_backups")
+@router.get(
+    "/backups",
+    operation_id="list_backups",
+    responses={403: {"description": "Only the local owner account manages backups"}},
+)
 def get_backups(request: Request, owner: Owner) -> BackupsOut:
     """The backups, newest first."""
     return _out(request)

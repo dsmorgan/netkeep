@@ -2199,7 +2199,8 @@ export interface paths {
          *     for a person to run themselves. Everything below comes from config -- no
          *     attach, so this never awaits browser work (CLAUDE.md). The address is the one in
          *     force (the file, then the Settings page, #597): after a change Chrome is started
-         *     on the new port, then serve restarted to attach there.
+         *     on the new port, then serve restarted to attach there. Owner only: the profile
+         *     directory belongs to the install, not to one user.
          */
         get: operations["get_linkedin_browser"];
         put?: never;
@@ -10050,6 +10051,13 @@ export interface operations {
                     "application/json": components["schemas"]["BackupsOut"];
                 };
             };
+            /** @description Only the local owner account manages backups */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     create_backup: {
@@ -14361,6 +14369,13 @@ export interface operations {
                     "application/json": components["schemas"]["BrowserLaunchOut"];
                 };
             };
+            /** @description Only the local owner account sees the Chrome profile */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     get_linkedin_browser_health: {
@@ -16031,6 +16046,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ConfigOut"];
                 };
+            };
+            /** @description A setting only the local owner account changes, from anyone else */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description A value refused: nothing was stored */
             422: {
