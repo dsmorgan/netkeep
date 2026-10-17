@@ -182,3 +182,12 @@ def test_only_the_keychain_module_calls_keyring() -> None:
         if re.search(r"^\s*(import|from)\s+keyring\b", path.read_text(), re.MULTILINE)
     ]
     assert importers == ["services/keychain.py"]
+
+
+def test_a_literal_service_name_for_one_path_never_moves(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Changing the hash would silently move everyone's Gmail secrets to a new service
+    (and, since #600, rename their login item's label)."""
+    monkeypatch.setenv("NETKEEPER_DATA", "/nk-pin/data")
+    assert keychain.service_name() == "netkeeper@6f70bec19518"

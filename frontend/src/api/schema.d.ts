@@ -2820,6 +2820,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/login-item/repair": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Repair Login Item
+         * @description Rewrite the plist for this netkeeper and adopt an old script's agent.
+         */
+        post: operations["repair_login_item"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/mailboxes": {
         parameters: {
             query?: never;
@@ -7027,6 +7047,8 @@ export interface components {
             enabled: boolean;
             /** Label */
             label: string;
+            /** Legacy */
+            legacy: boolean;
             /** Log Path */
             log_path: string;
             /** Message */
@@ -15560,6 +15582,40 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    repair_login_item: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginItemOut"];
+                };
+            };
+            /** @description Only the local owner account manages the login item */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not macOS, or launchctl refused: the reason is in detail */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

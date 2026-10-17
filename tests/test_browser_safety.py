@@ -901,17 +901,157 @@ def test_no_code_path_starts_a_process() -> None:
     assert not others, complain(others, "netkeeper starts no processes:")
 
 
+def launchctl_pin_problems(source: str) -> list[str]:
+    """What is wrong with ``login_item.py``'s one process start, from its syntax tree.
+
+    The module may use the name ``subprocess`` only as the import, as
+    ``subprocess.TimeoutExpired`` and in exactly one ``subprocess.run([LAUNCHCTL,
+    *args], ...)`` call with no ``shell`` or ``executable``, where ``LAUNCHCTL`` is
+    assigned once, to ``"/bin/launchctl"``. Anything else (a second call of any kind, an
+    alias, a ``getattr``, a reassigned constant) is a problem.
+    """
+    tree = ast.parse(source)
+    problems: list[str] = []
+    calls: list[ast.Call] = []
+    allowed_names: set[int] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "subprocess"
+        ):
+            if node.attr == "TimeoutExpired":
+                allowed_names.add(id(node.value))
+            elif node.attr != "run":
+                problems.append(f"line {node.lineno}: subprocess.{node.attr}")
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "subprocess"
+            and node.func.attr == "run"
+        ):
+            calls.append(node)
+            allowed_names.add(id(node.func.value))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == "subprocess" and id(node) not in allowed_names:
+            problems.append(f"line {node.lineno}: subprocess used other than subprocess.run(...)")
+        if isinstance(node, ast.Constant) and node.value == "subprocess":
+            problems.append(f"line {node.lineno}: 'subprocess' as a string (getattr?)")
+    imports = [n for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom))]
+    for node in imports:
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.module
+            and node.module.split(".")[0] in (PROCESS_MODULES | {"os", "asyncio"})
+        ):
+            problems.append(f"line {node.lineno}: from {node.module} import ...")
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] in PROCESS_MODULES - {"subprocess"}:
+                    problems.append(f"line {node.lineno}: import {alias.name}")
+                if alias.name == "subprocess" and alias.asname:
+                    problems.append(f"line {node.lineno}: subprocess imported under an alias")
+    if len(calls) != 1:
+        problems.append(f"{len(calls)} subprocess.run calls, not exactly 1")
+    for call in calls:
+        first = call.args[0] if call.args else None
+        argv_ok = (
+            isinstance(first, ast.List)
+            and len(first.elts) == 2
+            and isinstance(first.elts[0], ast.Name)
+            and first.elts[0].id == "LAUNCHCTL"
+            and isinstance(first.elts[1], ast.Starred)
+            and isinstance(first.elts[1].value, ast.Name)
+            and first.elts[1].value.id == "args"
+        )
+        if not argv_ok:
+            problems.append(f"line {call.lineno}: the program is not [LAUNCHCTL, *args]")
+        if len(call.args) != 1:
+            problems.append(f"line {call.lineno}: extra positional arguments")
+        for keyword in call.keywords:
+            if keyword.arg is None or keyword.arg in ("shell", "executable", "env", "cwd"):
+                problems.append(f"line {call.lineno}: keyword {keyword.arg}")
+    assignments = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr))
+        and any(
+            isinstance(t, ast.Name) and t.id == "LAUNCHCTL"
+            for t in (n.targets if isinstance(n, ast.Assign) else [n.target])
+        )
+    ]
+    constant_ok = (
+        len(assignments) == 1
+        and isinstance(assignments[0], ast.AnnAssign)
+        and isinstance(assignments[0].value, ast.Constant)
+        and assignments[0].value.value == "/bin/launchctl"
+    )
+    if not constant_ok:
+        problems.append('LAUNCHCTL is not assigned exactly once, to "/bin/launchctl"')
+    if any(
+        isinstance(n, (ast.Global, ast.Nonlocal)) and "LAUNCHCTL" in n.names for n in ast.walk(tree)
+    ):
+        problems.append("LAUNCHCTL is declared global or nonlocal")
+    return problems
+
+
 def test_the_one_process_netkeeper_runs_is_launchctl() -> None:
     """The login item (#600) is the one module that imports ``subprocess``, to run
-    ``/bin/launchctl`` for the user's own launchd agent. It may import nothing else that
-    starts a process, and it has exactly one call, whose program is the ``LAUNCHCTL``
-    constant (a fixed path), never a browser or a string built from input."""
+    ``/bin/launchctl`` for the user's own launchd agent: one call, to the fixed path."""
     source = LOGIN_ITEM.read_text()
-    assert source.count("subprocess.run(") == 1
-    assert 'LAUNCHCTL: Final = "/bin/launchctl"' in source
-    assert "[LAUNCHCTL, *args]" in source
+    assert launchctl_pin_problems(source) == []
     findings = [f for f in process_starts(source, LOGIN_ITEM) if not is_launchctl_import(f)]
     assert not findings, complain(findings, "login_item.py may only import subprocess:")
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        (
+            "    return RunResult(done.returncode, done.stdout, done.stderr)\n",
+            "    subprocess.check_output(['/usr/bin/open', 'x'])\n"
+            "    return RunResult(done.returncode, done.stdout, done.stderr)\n",
+        ),
+        (
+            "    return RunResult(done.returncode, done.stdout, done.stderr)\n",
+            "    subprocess.call(['/usr/bin/open', 'x'])\n"
+            "    return RunResult(done.returncode, done.stdout, done.stderr)\n",
+        ),
+        (
+            "    return RunResult(done.returncode, done.stdout, done.stderr)\n",
+            "    subprocess.run(['/usr/bin/open', 'x'])\n"
+            "    return RunResult(done.returncode, done.stdout, done.stderr)\n",
+        ),
+        (
+            "def default_agents_dir()",
+            "_r = subprocess.run\n\n\ndef default_agents_dir()",
+        ),
+        ("capture_output=True,", "capture_output=True, shell=True,"),
+        ("capture_output=True,", "capture_output=True, executable='/usr/bin/open',"),
+        (
+            "def default_agents_dir()",
+            "LAUNCHCTL = '/usr/bin/open'\n\n\ndef default_agents_dir()",
+        ),
+        ("[LAUNCHCTL, *args]", "['/usr/bin/open', *args]"),
+        ("[LAUNCHCTL, *args]", "[LAUNCHCTL, 'x', *args]"),
+        (
+            "def default_agents_dir()",
+            "_g = getattr(subprocess, 'Popen')\n\n\ndef default_agents_dir()",
+        ),
+        (
+            "def default_agents_dir()",
+            "import subprocess as sp\n\n\ndef default_agents_dir()",
+        ),
+        ('LAUNCHCTL: Final = "/bin/launchctl"', 'LAUNCHCTL: Final = "/usr/bin/open"'),
+    ],
+)
+def test_the_launchctl_pin_rejects_every_other_way_to_start_a_process(old: str, new: str) -> None:
+    """Each mutation of the login item's source must fail the pin."""
+    source = LOGIN_ITEM.read_text()
+    assert old in source, old
+    assert launchctl_pin_problems(source.replace(old, new, 1))
 
 
 def test_the_users_browser_context_is_never_mutated() -> None:

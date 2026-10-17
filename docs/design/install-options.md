@@ -8,7 +8,7 @@ This document holds the research and the per-option comparison behind [ADR 0011]
 - **Dependencies.** On Apple silicon every runtime dependency in `uv.lock` ships a wheel, so an install from PyPI compiles nothing and needs no Xcode Command Line Tools. On Intel, one doesn't: cryptography, which google-auth requires, dropped macOS x86_64 wheels in 49.0.0, and the locked 50.x ships `macosx_11_0_arm64` only (see "Intel Macs" below). Playwright ships wheels only (no sdist), one per architecture plus universal2, each with a bundled Node driver; netkeeper uses it attach-only, so `playwright install` never runs (ADR 0002).
 - **Python.** In a checkout, `.python-version` pins 3.12 and `[tool.uv] python-preference = "only-managed"`, so uv uses its own CPython. A tool install reads none of that, nor `uv.lock`: it resolves fresh from the wheel's metadata (`>=3.12`, floating lower bounds), and may pick any Python 3.12 or later it finds, a Homebrew one included. So the install command has to pin all three (option A).
 - **UI.** `netkeeper/web/frontend.py` serves `frontend/dist` from the repository root (or `$NETKEEPER_FRONTEND_DIST`). Building it needs Node 22 and pnpm (`make build-ui`). A wheel today carries no UI. #596 moves the build into CI and into the wheel.
-- **Run at login.** `scripts/install-launchd.sh` writes `~/Library/LaunchAgents/fun.tnkr.netkeeper.plist`, which runs `scripts/serve-launchd.sh` from the checkout's `.venv`. It assumes a git checkout. #600 moves it into a Settings switch.
+- **Run at login.** The Settings switch and `netkeeper login-item on|off|status` (#600) write `~/Library/LaunchAgents/<label>.plist`, which runs the installed `netkeeper serve`; `fun.tnkr.netkeeper` is the default data directory's label. They replaced `scripts/install-launchd.sh` and `serve-launchd.sh`, which assumed a git checkout.
 - **Chrome.** netkeeper never starts a browser today (ADR 0002); `scripts/chrome.sh` starts the dedicated profile by hand. #595 decides how that changes.
 - **Data and secrets.** The data directory defaults to `~/Library/Application Support/netkeeper`. Keychain entries use the service `netkeeper` for the default directory and `netkeeper@<hash>` for any other (#580). Neither depends on where the code is installed, so a change of install method keeps the data and the secrets, provided the data directory stays the same.
 
@@ -44,7 +44,7 @@ A short POSIX script that does option A's three steps, then opens the first-run 
 
 - **User needs:** the same as A, and one copy and paste.
 - **Updates and uninstall:** A's.
-- **Cost to us:** the script, its tests (the `install-launchd.sh` tests show the pattern: a fake `uname` and `launchctl`), and attaching it to each release.
+- **Cost to us:** the script, its tests (the login item's tests show the pattern: a fake `launchctl` runner and an injected agents directory), and attaching it to each release.
 - **Security tradeoffs:** piping a script to a shell runs code the user didn't read, with no signature check, and automated scanners flag the pattern. In practice the user already trusts the same host for the code itself, so the script adds little new trust, but it should earn what trust it asks for:
   - Wrap the body in a function called on the last line, so a download cut short runs nothing.
   - Serve it over HTTPS from the GitHub release, with GitHub's immutable releases turned on, so nobody with write access can swap `install.sh` or the constraints file after publication. `releases/latest/download/` moves with each release, so the docs also show the versioned URL (`releases/download/vX.Y.Z/install.sh`).
@@ -104,7 +104,7 @@ A `.app` in a `.dmg`, built with Briefcase, py2app, or PyInstaller (one-director
 2. Otherwise stop the login item (`launchctl bootout`) and confirm the serve lock is free. The plist's `KeepAlive` relaunches a crashed `serve`, so an upgrade under a running job could start a half-installed copy, and that copy would migrate the database. Replacing files under a running process can also break its lazy imports.
 3. Take a backup while nothing has the database open, because the new version's `serve` migrates at start.
 4. Upgrade: the pinned `uv tool install` of the new version (option A).
-5. Re-execute the newly installed `netkeeper update --finish` (a hidden subcommand), which starts the login item again (`launchctl bootstrap`); `serve` migrates as it starts, as `serve-launchd.sh` does today.
+5. Re-execute the newly installed `netkeeper update --finish` (a hidden subcommand), which starts the login item again (`launchctl bootstrap`); `serve` migrates as it starts, as the login item's agent does today (it runs `netkeeper serve` directly).
 6. Health check, in `--finish`: the serve lock is held, the database revision equals the new version's head, and `/health` answers, within a time limit.
 
 **Replacing its own code.** A successful `uv tool install` syncs the same environment in place, so after step 4 the running `update` process sits on files that may be the new version's or a mix. So the old process does nothing after step 4 but run `uv` and `exec` a fresh binary: the new `netkeeper update --finish` on success, or, on failure, the rollback's reinstall and then the old version's `netkeeper update --rollback` (also hidden). A health check that fails in `--finish` does the same: reinstall the old version, then `exec` its `--rollback`, which runs rollback steps 2 to 4 on code that matches what's installed. Steps 1 to 4 import everything they need before step 4 starts. The alternative, a small script copied out of the environment that runs steps 4 to 6, is equivalent but harder to test; re-executing is the choice.
@@ -156,7 +156,7 @@ Every option must keep `~/Library/Application Support/netkeeper` as the default 
 
 ### The LaunchAgent and #600
 
-The plist must point at the installed, stable executable (`~/.local/bin/netkeeper`, or `$(brew --prefix)/bin/netkeeper`), not at a checkout's `.venv` and not at a versioned path. `netkeeper setup` and the #600 Settings switch should share one implementation, with the same label (`fun.tnkr.netkeeper`), and `scripts/install-launchd.sh` stays for a checkout.
+The plist must point at the installed, stable executable (`~/.local/bin/netkeeper`, or `$(brew --prefix)/bin/netkeeper`), not at a checkout's `.venv` and not at a versioned path. `netkeeper setup` and the #600 Settings switch should share one implementation, with the same label (`fun.tnkr.netkeeper`, plus a data-directory hash for any other data directory). `scripts/install-launchd.sh` was removed in #600: a checkout runs `netkeeper login-item on` from its `.venv`.
 
 ### Chrome, #595 and #599
 

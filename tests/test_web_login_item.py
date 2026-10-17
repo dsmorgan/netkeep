@@ -78,3 +78,34 @@ async def test_a_second_user_gets_403(
         assert (await client.get(URL)).status_code == 403
         assert (await client.put(URL, json={"enabled": True}, headers=HEADERS)).status_code == 403
     assert launchctl.calls == []
+
+
+async def test_repair_adopts_an_old_agent_and_keeps_the_port(
+    running_app: FastAPI, client: httpx.AsyncClient, tmp_path: Path
+) -> None:
+    from test_login_item import write_old_plist
+
+    launchctl = _install(running_app, tmp_path)
+    old = write_old_plist(tmp_path, tmp_path / "data", "--port", "8080")
+    assert (await client.get(URL)).json()["legacy"] is True
+    response = await client.post(f"{URL}/repair", headers=HEADERS)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["legacy"] is False
+    assert body["enabled"] is True
+    assert not old.exists()
+    assert "bootstrap" not in launchctl.verbs()
+    plist = next((tmp_path / "LaunchAgents").glob("*.plist"))
+    assert b"<string>8080</string>" in plist.read_bytes()
+
+
+async def test_switching_off_and_on_keeps_the_port(
+    running_app: FastAPI, client: httpx.AsyncClient, tmp_path: Path
+) -> None:
+    from test_login_item import make
+
+    item = make(FakeLaunchctl(), tmp_path, tmp_path / "data", lock_held=True)
+    running_app.state.login_item = item
+    item.enable(port=9001)
+    await client.put(URL, json={"enabled": True}, headers=HEADERS)
+    assert b"<string>9001</string>" in item.plist_path.read_bytes()

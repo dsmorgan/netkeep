@@ -17,13 +17,25 @@ const OFF: LoginItem = {
   plist_path: '/Users/x/Library/LaunchAgents/fun.tnkr.netkeeper.plist',
   log_path: '/data/logs/netkeeper.log',
   points_elsewhere: null,
+  legacy: false,
 }
 
 function renderSection(initial: LoginItem, onPut?: (enabled: boolean) => Response) {
   const puts: boolean[] = []
+  const repairs: boolean[] = []
   mockFetch(async (request) => {
     const { pathname } = new URL(request.url)
-    if (pathname !== '/api/v1/login-item') return jsonResponse({ detail: 'unexpected' }, 500)
+    if (!pathname.startsWith('/api/v1/login-item'))
+      return jsonResponse({ detail: 'unexpected' }, 500)
+    if (pathname === '/api/v1/login-item/repair') {
+      repairs.push(true)
+      return jsonResponse({
+        ...initial,
+        legacy: false,
+        points_elsewhere: null,
+        message: 'Repaired.',
+      })
+    }
     if (request.method === 'GET') return jsonResponse(initial)
     const body = (await request.json()) as { enabled: boolean }
     puts.push(body.enabled)
@@ -40,12 +52,12 @@ function renderSection(initial: LoginItem, onPut?: (enabled: boolean) => Respons
       <LoginItemSection />
     </QueryClientProvider>,
   )
-  return puts
+  return { puts, repairs }
 }
 
 describe('LoginItemSection', () => {
   it('shows the state the server read and turns it on', async () => {
-    const puts = renderSection(OFF)
+    const { puts } = renderSection(OFF)
     const box = await screen.findByRole('checkbox', { name: 'Start netkeeper when I log in' })
     expect(box).not.toBeChecked()
     fireEvent.click(box)
@@ -70,5 +82,15 @@ describe('LoginItemSection', () => {
   it('warns when the agent runs another netkeeper', async () => {
     renderSection({ ...OFF, enabled: true, points_elsewhere: '/old/checkout/.venv/bin/netkeeper' })
     expect(await screen.findByRole('alert')).toHaveTextContent('/old/checkout/.venv/bin/netkeeper')
+  })
+
+  it('offers Repair for an old script agent, and never says to turn it off and on', async () => {
+    const { puts, repairs } = renderSection({ ...OFF, legacy: true })
+    expect(await screen.findByText(/old install script/)).toBeInTheDocument()
+    expect(screen.queryByText(/off and on/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Repair' }))
+    expect(await screen.findByText('Repaired.')).toBeInTheDocument()
+    expect(repairs).toEqual([true])
+    expect(puts).toEqual([])
   })
 })

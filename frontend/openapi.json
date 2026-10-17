@@ -9528,6 +9528,10 @@
             "title": "Label",
             "type": "string"
           },
+          "legacy": {
+            "title": "Legacy",
+            "type": "boolean"
+          },
           "log_path": {
             "title": "Log Path",
             "type": "string"
@@ -9591,7 +9595,8 @@
           "label",
           "plist_path",
           "log_path",
-          "points_elsewhere"
+          "points_elsewhere",
+          "legacy"
         ],
         "title": "LoginItemOut",
         "type": "object"
@@ -23885,6 +23890,34 @@
           }
         },
         "summary": "Put Login Item",
+        "tags": [
+          "login-item"
+        ]
+      }
+    },
+    "/api/v1/login-item/repair": {
+      "post": {
+        "description": "Rewrite the plist for this netkeeper and adopt an old script's agent.",
+        "operationId": "repair_login_item",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginItemOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Only the local owner account manages the login item"
+          },
+          "409": {
+            "description": "Not macOS, or launchctl refused: the reason is in detail"
+          }
+        },
+        "summary": "Repair Login Item",
         "tags": [
           "login-item"
         ]

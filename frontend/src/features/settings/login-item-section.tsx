@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useId } from 'react'
 
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 
-import { loginItemQuery, setLoginItem } from './api'
+import { loginItemQuery, repairLoginItem, setLoginItem } from './api'
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -24,6 +25,10 @@ export function LoginItemSection() {
   const queryClient = useQueryClient()
   const change = useMutation({
     mutationFn: setLoginItem,
+    onSuccess: (data) => queryClient.setQueryData(loginItemQuery.queryKey, data),
+  })
+  const repair = useMutation({
+    mutationFn: repairLoginItem,
     onSuccess: (data) => queryClient.setQueryData(loginItemQuery.queryKey, data),
   })
   const item = state.data
@@ -62,13 +67,33 @@ export function LoginItemSection() {
                 On, but not running under launchd yet: it starts at your next login.
               </p>
             )}
+            {item.legacy && (
+              <p role="alert">
+                An agent from the old install script serves this data directory, and it can no
+                longer start because that script is gone.
+              </p>
+            )}
             {item.points_elsewhere && (
               <p role="alert">
                 The agent runs{' '}
                 <code className="font-mono text-xs break-all">{item.points_elsewhere}</code>, not
-                this copy of netkeeper. Turn the switch off and on to fix it.
+                this copy of netkeeper.
               </p>
             )}
+            {(item.legacy || item.points_elsewhere) && (
+              <Button
+                size="sm"
+                disabled={repair.isPending}
+                onClick={() => {
+                  repair.reset()
+                  repair.mutate()
+                }}
+              >
+                {repair.isPending ? 'Repairing…' : 'Repair'}
+              </Button>
+            )}
+            {repair.isSuccess && repair.data.message && <p role="status">{repair.data.message}</p>}
+            {repair.isError && <p role="alert">{message(repair.error)}</p>}
             {change.isSuccess && change.data.message && <p role="status">{change.data.message}</p>}
             {change.isError && <p role="alert">{message(change.error)}</p>}
             {item.supported && (
