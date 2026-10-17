@@ -114,11 +114,57 @@ async def test_no_single_top_card_h2_skips_the_name_check_and_the_card_decides(
 
 
 async def test_two_contact_info_links_skip_the_name_check() -> None:
+    """The second link is hidden, so only a count that includes hidden links sees two
+    (#566: this kills the ``include_hidden=False`` mutant)."""
     site = _h2_site("Somebody Else")
-    site.before = f'<a href="/in/{ZEPHYRINE.slug}/overlay/contact-info/">Contact info</a>'
+    site.before = f'<a href="/in/{ZEPHYRINE.slug}/overlay/contact-info/" hidden>Contact info</a>'
     ran = await prefill(site)
     assert ran.kind is MessageOutcomeKind.PREFILLED, ran.result
     assert ran.result.outcome.recipient_name_checked is False
+
+
+def _one_section_h2(site: MessagingSite) -> MessagingSite:
+    """``site`` with its Activity section gone, so its About title is the page's only
+    ``h2`` after the top card."""
+    site.profile_html = site.profile_html.replace("<section><h2>Activity</h2></section>", "")
+    return site
+
+
+@pytest.mark.parametrize(
+    "shape",
+    ["no h2 in the top card", "no h2 in the top card, two section titles", "an h2 after"],
+)
+async def test_an_h2_after_the_contact_info_link_is_not_the_name(
+    shape: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#566: the name's ``h2`` comes before the Contact info link. A top card with no
+    ``h2`` lets the climb reach a section title ("About"); that, or an ``h2`` after the
+    link, is no name heading: the check is skipped and the card decides, rather than
+    refusing the right person by a section title."""
+    if shape == "no h2 in the top card":
+        site = _one_section_h2(_h2_site(top_card_h2s=0))
+    elif shape == "no h2 in the top card, two section titles":
+        site = _h2_site(top_card_h2s=0)
+    else:
+        site = _one_section_h2(_h2_site(top_card_h2s=0))
+        site.profile_html = site.profile_html.replace(
+            "</span></a>", f"</span></a><h2>{ZEPHYRINE.name}</h2>", 1
+        )
+    with caplog.at_level("DEBUG", logger="netkeeper.linkedin.browser"):
+        ran = await prefill(site)
+    assert ran.kind is MessageOutcomeKind.PREFILLED, ran.result
+    assert ran.result.outcome.recipient_name_checked is False
+    assert "prefill: no name heading (no h2 before the Contact info link)" in caplog.text
+
+
+async def test_more_than_one_h2_before_the_contact_info_link_has_its_own_reason(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("DEBUG", logger="netkeeper.linkedin.browser"):
+        ran = await prefill(_h2_site(top_card_h2s=2))
+    assert ran.result.outcome.recipient_name_checked is False
+    assert "prefill: no name heading (the top card holds more than one h2)" in caplog.text
+    assert "no h2 before the Contact info link" not in caplog.text
 
 
 async def test_an_h1_still_wins_over_the_top_cards_h2() -> None:
