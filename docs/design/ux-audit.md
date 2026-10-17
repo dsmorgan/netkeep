@@ -52,7 +52,7 @@ All paths are under `/api/v1`.
 | `/templates` | All templates · Editor (with AI draft helper and merge fields) · Preview · Version history | New template; Save; Delete; Copy prompt / Paste result; Add to dictionary | `templates*`, `templates/lint·merge-fields·dictionary`, `contacts` (search) |
 | `/campaigns` | Campaigns table · Archived campaigns | New campaign; Show archived | `campaigns` |
 | `/campaigns/new` | New campaign · Steps · Audience | Add a step; Save draft | `templates`, `mailboxes`, `campaigns/linkedin/options`, `lists`, `tags`, `campaigns/audience-preview`, `campaigns` |
-| `/campaigns/$id` | Overview · Results · Make a list from this campaign · Steps · LinkedIn queue and Waiting for you · Audience · Review · Enrollments | Pause / Resume; Change start; End; Archive; Delete; Enroll the audience; Start review; Approve; Run lint; Test send; Activate; Use newest version; Timing; Switch to Prefill / Auto-send; Record a response | `campaigns/{id}*` (36 endpoints), `campaigns/linkedin/*`, `settings/sending-hours`, `poll-status` |
+| `/campaigns/$id` | Overview · Results · Make a list from this campaign · Steps · LinkedIn queue and Waiting for you · Audience · Review · Enrollments | Pause / Resume; Change start; End; Archive; Delete; Enroll the audience; Start review; Approve; Run lint; Test send; Activate; Use newest version; Timing; Switch to Prefill / Auto-send; Record a response | `campaigns/{id}*` (30 endpoints), `campaigns/linkedin/*`, `settings/sending-hours`, `poll-status` |
 | `/inbox` | One list, with Show and Kind filters | Mark handled; Add note | `inbox`, `inbox/{id}/handled`, `contacts/{id}/interactions`, `mailboxes` |
 | `/settings` | Intro · Gmail (eight-step setup guide, OAuth client, mailboxes, steps to arm) · Sending hours · About you · LinkedIn budgets · LinkedIn active hours · Campaign defaults · Backups (config) · Backup files · Do-not-send list · Posture (30 rows) · Current user (raw JSON) | Connect Gmail; Check now; Arm for drafts / Arm to send / Disarm / Disconnect; Save (×7); Back up now; Acknowledge; Reset breaker; Forget inbox owner | `gmail-setup`, `mailboxes*`, `settings/*`, `backups`, `do-not-send`, `posture`, `linkedin/schedule/reset-breaker`, `linkedin/inbox/*`, `me` |
 
@@ -97,7 +97,7 @@ The click counts assume a person who knows where everything is. Real first-time 
 | First sync | `/linkedin` › Start a run: pick Full connections sync, Start run, confirm. Then LinkedIn inbox › Check inbox now. Then Scheduled runs › Arm, confirm | 7 | Order matters (sync, then inbox, then arm) but nothing sequences it. Scheduled job names are raw keys (`connections_incremental: every 24h`). |
 | Triage | Sidebar › Triage, keys | 1 plus keys | Good. The badge (14) is the only pointer to it. |
 
-A CSV-only user hits a wall later: our 12 CSV contacts couldn't join a LinkedIn campaign. "0 will start, 12 skipped (12 no LinkedIn member id yet (a connections sync adds it))". The first-run flow should say that a sync is what makes imported contacts reachable on LinkedIn.
+A CSV-only user hits a wall later: our 12 CSV contacts couldn't join a LinkedIn campaign. "0 will start, 12 skipped (12 no LinkedIn member id yet (a connections sync adds it))". A LinkedIn step needs the contact's LinkedIn member id, and a connections sync adds it only to imported contacts it can match to a 1st-degree connection by profile URL or email. A name and company match only makes a possible duplicate, and someone who isn't a connection never gets an id from a sync. So a CSV without LinkedIn URLs mostly stays email-only, or lands in duplicates to merge. Today the UI says this only as a skip reason in the audience preview and the enroll result. Neither the import result page nor `docs/guide` mentions it. Both should say it after the import, with the count of contacts that have no LinkedIn URL.
 
 ### 2.2 Daily use: what's running, what needs me, replies
 
@@ -135,7 +135,7 @@ That is about 30 clicks and three trips to Settings. The callout "Email replies 
 | Heat | `/linkedin` › Heat › Clear heat… | Fine. |
 | Gmail token expired | Global banner › Re-authorize | Good. It only re-authorizes the first stuck mailbox. |
 | "Is everything OK?" | Settings › Posture: 30 rows in one table | No summary, no grouping by severity. "NOT clear: 1 of 30 protections is not in force, 1 warning in all" is at the bottom. |
-| Logs | None in the UI. `<data_dir>/logs/serve.log` | No endpoint. |
+| Logs | None in the UI. The application log is `<data_dir>/logs/serve.err.log`, and only under launchd (`scripts/install-launchd.sh`). A `netkeeper serve` started in a terminal writes no file; its log is the terminal | No endpoint, and no file to read from outside launchd. #602 is adding a rotating log file. |
 | Support bundle | Doesn't exist | — |
 | Restore a backup | Settings shows the command. CLI with serve stopped | By design. Fine. |
 
@@ -157,17 +157,20 @@ Endpoints with no frontend caller (two `/tasks` demo endpoints and the OAuth cal
 CLI-only capabilities a UI user would want:
 
 - `history import` and `history scan-gmail` (#601 is adding the UI)
-- `preflight`, a live Chrome check
-- `config adopt`
-- `linkedin message-check`
-- `linkedin field-changes`
+- `preflight`, a live Chrome check (see §3.2 item 2)
 - `linkedin unreadable` across runs
-- `simulate`
 - `do-not-send add`
 - `import rm`
 - `templates dictionary list` and `remove`
 
-`docs/guide/troubleshooting.md` still lists `reset-breaker` and `inbox-forget-owner` as CLI-only. #583 added both to the UI.
+CLI-only by design, so not UI gaps:
+
+- `config adopt`: runs only in a terminal, on purpose.
+- `linkedin message-check`: a diagnostic (#495) that spends a profile visit.
+- `linkedin field-changes`: diagnostic counts (#518).
+- `simulate`: a what-if tool for budgets and heat.
+- `restore`, `rehearse`, `db`, `openapi`: need serve stopped, or are for developers.
+
 
 ### 3.2 UI needs, backend lacks (for #610)
 
@@ -176,10 +179,13 @@ CLI-only capabilities a UI user would want:
 3. **A ranked "needs you" feed.** `GET /attention` gives counts and flags. Home needs items: kind, sentence, target, severity, created_at. That covers replies, waiting prefills, retries, a review in progress, a tripped breaker, a session flag, mailbox reauth, leftover drafts, draft imports and triage.
 4. **An "upcoming" feed** that merges `dashboard/next-fires`, the scheduled jobs and poll status into one time-ordered list.
 5. **A health summary**: posture grouped into problems, warnings and on, each problem with its fix action. `GET /posture` has `actions` per row; it needs a severity and a plain-language fix sentence.
-6. **Logs**: the last N lines of `serve.log`, filtered and redacted.
+6. **Logs**: the last N lines of the application log, filtered and redacted. This depends on #602: today only a launchd `serve` writes a file (`serve.err.log`), so an endpoint would have nothing to read for a terminal `serve`. The log endpoint should read #602's rotating file.
 7. **A support bundle**: a zip of the config (secrets removed), versions, posture, recent runs and log tail, with message bodies, emails and cookies removed.
 8. **A "connect Gmail" entry that works from anywhere**: the OAuth start already exists. What's missing is a return target, so the flow comes back to the page it started from instead of `/settings`.
 9. **"Skipped" per setup step**, stored per user, so a skipped step stays a reminder instead of a nag.
+10. **Import result copy about LinkedIn reach**: the import result should say how many imported contacts a sync can't match (no profile URL and no email), so they won't be reachable by LinkedIn steps (§2.1). This is mostly frontend copy, plus a count in the commit result.
+
+Not a need: **an automatic first LinkedIn inbox poll.** The first poll stays a poll you start by hand, by design. `FIRST_POLL_BY_HAND` in `netkeeper/services/scheduled_runs.py` holds scheduled inbox polls until a poll you started has completed, because that supervised poll records the LinkedIn mailbox owner that the inbox owner breaker checks against. The same hold applies again after **Forget inbox owner**. #610 must not chain the first poll onto the sync or run it on the user's behalf; the setup flow shows it as a button (§4.4 step 6).
 
 ### 3.3 Inconsistent copy and states
 
@@ -257,7 +263,7 @@ Top to bottom (see `home.html`):
    6. triage
    7. changed jobs worth a note
 
-   Done items strike through, and an Undo lives in the Inbox. Empty: "You are all caught up."
+   Marking an item done strikes it through and shows an Undo for a few seconds. A reply marked handled can also be marked unhandled again from the Inbox, as it can today. Items that finish on their own, such as a prefill you sent or a triaged contact, leave the list without an Undo. Empty: "You are all caught up."
 5. **Coming up.** One timeline merging campaign sends, scheduled runs and checks, with a stopped item marked in place.
 6. **Campaigns.** One row per active or in-review campaign, with a sent and replied bar.
 7. **This week.** Sent, replied, bounced, changed jobs.
@@ -273,7 +279,7 @@ Seven steps on `/setup` (see `first-run.html`). Steps 4 to 7 are optional and sk
 3. **Bring in contacts.** Drop a zip or a CSV, see what was recognized, and import. Possible duplicates can be decided now or later. Mentions rollback.
 4. **Connect Gmail.** The six console steps collapsed into a checklist beside a link to the guide, then paste the client, then Connect. It ends with "Sending stays off. Campaigns only make drafts until you arm the mailbox, after a test."
 5. **LinkedIn Chrome.** The launch command with Copy, "sign in in that window", then **Check connection**. This needs the live-check endpoint (§3.2 item 2). Until then the step shows the `netkeeper preflight` command.
-6. **First sync.** Start the full connections sync and watch its progress inline. The first LinkedIn inbox check runs on its own when the sync ends. It explains that the sync is what makes imported contacts reachable on LinkedIn. It is blocked, with a link back, if step 5 was skipped.
+6. **First sync.** Start the full connections sync and watch its progress inline. When it ends, the step shows a **Check your LinkedIn inbox** button. The user presses it; it never runs on its own. The step explains why: this first check, started by hand while you watch, records which LinkedIn account the inbox belongs to, and scheduled checks wait for it (the same is true after Forget inbox owner). The step also says what the sync did for the import: "The sync added LinkedIn ids to 31 imported contacts it matched by profile URL or email. 6 are possible duplicates to merge, and 3 stay email-only." It is blocked, with a link back, if step 5 was skipped.
 7. **Triage a few.** Five cards with m, n and s, then "the rest wait in Contacts › Triage".
 
 The flow then offers **Start your first campaign** or **Go to Home**. Arming scheduled runs and arming Gmail to send stay deliberate acts on Connections, and Home's setup bar points to them. They should not be steps a user clicks through while learning the app.
@@ -297,7 +303,7 @@ See `campaign.html`.
 See `health.html`.
 
 - A summary row: problems, warnings, protections on, last backup.
-- **Needs fixing**: each problem in plain words, why it stopped, and its fix button. For example, "I fixed it, resume checks" resets the breaker, with "forget the recorded account" as the alternative.
+- **Needs fixing**: each problem in plain words, why it stopped, and its fix button. For example, a tripped inbox owner breaker says to sign back in to your own account, then offers **Reset breaker**, which keeps today's confirmation dialog. **Forget inbox owner** is a separate remedy, for when you changed accounts on purpose; it also confirms, and then the next inbox poll must be one you start (§3.2).
 - **Worth a look**: warnings, such as leftover drafts and high heat.
 - **Connections** and **Background checks** at a glance, with Check now in one place.
 - **All 30 protections**, collapsed.
@@ -305,13 +311,13 @@ See `health.html`.
 
 ## 5. Mockups
 
-The mockups are clickable, self-contained HTML files with no network requests and invented data. They were handed to the design session; they are not in the repository.
+The mockups are clickable, self-contained HTML files with no network requests and invented data. They live in the maintainer's design-session artifact, not in the repository.
 
 | File | What it shows |
 |---|---|
 | `index.html` | Entry page and a summary of the directions |
 | `home.html` | §4.3 Home. Mark handled and I sent them work |
-| `first-run.html` | §4.4. Each step is clickable; file pick, Gmail connect, Chrome check, sync progress and triage keys are simulated |
+| `first-run.html` | §4.4. Each step is clickable; file pick, Gmail connect, Chrome check, sync progress, the first inbox check (a button the user presses after the sync) and triage keys are simulated |
 | `campaign.html` | §4.5. Approve, test and activate walk the lifecycle; the tabs switch |
 | `health.html` | §4.6. Resolving the problem clears it |
 
@@ -328,3 +334,4 @@ Questions for the session:
 3. Is Templates a tab of Campaigns, or its own item?
 4. Which direction, or which mix (for example A's palette with B's status tiles)?
 5. Which §3.2 backend items are in scope for 1.0? Setup state and the live Chrome check decide whether first run can be fully in the UI.
+6. Where does arming live? First run (§4.4) keeps arming scheduled runs and arming Gmail to send as deliberate acts on Connections, while the campaign page (§4.5) offers the mailbox arm inline, and principle 3 says each fact has one owner page. Is arming inline on the campaign page, only on Connections, or inline but linking to Connections to confirm?
