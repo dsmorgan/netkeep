@@ -110,8 +110,9 @@ export function CampaignListsCard({ campaignId }: { campaignId: number }) {
           </div>
         )}
         <p className="text-xs text-muted-foreground">
-          &ldquo;No reply&rdquo; is everyone still active or finished without answering. It leaves
-          out the people who bounced, opted out or were removed, which have their own lists.
+          &ldquo;No reply&rdquo; is everyone the campaign wrote to who hasn&apos;t answered, still
+          active or finished. Someone not sent anything yet stays under &ldquo;Still active&rdquo;,
+          and the people who bounced, opted out or were removed have their own lists.
           &ldquo;Replied&rdquo; counts responses you recorded by hand.
         </p>
 

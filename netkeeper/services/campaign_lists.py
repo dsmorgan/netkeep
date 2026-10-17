@@ -112,7 +112,8 @@ def outcome_counts(session: Session, user: User, campaign_id: int) -> list[Outco
 def default_list_name(campaign: Campaign, outcome: CampaignOutcome) -> str:
     """``"<campaign>: <outcome>"``, the campaign's name cut so the whole fits a list name."""
     suffix = f": {OUTCOME_LABELS[outcome]}"
-    return campaign.name[: LIST_NAME_MAX_LENGTH - len(suffix)].rstrip() + suffix
+    # Stripped as create_list strips a name, so the duplicate check sees what is stored.
+    return campaign.name.strip()[: LIST_NAME_MAX_LENGTH - len(suffix)].rstrip() + suffix
 
 
 def _free_name(session: Session, user: User, name: str) -> str:

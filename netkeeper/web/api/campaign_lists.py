@@ -60,8 +60,9 @@ class OutcomeCountOut(BaseModel):
 class CampaignOutcomesOut(BaseModel):
     campaign_id: int
     outcomes: list[OutcomeCountOut]
-    """Every outcome, in order, zero counts included. ``no_reply`` is ``active`` plus
-    ``completed``; the others split the enrollments once."""
+    """Every outcome, in order, zero counts included. ``no_reply`` is the part of
+    ``active`` plus ``completed`` that was sent at least one message; the others split
+    the enrollments once."""
 
 
 class OutcomeListIn(BaseModel):

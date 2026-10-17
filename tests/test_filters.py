@@ -744,17 +744,34 @@ def _campaign_cast(session: Session, user: User) -> tuple[Any, dict[str, int]]:
         "replied_by_hand": {"status": EnrollmentStatus.REPLIED, "replied_at": NOW},
         # A reply after the sequence finished leaves it completed (campaign_replies).
         "replied_late": {"status": EnrollmentStatus.COMPLETED, "replied_at": NOW},
+        # A row with the status and no ``replied_at``: _REPLIED's status branch.
+        "replied_status_only": {"status": EnrollmentStatus.REPLIED},
         "opted_out": {"status": EnrollmentStatus.OPTED_OUT, "replied_at": NOW},
+        # An unsubscribe reply after the sequence finished leaves it completed too.
+        "late_opt_out": {"status": EnrollmentStatus.COMPLETED, "replied_at": NOW},
         "bounced": {"status": EnrollmentStatus.BOUNCED},
         "removed": {"status": EnrollmentStatus.REMOVED},
         "completed": {"status": EnrollmentStatus.COMPLETED},
         "active": {"status": EnrollmentStatus.ACTIVE},
+        # Enrolled and waiting, with nothing sent yet.
         "pending": {"status": EnrollmentStatus.PENDING},
+        "active_unsent": {"status": EnrollmentStatus.ACTIVE},
         "paused": {"status": EnrollmentStatus.PAUSED},
     }
+    unsent = {"pending", "active_unsent"}
     for name, fields in states.items():
         contact = factories.make_contact(session, user)
         enrollment = factories.make_enrollment(session, campaign, contact, **fields)
+        if name not in unsent:
+            factories.make_message(session, enrollment)
+        if name == "late_opt_out":
+            factories.make_message(
+                session,
+                enrollment,
+                direction=MessageDirection.IN,
+                status=MessageStatus.RECEIVED,
+                asks_unsubscribe=True,
+            )
         if name == "replied_by_hand":
             factories.make_message(
                 session,
@@ -773,13 +790,14 @@ def _ids(people: dict[str, int], *names: str) -> list[int]:
 
 
 OUTCOME_PEOPLE: dict[str, tuple[str, ...]] = {
-    "replied": ("replied", "replied_by_hand", "replied_late"),
-    "opted_out": ("opted_out",),
+    "replied": ("replied", "replied_by_hand", "replied_late", "replied_status_only"),
+    "opted_out": ("opted_out", "late_opt_out"),
     "bounced": ("bounced",),
     "removed": ("removed",),
     "completed": ("completed",),
-    "active": ("active", "pending", "paused"),
-    "no_reply": ("completed", "active", "pending", "paused"),
+    "active": ("active", "pending", "active_unsent", "paused"),
+    # Only people the campaign wrote to: an enrollment not sent anything stays "active".
+    "no_reply": ("completed", "active", "paused"),
 }
 
 
@@ -808,7 +826,15 @@ def test_replied_in_counts_a_response_recorded_by_hand_and_an_opt_out_reply(
 ) -> None:
     campaign, people = _campaign_cast(session, user)
     replied = matching(session, user, {"op": "replied_in", "campaign_ids": [campaign.id]})
-    assert replied == _ids(people, "replied", "replied_by_hand", "replied_late", "opted_out")
+    assert replied == _ids(
+        people,
+        "replied",
+        "replied_by_hand",
+        "replied_late",
+        "replied_status_only",
+        "opted_out",
+        "late_opt_out",
+    )
 
 
 @pytest.mark.parametrize("outcome", list(OUTCOME_PEOPLE))
@@ -816,6 +842,43 @@ def test_each_outcome_selects_its_people(session: Session, user: User, outcome: 
     campaign, people = _campaign_cast(session, user)
     node = {"op": "campaign_outcome", "campaign_ids": [campaign.id], "outcome": outcome}
     assert matching(session, user, node) == _ids(people, *OUTCOME_PEOPLE[outcome])
+
+
+def test_a_late_opt_out_is_opted_out_not_replied(session: Session, user: User) -> None:
+    campaign, people = _campaign_cast(session, user)
+    late = people["late_opt_out"]
+    node = {"op": "campaign_outcome", "campaign_ids": [campaign.id], "outcome": "replied"}
+    assert late not in matching(session, user, node)
+    node["outcome"] = "opted_out"
+    assert late in matching(session, user, node)
+    node["outcome"] = "completed"
+    assert late not in matching(session, user, node)
+
+
+def test_the_status_alone_says_replied(session: Session, user: User) -> None:
+    campaign, people = _campaign_cast(session, user)
+    only = people["replied_status_only"]
+    assert only in matching(session, user, {"op": "replied_in", "campaign_ids": [campaign.id]})
+    for outcome, expected in (("replied", True), ("no_reply", False), ("active", False)):
+        node = {"op": "campaign_outcome", "campaign_ids": [campaign.id], "outcome": outcome}
+        assert (only in matching(session, user, node)) is expected, outcome
+
+
+def test_no_reply_needs_a_message_sent(session: Session, user: User) -> None:
+    """Someone enrolled but not written to yet stays "still active", never "no reply"."""
+    campaign, people = _campaign_cast(session, user)
+    for name in ("pending", "active_unsent"):
+        no_reply = {"op": "campaign_outcome", "campaign_ids": [campaign.id], "outcome": "no_reply"}
+        assert people[name] not in matching(session, user, no_reply)
+        active = {"op": "campaign_outcome", "campaign_ids": [campaign.id], "outcome": "active"}
+        assert people[name] in matching(session, user, active)
+    contact = factories.make_contact(session, user)
+    enrollment = factories.make_enrollment(session, campaign, contact)
+    factories.make_message(session, enrollment, status=MessageStatus.DRAFTED, sent_at=None)
+    no_reply = {"op": "campaign_outcome", "campaign_ids": [campaign.id], "outcome": "no_reply"}
+    assert contact.id not in matching(session, user, no_reply), "a draft is not a send"
+    factories.make_message(session, enrollment, status=MessageStatus.BOUNCED)
+    assert contact.id in matching(session, user, no_reply)
 
 
 def test_the_outcomes_but_no_reply_split_the_enrollments_once(session: Session, user: User) -> None:
@@ -876,7 +939,12 @@ def test_campaign_predicates_compose_with_other_predicates(session: Session, use
     replied = factories.make_contact(session, user, current_company="Acme Corp")
     _assign(session, user, replied, founder)
     for contact in (wanted, untagged, elsewhere):
-        factories.make_enrollment(session, campaign, contact, status=EnrollmentStatus.COMPLETED)
+        factories.make_message(
+            session,
+            factories.make_enrollment(
+                session, campaign, contact, status=EnrollmentStatus.COMPLETED
+            ),
+        )
     factories.make_enrollment(
         session, campaign, replied, status=EnrollmentStatus.REPLIED, replied_at=NOW
     )
@@ -911,6 +979,7 @@ def test_a_smart_list_over_an_outcome_is_live(session: Session, user: User) -> N
     campaign = factories.make_campaign(session, user)
     contact = factories.make_contact(session, user)
     enrollment = factories.make_enrollment(session, campaign, contact)
+    factories.make_message(session, enrollment)
     node = {"op": "campaign_outcome", "campaign_ids": [campaign.id], "outcome": "no_reply"}
     smart = _smart_list(session, user, "Autumn hello: no reply", node)
     assert [c.id for c in list_members(session, user, smart.id, limit=10)[0]] == [contact.id]
