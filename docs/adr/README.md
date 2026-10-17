@@ -23,5 +23,6 @@ An ADR records one decision, the context that forced it, and its consequences. T
 | [0008](0008-auto-send.md) | Auto-send clicks Send, only from the scheduler, and stops at the first doubt | Accepted |
 | [0009](0009-gmail-deletes.md) | netkeeper deletes nothing in Gmail; a future trash switch follows fixed rules | Accepted |
 | [0010](0010-contact-channel-preference.md) | Contact channel preference: you set it, a campaign skips a mismatch unless you override, and routing comes later | Accepted |
+| [0012](0012-chrome-profiles.md) | Chrome profiles: the UI never shares netkeeper's LinkedIn Chrome | Proposed |
 
 The mechanics behind ADRs 0006, 0007, and 0008 (the browser inputs, their checks, and their pins) are in [How netkeeper drives a LinkedIn page](../linkedin-browser-inputs.md).
