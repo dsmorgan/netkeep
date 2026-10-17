@@ -9,7 +9,7 @@ import factories
 import httpx
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import select
+from sqlalchemy import Engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from netkeeper.crm import identity
@@ -786,3 +786,21 @@ async def test_deleting_a_rolled_back_run_is_refused(client: httpx.AsyncClient) 
 async def test_deleting_an_unknown_run_is_not_found(client: httpx.AsyncClient) -> None:
     response = await client.delete("/api/v1/imports/404", headers=CSRF)
     assert response.status_code == 404
+
+
+async def test_inspecting_a_file_never_takes_the_write_lock(
+    client: httpx.AsyncClient, bare_engine: Engine
+) -> None:
+    """#627: the parse of up to 32M characters stores nothing, so it holds no writer."""
+    begins: list[str] = []
+
+    @event.listens_for(bare_engine, "before_cursor_execute")
+    def record(*args: Any) -> None:
+        if args[2].startswith("BEGIN"):
+            begins.append(args[2])
+
+    response = await client.post(
+        "/api/v1/imports/inspect", headers=CSRF, json={"content": NINE_COLUMN}
+    )
+    assert response.status_code == 200
+    assert "BEGIN IMMEDIATE" not in begins

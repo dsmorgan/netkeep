@@ -53,7 +53,7 @@ from netkeeper.models import (
     ImportSourceKind,
     ImportStatus,
 )
-from netkeeper.web.deps import CurrentUser, SessionDep
+from netkeeper.web.deps import CurrentUser, SessionDep, read_only
 from netkeeper.web.errors import ApiError
 from netkeeper.web.schemas import (
     ArchiveConnectionCountsOut,
@@ -280,6 +280,7 @@ def delete_import_preset(name: str, user: CurrentUser, session: SessionDep) -> N
 
 
 @router.post("/imports/inspect", operation_id="inspect_import_file", responses=INVALID)
+@read_only  # parses up to 32M characters and stores nothing: never under the write lock (#627)
 def inspect_import_file(body: ImportInspectIn, user: CurrentUser) -> ImportInspectOut:
     """A file's columns and the mapping a preset gives them. Nothing is stored."""
     with translate_errors():
