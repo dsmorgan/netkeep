@@ -8,7 +8,17 @@ wheel="${1:-$(ls dist/netkeeper-*.whl | head -n1)}"
 work="$(mktemp -d)"
 server_pid=""
 cleanup() {
-  [ -n "$server_pid" ] && kill "$server_pid" 2>/dev/null || true
+  if [ -n "$server_pid" ]; then
+    kill "$server_pid" 2>/dev/null || true
+    # serve still writes its log while it shuts down: wait (about 10 s at most) before
+    # removing the directory under it.
+    for _ in $(seq 1 20); do
+      kill -0 "$server_pid" 2>/dev/null || break
+      sleep 0.5
+    done
+    kill -9 "$server_pid" 2>/dev/null || true
+    wait "$server_pid" 2>/dev/null || true
+  fi
   rm -rf "$work"
 }
 trap cleanup EXIT
