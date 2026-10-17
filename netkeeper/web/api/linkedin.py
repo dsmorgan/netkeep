@@ -36,6 +36,10 @@ built on:
   person saw): ``netkeeper linkedin clear-flag``, with its refusals (#181).
 * ``POST /linkedin/inbox/acknowledge``: ``netkeeper linkedin inbox-acknowledge``: clear
   the posture warning that the first inbox poll could not read back far enough (#383).
+* ``POST /linkedin/schedule/reset-breaker`` (with ``confirm: true`` and the tripped
+  breakers the person saw): ``netkeeper linkedin schedule reset-breaker`` (#583).
+* ``POST /linkedin/inbox/forget-owner`` (with ``confirm: true``): ``netkeeper linkedin
+  inbox-forget-owner`` (#583).
 * ``GET /linkedin/browser``: ``netkeeper browser launch``'s instructions, as data.
   Read-only and built from config alone; it never attaches (spec 9.9, CLAUDE.md).
 * ``GET /linkedin/browser/health``: what the last preflight or run recorded about
@@ -56,7 +60,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from netkeeper.config import LinkedInSettings
-from netkeeper.crm.inbox_apply import clear_short_first_poll
+from netkeeper.crm.inbox_apply import clear_short_first_poll, forget_owner
 from netkeeper.models import Contact, SyncRun, SyncRunKind, SyncRunStatus, SyncRunTrigger, User
 from netkeeper.models.base import utcnow
 from netkeeper.paths import data_dir
@@ -65,6 +69,7 @@ from netkeeper.services import (
     auto_send_outlook,
     budgets,
     enrich_plan,
+    route_breaker,
     run_contacts,
     run_diagnostics,
     runs,
@@ -102,12 +107,16 @@ from netkeeper.services.visit_budget import todays_visits
 from netkeeper.web.deps import CurrentUser, SessionDep, Tasks, effective_settings, file_settings
 from netkeeper.web.schemas import (
     AutoSendOutlookOut,
+    BreakerResetIn,
+    BreakerResetOut,
     BrowserHealthOut,
     BrowserLaunchOut,
     BudgetOut,
     BudgetStatusOut,
     HeatClearIn,
     HeatOut,
+    InboxOwnerForgetIn,
+    InboxOwnerForgottenOut,
     LastFireOut,
     LinkedInStatusOut,
     PeriodBudgetOut,
@@ -699,6 +708,51 @@ def unpause_linkedin_schedule(
     return _schedule_out(request, session, user)
 
 
+@router.post(
+    "/schedule/reset-breaker",
+    operation_id="reset_linkedin_breaker",
+    responses={
+        409: {"description": "No breaker is tripped, or which are tripped changed since"},
+        422: {"description": "confirm was not true"},
+    },
+)
+def reset_linkedin_breaker(
+    body: BreakerResetIn, user: CurrentUser, session: SessionDep
+) -> BreakerResetOut:
+    """Reset the tripped LinkedIn breakers (#583): ``netkeeper linkedin schedule
+    reset-breaker``, so scheduled connections, enrichment, and inbox runs may fire again
+    when due. Like the command, it clears all five breakers at once.
+
+    Needs ``confirm: true`` and the keys of the tripped breaker rows the person was shown
+    (``tripped``). With none tripped, or a different set tripped now, it refuses with
+    ``409`` and writes nothing. A count below its threshold skips nothing, so it is not a
+    reason to reset here; the command still clears one.
+    """
+    if not body.confirm:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "resetting a breaker lets scheduled LinkedIn runs start again; send confirm: true"
+            ),
+        )
+    account_id = account_id_for(session, user)
+    tripped = posture_service.tripped_breakers(session, user, account_id)
+    if not tripped:
+        raise HTTPException(
+            status_code=409, detail="no LinkedIn breaker is tripped; nothing to reset"
+        )
+    if tripped != frozenset(body.tripped):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"the tripped breakers are now {', '.join(sorted(tripped))}, not what you"
+                " were shown; reload Posture and confirm again"
+            ),
+        )
+    route_breaker.reset(session, user, account_id)
+    return BreakerResetOut(cleared=True, reset=sorted(tripped))
+
+
 # --- the banner ------------------------------------------------------------------------
 
 
@@ -748,6 +802,36 @@ def acknowledge_inbox_first_poll(user: CurrentUser, session: SessionDep) -> Inbo
     inbox poll could not read back far enough. ``netkeeper linkedin inbox-acknowledge``.
     Touches no browser and visits nothing."""
     return InboxAcknowledgedOut(cleared=clear_short_first_poll(session, user))
+
+
+@router.post(
+    "/inbox/forget-owner",
+    operation_id="forget_linkedin_inbox_owner",
+    responses={
+        409: {"description": "No LinkedIn mailbox is recorded"},
+        422: {"description": "confirm was not true"},
+    },
+)
+def forget_inbox_owner(
+    body: InboxOwnerForgetIn, user: CurrentUser, session: SessionDep
+) -> InboxOwnerForgottenOut:
+    """Forget which LinkedIn mailbox the inbox poll recorded, after you changed accounts
+    (#583): ``netkeeper linkedin inbox-forget-owner``. The next poll records whichever
+    mailbox the page shows. Touches no browser and visits nothing, and leaves your own
+    contact's LinkedIn ID as it is."""
+    if not body.confirm:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "forgetting the mailbox lets the next inbox poll record another account's;"
+                " send confirm: true"
+            ),
+        )
+    if not forget_owner(session, user):
+        raise HTTPException(
+            status_code=409, detail="nothing to forget: no LinkedIn mailbox is recorded"
+        )
+    return InboxOwnerForgottenOut(forgotten=True)
 
 
 def _status_out(request: Request, session: SessionDep, user: User) -> LinkedInStatusOut:

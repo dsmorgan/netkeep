@@ -3,14 +3,19 @@ import { useId, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { renderInlineMarkdown } from '@/lib/inline-markdown'
 import { cn } from '@/lib/utils'
 
 import {
+  FORGET_INBOX_OWNER_ACTION,
   REPLY_POLL_KEY,
   MANUAL_SENDS_KEY,
+  RESET_BREAKER_ACTION,
   acknowledgeInboxFirstPoll,
+  forgetInboxOwner,
   postureQuery,
+  resetBreaker,
   type Protection,
 } from './api'
 
@@ -43,6 +48,7 @@ function message(error: unknown): string {
 export function PostureSection() {
   const posture = useQuery(postureQuery)
   const [expanded, setExpanded] = useState(false)
+  const [acting, setActing] = useState<RowAction | null>(null)
   const detailsId = useId()
 
   return (
@@ -69,7 +75,12 @@ export function PostureSection() {
             <div id={detailsId} className="space-y-4">
               <ul className="space-y-2 sm:hidden" data-testid="posture-blocks">
                 {posture.data.protections.map((row) => (
-                  <ProtectionBlock key={row.name} row={row} expanded={expanded} />
+                  <ProtectionBlock
+                    key={row.name}
+                    row={row}
+                    expanded={expanded}
+                    onAction={setActing}
+                  />
                 ))}
               </ul>
               <table
@@ -96,7 +107,12 @@ export function PostureSection() {
                 </thead>
                 <tbody>
                   {posture.data.protections.map((row) => (
-                    <ProtectionRow key={row.name} row={row} expanded={expanded} />
+                    <ProtectionRow
+                      key={row.name}
+                      row={row}
+                      expanded={expanded}
+                      onAction={setActing}
+                    />
                   ))}
                 </tbody>
               </table>
@@ -128,6 +144,12 @@ export function PostureSection() {
             <p role="status" className="font-medium">
               {posture.data.verdict}
             </p>
+
+            <RowActionDialog
+              acting={acting}
+              rows={posture.data.protections}
+              onClose={() => setActing(null)}
+            />
           </>
         )}
       </CardContent>
@@ -268,7 +290,13 @@ export function ProtectionDetail({ row, expanded }: { row: Protection; expanded:
   )
 }
 
-function ProtectionRow({ row, expanded }: { row: Protection; expanded: boolean }) {
+interface RowProps {
+  row: Protection
+  expanded: boolean
+  onAction: (action: RowAction) => void
+}
+
+function ProtectionRow({ row, expanded, onAction }: RowProps) {
   return (
     <tr className="border-t border-border/60 align-top">
       <th scope="row" className="py-2 pr-3 font-normal break-words">
@@ -279,12 +307,13 @@ function ProtectionRow({ row, expanded }: { row: Protection; expanded: boolean }
       </td>
       <td className="py-2 break-words">
         <ProtectionDetail row={row} expanded={expanded} />
+        <RowActions row={row} onAction={onAction} />
       </td>
     </tr>
   )
 }
 
-function ProtectionBlock({ row, expanded }: { row: Protection; expanded: boolean }) {
+function ProtectionBlock({ row, expanded, onAction }: RowProps) {
   return (
     <li className="rounded-lg border border-border/60 p-2">
       {/* `flex-wrap`, and the name keeps its own min-content width: when the
@@ -299,6 +328,149 @@ function ProtectionBlock({ row, expanded }: { row: Protection; expanded: boolean
       <div className="mt-2 break-words text-muted-foreground">
         <ProtectionDetail row={row} expanded={expanded} />
       </div>
+      <RowActions row={row} onAction={onAction} />
     </li>
+  )
+}
+
+/** A button a posture row offers (#583), and the row it was clicked on. */
+interface RowAction {
+  action: string
+  row: Protection
+}
+
+const ACTION_LABELS: Record<string, string> = {
+  [RESET_BREAKER_ACTION]: 'Reset breaker',
+  [FORGET_INBOX_OWNER_ACTION]: 'Forget inbox owner',
+}
+
+/**
+ * The buttons a row offers right now (#583). The backend decides which apply (a
+ * row's `actions`): **Reset breaker** only on a tripped breaker, **Forget inbox owner**
+ * only where an owner mismatch shows that forgetting can fix. Each opens a confirmation.
+ */
+function RowActions({ row, onAction }: { row: Protection; onAction: (a: RowAction) => void }) {
+  const actions = row.actions.filter((action) => action in ACTION_LABELS)
+  if (actions.length === 0) return null
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {actions.map((action) => (
+        <Button key={action} size="sm" variant="outline" onClick={() => onAction({ action, row })}>
+          {ACTION_LABELS[action]}
+        </Button>
+      ))}
+    </div>
+  )
+}
+
+/** What each breaker stops while it is tripped, for the reset's confirmation (#583). */
+const BREAKER_GUARDS: Record<string, string> = {
+  route_changed_breaker:
+    'It stops scheduled connections syncs from loading a connections page LinkedIn has changed or walled off, again at every interval.',
+  answer_lost_limit:
+    'It stops scheduled connections syncs from spending page views while LinkedIn’s answers keep arriving unreadable.',
+  contact_info_breaker:
+    'It stops scheduled enrichment runs while Contact info answers keep arriving unreadable.',
+  inbox_breaker:
+    'It stops scheduled LinkedIn inbox polls while the messaging page has changed or can’t be read.',
+  inbox_owner_breaker:
+    'It stops scheduled LinkedIn inbox polls while the page shows another LinkedIn mailbox than this account’s.',
+}
+
+/**
+ * The one confirmation for whichever row button was clicked (#583). The rows render
+ * twice (a table from `sm` up, stacked blocks below it), so the dialog lives here once
+ * rather than in each row.
+ */
+function RowActionDialog({
+  acting,
+  rows,
+  onClose,
+}: {
+  acting: RowAction | null
+  rows: readonly Protection[]
+  onClose: () => void
+}) {
+  const queryClient = useQueryClient()
+  const done = async () => {
+    await queryClient.invalidateQueries({ queryKey: postureQuery.queryKey })
+    onClose()
+  }
+  // Every row offering a reset: the reset clears them all, so the person is shown them
+  // all, and the backend checks that this is still the set that is tripped.
+  const tripped = rows.filter((r) => r.actions.includes(RESET_BREAKER_ACTION))
+  const reset = useMutation({
+    mutationFn: () => resetBreaker(tripped.map((r) => r.key ?? '')),
+    onSuccess: done,
+  })
+  const forget = useMutation({ mutationFn: forgetInboxOwner, onSuccess: done })
+  const close = (open: boolean) => {
+    if (open) return
+    reset.reset()
+    forget.reset()
+    onClose()
+  }
+
+  if (acting?.action === FORGET_INBOX_OWNER_ACTION) {
+    return (
+      <ConfirmDialog
+        open
+        onOpenChange={close}
+        title="Forget the recorded LinkedIn mailbox?"
+        confirmLabel="Forget inbox owner"
+        pending={forget.isPending}
+        error={forget.isError ? message(forget.error) : null}
+        onConfirm={() => forget.mutateAsync()}
+      >
+        <p>
+          The LinkedIn inbox poll recorded which mailbox is this account’s, and the page has since
+          shown another one, so polls stop rather than read it.
+        </p>
+        <p>
+          If Chrome is signed in to another LinkedIn account, cancel and sign back in to yours
+          instead. Forget the mailbox only if you moved netkeeper to a different LinkedIn account on
+          purpose: the next inbox poll records whichever account the page shows.
+        </p>
+        <p>
+          This touches no browser and visits nothing. Afterward, run an inbox poll by hand (
+          <code className="font-mono text-xs">netkeeper linkedin inbox</code>) to record the new
+          mailbox.
+        </p>
+      </ConfirmDialog>
+    )
+  }
+
+  return (
+    <ConfirmDialog
+      open={acting?.action === RESET_BREAKER_ACTION}
+      onOpenChange={close}
+      title={tripped.length > 1 ? 'Reset the LinkedIn breakers?' : 'Reset the LinkedIn breaker?'}
+      confirmLabel="Reset breaker"
+      confirmVariant="default"
+      pending={reset.isPending}
+      error={reset.isError ? message(reset.error) : null}
+      onConfirm={() => reset.mutateAsync()}
+    >
+      {tripped.map((row) => (
+        <div key={row.name} data-testid="reset-breaker-row">
+          <p className="font-medium text-foreground">{row.name}</p>
+          {row.key != null && BREAKER_GUARDS[row.key] !== undefined && (
+            <p>{BREAKER_GUARDS[row.key]}</p>
+          )}
+          <p className="mt-1">Why it tripped:</p>
+          <ul className="list-disc space-y-1 pl-5">
+            {row.warnings.map((warning) => (
+              <li key={warning}>{renderInlineMarkdown(warning)}</li>
+            ))}
+          </ul>
+        </div>
+      ))}
+      <p>
+        Resetting clears every LinkedIn breaker at once, so scheduled connections, enrichment, and
+        inbox runs may start again when due. If the cause is still there, the breaker trips again
+        after the next failed runs. To check first, run one by hand instead: a run that completes
+        clears its breaker without a reset.
+      </p>
+    </ConfirmDialog>
   )
 }

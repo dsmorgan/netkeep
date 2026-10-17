@@ -263,6 +263,27 @@ its posture rows by them (#449)."""
 KEY_LINKEDIN_REPLY_POLL: Final = "linkedin_reply_poll"
 """The key of the LinkedIn inbox poll's row (it is always there). A short first poll adds
 a warning to it, which Settings acknowledges."""
+KEY_ROUTE_CHANGED_BREAKER: Final = "route_changed_breaker"
+KEY_ANSWER_LOST_LIMIT: Final = "answer_lost_limit"
+KEY_CONTACT_INFO_BREAKER: Final = "contact_info_breaker"
+KEY_INBOX_BREAKER: Final = "inbox_breaker"
+KEY_INBOX_OWNER_BREAKER: Final = "inbox_owner_breaker"
+"""The keys of the five breaker rows (#583). ``POST /linkedin/schedule/reset-breaker``
+takes the keys of the tripped ones the person saw (:func:`tripped_breakers`)."""
+
+ACTION_RESET_BREAKER: Final = "reset_breaker"
+"""A row's action (#583): **Reset breaker**, ``netkeeper linkedin schedule reset-breaker``.
+Set on a breaker row only while it is tripped (an unreadable one included)."""
+ACTION_FORGET_INBOX_OWNER: Final = "forget_inbox_owner"
+"""A row's action (#583): **Forget inbox owner**, ``netkeeper linkedin inbox-forget-owner``.
+Set only where a row shows an owner mismatch that forgetting can fix
+(:func:`_forget_owner_applies`)."""
+
+RESET_BREAKER_HOW: Final = (
+    "click **Reset breaker** under Posture on the Settings page, or run"
+    " `netkeeper linkedin schedule reset-breaker`"
+)
+"""How to clear a tripped breaker directly, in every breaker row's warning (#583)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -289,6 +310,9 @@ class Protection:
     key: str | None = None
     """A stable id for a row the UI acts on (#383): :data:`KEY_MANUAL_LINKEDIN_SENDS`,
     :data:`KEY_LINKEDIN_REPLY_POLL`. None for the rest; ``name`` is for reading."""
+    actions: tuple[str, ...] = ()
+    """The buttons this row offers right now (#583): :data:`ACTION_RESET_BREAKER`,
+    :data:`ACTION_FORGET_INBOX_OWNER`. Empty when none applies."""
 
     @property
     def summary(self) -> str:
@@ -594,11 +618,7 @@ def posture(
         _sending_hours(session, user),
         _next_campaign_send(session, user, zone=zone, now=now, settings=settings),
         _campaign_templates(session, user),
-        _route_changed_breaker(session, user, account_id),
-        _answer_lost_limit(session, user, account_id),
-        _contact_info_breaker(session, user, account_id),
-        _inbox_breaker(session, user, account_id, now=now),
-        _inbox_owner_breaker(session, user, account_id, now=now),
+        *_breaker_rows(session, user, account_id, now=now),
         _network_aging(session, user),
     ]
     protections.append(_linkedin_reply_poll(session, user, now=now))
@@ -1697,6 +1717,7 @@ def _linkedin_reply_poll(session: Session, user: User, *, now: datetime) -> Prot
     short_of = short_first_poll(session, user)
     last = inbox_hold.last_complete_poll(session, user, now=now)
     notes: list[str] = []
+    actions: tuple[str, ...] = ()
     if last is None:
         value = (
             "no complete poll yet; scheduled polls wait for a first one you run by hand:"
@@ -1714,6 +1735,8 @@ def _linkedin_reply_poll(session: Session, user: User, *, now: datetime) -> Prot
             why = f"; the newest poll ended {newest.stop_reason or newest.status.value}"
             if newest.stop_reason == "owner_mismatch":
                 why += f" ({inbox_apply.owner_mismatch_fix(session, user)})"
+                if _forget_owner_applies(session, user):
+                    actions = (ACTION_FORGET_INBOX_OWNER,)
         reason = inbox_hold.why_stale(session, user, now=now)
         effect = (
             "LinkedIn prefills, and every step, email included, for a contact you are"
@@ -1738,6 +1761,7 @@ def _linkedin_reply_poll(session: Session, user: User, *, now: datetime) -> Prot
         value=value,
         notes=tuple(notes),
         warnings=warnings,
+        actions=actions,
     )
 
 
@@ -1786,6 +1810,63 @@ def _scheduled_runs_armed(session: Session, user: User, account_id: int) -> Prot
     )
 
 
+def tripped_breakers(session: Session, user: User, account_id: int) -> frozenset[str]:
+    """The keys of the breaker rows tripped now, an unreadable one included (fail closed):
+    the rows that offer **Reset breaker** (#583), and what its endpoint compares with the
+    keys the person saw. Read-only."""
+    lost = route_breaker.answer_lost_states(session, user, account_id)
+    tripped = {
+        KEY_ROUTE_CHANGED_BREAKER: route_breaker.tripped(session, user, account_id),
+        KEY_ANSWER_LOST_LIMIT: any(state.tripped for state in lost.values()),
+        KEY_CONTACT_INFO_BREAKER: route_breaker.contact_info_tripped(session, user, account_id),
+        KEY_INBOX_BREAKER: route_breaker.inbox_tripped(session, user, account_id),
+        KEY_INBOX_OWNER_BREAKER: route_breaker.inbox_owner_tripped(session, user, account_id),
+    }
+    return frozenset(key for key, on in tripped.items() if on)
+
+
+def _forget_owner_applies(session: Session, user: User) -> bool:
+    """Whether **Forget inbox owner** can fix an owner mismatch (#583): a mailbox is
+    recorded, and the self contact has no LinkedIn ID, which
+    :func:`inbox_apply.owner_matches` would compare first. Read-only."""
+    return inbox_apply.owner_recorded(session, user) and not inbox_apply.self_contact_has_urn(
+        session, user
+    )
+
+
+def _breaker_rows(
+    session: Session, user: User, account_id: int, *, now: datetime
+) -> tuple[Protection, ...]:
+    """The five breaker rows, each with its key, and **Reset breaker** on the tripped ones
+    (#583). The inbox owner breaker's row also offers **Forget inbox owner** while it shows
+    a mismatch that forgetting can fix."""
+    tripped = tripped_breakers(session, user, account_id)
+    owner = route_breaker.inbox_owner_state(session, user, account_id)
+    rows = (
+        (KEY_ROUTE_CHANGED_BREAKER, _route_changed_breaker(session, user, account_id)),
+        (KEY_ANSWER_LOST_LIMIT, _answer_lost_limit(session, user, account_id)),
+        (KEY_CONTACT_INFO_BREAKER, _contact_info_breaker(session, user, account_id)),
+        (KEY_INBOX_BREAKER, _inbox_breaker(session, user, account_id, now=now)),
+        (KEY_INBOX_OWNER_BREAKER, _inbox_owner_breaker(session, user, account_id, now=now)),
+    )
+    forget = owner.readable and owner.count > 0 and _forget_owner_applies(session, user)
+    return tuple(
+        replace(
+            row,
+            key=key,
+            actions=(
+                *((ACTION_RESET_BREAKER,) if key in tripped else ()),
+                *(
+                    (ACTION_FORGET_INBOX_OWNER,)
+                    if key == KEY_INBOX_OWNER_BREAKER and forget
+                    else ()
+                ),
+            ),
+        )
+        for key, row in rows
+    )
+
+
 def _route_changed_breaker(session: Session, user: User, account_id: int) -> Protection:
     """The route-changed breaker's count (#189 item 1): consecutive connections runs
     (full or incremental, by hand or by schedule) that ended ``route_changed``.
@@ -1814,8 +1895,8 @@ def _route_changed_breaker(session: Session, user: User, account_id: int) -> Pro
                 "the route-changed breaker's stored state is corrupt and could not be"
                 " read. Scheduled connections runs are skipped until it is next written"
                 " (fail closed) -- run one by hand (`netkeeper linkedin sync`) to check"
-                " and repair it, or clear it directly with"
-                " `netkeeper linkedin schedule reset-breaker`",
+                " and repair it, or clear it directly:"
+                f" {RESET_BREAKER_HOW}",
             ),
         )
     if current.count == 0:
@@ -1841,7 +1922,7 @@ def _route_changed_breaker(session: Session, user: User, account_id: int) -> Pro
             f"{current.count} connections runs in a row ended route_changed{since}:"
             " scheduled connections runs are skipped until this clears. Run one by hand"
             " (`netkeeper linkedin sync`) to check whether the wall is still there, or"
-            " clear it directly with `netkeeper linkedin schedule reset-breaker`",
+            f" clear it directly: {RESET_BREAKER_HOW}",
         ),
     )
 
@@ -1867,8 +1948,8 @@ def _answer_lost_limit(session: Session, user: User, account_id: int) -> Protect
                 f"the answer-lost limit's stored state ({', '.join(unreadable)}) is corrupt"
                 " and could not be read. Scheduled connections runs are skipped until it"
                 " is next written (fail closed) -- run one by hand (`netkeeper linkedin"
-                " sync`) to check and repair it, or clear it directly with"
-                " `netkeeper linkedin schedule reset-breaker`",
+                " sync`) to check and repair it, or clear it directly:"
+                f" {RESET_BREAKER_HOW}",
             ),
         )
     if all(state.count == 0 for state in states.values()):
@@ -1901,8 +1982,8 @@ def _answer_lost_limit(session: Session, user: User, account_id: int) -> Protect
             f" row ended answer_lost ({counts}): the page's answers keep arriving"
             " unreadable, and scheduled connections runs are skipped until this clears."
             " Run one of that kind by hand (`netkeeper linkedin sync`, with `--full` for a"
-            " full sync) to check whether they still do, or clear it directly with"
-            " `netkeeper linkedin schedule reset-breaker`",
+            " full sync) to check whether they still do, or clear it directly:"
+            f" {RESET_BREAKER_HOW}",
         ),
     )
 
@@ -1925,8 +2006,8 @@ def _contact_info_breaker(session: Session, user: User, account_id: int) -> Prot
                 "the Contact info breaker's stored state is corrupt and could not be read."
                 " Scheduled enrichment runs are skipped until it is next written (fail"
                 " closed) -- run one by hand (`netkeeper linkedin enrich`) to check and"
-                " repair it, or clear it directly with"
-                " `netkeeper linkedin schedule reset-breaker`",
+                " repair it, or clear it directly:"
+                f" {RESET_BREAKER_HOW}",
             ),
         )
     if current.count == 0:
@@ -1955,8 +2036,8 @@ def _contact_info_breaker(session: Session, user: User, account_id: int) -> Prot
             f"{current.count} enrichment runs in a row lost their Contact info answers, which"
             f" arrived with no readable body{since}: scheduled enrichment runs are"
             " skipped until this clears. Run one by hand (`netkeeper linkedin enrich`) to"
-            " check whether Contact info reads again, or clear it directly with"
-            " `netkeeper linkedin schedule reset-breaker`",
+            " check whether Contact info reads again, or clear it directly:"
+            f" {RESET_BREAKER_HOW}",
         ),
     )
 
@@ -1976,7 +2057,7 @@ def _inbox_breaker(session: Session, user: User, account_id: int, *, now: dateti
     since = f" (since {current.since:%Y-%m-%d %H:%M UTC})" if current.since is not None else ""
     release = (
         "run `netkeeper linkedin inbox` by hand: a poll that completes releases the breaker,"
-        " or clear it directly with `netkeeper linkedin schedule reset-breaker`"
+        f" or clear it directly: {RESET_BREAKER_HOW}"
     )
     held = inbox_hold.linkedin_in_use(session, user) and inbox_hold.stale(session, user, now=now)
     waits = (
@@ -2046,8 +2127,7 @@ def _inbox_owner_breaker(
         else ""
     )
     release = (
-        "a poll that completes releases the breaker, or clear it directly with"
-        " `netkeeper linkedin schedule reset-breaker`"
+        f"a poll that completes releases the breaker, or clear it directly: {RESET_BREAKER_HOW}"
     )
     if not current.readable:
         return Protection(

@@ -331,7 +331,16 @@ def owner_mismatch_fix(session: Session, user: User) -> str:
             f"{signed_in}; otherwise your own contact's LinkedIn ID does not match this"
             " mailbox, and netkeeper cannot edit it yet"
         )
-    return f"{signed_in}; otherwise run `netkeeper linkedin inbox-forget-owner`"
+    return (
+        f"{signed_in}; otherwise click **Forget inbox owner** under Posture on the Settings"
+        " page, or run `netkeeper linkedin inbox-forget-owner`"
+    )
+
+
+def owner_recorded(session: Session, user: User) -> bool:
+    """Whether a poll recorded the mailbox owner, which :func:`forget_owner` forgets.
+    Read-only."""
+    return get_setting(session, user, OWNER_KEY) is not None
 
 
 def forget_owner(session: Session, user: User) -> bool:

@@ -57,6 +57,7 @@ def get_posture(request: Request, user: CurrentUser, session: SessionDep) -> Pos
                 summary=protection.summary,
                 warnings=list(protection.warnings),
                 notes=list(protection.notes),
+                actions=list(protection.actions),
             )
             for protection in report.protections
         ],

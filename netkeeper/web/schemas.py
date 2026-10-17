@@ -2185,6 +2185,42 @@ class HeatClearIn(BaseModel):
     last_raised_at: datetime
 
 
+class BreakerResetIn(BaseModel):
+    """Reset the tripped LinkedIn breakers (#583): ``netkeeper linkedin schedule
+    reset-breaker``, which clears all five at once.
+
+    ``confirm`` must be true, and ``tripped`` is the keys of the tripped breaker rows the
+    person saw (the posture rows offering ``reset_breaker``): a breaker that tripped or
+    cleared in between refuses the reset, so it never clears one nobody was shown.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    confirm: bool
+    tripped: list[str]
+
+
+class BreakerResetOut(BaseModel):
+    cleared: bool
+    """Always true: a request with nothing tripped is refused with ``409``."""
+    reset: list[str]
+    """The keys of the breaker rows that were tripped and are now clear, sorted."""
+
+
+class InboxOwnerForgetIn(BaseModel):
+    """Forget the recorded LinkedIn mailbox (#583): ``netkeeper linkedin
+    inbox-forget-owner``. ``confirm`` must be true."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    confirm: bool
+
+
+class InboxOwnerForgottenOut(BaseModel):
+    forgotten: bool
+    """Always true: a request with nothing to forget is refused with ``409``."""
+
+
 class BrowserHealthOut(BaseModel):
     """What netkeeper already knows about Chrome and the LinkedIn session (#181).
 
@@ -2227,6 +2263,9 @@ class ProtectionOut(BaseModel):
     summary: str
     warnings: list[str]
     notes: list[str]
+    actions: list[str] = []
+    """The buttons this row offers now (#583): ``reset_breaker`` on a tripped breaker,
+    ``forget_inbox_owner`` where an owner mismatch shows that forgetting can fix."""
 
 
 class PostureOut(BaseModel):

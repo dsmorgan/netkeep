@@ -58,6 +58,38 @@ export async function acknowledgeInboxFirstPoll(): Promise<boolean> {
   return data.cleared
 }
 
+/** A posture row's action (#583): **Reset breaker**, on a tripped breaker's row. */
+export const RESET_BREAKER_ACTION = 'reset_breaker'
+/** A posture row's action (#583): **Forget inbox owner**, where an owner mismatch shows. */
+export const FORGET_INBOX_OWNER_ACTION = 'forget_inbox_owner'
+
+/**
+ * Reset the tripped LinkedIn breakers (`netkeeper linkedin schedule reset-breaker`),
+ * which clears all five. `tripped` is the keys of the rows offering the reset that the
+ * person was shown: the backend refuses (409) when a different set is tripped now, or none.
+ */
+export async function resetBreaker(tripped: readonly string[]): Promise<void> {
+  const { data, error, response } = await api.POST('/api/v1/linkedin/schedule/reset-breaker', {
+    body: { confirm: true, tripped: [...tripped] },
+  })
+  if (data === undefined) {
+    throw failure(error, response, 'POST /api/v1/linkedin/schedule/reset-breaker')
+  }
+}
+
+/**
+ * Forget the LinkedIn mailbox the inbox poll recorded (`netkeeper linkedin
+ * inbox-forget-owner`). The backend refuses (409) when none is recorded.
+ */
+export async function forgetInboxOwner(): Promise<void> {
+  const { data, error, response } = await api.POST('/api/v1/linkedin/inbox/forget-owner', {
+    body: { confirm: true },
+  })
+  if (data === undefined) {
+    throw failure(error, response, 'POST /api/v1/linkedin/inbox/forget-owner')
+  }
+}
+
 /** The addresses no campaign sends to (#238), newest first. */
 export const doNotSendQuery = queryOptions({
   queryKey: ['do-not-send'] as const,

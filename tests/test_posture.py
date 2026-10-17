@@ -2346,7 +2346,10 @@ def test_a_tripped_inbox_owner_breaker_names_the_recorded_owner_fix(
     assert "Scheduled inbox polls are skipped" in warning
     assert "a poll you run by hand is not" in warning
     assert "sign back in to yours" in warning
-    assert "otherwise run `netkeeper linkedin inbox-forget-owner`" in warning
+    assert (
+        "otherwise click **Forget inbox owner** under Posture on the Settings page, or run"
+        " `netkeeper linkedin inbox-forget-owner`"
+    ) in warning
     assert "releases the breaker" in warning and "reset-breaker" in warning
     assert not report.ok
     # It is its own streak: the unreadable-page breaker stays clear.

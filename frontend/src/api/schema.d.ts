@@ -2276,6 +2276,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/linkedin/inbox/forget-owner": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Forget Inbox Owner
+         * @description Forget which LinkedIn mailbox the inbox poll recorded, after you changed accounts
+         *     (#583): ``netkeeper linkedin inbox-forget-owner``. The next poll records whichever
+         *     mailbox the page shows. Touches no browser and visits nothing, and leaves your own
+         *     contact's LinkedIn ID as it is.
+         */
+        post: operations["forget_linkedin_inbox_owner"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/linkedin/pins": {
         parameters: {
             query?: never;
@@ -2533,6 +2556,33 @@ export interface paths {
          *     once. The pause survives a restart of ``netkeeper serve``.
          */
         post: operations["pause_linkedin_schedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/linkedin/schedule/reset-breaker": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset Linkedin Breaker
+         * @description Reset the tripped LinkedIn breakers (#583): ``netkeeper linkedin schedule
+         *     reset-breaker``, so scheduled connections, enrichment, and inbox runs may fire again
+         *     when due. Like the command, it clears all five breakers at once.
+         *
+         *     Needs ``confirm: true`` and the keys of the tripped breaker rows the person was shown
+         *     (``tripped``). With none tripped, or a different set tripped now, it refuses with
+         *     ``409`` and writes nothing. A count below its threshold skips nothing, so it is not a
+         *     reason to reset here; the command still clears one.
+         */
+        post: operations["reset_linkedin_breaker"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4184,6 +4234,28 @@ export interface components {
              * @description The LinkedIn export zip, exactly as downloaded.
              */
             file: string;
+        };
+        /**
+         * BreakerResetIn
+         * @description Reset the tripped LinkedIn breakers (#583): ``netkeeper linkedin schedule
+         *     reset-breaker``, which clears all five at once.
+         *
+         *     ``confirm`` must be true, and ``tripped`` is the keys of the tripped breaker rows the
+         *     person saw (the posture rows offering ``reset_breaker``): a breaker that tripped or
+         *     cleared in between refuses the reset, so it never clears one nobody was shown.
+         */
+        BreakerResetIn: {
+            /** Confirm */
+            confirm: boolean;
+            /** Tripped */
+            tripped: string[];
+        };
+        /** BreakerResetOut */
+        BreakerResetOut: {
+            /** Cleared */
+            cleared: boolean;
+            /** Reset */
+            reset: string[];
         };
         /**
          * BrowserHealthOut
@@ -6231,6 +6303,20 @@ export interface components {
          * @enum {string}
          */
         InboxKind: "reply" | "unsubscribe" | "bounce";
+        /**
+         * InboxOwnerForgetIn
+         * @description Forget the recorded LinkedIn mailbox (#583): ``netkeeper linkedin
+         *     inbox-forget-owner``. ``confirm`` must be true.
+         */
+        InboxOwnerForgetIn: {
+            /** Confirm */
+            confirm: boolean;
+        };
+        /** InboxOwnerForgottenOut */
+        InboxOwnerForgottenOut: {
+            /** Forgotten */
+            forgotten: boolean;
+        };
         /** InboxPageOut */
         InboxPageOut: {
             /** Items */
@@ -7550,6 +7636,11 @@ export interface components {
          *     keeps the full detail.
          */
         ProtectionOut: {
+            /**
+             * Actions
+             * @default []
+             */
+            actions: string[];
             /** Key */
             key?: string | null;
             /** Name */
@@ -13909,6 +14000,44 @@ export interface operations {
             };
         };
     };
+    forget_linkedin_inbox_owner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InboxOwnerForgetIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxOwnerForgottenOut"];
+                };
+            };
+            /** @description No LinkedIn mailbox is recorded */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description confirm was not true */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list_linkedin_pins: {
         parameters: {
             query?: never;
@@ -14434,6 +14563,44 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ScheduleOut"];
                 };
+            };
+        };
+    };
+    reset_linkedin_breaker: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BreakerResetIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BreakerResetOut"];
+                };
+            };
+            /** @description No breaker is tripped, or which are tripped changed since */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description confirm was not true */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -34,6 +34,7 @@ const CLEAN: Posture = {
       status: 'on',
       value: 'attach only',
       summary: 'attach only',
+      actions: [],
       warnings: [],
       notes: [],
     },
@@ -42,6 +43,7 @@ const CLEAN: Posture = {
       status: 'unknown',
       value: 'not probed',
       summary: 'not probed',
+      actions: [],
       warnings: ['no browser probe was run, so the session is unknown'],
       notes: [],
     },
@@ -98,6 +100,7 @@ describe('PostureSection', () => {
           status: 'on',
           value: '0/150 today, 0/750 this week (hard max 250/day, 1250/week)',
           summary: '0/150 today, 0/750 this week',
+          actions: [],
           warnings: [],
           notes: [risk],
         },
@@ -176,6 +179,7 @@ describe('PostureSection', () => {
           status: 'on',
           value: '0/150 today, 0/750 this week (hard max 250/day, 1250/week)',
           summary: '0/150 today, 0/750 this week',
+          actions: [],
           warnings: [],
           notes: ['Profile visits are set to 150 a day, above the 100 a day.'],
         },
@@ -272,6 +276,7 @@ describe('PostureSection: LinkedIn sends and the first inbox poll (#383)', () =>
     status: 'on',
     value: 'auto-send off',
     summary: 'auto-send off',
+    actions: [],
     warnings: [],
     notes: [],
   }
@@ -289,6 +294,7 @@ describe('PostureSection: LinkedIn sends and the first inbox poll (#383)', () =>
     status: 'on',
     value: 'last complete poll 2030-01-03 09:00 UTC (1 h ago)',
     summary: 'last complete poll 2030-01-03 09:00 UTC (1 h ago)',
+    actions: [],
     warnings: [SHORT_POLL_WARNING],
     notes: [],
   }
@@ -305,6 +311,7 @@ describe('PostureSection: LinkedIn sends and the first inbox poll (#383)', () =>
           value:
             'no complete poll yet; scheduled polls wait for a first one you run by hand: `netkeeper linkedin inbox`',
           summary: 'no complete poll yet',
+          actions: [],
           warnings: [],
           notes: [
             'the LinkedIn inbox has not been read: no poll has completed yet; run `netkeeper linkedin inbox` by hand; scheduled polls wait for a first one. LinkedIn prefills wait until a poll completes; nothing is skipped or failed',
@@ -338,6 +345,7 @@ describe('PostureSection: LinkedIn sends and the first inbox poll (#383)', () =>
           status: 'off',
           value: 'auto-send ON',
           summary: 'auto-send ON',
+          actions: [],
           warnings: [AUTO_SEND_WARNING],
         },
       ]),
@@ -431,5 +439,237 @@ describe('PostureSection: LinkedIn sends and the first inbox poll (#383)', () =>
     renderSection(withRows([MANUAL_ON]))
     await screen.findByRole('note', { name: 'Manual LinkedIn sends' })
     expect(screen.queryByRole('button', { name: 'Acknowledge' })).toBeNull()
+  })
+})
+
+describe('PostureSection: Reset breaker and Forget inbox owner (#583)', () => {
+  const ROUTE_WARNING =
+    '2 connections runs in a row ended route_changed: scheduled connections runs are skipped' +
+    ' until this clears. Run one by hand (`netkeeper linkedin sync`) to check whether the wall' +
+    ' is still there, or clear it directly: click **Reset breaker** under Posture on the' +
+    ' Settings page, or run `netkeeper linkedin schedule reset-breaker`'
+  const ROUTE_TRIPPED = {
+    name: 'route-changed breaker',
+    key: 'route_changed_breaker',
+    status: 'on',
+    value: 'tripped: 2 route_changed connections runs in a row',
+    summary: 'tripped: 2 route_changed connections runs in a row',
+    actions: ['reset_breaker'],
+    warnings: [ROUTE_WARNING],
+    notes: [],
+  }
+  const ROUTE_CLEAR = {
+    ...ROUTE_TRIPPED,
+    value: 'clear: no consecutive connections runs have ended route_changed',
+    summary: 'clear: no consecutive connections runs have ended route_changed',
+    actions: [],
+    warnings: [],
+  }
+  const OWNER_WARNING =
+    "2 LinkedIn inbox polls in a row showed another mailbox than this account's. To fix it:" +
+    ' if Chrome is signed in to another LinkedIn account, sign back in to yours; otherwise' +
+    ' click **Forget inbox owner** under Posture on the Settings page, or run' +
+    ' `netkeeper linkedin inbox-forget-owner`.'
+  const OWNER_TRIPPED = {
+    name: 'Inbox owner breaker',
+    key: 'inbox_owner_breaker',
+    status: 'on',
+    value: 'tripped: 2 inbox polls in a row showed another mailbox',
+    summary: 'tripped: 2 inbox polls in a row showed another mailbox',
+    actions: ['reset_breaker', 'forget_inbox_owner'],
+    warnings: [OWNER_WARNING],
+    notes: [],
+  }
+
+  function withRows(rows: Posture['protections']): Posture {
+    return { ...CLEAN, protections: [...CLEAN.protections, ...rows] }
+  }
+
+  function serve(
+    initial: Posture,
+    routes: Record<string, (request: Request) => Response | Promise<Response>>,
+  ) {
+    let posture = initial
+    const posted: { path: string; body: unknown }[] = []
+    mockFetch(async (request) => {
+      const { pathname } = new URL(request.url)
+      if (pathname === '/api/v1/posture') return jsonResponse(posture)
+      const route = routes[pathname]
+      if (route !== undefined && request.method === 'POST') {
+        posted.push({ path: pathname, body: await request.clone().json() })
+        return route(request)
+      }
+      return jsonResponse({ detail: 'no fake' }, 404)
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PostureSection />
+      </QueryClientProvider>,
+    )
+    return {
+      posted,
+      set: (next: Posture) => {
+        posture = next
+      },
+    }
+  }
+
+  it('offers no button on a clear breaker row', async () => {
+    renderSection(withRows([ROUTE_CLEAR]))
+    await screen.findByTestId('posture-table')
+    expect(screen.queryByRole('button', { name: 'Reset breaker' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Forget inbox owner' })).toBeNull()
+  })
+
+  it('shows Reset breaker in the tripped row, in the table and the stacked blocks', async () => {
+    renderSection(withRows([ROUTE_TRIPPED]))
+    const table = await screen.findByTestId('posture-table')
+    const row = within(table).getByText('route-changed breaker').closest('tr') as HTMLElement
+    expect(within(row).getByRole('button', { name: 'Reset breaker' })).toBeVisible()
+    const blocks = screen.getByTestId('posture-blocks')
+    const block = within(blocks).getByText('route-changed breaker').closest('li') as HTMLElement
+    expect(within(block).getByRole('button', { name: 'Reset breaker' })).toBeVisible()
+    // The browser row has no button.
+    const browser = within(table).getByText('browser mode').closest('tr') as HTMLElement
+    expect(within(browser).queryByRole('button')).toBeNull()
+  })
+
+  it('confirms first, saying what the breaker guards and why it tripped, then resets', async () => {
+    const fake = serve(withRows([ROUTE_TRIPPED]), {
+      '/api/v1/linkedin/schedule/reset-breaker': () => {
+        fake.set(withRows([ROUTE_CLEAR]))
+        return jsonResponse({ cleared: true, reset: ['route_changed_breaker'] })
+      },
+    })
+    const table = await screen.findByTestId('posture-table')
+    fireEvent.click(within(table).getByRole('button', { name: 'Reset breaker' }))
+
+    const dialog = await screen.findByRole('alertdialog')
+    expect(fake.posted).toHaveLength(0)
+    expect(dialog).toHaveTextContent('Reset the LinkedIn breaker?')
+    expect(dialog).toHaveTextContent(
+      'It stops scheduled connections syncs from loading a connections page LinkedIn has changed',
+    )
+    expect(dialog).toHaveTextContent('Why it tripped:')
+    expect(dialog).toHaveTextContent('2 connections runs in a row ended route_changed')
+    expect(dialog).toHaveTextContent(
+      'scheduled connections, enrichment, and inbox runs may start again when due',
+    )
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Reset breaker' }))
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(fake.posted).toEqual([
+      {
+        path: '/api/v1/linkedin/schedule/reset-breaker',
+        body: { confirm: true, tripped: ['route_changed_breaker'] },
+      },
+    ])
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Reset breaker' })).toBeNull())
+  })
+
+  it('Cancel resets nothing', async () => {
+    const fake = serve(withRows([ROUTE_TRIPPED]), {
+      '/api/v1/linkedin/schedule/reset-breaker': () =>
+        jsonResponse({ cleared: true, reset: ['route_changed_breaker'] }),
+    })
+    const table = await screen.findByTestId('posture-table')
+    fireEvent.click(within(table).getByRole('button', { name: 'Reset breaker' }))
+    const dialog = await screen.findByRole('alertdialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(fake.posted).toHaveLength(0)
+  })
+
+  it('names every tripped breaker the reset clears, and sends all their keys', async () => {
+    const fake = serve(withRows([ROUTE_TRIPPED, OWNER_TRIPPED]), {
+      '/api/v1/linkedin/schedule/reset-breaker': () =>
+        jsonResponse({ cleared: true, reset: ['inbox_owner_breaker', 'route_changed_breaker'] }),
+    })
+    const table = await screen.findByTestId('posture-table')
+    const owner = within(table).getByText('Inbox owner breaker').closest('tr') as HTMLElement
+    fireEvent.click(within(owner).getByRole('button', { name: 'Reset breaker' }))
+
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('Reset the LinkedIn breakers?')
+    expect(within(dialog).getAllByTestId('reset-breaker-row')).toHaveLength(2)
+    expect(dialog).toHaveTextContent('another LinkedIn mailbox than this account’s')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Reset breaker' }))
+
+    await waitFor(() => expect(fake.posted).toHaveLength(1))
+    expect(fake.posted[0]?.body).toEqual({
+      confirm: true,
+      tripped: ['route_changed_breaker', 'inbox_owner_breaker'],
+    })
+  })
+
+  it('keeps the dialog open with the refusal when the breakers changed meanwhile', async () => {
+    serve(withRows([ROUTE_TRIPPED]), {
+      '/api/v1/linkedin/schedule/reset-breaker': () =>
+        jsonResponse(
+          {
+            detail:
+              'the tripped breakers are now inbox_owner_breaker, route_changed_breaker, not what you were shown; reload Posture and confirm again',
+          },
+          409,
+        ),
+    })
+    const table = await screen.findByTestId('posture-table')
+    fireEvent.click(within(table).getByRole('button', { name: 'Reset breaker' }))
+    const dialog = await screen.findByRole('alertdialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Reset breaker' }))
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('reload Posture')
+    expect(screen.getByRole('alertdialog')).toBeVisible()
+  })
+
+  it('forgets the inbox owner after a confirmation that says when not to', async () => {
+    const fake = serve(withRows([OWNER_TRIPPED]), {
+      '/api/v1/linkedin/inbox/forget-owner': () => {
+        fake.set(withRows([{ ...OWNER_TRIPPED, actions: ['reset_breaker'] }]))
+        return jsonResponse({ forgotten: true })
+      },
+    })
+    const table = await screen.findByTestId('posture-table')
+    fireEvent.click(within(table).getByRole('button', { name: 'Forget inbox owner' }))
+
+    const dialog = await screen.findByRole('alertdialog')
+    expect(fake.posted).toHaveLength(0)
+    expect(dialog).toHaveTextContent('Forget the recorded LinkedIn mailbox?')
+    expect(dialog).toHaveTextContent('cancel and sign back in to yours instead')
+    expect(dialog).toHaveTextContent('the next inbox poll records whichever account the page shows')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Forget inbox owner' }))
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(fake.posted).toEqual([
+      { path: '/api/v1/linkedin/inbox/forget-owner', body: { confirm: true } },
+    ])
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Forget inbox owner' })).toBeNull(),
+    )
+    expect(within(table).getByRole('button', { name: 'Reset breaker' })).toBeVisible()
+  })
+
+  it('shows Forget inbox owner on whichever row the backend offers it, such as the reply poll', async () => {
+    renderSection(
+      withRows([
+        {
+          name: 'linkedin reply poll',
+          key: 'linkedin_reply_poll',
+          status: 'on',
+          value: 'no complete poll yet',
+          summary: 'no complete poll yet',
+          actions: ['forget_inbox_owner'],
+          warnings: [],
+          notes: ['the newest poll ended owner_mismatch'],
+        },
+      ]),
+    )
+    const table = await screen.findByTestId('posture-table')
+    const row = within(table).getByText('linkedin reply poll').closest('tr') as HTMLElement
+    expect(within(row).getByRole('button', { name: 'Forget inbox owner' })).toBeVisible()
+    expect(within(row).queryByRole('button', { name: 'Reset breaker' })).toBeNull()
   })
 })

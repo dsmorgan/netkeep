@@ -1477,6 +1477,50 @@
         "title": "Body_import_archive",
         "type": "object"
       },
+      "BreakerResetIn": {
+        "additionalProperties": false,
+        "description": "Reset the tripped LinkedIn breakers (#583): ``netkeeper linkedin schedule\nreset-breaker``, which clears all five at once.\n\n``confirm`` must be true, and ``tripped`` is the keys of the tripped breaker rows the\nperson saw (the posture rows offering ``reset_breaker``): a breaker that tripped or\ncleared in between refuses the reset, so it never clears one nobody was shown.",
+        "properties": {
+          "confirm": {
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "tripped": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tripped",
+            "type": "array"
+          }
+        },
+        "required": [
+          "confirm",
+          "tripped"
+        ],
+        "title": "BreakerResetIn",
+        "type": "object"
+      },
+      "BreakerResetOut": {
+        "properties": {
+          "cleared": {
+            "title": "Cleared",
+            "type": "boolean"
+          },
+          "reset": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reset",
+            "type": "array"
+          }
+        },
+        "required": [
+          "cleared",
+          "reset"
+        ],
+        "title": "BreakerResetOut",
+        "type": "object"
+      },
       "BrowserHealthOut": {
         "description": "What netkeeper already knows about Chrome and the LinkedIn session (#181).\n\nBuilt only from what was recorded: the last ``netkeeper preflight`` or\n``posture --probe``, the newest run that read LinkedIn, the session flag, and\nthe newest run that could not reach Chrome. Nothing here attaches to the\nbrowser; a request handler never does (spec 9.9, CLAUDE.md).\n\n``session_status`` and ``session_summary`` are the posture report's\n``linkedin session`` row, word for word. ``chrome_unreachable_at`` is set when\nthe newest run that ended ``browser_unavailable`` is newer than the last sign\nof a working session.",
         "properties": {
@@ -7988,6 +8032,34 @@
         "title": "InboxKind",
         "type": "string"
       },
+      "InboxOwnerForgetIn": {
+        "additionalProperties": false,
+        "description": "Forget the recorded LinkedIn mailbox (#583): ``netkeeper linkedin\ninbox-forget-owner``. ``confirm`` must be true.",
+        "properties": {
+          "confirm": {
+            "title": "Confirm",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "confirm"
+        ],
+        "title": "InboxOwnerForgetIn",
+        "type": "object"
+      },
+      "InboxOwnerForgottenOut": {
+        "properties": {
+          "forgotten": {
+            "title": "Forgotten",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "forgotten"
+        ],
+        "title": "InboxOwnerForgottenOut",
+        "type": "object"
+      },
       "InboxPageOut": {
         "properties": {
           "items": {
@@ -11271,6 +11343,14 @@
       "ProtectionOut": {
         "description": "One row of the posture report (spec section 9): what it is, whether it is in\nforce, and anything wrong with it. ``status`` is `netkeeper.services.posture.Status`'s\nvalue (``on``, ``off``, ``unknown``); ``off``/``unknown`` always carry a warning.\n``notes`` describe a choice the user made, not a fault, and never affect ``ok``.\n``summary`` is the row in a few words, for the collapsed view (#340): the same\nas ``value`` for most rows, a one-line form of it for the long ones. ``value``\nkeeps the full detail.",
         "properties": {
+          "actions": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
           "key": {
             "anyOf": [
               {
@@ -21709,6 +21789,44 @@
         ]
       }
     },
+    "/api/v1/linkedin/inbox/forget-owner": {
+      "post": {
+        "description": "Forget which LinkedIn mailbox the inbox poll recorded, after you changed accounts\n(#583): ``netkeeper linkedin inbox-forget-owner``. The next poll records whichever\nmailbox the page shows. Touches no browser and visits nothing, and leaves your own\ncontact's LinkedIn ID as it is.",
+        "operationId": "forget_linkedin_inbox_owner",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxOwnerForgetIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxOwnerForgottenOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "No LinkedIn mailbox is recorded"
+          },
+          "422": {
+            "description": "confirm was not true"
+          }
+        },
+        "summary": "Forget Inbox Owner",
+        "tags": [
+          "linkedin"
+        ]
+      }
+    },
     "/api/v1/linkedin/pins": {
       "get": {
         "operationId": "list_linkedin_pins",
@@ -22349,6 +22467,44 @@
           }
         },
         "summary": "Pause Linkedin Schedule",
+        "tags": [
+          "linkedin"
+        ]
+      }
+    },
+    "/api/v1/linkedin/schedule/reset-breaker": {
+      "post": {
+        "description": "Reset the tripped LinkedIn breakers (#583): ``netkeeper linkedin schedule\nreset-breaker``, so scheduled connections, enrichment, and inbox runs may fire again\nwhen due. Like the command, it clears all five breakers at once.\n\nNeeds ``confirm: true`` and the keys of the tripped breaker rows the person was shown\n(``tripped``). With none tripped, or a different set tripped now, it refuses with\n``409`` and writes nothing. A count below its threshold skips nothing, so it is not a\nreason to reset here; the command still clears one.",
+        "operationId": "reset_linkedin_breaker",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BreakerResetIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BreakerResetOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "No breaker is tripped, or which are tripped changed since"
+          },
+          "422": {
+            "description": "confirm was not true"
+          }
+        },
+        "summary": "Reset Linkedin Breaker",
         "tags": [
           "linkedin"
         ]
