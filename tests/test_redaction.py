@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import traceback
 from pathlib import Path
 
 import pytest
@@ -258,26 +259,46 @@ def test_a_traceback_keeps_only_its_shape(body: list[str], kept: list[str]) -> N
     assert out[-1] == "2026-10-17 14:16:13 INFO x next record"
 
 
-def test_an_exception_group_keeps_its_drawing_and_types_only() -> None:
-    text = _traceback(
-        "  | ExceptionGroup: two failed (2 sub-exceptions)",
-        "  +-+---------------- 1 ----------------",
-        "    | Traceback (most recent call last):",
-        '    |   File "/srv/app.py", line 9, in inner',
-        "    |     raise ValueError(message)",
-        f"    | ValueError: {NAME} bad",
-        f"    | {NAME} second line",
-        "    +---------------- 2 ----------------",
-        f"    | KeyError: '{SLUG}'",
-        "    +------------------------------------",
-    )
+def _real_group() -> str:
+    try:
+        raise ExceptionGroup(
+            "two failed", [ValueError(f"{NAME} bad\n{NAME} second line"), KeyError(SLUG)]
+        )
+    except ExceptionGroup:
+        return traceback.format_exc()
+
+
+def test_a_real_exception_group_keeps_its_drawing_frames_and_types_only() -> None:
+    text = "2026-10-17 14:16:12 ERROR x group\n" + _real_group()
     out = Redactor().log(text)
     assert NAME not in out and SLUG not in out
-    assert "  | ExceptionGroup: <message left out>" in out
-    assert "    | ValueError: <message left out>" in out
-    assert "    | KeyError: <message left out>" in out
-    assert '    |   File "/srv/app.py", line 9, in inner' in out
-    assert "    +---------------- 2 ----------------" in out
+    lines = out.splitlines()
+    assert "  + Exception Group Traceback (most recent call last):" in lines
+    assert any(line.startswith('  |   File "') for line in lines)
+    assert "  | ExceptionGroup: <message left out>" in lines
+    assert "  +-+---------------- 1 ----------------" in lines
+    assert "    | ValueError: <message left out>" in lines
+    assert "    +---------------- 2 ----------------" in lines
+    assert "    | KeyError: <message left out>" in lines
+    assert "    +------------------------------------" in lines
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "AcmeError",
+        "QuenchwaterError: hi",
+        "jane.doe",
+        "evander.gallowglass: hi",
+        "Quenchwater.Inc",
+        "5550142266",
+        'File "Evander Gallowglass", line 1, in Vexshire\n    Lucinda Thornbury',
+    ],
+)
+def test_after_a_type_every_line_is_message(message: str) -> None:
+    text = _traceback("ValueError: first", *message.split("\n"))
+    out = Redactor().log(text).splitlines()
+    assert out[5:-1] == ["ValueError: <message left out>", "<message left out>"]
 
 
 def test_a_multi_line_message_outside_a_traceback_keeps_its_first_line() -> None:
@@ -299,3 +320,44 @@ def test_a_frame_line_keeps_only_frame_shape() -> None:
         .splitlines()
     )
     assert lines[-1] == "ValueError: <message left out>"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "range 3600-7200",
+        "took 250-1250 ms",
+        "commit 789f423-1234",
+        "0 1000-2000 1",
+        "visits 100-1000",
+        "a 100-1000\n2026-10-17 15:06:16 INFO b",
+        "budget 555 0100 then",
+    ],
+)
+def test_numbers_that_are_not_phones_stay_and_records_stay_apart(text: str) -> None:
+    assert Redactor().text(text) == text
+    record = f"2026-10-17 15:06:15 INFO {text}"
+    assert Redactor().log(record) == record
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "phone 555-0142 end",
+        "call me at 555-0142",
+        "+33 1 23 45 67 89 here",
+        "01 23 45 67 89 here",
+        "+44 (0)20 7946 0958",
+    ],
+)
+def test_phone_formats_are_caught(line: str) -> None:
+    out = Redactor().text(line)
+    assert "<phone-1>" in out
+    for fragment in ("0142", "45 67 89", "7946"):
+        assert fragment not in out
+
+
+def test_a_cookie_dict_with_the_value_first() -> None:
+    out = strip_secrets("{'value': 'AQEDinventedFirst', 'name': 'li_at', 'path': '/'}")
+    assert "AQEDinventedFirst" not in out
+    assert "'value': '<secret>'" in out

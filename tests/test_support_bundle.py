@@ -551,3 +551,19 @@ def test_the_cdp_url_keeps_only_its_host_and_port(
             files = _contents(build_bundle(session, user, settings=settings, level=level).data)
             value = json.loads(files["settings.json"])["values"]["linkedin.cdp_url"]["value"]
             assert value == "ws://127.0.0.1:9222"
+
+
+@pytest.mark.parametrize(
+    ("error", "kept"),
+    [
+        ("ValueError: no contact named Quorbelle Fictionary", "ValueError: <message left out>"),
+        ("TimeoutError", "TimeoutError"),
+        ("TimeoutError: ", "TimeoutError"),
+        ("Conflict: li_public_id 'quorbelle-x' already belongs", "Conflict: <message left out>"),
+        ("jane.doe: hi", "<message left out>"),
+        ("Quorbelle Fictionary was here", "<message left out>"),
+        (None, None),
+    ],
+)
+def test_a_run_error_keeps_only_its_type(error: str | None, kept: str | None) -> None:
+    assert support_bundle.error_type(error) == kept
