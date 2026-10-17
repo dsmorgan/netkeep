@@ -17,8 +17,9 @@ In order, and nothing later runs when an earlier step refuses:
    navigation, in one transaction.
 3. Run the source. A wall at the profile sets the session flag or raises heat.
 4. Record the outcome (:func:`~netkeeper.services.linkedin_steps.record_prefill_outcome`)
-   and the run's ending in one transaction. A ``prefilled`` outcome's ``prefilled_at``
-   is the moment typing started, before the first key.
+   and the run's ending in one transaction, tried again a few times when the write lock
+   is held past the busy timeout (#627); the page work never is. A ``prefilled``
+   outcome's ``prefilled_at`` is the moment typing started, before the first key.
 
 **Auto-send** (ADR 0008). A ``message_send`` run the scheduler recorded (``scheduled``,
 :func:`netkeeper.services.linkedin_steps.claim_auto_send`) is an auto-send. Before the
@@ -43,17 +44,19 @@ source: never on the run row, in ``progress_json``, in a log, or in an error.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import secrets
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Final
 
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from netkeeper.config import Settings
-from netkeeper.db import off_loop, session_scope
+from netkeeper.db import RECORD_RETRY_WAITS_S, is_lock_timeout, off_loop, session_scope
 from netkeeper.linkedin.classify import Outcome
 from netkeeper.linkedin.messaging import (
     NAME_CHECK_SKIPPED,
@@ -815,26 +818,29 @@ async def run_prefill(
     except Exception:
         log.exception("prefill run %d: the wall or the refund could not be written", run_id)
     try:
-        return await off_loop(
-            record,
-            factory,
-            user_id,
+        return await _record_retrying(
             run_id,
-            result.outcome,
-            settings=settings,
-            now=clock(),
-            prefilled_at=result.typing_started_at,
-            click_attempted=source.message_click_attempted,
-            clicked=source.message_clicked,
-            send_clicked_at=result.send_clicked_at,
-            send_refusal=result.send_refusal,
-            bubble_closed=result.bubble_closed,
-            close_refusal=result.close_refusal,
-            tab_closed=tab_closed,
-            send_unconfirmed=result.send_unconfirmed,
-            pre_click_hold=result.pre_click_hold,
-            budget_spent=None if auto else True,
-            click_diagnostics=source.message_click_diagnostics,
+            functools.partial(
+                record,
+                factory,
+                user_id,
+                run_id,
+                result.outcome,
+                settings=settings,
+                now=clock(),
+                prefilled_at=result.typing_started_at,
+                click_attempted=source.message_click_attempted,
+                clicked=source.message_clicked,
+                send_clicked_at=result.send_clicked_at,
+                send_refusal=result.send_refusal,
+                bubble_closed=result.bubble_closed,
+                close_refusal=result.close_refusal,
+                tab_closed=tab_closed,
+                send_unconfirmed=result.send_unconfirmed,
+                pre_click_hold=result.pre_click_hold,
+                budget_spent=None if auto else True,
+                click_diagnostics=source.message_click_diagnostics,
+            ),
         )
     except Exception:
         if (source.message_click_attempted and not tab_closed) or result.pre_click_hold is not None:
@@ -847,6 +853,38 @@ async def run_prefill(
                 pre_click_hold=result.pre_click_hold,
             )
         raise
+
+
+async def _record_retrying(for_run: int, call: Callable[[], PrefillReport]) -> PrefillReport:
+    """:func:`record` off the loop, tried again after each of
+    :data:`~netkeeper.db.RECORD_RETRY_WAITS_S` while another writer holds the write lock
+    past the busy timeout (#627). The page work is done and is never repeated: only the
+    record's one transaction, rolled back whole by the failure, runs again. The waits are
+    on the loop, so the background-database thread serves other writes meanwhile."""
+    waits = iter(RECORD_RETRY_WAITS_S)
+    while True:
+        try:
+            return await off_loop(call)
+        except OperationalError as exc:
+            wait = next(waits, None)
+            if not is_lock_timeout(exc) or wait is None:
+                log.error(
+                    "prefill run %d: its outcome could not be recorded; its message stays"
+                    " claimed, and the run reads as interrupted",
+                    for_run,
+                )
+                raise
+            log.warning(
+                "prefill run %d: the database was locked while recording its outcome;"
+                " trying again in %.0f s (nothing is typed or sent again)",
+                for_run,
+                wait,
+            )
+            await _sleep(wait)
+
+
+_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+"""The record retry's wait; a test replaces it."""
 
 
 def _sent(source: PrefillSource) -> bool:

@@ -245,6 +245,7 @@ def test_the_baseline_covers_every_protection_the_item_asks_for(
         "sending hours",
         "next campaign send",
         "campaign templates",
+        "send records",
         "route-changed breaker",
         "answer-lost limit",
         "Contact info breaker",
