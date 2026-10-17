@@ -1,0 +1,82 @@
+# Troubleshooting
+
+Start with **Settings**, under **Posture**, or `netkeeper posture --no-probe` in a terminal. Each line is one protection and its state. "NOT clear" means at least one has a warning, and the warning says what to do. **Show details** (or `--details`) shows the rest. Without `--no-probe`, `netkeeper posture` also attaches to the LinkedIn Chrome to check the session, as `netkeeper preflight` does.
+
+For a LinkedIn run, open the **LinkedIn** page and click the run's row under **Runs**. It says how the run ended, in plain words, and for enrichment, which visits couldn't be read and why. `netkeeper linkedin runs` and `netkeeper linkedin run <id>` show the same.
+
+For Gmail, see the reason codes in [Gmail setup](../gmail-setup.md#troubleshooting).
+
+## Installing and opening the UI
+
+| What you see | What to do |
+|---|---|
+| "The frontend is not built" | Run `make build-ui`, then reload. Run it again after each `git pull`. |
+| A banner that says the UI requires Chrome | Open <http://127.0.0.1:8000> in Google Chrome. |
+| "Backend unreachable" in the header | `serve` stopped. Start it again: `.venv/bin/netkeeper serve`. |
+| `serve` says the address is already in use | Another `serve`, or another program, has port 8000. Stop it, or run `netkeeper serve --port 8080`. |
+
+## The LinkedIn Chrome
+
+| What you see | What to do |
+|---|---|
+| "Chrome was not reachable or went away mid-run" | Start the LinkedIn Chrome: `make chrome`, or the command `netkeeper browser launch` prints. Then `netkeeper preflight`. |
+| Chrome ignores the debug port | Chrome 136 and later refuse it on your default profile. Use the command netkeeper prints, which has its own `--user-data-dir`. |
+| Chrome won't start on the profile after a crash | `make chrome` clears the profile lock a crashed Chrome left behind. |
+| "the browser was busy with another run" | One netkeeper process uses the browser at a time. `netkeeper preflight` names the process that holds it. Wait for that run, or stop it. |
+| Posture: the activity lock "is probably stuck", or is held by something netkeeper can't name | Stop the process the warning names. The lock is released when its holder exits. |
+
+## Why a LinkedIn run stopped
+
+netkeeper classifies every answer LinkedIn gives (spec [9.7](../architecture.md#97-failure-classification-and-heat)). These are the endings that need you; the rest, such as "read to the end of the connections list" or "made the visits it was allowed", are normal.
+
+| The run says | What it means | What to do |
+|---|---|---|
+| LinkedIn throttled it | LinkedIn pushed back (HTTP 429 or 999). netkeeper raised heat and slowed down. | Nothing. Heat decays on its own, and runs resume. The **LinkedIn** page shows when. Use **Clear heat…** only if you know the block was something else. |
+| LinkedIn showed a checkpoint | LinkedIn wants you to prove you're you. netkeeper set the session flag and stopped. It never retries a checkpoint. | In the LinkedIn Chrome, open LinkedIn yourself and resolve it. Then choose **Clear flag…** on the banner, or run `netkeeper linkedin clear-flag`. |
+| LinkedIn asked to log in | The session expired or was logged out. netkeeper set the session flag. | Log in to LinkedIn in the LinkedIn Chrome, then run `netkeeper preflight`. It clears the flag once it sees a live session. |
+| the page's answers changed shape | LinkedIn served a page netkeeper doesn't recognize. It gave up on that page for the run. | Run once more by hand. Two connections runs in a row ending this way trip the route-changed breaker (below). If it keeps happening, LinkedIn changed something; open an issue. |
+| lost some of the page's answers | The page loaded, but Chrome didn't keep some answers' bodies. | Nothing, once. Repeated losses trip the answer-lost limit (below). |
+| too many profiles were not found | Several profiles in a row were missing. None was recorded as not found. | Nothing. They're visited again later. |
+| refused: the session is flagged | A checkpoint or login wall set the session flag earlier. | Clear it as above. |
+| refused: heat is over its skip threshold | Heat is too high for browser jobs. | Wait. The **LinkedIn** page shows when runs resume. |
+| outside active hours, or today's or this week's budget is spent | A limit you set. | Nothing, or change it on **Settings**, under **LinkedIn active hours** or **LinkedIn budgets**. |
+| refused: scheduled runs are disarmed | The schedule is off. | **Arm scheduled runs** on the **LinkedIn** page, when you're ready. |
+| refused: the first LinkedIn inbox poll is run by hand | Scheduled inbox polls wait for one you start. | **Check inbox now** on the **LinkedIn** page, or `netkeeper linkedin inbox`. |
+| refused: the route-changed breaker, the answer-lost limit, the Contact info breaker, the inbox breaker, or the inbox owner breaker is tripped | Repeated failures of one kind stopped scheduled runs of that kind. Runs you start by hand still go. | Start one run of that kind by hand. One that reaches its end clears the breaker. Or clear every breaker with `netkeeper linkedin schedule reset-breaker`. |
+| the page showed another LinkedIn mailbox than this account's | The LinkedIn Chrome is signed in to a different LinkedIn account. | Sign back in to yours. If you changed accounts on purpose, run `netkeeper linkedin inbox-forget-owner`. |
+| the netkeeper process running it stopped | `serve` stopped or restarted mid-run. | Start the run again. An enrichment can **Resume** its plan once, from the run's detail. |
+
+## Posture warnings
+
+| Warning | What to do |
+|---|---|
+| nothing has checked the LinkedIn session yet | Run `netkeeper preflight`. |
+| the last check found no LinkedIn session, or the session was last confirmed more than 24 hours ago | Log in to LinkedIn in the LinkedIn Chrome, then run `netkeeper preflight`. |
+| LinkedIn answered with a checkpoint or logged out | The session flag is up. Clear it as in the table above. |
+| scheduled jobs: nothing fires on its own | Expected until `serve` has run with scheduled runs armed. |
+| `linkedin_auto_send` is on | You turned on LinkedIn auto-send in `config.toml`. Turn it off there and restart `serve` unless you mean it. |
+| a `linkedin.pacing` value, or `linkedin.cdp_url` not on this machine | A value in `config.toml` weakens a protection. Remove it to get the default back. |
+| a complete full sync refused to age anyone | A sync would have marked too many connections gone at once, so it marked none. It clears after a later complete full sync. |
+
+## Gmail
+
+| What you see | What to do |
+|---|---|
+| "Gmail needs you to sign in again" | Choose **Re-authorize** on the banner, or run `netkeeper gmail login`. Email steps wait until you do. |
+| **Arm to send** says no netkeeper test draft was found | Make a test draft from a campaign's review (**Send a test of step 1**) while the mailbox is armed for drafts, then **Check now**. |
+| A step's email went out as a draft | The mailbox is armed for drafts only. Send the draft yourself, or **Arm to send**. |
+
+## Actions that stay on the command line
+
+Everything else is in the UI. These remain in a terminal or a file, most of them by design:
+
+| Action | How |
+|---|---|
+| Start `serve` at login | `scripts/install-launchd.sh`. See [Run at login](../../README.md#run-at-login-macos). |
+| Start the LinkedIn Chrome | `make chrome`, or the command `netkeeper browser launch` prints. netkeeper never starts a browser. |
+| Check the LinkedIn Chrome (optional) | `netkeeper preflight`. |
+| Turn on LinkedIn auto-send | `config.toml`: `[campaigns] linkedin_auto_send = true`, then restart `serve`. Read [ADR 0008](../adr/0008-auto-send.md) first. |
+| Import the old mailing tool's history (optional) | `netkeeper history import` and `netkeeper history scan-gmail`. See [the guide](../history-import.md). |
+| Restore a backup | `netkeeper restore <backup>`, with `serve` stopped. See [Backups and restore](backups.md). |
+| Clear a tripped breaker without a manual run | `netkeeper linkedin schedule reset-breaker`. |
+| Forget the recorded LinkedIn inbox owner after you change accounts | `netkeeper linkedin inbox-forget-owner`. |
