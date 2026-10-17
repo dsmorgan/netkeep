@@ -355,9 +355,10 @@ def forget_owner(session: Session, user: User) -> bool:
 
     Forgetting one also holds scheduled inbox polls (#592) until a poll a person starts
     passes the owner check (:func:`release_owner_hold`): whichever account Chrome shows
-    then is recorded, and a person should be watching."""
+    then is recorded, and a person should be watching. Not while the self contact has a
+    LinkedIn ID: :func:`owner_matches` compares that first, so no poll records an owner."""
     forgotten = delete_setting(session, user, OWNER_KEY)
-    if forgotten:
+    if forgotten and not self_contact_has_urn(session, user):
         set_setting(session, user, OWNER_BY_HAND_KEY, True)
     return forgotten
 
