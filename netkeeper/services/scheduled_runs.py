@@ -53,14 +53,13 @@ from datetime import datetime, time, timedelta
 from typing import Final
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from netkeeper.config import LinkedInSettings, Settings
 from netkeeper.crm.inbox_apply import has_anything_to_watch, owner_hold
 from netkeeper.db import off_loop, session_scope
 from netkeeper.logging_setup import personal_exc
-from netkeeper.models import SyncRun, SyncRunKind, SyncRunTrigger, User, UserKind
+from netkeeper.models import SyncRun, SyncRunKind, SyncRunTrigger, User
 from netkeeper.models.base import utcnow
 from netkeeper.scoping import scoped
 from netkeeper.services import runs, ui_settings
@@ -93,6 +92,7 @@ from netkeeper.services.scheduler import (
     stored_due,
 )
 from netkeeper.services.tasks import TaskRunner
+from netkeeper.services.users import local_users
 
 log = logging.getLogger(__name__)
 
@@ -582,9 +582,7 @@ def _local_accounts(factory: sessionmaker[Session]) -> Callable[[], list[tuple[U
 
     def accounts() -> list[tuple[User, int]]:
         with session_scope(factory) as session:
-            users = session.scalars(
-                select(User).where(User.kind == UserKind.LOCAL).order_by(User.id)
-            ).all()
+            users = local_users(session)
             found: list[tuple[User, int]] = []
             for user in users:
                 account = find_account(session, user)

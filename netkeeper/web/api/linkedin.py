@@ -104,7 +104,14 @@ from netkeeper.services.linkedin_session import (
 from netkeeper.services.scheduled_runs import seed_served_schedule, submit_run
 from netkeeper.services.scheduler import SERVED_SCHEDULES, stored_due
 from netkeeper.services.visit_budget import todays_visits
-from netkeeper.web.deps import CurrentUser, SessionDep, Tasks, effective_settings, file_settings
+from netkeeper.web.deps import (
+    CurrentUser,
+    SessionDep,
+    Tasks,
+    effective_settings,
+    file_settings,
+    require_owner,
+)
 from netkeeper.web.schemas import (
     AutoSendOutlookOut,
     BreakerResetIn,
@@ -901,7 +908,11 @@ def get_browser_health(
 # --- launch instructions ---------------------------------------------------------------
 
 
-@router.get("/browser", operation_id="get_linkedin_browser")
+@router.get(
+    "/browser",
+    operation_id="get_linkedin_browser",
+    responses={403: {"description": "Only the local owner account sees the Chrome profile"}},
+)
 def get_browser(request: Request, session: SessionDep, user: CurrentUser) -> BrowserLaunchOut:
     """``netkeeper browser launch``'s instructions, as data (spec 9.1, ADR 0002).
 
@@ -909,8 +920,10 @@ def get_browser(request: Request, session: SessionDep, user: CurrentUser) -> Bro
     for a person to run themselves. Everything below comes from config -- no
     attach, so this never awaits browser work (CLAUDE.md). The address is the one in
     force (the file, then the Settings page, #597): after a change Chrome is started
-    on the new port, then serve restarted to attach there.
+    on the new port, then serve restarted to attach there. Owner only: the profile
+    directory belongs to the install, not to one user.
     """
+    require_owner(session, user, "only the local owner account sees the Chrome profile")
     cdp_url = effective_settings(request, session, user).linkedin.cdp_url
     profile = data_dir() / CHROME_PROFILE_DIRNAME
     return BrowserLaunchOut(

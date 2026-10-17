@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
+import { createQueryClient } from '@/api/query-client'
 import { jsonResponse, mockFetch } from '@/test/fetch'
 
 import type { Backup, Backups } from './api'
@@ -105,5 +106,23 @@ describe('humanSize', () => {
     expect(humanSize(96)).toBe('96 B')
     expect(humanSize(2048)).toBe('2.0 KB')
     expect(humanSize(1572864)).toBe('1.5 MB')
+  })
+
+  it('shows the server message to a user who is not the owner, without retrying', async () => {
+    let gets = 0
+    mockFetch(() => {
+      gets += 1
+      return jsonResponse({ detail: 'only the local owner account manages backups' }, 403)
+    })
+    const queryClient = createQueryClient()
+    render(
+      <QueryClientProvider client={queryClient}>
+        <BackupsSection />
+      </QueryClientProvider>,
+    )
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'only the local owner account manages backups',
+    )
+    expect(gets).toBe(1)
   })
 })

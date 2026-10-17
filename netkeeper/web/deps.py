@@ -10,16 +10,16 @@ from collections.abc import Callable, Iterator
 from typing import Annotated, Any, Protocol
 
 from fastapi import Depends, HTTPException, Request
-from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from netkeeper.config import Settings
 from netkeeper.crm.confirmation import Signer
 from netkeeper.db import session_scope
-from netkeeper.models import User, UserKind
+from netkeeper.models import User
 from netkeeper.services import ui_settings
 from netkeeper.services.events import EventBus
 from netkeeper.services.tasks import TaskRunner
+from netkeeper.services.users import local_owner
 
 
 class AuthProvider(Protocol):
@@ -32,9 +32,7 @@ class LocalSingleUser:
     """No login: the only ``local`` user is the current user."""
 
     def current_user(self, request: Request, session: Session) -> User:
-        user = session.scalars(
-            select(User).where(User.kind == UserKind.LOCAL).order_by(User.id)
-        ).first()
+        user = local_owner(session)
         if user is None:
             raise HTTPException(
                 status_code=500,
@@ -153,6 +151,19 @@ def current_user(request: Request, session: SessionDep) -> User:
 
 
 CurrentUser = Annotated[User, Depends(current_user)]
+
+
+def is_owner(session: Session, user: User) -> bool:
+    """The requester is the local owner: the account install-wide settings belong to."""
+    owner = local_owner(session)
+    return owner is not None and owner.id == user.id
+
+
+def require_owner(session: Session, user: User, detail: str) -> User:
+    """``user``, when they are the local owner; 403 with ``detail`` for anyone else."""
+    if not is_owner(session, user):
+        raise HTTPException(status_code=403, detail=detail)
+    return user
 
 
 def file_settings(request: Request) -> Settings:

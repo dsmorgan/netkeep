@@ -22,7 +22,6 @@ from zoneinfo import ZoneInfo
 import typer
 import uvicorn
 from sqlalchemy import inspect as sa_inspect
-from sqlalchemy import select
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import OperationalError, ProgrammingError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
@@ -83,7 +82,6 @@ from netkeeper.models import (
     SyncRunStatus,
     SyncRunTrigger,
     User,
-    UserKind,
 )
 from netkeeper.paths import CONFIG_ENV, data_dir
 from netkeeper.scoping import install_scope_guard, scoped
@@ -164,7 +162,7 @@ from netkeeper.services.simulate_run import DEFAULT_SEED as DEFAULT_SIMULATION_S
 from netkeeper.services.simulate_run import DEFAULT_THROTTLES as DEFAULT_SIMULATION_THROTTLES
 from netkeeper.services.simulate_run import InvalidSimulation, run_simulation
 from netkeeper.services.simulate_run import render as render_simulation
-from netkeeper.services.users import ensure_local_user
+from netkeeper.services.users import ensure_local_user, local_owner
 from netkeeper.web.api.campaigns import results_out
 from netkeeper.web.app import create_app, openapi_json
 from netkeeper.worker import (
@@ -330,9 +328,7 @@ def _with_settings_page(settings: Settings) -> Settings:
         factory = make_session_factory(engine)
         install_scope_guard(factory)
         with session_scope(factory) as session:
-            user = session.scalars(
-                select(User).where(User.kind == UserKind.LOCAL).order_by(User.id)
-            ).first()
+            user = local_owner(session)
             return settings if user is None else ui_settings.resolve(session, user, settings)
     finally:
         engine.dispose()
@@ -796,9 +792,7 @@ def _clear_session_flag_after_login(report: PreflightReport) -> list[str]:
         factory = make_session_factory(engine)
         install_scope_guard(factory)
         with session_scope(factory) as session:  # read: this command may not write yet
-            user = session.scalars(
-                select(User).where(User.kind == UserKind.LOCAL).order_by(User.id)
-            ).first()
+            user = local_owner(session)
             flag = None if user is None else session_flag(session, user)
         if flag is None:
             return []
@@ -812,9 +806,7 @@ def _clear_session_flag_after_login(report: PreflightReport) -> list[str]:
         if flag.outcome is not Outcome.LOGGED_OUT:
             return []
         with session_scope(factory, write=True) as session:
-            user = session.scalars(
-                select(User).where(User.kind == UserKind.LOCAL).order_by(User.id)
-            ).first()
+            user = local_owner(session)
             if user is None or session_flag(session, user) != flag:
                 # Gone, or changed, since the read above: clear only the flag this
                 # function actually saw, never whatever is there now.
@@ -863,9 +855,7 @@ def _record_session_evidence(report: PreflightReport, *, source: str) -> list[st
         factory = make_session_factory(engine)
         install_scope_guard(factory)
         with session_scope(factory, write=True) as session:
-            user = session.scalars(
-                select(User).where(User.kind == UserKind.LOCAL).order_by(User.id)
-            ).first()
+            user = local_owner(session)
             if user is None:
                 return []
             record_session_evidence(
@@ -1237,9 +1227,7 @@ def _browser_lock_key() -> str:
         factory = make_session_factory(engine)
         install_scope_guard(factory)
         with session_scope(factory) as session:
-            user = session.scalars(
-                select(User).where(User.kind == UserKind.LOCAL).order_by(User.id)
-            ).first()
+            user = local_owner(session)
             if user is None:
                 return SINGLE_ACCOUNT_KEY
             return account_key(account_id_for(session, user))
@@ -5835,9 +5823,7 @@ def _cli_actor() -> str:
 
 
 def _local_user_or_exit(session: Session) -> User:
-    user = session.scalars(
-        select(User).where(User.kind == UserKind.LOCAL).order_by(User.id)
-    ).first()
+    user = local_owner(session)
     if user is None:
         typer.echo("error: no local user exists; run `netkeeper db upgrade` first", err=True)
         raise typer.Exit(code=1)

@@ -57,7 +57,6 @@ from datetime import UTC, datetime
 from typing import Any, Final, Protocol
 
 from fastapi import FastAPI
-from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from netkeeper.config import LinkedInSettings, Settings, load_settings
@@ -89,7 +88,7 @@ from netkeeper.linkedin.page_messaging import MessageCheckResult as MessageCheck
 from netkeeper.linkedin.page_messaging import PageBubbleCheck, PageMessageCheck, PagePrefill
 from netkeeper.linkedin.page_profiles import PageProfiles
 from netkeeper.logging_setup import personal_exc, setup_logging
-from netkeeper.models import SyncRunKind, SyncRunStatus, SyncRunTrigger, User, UserKind
+from netkeeper.models import SyncRunKind, SyncRunStatus, SyncRunTrigger, User
 from netkeeper.services import message_check, message_send, route_breaker, runs, ui_settings
 from netkeeper.services.budgets import (
     ActionClass,
@@ -102,6 +101,7 @@ from netkeeper.services.events import Event, EventBus
 from netkeeper.services.inbox_poll import poll_inbox
 from netkeeper.services.linkedin_accounts import local_account_id, scheduled_runs_armed
 from netkeeper.services.scheduled_runs import ServeExtractor
+from netkeeper.services.users import local_owner
 from netkeeper.web.app import create_app
 
 log = logging.getLogger(__name__)
@@ -726,9 +726,7 @@ def serve_extractor(
 
 def _local_cdp_url(session: Session, settings: Settings) -> str:
     """``linkedin.cdp_url`` in force for the first local user, or the file's without one."""
-    user = session.scalars(
-        select(User).where(User.kind == UserKind.LOCAL).order_by(User.id)
-    ).first()
+    user = local_owner(session)
     if user is None:
         return settings.linkedin.cdp_url
     return ui_settings.resolve(session, user, settings).linkedin.cdp_url

@@ -51,19 +51,20 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Final
 
-from sqlalchemy import func, select
+from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 
 from netkeeper.campaigns import gmail_oauth
 from netkeeper.campaigns.gmail import GmailClient
 from netkeeper.db import session_scope
 from netkeeper.logging_setup import personal, personal_exc
-from netkeeper.models import Mailbox, MailboxArm, MailboxStatus, TestSend, User, UserKind
+from netkeeper.models import Mailbox, MailboxArm, MailboxStatus, TestSend, User
 from netkeeper.models.base import utcnow
 from netkeeper.models.mailboxes import MAILBOX_ARMED_BY_MAX_LENGTH
 from netkeeper.scoping import get_scoped, scoped
 from netkeeper.services import keychain
 from netkeeper.services.events import Event, EventBus
+from netkeeper.services.users import local_users
 
 log = logging.getLogger(__name__)
 
@@ -616,9 +617,7 @@ def poll_mailboxes(
     """Check every ``ok`` mailbox of every local user, or of just ``user_ids``. Blocking:
     run it off the event loop."""
     with session_scope(factory) as session:
-        users = session.scalars(
-            select(User).where(User.kind == UserKind.LOCAL).order_by(User.id)
-        ).all()
+        users = local_users(session)
         if user_ids is not None:
             users = [user for user in users if user.id in user_ids]
         due = [
@@ -709,11 +708,7 @@ class MailboxMonitor:
         now = self._monotonic()
         due: list[int] = []
         with session_scope(self._factory) as session:
-            user_ids = list(
-                session.scalars(
-                    select(User.id).where(User.kind == UserKind.LOCAL).order_by(User.id)
-                )
-            )
+            user_ids = [user.id for user in local_users(session)]
         for user_id in user_ids:
             try:
                 interval = self._interval_for(user_id)

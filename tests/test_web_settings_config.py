@@ -386,3 +386,44 @@ async def test_a_saved_chrome_address_waits_for_a_restart(client: httpx.AsyncCli
     assert remote.status_code == 422
     reset = await _put(client, {"linkedin.cdp_url": None})
     assert reset.json()["restart_pending"] is False
+
+
+async def test_backup_settings_are_the_owners_alone(
+    running_app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    """#623: only the owner's ``backup.*`` values take effect, so anyone else sees the
+    group read-only with a note, and a write is refused (403) with nothing stored."""
+    factory: sessionmaker[Session] = running_app.state.session_factory
+    with session_scope(factory, write=True) as session:
+        other_id = factories.make_user(session).id
+    owner_view = _field((await client.get(URL)).json(), "backup.keep")
+    assert owner_view["editable"] is True and owner_view["locked_reason"] is None
+    with acting_as(running_app, other_id):
+        body = (await client.get(URL)).json()
+        for key in ("backup.nightly", "backup.keep"):
+            field = _field(body, key)
+            assert field["editable"] is False
+            assert "local owner" in field["locked_reason"]
+        assert _field(body, PREFILLS)["editable"] is True
+        refused = await _put(client, {"backup.keep": 3, PREFILLS: 40})
+        assert refused.status_code == 403
+        assert "local owner" in refused.json()["detail"]
+        assert (await _put(client, {PREFILLS: 40})).status_code == 200
+    with session_scope(factory) as session:
+        other = session.get(User, other_id)
+        assert other is not None
+        assert ui_settings.stored(session, other) == {PREFILLS: 40}
+
+
+async def test_only_the_owner_sees_the_chrome_profile_path(
+    running_app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    """#623: ``GET /linkedin/browser`` names the install's Chrome profile directory."""
+    factory: sessionmaker[Session] = running_app.state.session_factory
+    with session_scope(factory, write=True) as session:
+        other_id = factories.make_user(session).id
+    assert (await client.get("/api/v1/linkedin/browser")).status_code == 200
+    with acting_as(running_app, other_id):
+        refused = await client.get("/api/v1/linkedin/browser")
+    assert refused.status_code == 403
+    assert "cdp_url" not in refused.text and "launch_command" not in refused.text

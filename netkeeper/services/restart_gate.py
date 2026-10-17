@@ -29,17 +29,17 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Final, Literal, Protocol, runtime_checkable
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from netkeeper.db import session_scope
 from netkeeper.linkedin import activity_lock
-from netkeeper.models import SyncRun, SyncRunStatus, User, UserKind
+from netkeeper.models import SyncRun, SyncRunStatus
 from netkeeper.models.base import utcnow
 from netkeeper.scoping import scoped
 from netkeeper.services import runs
 from netkeeper.services.linkedin_accounts import local_account_id
 from netkeeper.services.tasks import TaskRunner
+from netkeeper.services.users import local_users
 
 log = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ def stored_busy(factory: sessionmaker[Session]) -> list[str]:
     reasons: list[str] = []
     now = utcnow()
     with session_scope(factory) as session:
-        users = session.scalars(select(User).where(User.kind == UserKind.LOCAL)).all()
+        users = local_users(session)
         for user in users:
             running = session.scalars(
                 scoped(user, SyncRun).where(SyncRun.status == SyncRunStatus.RUNNING)

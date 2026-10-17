@@ -109,3 +109,9 @@ async def test_the_prune_uses_the_owners_keep(
     response = await client.post(URL, headers=HEADERS)
     assert response.status_code == 201
     assert len(_files(_data_dir)) == 3
+
+
+def test_get_backups_lists_the_403_in_its_schema(running_app: FastAPI) -> None:
+    schema = running_app.openapi()["paths"][URL]
+    assert "403" in schema["get"]["responses"]
+    assert "403" in schema["post"]["responses"]
