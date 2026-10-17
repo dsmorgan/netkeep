@@ -13,6 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from email.message import EmailMessage
+from typing import Any
 
 import factories
 import pytest
@@ -23,6 +24,7 @@ from netkeeper.campaigns.gmail_fake import FakeGmail
 from netkeeper.db import session_scope
 from netkeeper.models import (
     Campaign,
+    Contact,
     Enrollment,
     EnrollmentStatus,
     Interaction,
@@ -60,24 +62,52 @@ class World:
             return fn(session, user)
 
     def enroll(
-        self, emails: tuple[str, ...] = (QUORBELLE,), sent_at: datetime | None = FIRST_SEND
+        self,
+        emails: tuple[str, ...] = (QUORBELLE,),
+        sent_at: datetime | None = FIRST_SEND,
+        *,
+        campaign_id: int | None = None,
+        **overrides: Any,
     ) -> int:
         """A contact with ``emails``, enrolled; its LinkedIn step 1 went out at ``sent_at``."""
 
         def make(session: Session, user: User) -> int:
-            campaign = get_scoped(session, user, Campaign, self.campaign_id)
+            campaign = get_scoped(session, user, Campaign, campaign_id or self.campaign_id)
             assert campaign is not None
             contact = factories.make_contact(session, user, emails=list(emails))
-            enrollment = factories.make_enrollment(
-                session, campaign, contact, current_step=1, next_action_at=NOW + timedelta(days=5)
-            )
+            fields: dict[str, Any] = {"current_step": 1, "next_action_at": NOW + timedelta(days=5)}
+            fields.update(overrides)
+            enrollment = factories.make_enrollment(session, campaign, contact, **fields)
             if sent_at is not None:
                 factories.make_message(session, enrollment, position=1, sent_at=sent_at)
             return enrollment.id
 
         return self.write(make)
 
-    def poll(self, now: datetime = NOW) -> replies.RepliesPolled:
+    def sent(self, enrollment_id: int, position: int, at: datetime, **overrides: Any) -> None:
+        """Step ``position`` of the enrollment went out at ``at``."""
+
+        def make(session: Session, user: User) -> None:
+            enrollment = get_scoped(session, user, Enrollment, enrollment_id)
+            assert enrollment is not None
+            enrollment.current_step = position
+            factories.make_message(session, enrollment, position=position, sent_at=at, **overrides)
+
+        self.write(make)
+
+    def campaign(self, *channels: TemplateChannel, own_mailbox: bool = False) -> int:
+        """Another campaign of the user, on the armed mailbox when ``own_mailbox``."""
+
+        def make(session: Session, user: User) -> int:
+            mailbox_id = self.mailbox_id if own_mailbox else None
+            return factories.make_campaign(
+                session, user, channels=channels, mailbox_id=mailbox_id
+            ).id
+
+        return self.write(make)
+
+    def poll(self, now: datetime = NOW, *, labels: bool = False) -> replies.RepliesPolled:
+        """One poll; ``labels``: a reply may be labelled (a watch with a sent email)."""
         labelled: list[str] = []
         polled = replies.poll_replies(
             self.factory,
@@ -86,7 +116,8 @@ class World:
             now=now,
             label=lambda gmail, mailbox_id, name, message_id: labelled.append(message_id),
         )
-        assert labelled == []  # a LinkedIn-only watch's reply is never labelled
+        if not labels:
+            assert labelled == []  # a LinkedIn-only watch's reply is never labelled
         return polled
 
     def enrollment(self, enrollment_id: int) -> Enrollment:
@@ -281,3 +312,127 @@ def test_a_campaign_with_its_own_disarmed_mailbox_is_not_watched_by_another(
     [work] = world.write(lambda s, u: replies.reply_work(s, u, now=NOW))
 
     assert (work.mailbox_id, work.watches) == (world.mailbox_id, ())
+
+
+# --- review of #572 -------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("path", ["history", "scan"])
+def test_a_mixed_campaign_counts_from_its_first_linkedin_send(world: World, path: str) -> None:
+    """LinkedIn step 1 goes, the contact answers by email, and the campaign's first email
+    (step 2) goes before any poll reads the answer: it is still a reply, as a reply to
+    step 1 read only after step 2 went out is on an email-only campaign."""
+    campaign_id = world.campaign(TemplateChannel.LINKEDIN, TemplateChannel.EMAIL, own_mailbox=True)
+    enrollment_id = world.enroll(campaign_id=campaign_id)
+    if path == "history":
+        baseline(world)
+    world.gmail.deliver(email(QUORBELLE, "About your note"), at=NOW - timedelta(hours=3))
+    out = EmailMessage()
+    out["From"] = world.gmail.address
+    out["To"] = QUORBELLE
+    out["Subject"] = "Hello"
+    out.set_content("Step 2.")
+    ref = world.gmail.send(out, purpose="test: the campaign's first email")
+    world.sent(
+        enrollment_id,
+        2,
+        NOW - timedelta(hours=1),
+        gmail_message_id=ref.id,
+        gmail_thread_id=ref.thread_id,
+    )
+    if path == "scan":
+        world.set_mailbox(history_id=None)
+
+    [work] = world.write(lambda s, u: replies.reply_work(s, u, now=NOW))
+    [watch] = work.watches
+    assert watch.first_sent_at == FIRST_SEND and len(watch.sent) == 1
+    world.poll(labels=True)
+
+    assert world.enrollment(enrollment_id).status is EnrollmentStatus.REPLIED
+    assert [m.subject for m in world.inbound(enrollment_id)] == ["About your note"]
+
+
+def test_an_email_only_watch_still_counts_from_its_first_email(world: World) -> None:
+    """The change for #571 leaves an email-only enrollment's watch as it was."""
+    campaign_id = world.campaign(TemplateChannel.EMAIL, TemplateChannel.EMAIL, own_mailbox=True)
+    enrollment_id = world.enroll(campaign_id=campaign_id, sent_at=None)
+    world.sent(enrollment_id, 1, FIRST_SEND, gmail_message_id="m1", gmail_thread_id="t1")
+    world.sent(
+        enrollment_id, 2, NOW - timedelta(hours=1), gmail_message_id="m2", gmail_thread_id="t1"
+    )
+
+    [work] = world.write(lambda s, u: replies.reply_work(s, u, now=NOW))
+
+    [watch] = work.watches
+    assert watch.first_sent_at == FIRST_SEND
+    assert [s.gmail_message_id for s in watch.sent] == ["m1", "m2"]
+    assert watch.label is not None
+
+
+def test_two_linkedin_sends_count_from_the_first(world: World) -> None:
+    enrollment_id = world.enroll()
+    world.sent(enrollment_id, 2, NOW - timedelta(hours=1))
+    world.gmail.deliver(email(QUORBELLE), at=NOW - timedelta(hours=3))  # between the two
+
+    world.poll()
+
+    assert world.enrollment(enrollment_id).status is EnrollmentStatus.REPLIED
+
+
+@pytest.mark.parametrize(("days", "watched"), [(29, True), (31, False)])
+def test_a_completed_linkedin_only_enrollment_is_watched_thirty_days_after_its_last_send(
+    world: World, days: int, watched: bool
+) -> None:
+    enrollment_id = world.enroll(
+        sent_at=NOW - timedelta(days=60), status=EnrollmentStatus.COMPLETED
+    )
+    world.sent(enrollment_id, 2, NOW - timedelta(days=days))
+
+    [work] = world.write(lambda s, u: replies.reply_work(s, u, now=NOW))
+
+    assert [w.enrollment_id for w in work.watches] == ([enrollment_id] if watched else [])
+
+
+def test_an_out_of_office_does_not_stop_it(world: World) -> None:
+    enrollment_id = world.enroll()
+    auto = email(QUORBELLE, "Out of office", "Back next week.")
+    auto["Auto-Submitted"] = "auto-replied"
+    world.gmail.deliver(auto, at=NOW - timedelta(hours=1))
+
+    world.poll()
+
+    assert world.enrollment(enrollment_id).status is EnrollmentStatus.ACTIVE
+    assert world.inbound(enrollment_id) == []
+
+
+def test_the_scan_searches_each_address_once_from_its_earliest_send(world: World) -> None:
+    """One contact in two campaigns: one ``from:`` search, from the earlier first send."""
+    first = world.enroll()
+    other = world.campaign(TemplateChannel.LINKEDIN)
+
+    def enroll_again(session: Session, user: User) -> None:
+        campaign = get_scoped(session, user, Campaign, other)
+        enrollment = get_scoped(session, user, Enrollment, first)
+        assert campaign is not None and enrollment is not None
+        contact = get_scoped(session, user, Contact, enrollment.contact_id)
+        assert contact is not None
+        again = factories.make_enrollment(
+            session, campaign, contact, current_step=1, next_action_at=NOW
+        )
+        factories.make_message(session, again, position=1, sent_at=NOW - timedelta(hours=5))
+
+    world.write(enroll_again)
+    second = world.write(
+        lambda s, u: (
+            s.scalars(scoped(u, Enrollment).where(Enrollment.campaign_id == other)).one().id
+        )
+    )
+    # Between the two first sends: only the earlier search window holds it.
+    world.gmail.deliver(email(QUORBELLE), at=NOW - timedelta(days=1))
+    world.gmail.calls.clear()
+
+    world.poll()
+
+    assert [m for m, _ in world.gmail.calls].count("messages.list") == 1
+    assert world.enrollment(first).status is EnrollmentStatus.REPLIED
+    assert world.enrollment(second).status is EnrollmentStatus.ACTIVE

@@ -181,11 +181,7 @@ function Overview({ campaign }: { campaign: Campaign }) {
         {linkedIn.late !== null && <p className="text-muted-foreground">{linkedIn.late}</p>}
         {linkedIn.repliesUnwatched && (
           <Callout tone="warning" title="Email replies aren’t watched">
-            <p>
-              No armed mailbox watches this campaign, so a contact who answers by email isn’t seen
-              as replied and still gets the next LinkedIn steps. Arm a mailbox in Settings → Gmail
-              to watch for their email replies.
-            </p>
+            <p>{repliesUnwatchedText(campaign)}</p>
           </Callout>
         )}
         {canToggle && (
@@ -261,6 +257,22 @@ function useLinkedInFacts(campaign: Campaign): {
   const over = campaign.status === 'completed' || campaign.status === 'archived'
   const repliesUnwatched = onLinkedIn && !over && !campaign.email_replies_watched
   return { late, cap, repliesUnwatched }
+}
+
+/**
+ * Why a LinkedIn campaign's email replies aren't watched (#571): no mailbox is armed, or,
+ * for a campaign with its own mailbox, that mailbox isn't; arming another doesn't help.
+ */
+function repliesUnwatchedText(campaign: Campaign): string {
+  const which =
+    campaign.mailbox_id === null
+      ? 'No mailbox is armed'
+      : `This campaign’s mailbox, ${campaign.mailbox_email ?? 'its own'}, isn’t armed`
+  const arm = campaign.mailbox_id === null ? 'a mailbox' : 'that mailbox'
+  return (
+    `${which}, so a contact who answers by email isn’t seen as replied and still gets the ` +
+    `next LinkedIn steps. Arm ${arm} in Settings → Gmail to watch for their email replies.`
+  )
 }
 
 /**

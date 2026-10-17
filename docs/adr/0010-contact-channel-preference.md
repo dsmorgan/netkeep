@@ -12,7 +12,7 @@ Each campaign step sends on one channel, and a campaign can already mix channels
 
 - The guards (`netkeeper/services/campaign_guards.py`) run at enrollment and at every fire. The address guard checks only the step's channel. `not_disconnected` excludes a former LinkedIn connection on every channel, as the maintainer kept in #485 (answer 3). A contact who fails a guard at enrollment isn't enrolled at all. "In another campaign" and "contacted recently" already ignore channel: the second reads any outbound interaction or sent campaign message.
 - `check_channel` covers a mailbox's cap and reauth state and the browser's heat and budgets (`netkeeper/services/budgets.py`, `netkeeper/services/heat.py`).
-- Reply detection (`netkeeper/services/campaign_replies.py`): a LinkedIn reply after an enrollment's first send on any channel ends it. The Gmail poll watches only enrollments with a sent email, so an email reply to a LinkedIn-only enrollment would not stop it.
+- Reply detection (`netkeeper/services/campaign_replies.py`): a LinkedIn reply after an enrollment's first send on any channel ends it. The Gmail poll used to watch only enrollments with a sent email, so an email reply to a LinkedIn-only enrollment did not stop it; #571 fixed that while a mailbox is armed, and the campaign page says when none is.
 
 ## Decision
 
