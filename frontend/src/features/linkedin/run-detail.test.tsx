@@ -228,4 +228,37 @@ describe('RunDetail', () => {
     await waitFor(() => expect(onResumed).toHaveBeenCalledWith(99))
     expect(calls.some((call) => call.path === '/api/v1/linkedin/runs/1/resume')).toBe(true)
   })
+  it('shows the fields `netkeeper linkedin run` prints: plan, max visits, resumes (#405)', async () => {
+    renderDetail(7, {
+      'GET /api/v1/linkedin/runs/7': () =>
+        jsonResponse(
+          run({
+            id: 7,
+            kind: 'enrich',
+            status: 'aborted',
+            stop_reason: 'route_changed',
+            planned: 44,
+            completed: 12,
+            max_visits: 30,
+            resume_of_id: 5,
+            resumed_by: 9,
+          }),
+        ),
+    })
+    const fields = within(await screen.findByRole('region', { name: 'Run 7' }))
+    expect(fields.getByText('Plan').nextSibling).toHaveTextContent('12 of 44 done')
+    expect(fields.getByText('Max visits').nextSibling).toHaveTextContent('30')
+    expect(fields.getByText('Resumes').nextSibling).toHaveTextContent('Run 5')
+    expect(fields.getByText('Resumed by').nextSibling).toHaveTextContent('Run 9')
+  })
+
+  it('leaves out run fields a run does not have', async () => {
+    renderDetail(1, {
+      'GET /api/v1/linkedin/runs/1': () => jsonResponse(run({ id: 1, status: 'completed' })),
+    })
+    await screen.findByText('Completed')
+    for (const label of ['Plan', 'Max visits', 'Resumes', 'Resumed by']) {
+      expect(screen.queryByText(label)).not.toBeInTheDocument()
+    }
+  })
 })

@@ -114,6 +114,7 @@ export function RunDetail({
         {data.error !== null && <p role="alert">{data.error}</p>}
         {data.notes !== null && <p className="text-muted-foreground">{data.notes}</p>}
 
+        <FieldList title="Run" fields={runFields(data)} />
         {data.status === 'running' && (
           <FieldList title="Progress" fields={formatFields(data.progress)} />
         )}
@@ -157,6 +158,32 @@ export function RunDetail({
       </ConfirmDialog>
     </Card>
   )
+}
+
+/**
+ * The run's own fields that `netkeeper linkedin run <id>` prints beside its counts
+ * (#405): how far its plan got, its visit cap, and the run it resumes. Also the run
+ * that resumed it, which the CLI leaves out. Each shows only when the run has it.
+ */
+function runFields(data: {
+  planned: number | null
+  completed: number | null
+  max_visits: number | null
+  resume_of_id: number | null
+  resumed_by: number | null
+}): Field[] {
+  const fields: Field[] = []
+  if (data.planned !== null) {
+    fields.push({ label: 'Plan', value: `${data.completed ?? 0} of ${data.planned} done` })
+  }
+  if (data.max_visits !== null) fields.push({ label: 'Max visits', value: String(data.max_visits) })
+  if (data.resume_of_id !== null) {
+    fields.push({ label: 'Resumes', value: `Run ${data.resume_of_id}` })
+  }
+  if (data.resumed_by !== null) {
+    fields.push({ label: 'Resumed by', value: `Run ${data.resumed_by}` })
+  }
+  return fields
 }
 
 function FieldList({ title, fields }: { title: string; fields: Field[] }) {
