@@ -93,6 +93,9 @@ def _urls() -> dict[str, str]:
 
 def _html() -> dict[str, str]:
     return {
+        "profile_top_card_html": mp.profile_top_card_html(
+            mp.ZEPHYRINE, name=f"{mp.ZEPHYRINE.name}, MBA", pronouns="they/them", top_card_h2s=2
+        ),
         "message_control_html": mp.message_control_html(mp.ZEPHYRINE),
         "profile_message_controls_html": mp.profile_message_controls_html(
             mp.ZEPHYRINE, decoy=mp.SAFFRON
