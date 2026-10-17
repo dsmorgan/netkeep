@@ -1,81 +1,102 @@
 # Chrome profiles: research and mechanics
 
-This document holds the evidence and the mechanics behind [ADR 0012](../adr/0012-chrome-profiles.md). The ADR holds the decision. Researched 2026-10-17 for #595.
+This document holds the evidence and the mechanics behind [ADR 0012](../adr/0012-chrome-profiles.md). The ADR holds the decision: one netkeeper Chrome, on the dedicated profile with the debugging port, holds the UI, LinkedIn, and setup steps such as Gmail linkage. Researched 2026-10-17 for #595, and revised the same day after the maintainer's review.
 
 ## How netkeeper attaches today
 
-- `linkedin.cdp_url` (default `http://127.0.0.1:9222`) names the port. `AttachProvider` in `netkeeper/linkedin/browser.py` connects with Playwright's `connect_over_cdp` and reuses `browser.contexts[0]`. It never creates a context, and it never closes the browser or the context.
+- `linkedin.cdp_url` (default `http://127.0.0.1:9222`) names the port. `AttachProvider` in `netkeeper/linkedin/browser.py` connects with Playwright's `connect_over_cdp` and reuses `browser.contexts[0]`. It never creates a context, and it never closes the browser or the context. It logs a warning when the attached Chrome has more than one context.
 - The profile is `<data dir>/chrome-profile` (`CHROME_PROFILE_DIRNAME`). `netkeeper browser launch` and `GET /linkedin/browser` print the command from `chrome_launch_command` in `netkeeper/services/browser_launch.py`: `--remote-debugging-port=<port>` and `--user-data-dir=<profile>`, and nothing else. `scripts/chrome.sh` (`make chrome`) runs that command for a person.
+- Nothing checks yet that the Chrome on the port is the dedicated profile. #624 adds that check at attach.
 
-## What runs do with tabs
+## Why not your everyday Chrome
 
-- **Open:** each run opens one tab with `Target.createTarget` and `background: true` (#195, PR #468). If that fails, it falls back to `context.new_page()`, which opens a foreground tab, and it logs an "opened in front" note.
-- **Bring forward:** prefill and auto-send call `bring_to_front` once, before the Message click (ADR 0007, ADR 0008). This activates the Chrome window that holds the tab.
-- **Close:** a run closes its own tab at the end, except a prefill, which hands its tab to the user. Auto-send closes the sent message bubble by its close control. Past the control's fixed prefix, the rule accepts the contact's name alone, or with one other name on either side of " and " (#516, `_close_by_rule`).
-- **Read other tabs:** `bubble_check` (`message-check --bubble`, #495) lists `context.pages` and reads only the tabs on LinkedIn's origin.
+Chrome 136 (2025) and later ignore `--remote-debugging-port` and `--remote-debugging-pipe` when Chrome runs on the default user data directory. The flags work only with a non-default `--user-data-dir`, which uses its own encryption key. Chrome made this change because attackers used remote debugging to steal cookies after App-Bound Encryption shipped. Source: [Changes to remote debugging switches to improve security](https://developer.chrome.com/blog/remote-debugging-port).
 
-If the UI shares `contexts[0]`, each of these paths has to keep ignoring the UI's tabs. Today, the origin filter and the run-owned-tab rule do that, but every new tab path must keep doing it.
+Chrome 144 added an opt-in at `chrome://inspect/#remote-debugging` that lets a tool connect to your running browser. Chrome asks you to accept each session and shows a "controlled by automated test software" banner while one is active. Sources: [Let your coding agent debug your browser session](https://developer.chrome.com/blog/chrome-devtools-mcp-debug-your-browser-session) and [Auto-connect](https://developer.chrome.com/docs/devtools/agents/use-cases/auto-connect). netkeeper can't run unattended that way, and #624 refuses such a Chrome.
+
+So "the same profile" in ADR 0012 means netkeeper's dedicated profile. It's a second Chrome window with its own icon in the window list, and it is the one place you look when you operate netkeeper.
+
+## How Gmail linkage works today
+
+- **Google Cloud setup.** The Settings page's Gmail setup wizard (`frontend/src/features/settings/gmail-setup-wizard.tsx`) links to Google Cloud Console pages (new project, Gmail API, Branding, Audience, Create OAuth client). Each link opens a new tab (`target="_blank"`).
+- **Authorization, from the UI.** `POST /mailboxes/oauth/start` (`netkeeper/web/api/mailboxes.py`) returns Google's authorization URL, built by `gmail_oauth.begin` with PKCE and a loopback redirect to the API's own `/mailboxes/oauth/callback`. The UI then sends its own tab to that URL (`navigation.assign` in `frontend/src/features/mailboxes/api.ts`). After you allow access, Google redirects that tab to the callback, which exchanges the code and redirects back to the Settings page.
+- **Authorization, from the CLI.** The CLI starts its own loopback listener and prints the URL for you to open (`_present_authorization_url` in `netkeeper/cli.py`). It never opens a browser.
+
+So the launcher never needs Google's consent URL. In netkeeper's Chrome, the wizard's Console tabs and the consent page open in the same Chrome as the UI, and the Google sign-in you make there stays in that profile.
+
+## What runs do with tabs, and what changes
+
+| Path | Today | With the UI in the same Chrome |
+| --- | --- | --- |
+| Open | `_open_tab` sends `Target.createTarget` with `url: about:blank` and `background: true`, and no `newWindow` (#195, PR #468). On failure it falls back to `context.new_page()`, a foreground tab, and logs an "opened in front" note. | Chrome places a background tab in a window it picks, which can be the UI's or a setup window. **New (#632):** open the run's tab in its own window, likely `newWindow: true` with `background: true`. Check placement and focus live first. |
+| Wait for the new tab | `_open_tab` opens a page-level session on every page that appeared since it asked, to read its target id (`Target.getTargetInfo`). | A UI or Google tab you open during that wait gets a session too. It's read-only and harmless, but it isn't the run's tab. **New (#634):** skip pages that aren't `about:blank`, or match without attaching. |
+| Bring forward | `bring_tab_forward` calls `bring_to_front` once, on the run's own page, before the Message click (ADR 0007, ADR 0008). | Unchanged. With #632, it raises the run's window, not the UI's. |
+| Close | The run closes only its own page, except a prefill's handed-over tab. Auto-send closes the sent bubble inside the run's own tab (#516, `_close_by_rule`). | Unchanged. |
+| Read other tabs | `bubble_check` (`message-check --bubble`, #495) lists `context.pages` and reads only the tabs on the LinkedIn origin it's given. | Unchanged. **New (#634):** a test pins every `context.pages` use in the package to an ownership or LinkedIn-origin filter. |
+| Network | The body tap (`_open_body_tap`), the package's only `Network.enable`, is a page-level session on the run's own tab. | Unchanged. The UI's traffic isn't seen. |
+| Cookies | `_read_session_cookies` in `netkeeper/linkedin/preflight.py` calls `context.cookies()` with no URLs, then keeps LinkedIn's two session cookies by name and domain. It copies names and expiry times only. | After Gmail linkage, the jar holds your Google cookies too. **New (#633):** pass LinkedIn's URLs so the read never returns another site's cookies. |
+
+The user's own clicks or typing in a run's tab can still disturb that run. ADR 0012 accepts that near-term. The Phase 7 end state, a bundled or custom browser that controls focus, hides run tabs, and blocks navigation during a run, is #631.
 
 ## What a remote-debugging port exposes
 
-The first two bullets describe Chrome's known behavior. Neither has an official source, and neither was verified live for #595. A Chromium issue confirms that two instances can't share one user data directory. If a second profile's tabs show up through the port, they show up as a second browser context, and `AttachProvider` already logs a warning when the attached Chrome has more than one context (`browser.py`, the `len(contexts) > 1` branch). That warning is the observable sign.
+The first two bullets describe Chrome's known behavior. Neither has an official source, and neither was verified live for #595. A Chromium issue confirms that two instances can't share one user data directory.
 
-- **One process per profile directory.** Chrome allows one browser process per `--user-data-dir`, guarded by the profile's singleton lock (the `SingletonLock`, `SingletonCookie` and `SingletonSocket` files that `scripts/chrome.sh` clears after a crash). Profiles inside that directory (`--profile-directory=Profile 1`, and so on) run in the same process. A second launch with the same directory hands its arguments to the running process and exits.
-- **The port is browser-wide.** `/json/list`, `Target.getTargets` and `Target.setDiscoverTargets` report every page, worker, and extension target in the process, across all of its profiles. A client can attach to any of them and call `Runtime.evaluate`, read cookies (`Network.getAllCookies`, `Storage.getCookies`), take screenshots, and navigate.
-- **There's no authentication.** Any local process that reaches the port has the access above. Chrome checks the `Host` header on HTTP endpoints and rejects WebSocket upgrades from web origins that aren't allowed (`--remote-allow-origins`), but a native program on the same machine passes both checks.
-- **For the UI, this adds nothing new.** The API has no login, and `csrf_violation` (`netkeeper/web/security.py`) lets through a request that carries `X-Netkeeper-Client: 1` and has no `Origin` or `Sec-Fetch-Site`, which is a plain `curl` to loopback. A local program can already press any UI button without the port. That's why ADR 0012 rests on tabs, focus, and pollution, not on the port.
-- **Two profiles in one process are still one exposure.** A second profile under the same `--user-data-dir` doesn't remove anything from the port. Only a separate `--user-data-dir`, run as a separate process without the port flag, is outside the port.
+- **One process per profile directory.** Chrome allows one browser process per `--user-data-dir`, guarded by the profile's singleton lock (the `SingletonLock`, `SingletonCookie` and `SingletonSocket` files that `scripts/chrome.sh` clears after a crash). Profiles inside that directory run in the same process. A second launch with the same directory hands its arguments to the running process and exits.
+- **The port is browser-wide.** `/json/list`, `Target.getTargets` and `Target.setDiscoverTargets` report every page, worker, and extension target in the process. A client can attach to any of them and call `Runtime.evaluate`, read cookies (`Network.getAllCookies`, `Storage.getCookies`), take screenshots, and navigate.
+- **There's no authentication.** Chrome binds the port to loopback and checks the `Host` header and WebSocket origins (`--remote-allow-origins`), but a native program on the same machine passes those checks.
+- **What the UI adds.** A client on the port can read the UI's page, and after Gmail linkage, your Google cookies. That client can already drive LinkedIn and read LinkedIn's cookies, which is the asset netkeeper protects most. The API itself has no login today: `csrf_violation` (`netkeeper/web/security.py`) lets through a request with `X-Netkeeper-Client: 1` and no `Origin` or `Sec-Fetch-Site`, so a local program can already press any UI button without the port.
+- **A per-install API secret (#618).** If #618 adds one, the UI's page holds it, so a client on the port could read it with `Runtime.evaluate`. That's acceptable for the same reason: a client on the port already controls LinkedIn. The secret still stops local programs that don't have the port.
 
-## Chrome's recent restrictions
+## Profile and capture pollution (#520)
 
-- **Chrome 136** (2025) ignores `--remote-debugging-port` and `--remote-debugging-pipe` when Chrome runs on the default user data directory. The flags work only with a non-default `--user-data-dir`, which uses its own encryption key. Chrome made this change because attackers used remote debugging to steal cookies after App-Bound Encryption shipped. Source: [Changes to remote debugging switches to improve security](https://developer.chrome.com/blog/remote-debugging-port).
-- **Chrome 144** added an opt-in at `chrome://inspect/#remote-debugging` that lets a tool such as Chrome DevTools MCP connect to the user's running browser. Chrome asks the user to accept each session and shows a "controlled by automated test software" banner while one is active. Sources: [Let your coding agent debug your browser session](https://developer.chrome.com/blog/chrome-devtools-mcp-debug-your-browser-session) and [Auto-connect](https://developer.chrome.com/docs/devtools/agents/use-cases/auto-connect).
+During the CP8c capture (the setup notes in #520), a netkeeper UI tab (`localhost:8000`) was open in the test-account capture profile, not in netkeeper's LinkedIn Chrome. It kept polling the API; the top bar alone refetches `/poll-status` every minute, and the UI holds an event stream open. The capture's netlog records the whole browser's traffic, so the UI's requests mixed in with LinkedIn's.
 
-For netkeeper, this means two things:
+With the UI in netkeeper's Chrome:
 
-- The LinkedIn Chrome must keep its own `--user-data-dir`, which it already does.
-- Your everyday Chrome has no port unless you turn on the opt-in, and then Chrome asks before each connection. That's the safe place for the UI.
+- **The UI never talks to LinkedIn.** Its requests go to localhost. LinkedIn's pages can't read the UI's origin, its storage, or the profile's history.
+- **Runs don't see the UI's traffic,** because every network session is on the run's own tab.
+- **The residual risk is a whole-browser capture,** such as a netlog or `chrome://net-export`, taken in netkeeper's Chrome. Close the UI and quit `serve` first, as #520's setup already says.
+- **The profile now holds more:** the UI's origin data, and your Google sign-in after Gmail linkage. #633 keeps netkeeper's own reads to LinkedIn's cookies.
 
-## The CP8 incident
+## The launcher (for #549 and #599)
 
-During the CP8c capture (the setup notes in #520), a netkeeper UI tab (`localhost:8000`) was open in the same Chrome profile as the capture. That was the test-account capture profile (#484 and #520, setup steps 1 and 2), not netkeeper's LinkedIn Chrome. It kept polling the API; the top bar alone refetches `/poll-status` every minute, and the UI holds an event stream open. The capture recorded that traffic alongside LinkedIn's, so #520's setup tells you to quit `serve` and close every UI tab first.
+One function builds one argument list from config and spawns it:
 
-## Opening the UI (for #549)
+- **Binary.** Run Chrome's binary directly, as an argument list with no shell. On macOS that's `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`; on Linux, `google-chrome`. Don't use `open -a "Google Chrome" --args ...`: with two Chrome processes running, LaunchServices can activate either one, and `--args` reaches only a process the command itself launches.
+- **Arguments.** `--remote-debugging-port=<port>` and `--user-data-dir=<profile>`, exactly as `chrome_launch_command` prints them, then `--app=<the UI's URL>`, then, from the first-run button only, LinkedIn's sign-in or feed URL as a positional argument. Never a headless flag, never a fresh profile, never another flag or URL. A test pins the list to the printed lines plus these two additions, and checks that only the first-run caller passes the LinkedIn URL.
+- **Already running.** When netkeeper's Chrome is up, the same command hands its arguments to the running process through the profile's singleton, which opens the UI's app window and exits. So `netkeeper open` works whether or not that Chrome is running. Not verified live: that the running process honors `--app` and the positional URL on a handoff.
+- **Checks before a spawn.** Refuse, and report which case applied, as `scripts/chrome.sh --status` does, when:
+  - the port answers but isn't the dedicated profile (#624's check), or
+  - a live process holds the profile's singleton lock but the port doesn't answer (a Chrome on that profile without the port; a handoff would open the UI where runs can't attach).
+- **Runs.** Starting Chrome cold is refused while a process holds the account's browser lock (checked through `services.runs`), and #599's button is disabled then. Opening the UI's window into a running Chrome is allowed during a run, because it's your act and touches no run tab.
+- **Detached.** Run it detached, so the Chrome outlives `serve`.
 
-- **macOS:** run Chrome's binary directly, as an argument list (no shell), with `--app=<UI URL>` and no `--user-data-dir`. The binary is `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`. With no `--user-data-dir`, the launch belongs to the default profile directory, so a running everyday Chrome receives it through that directory's singleton, and a stopped one starts. Don't use `open -a "Google Chrome" --args ...`: when two Chrome processes are running, LaunchServices can activate either one, and `--args` reaches only a process that the command itself launches.
-- **Linux:** run `google-chrome --app=<UI URL>` without `--user-data-dir`.
-- **No Chrome found:** open the URL in the default browser. #549's banner already says Chrome is required.
-- **Never** pass the LinkedIn profile's `--user-data-dir` to the opener, and never ask the LinkedIn Chrome, over CDP or otherwise, to open a UI URL.
+### Why an `--app` window
 
-## Starting the LinkedIn Chrome (for #599)
+An app window has no tab strip. A run's tab never opens among the UI's tabs, and a run that raises its own tab doesn't swap the UI out of view. Links the UI opens in a new tab, such as the Gmail wizard's Console links, open in a normal window of the same Chrome. Not verified live: whether Chrome ever places a run's `background: true` tab into an app window. #632 checks this.
 
-- Don't run the printed lines through a shell. `chrome_launch_command` returns shell lines with trailing backslashes, for a person to paste. Build an argument list from the same port and profile, and pin it in a test to the printed lines: each flag and value matches, and nothing is added.
-- On macOS, the printed first line is `open -na "Google Chrome" --args`. That's the LaunchServices route the opener avoids, but `-n` always starts a new instance, so `--args` reaches it, and the profile's singleton lock refuses a second one on the same profile. Either that route or the binary directly is acceptable, as long as the test pins the argument list.
-- Run it detached, so the Chrome outlives `serve`.
-- Don't start a second Chrome while the port answers, or while the profile's singleton lock is held by a live process. Report which case applies, as `scripts/chrome.sh --status` does.
-- ADR 0012's rule 4 allows one start URL: LinkedIn's own sign-in or feed URL, as a positional argument after the flags, never a flag, and only from the first-run button. Start-at-login and the ordinary **Start Chrome** button pass no URL. A test pins the allowed URLs and checks that no other caller passes one.
+### No "open in netkeeper's Chrome" hint
 
-## Detecting a UI tab in the LinkedIn Chrome (rule 8)
-
-Posture already attaches to read the session. While attached, it can compare `context.pages` URLs against the UI's own origin (scheme, host, and port), and report a warning row when one matches. It reads only the URLs and never touches the tab. The UI can show its own banner without the browser: the page can't see its own window's debugging state, so the banner comes from posture's row through the API.
+If you open the UI by hand in another browser, it works the same. It shows no hint. The page can't see its own window's debugging state, so a hint would need posture to list targets through the port and compare origins, and opening the UI elsewhere puts nothing at risk. #549's Chrome-required banner still applies to browsers that aren't Chrome. The old rule that a UI tab in netkeeper's Chrome is a posture warning is dropped: that tab is now expected.
 
 ## The safety scanner and the text that changes on acceptance
 
-`tests/test_browser_safety.py` enforces ADR 0002's no-launch rule. It bans Playwright's launch calls, the `subprocess`, `pty` and `webbrowser` modules, and every process-spawning call (`create_subprocess_exec`, `Popen`, `posix_spawn`, and the rest) anywhere in the package. Both spawns in ADR 0012 break that ban, so on acceptance it gets one exception:
+`tests/test_browser_safety.py` enforces ADR 0002's no-launch rule. It bans Playwright's launch calls, the `subprocess`, `pty` and `webbrowser` modules, and every process-spawning call (`create_subprocess_exec`, `Popen`, `posix_spawn`, and the rest) anywhere in the package. The launcher breaks that ban, so on acceptance it gets one exception:
 
 - One module, and one function in it, may spawn a process. Nothing else in the package may, including the rest of that module.
-- The function builds one of two argument lists from config: the LinkedIn launcher's (rule 3, plus rule 4's start URL) and the UI opener's (rule 2). Tests pin each one to the lines netkeeper prints for it.
+- The function builds the launcher's one argument list from config. Tests pin it to the lines netkeeper prints, plus `--app=<the UI's URL>` and the first-run LinkedIn URL.
 - Playwright's launch calls stay banned everywhere, with no exception.
-- **Where it lives:** the spawning module sits beside `worker.py` (for example `netkeeper/chrome_spawn.py`), outside `web/`, `linkedin/`, `crm/` and `services/`, and imports nothing from `linkedin/`. Only `netkeeper/cli.py` (`netkeeper open`, and `browser launch --start` if it's added) and `netkeeper/worker.py` (`serve`'s wiring) import it. A test pins that list of importers, as `BROWSER_CALLERS` does for the provider, so no wrapper under `services/` can smuggle it in.
-- **How a route reaches it:** the way the runs API reaches the worker. `serve` puts the spawner on `app.state` behind a Protocol in `services/`, as it does with `services.runs.RunExecutor`. The route submits the spawn to the task runner and returns at once. With no spawner on `app.state`, the route answers 503, as `_executor` does. A route never imports the module and never spawns inside a handler. The reason isn't spec 9.9's deadlock, because a spawn touches no tab. The reasons are that the checks before a spawn and the wait for the port can take seconds, and that keeping process creation out of `web/` keeps the scanner's exception to one module.
-- **Checks before a spawn:** before it spawns the LinkedIn Chrome, the task refuses in three cases: a process holds the account's browser lock (checked through `services.runs`), the port already answers, or a live process holds the profile's singleton lock. It reports which case applied.
+- **Where it lives:** beside `worker.py` (for example `netkeeper/chrome_spawn.py`), outside `web/`, `linkedin/`, `crm/` and `services/`, and importing nothing from `linkedin/`. Only `netkeeper/cli.py` (`netkeeper open`, and `browser launch --start` if it's added) and `netkeeper/worker.py` (`serve`'s wiring) import it. A test pins that list of importers, as `BROWSER_CALLERS` does for the provider.
+- **How a route reaches it:** the way the runs API reaches the worker. `serve` puts the spawner on `app.state` behind a Protocol in `services/`, as it does with `services.runs.RunExecutor`. The route submits the spawn to the task runner and returns at once. With no spawner on `app.state`, the route answers 503, as `_executor` does. A route never imports the module and never spawns inside a handler: the checks before a spawn can take seconds, and keeping process creation out of `web/` keeps the scanner's exception to one module.
 
-This other text says netkeeper never starts Chrome, and changes to match when ADR 0012 is accepted:
+This other text says netkeeper never starts Chrome, or that the UI belongs elsewhere, and changes to match when ADR 0012 is accepted:
 
-- `docs/architecture.md`: F1 (line 71), N2 (line 110), and section 9.1 (lines 438 to 450)
-- `docs/guide/setup.md` (line 8) and `docs/guide/troubleshooting.md` (line 83)
-- `docs/implementation-guide.md` (lines 145 and 407)
-- `netkeeper/cli.py` (lines 197, 599 and 625)
-- `netkeeper/web/api/linkedin.py` (line 908)
+- `docs/architecture.md`: F1, N2, and section 9.1, "Browser attach"
+- `docs/guide/setup.md` (the "LinkedIn Chrome" bullet) and `docs/guide/troubleshooting.md` (the "Start the LinkedIn Chrome" row)
+- `docs/implementation-guide.md`, wherever it says netkeeper never starts a browser
+- `netkeeper/cli.py`: the `browser` group's help, `browser launch`'s docstring and message, and `_present_authorization_url`'s docstring
+- `netkeeper/web/api/linkedin.py`: the `GET /linkedin/browser` docstring
 - `scripts/chrome.sh` (its header comment)
 - `CLAUDE.md`: the "Browser identity" line and the `make chrome` note
+- ADR 0002: a dated amendment
