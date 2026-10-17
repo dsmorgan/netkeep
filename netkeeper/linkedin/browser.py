@@ -495,12 +495,17 @@ COMPOSER_PARAGRAPH: Final = "p"
 COMPOSER_UNREADABLE: Final = ":scope > :not(p), p :not(br)"
 #: The profile page's own heading, read once before the click for the chip check.
 PROFILE_HEADING: Final = "h1"
+#: With no ``h1`` on the page (#552, the CP8d captures: the name is an ``h2`` with hashed
+#: classes), the name heading is the top card's one ``h2``. The top card is the verified
+#: Contact info link's nearest ancestor that holds an ``h2``, never found by class.
+PROFILE_NAME_H2: Final = "h2"
+TOP_CARD_FROM_CONTACT_INFO: Final = "xpath=ancestor::*[.//h2][1]"
 #: The never-messaged bubble's scope: the composer's nearest ancestor that holds the
 #: ``New message`` heading (ADR 0007), found upward from the verified composer.
 #: What the never-messaged card check reads in its scope: every element with an href (#481).
 CARD_HREFS: Final = "[href]"
 NEW_MESSAGE_SCOPE: Final = "xpath=ancestor::*[.//h2[normalize-space()='New message']][1]"
-#: The refusal a chip whose name isn't ``Remove <the profile's h1>`` gives (ADR 0007).
+#: The refusal a chip whose name isn't ``Remove <the profile's name heading>`` gives (ADR 0007).
 RECIPIENT_NAME_MISMATCH: Final = "recipient_name_mismatch"
 #: The refusal a compose option that arrived after the verified one gives (ADR 0007).
 ANOTHER_COMPOSE: Final = "another_compose"
@@ -584,8 +589,9 @@ class BubbleRecipient:
     layout: BubbleLayout
     profile_id: str
     public_id: str | None
-    #: The profile page's one ``h1`` text, read before the click, when there was exactly
-    #: one: the never-messaged bubble's chip must then be named ``Remove <it>``.
+    #: The profile's name heading's text (its one ``h1``, or the top card's one ``h2``,
+    #: #552), read before the click when there was one: the never-messaged bubble's chip
+    #: must then be named ``Remove <it>``, exactly.
     profile_name: str | None = None
 
 
@@ -741,10 +747,11 @@ def classify_read_failure(exc: BaseException) -> ReadFailure:
     return ReadFailure.OTHER
 
 
-#: The profile's top card control: the first Message link after the profile's one
-#: ``h1`` in document order, read relative to that ``h1`` (#444). The capture shows no
-#: landmark for the top card (ADR 0007), but the name heading opens it, and its actions
-#: follow the name; a sticky copy or a hidden layout variant sits elsewhere.
+#: The profile's top card control: the first Message link after the profile's name
+#: heading in document order, read relative to that heading (#444; the one ``h1``, or
+#: without one the top card's one ``h2``, #552, :meth:`BrowserRun._name_heading`). The
+#: capture shows no landmark for the top card (ADR 0007), but the name heading opens it,
+#: and its actions follow the name; a sticky copy or a hidden layout variant sits elsewhere.
 MESSAGE_TOP_CARD: Final = "xpath=following::a"
 #: How many visible Message controls the click looks at. The capture rendered three.
 MESSAGE_MAX_CANDIDATES: Final = 8
@@ -879,7 +886,7 @@ class NotClear(enum.StrEnum):
     """No visible Message link for the contact."""
 
     NO_TOP_CARD = "no_top_card"
-    """No top card (no single ``h1``), and no other control on screen and clear."""
+    """No top card (no name heading), and no other control on screen and clear."""
 
     TOP_CARD_OFF_SCREEN = "top_card_off_screen"
     """The top card's control has no box, so there's nothing to scroll to."""
@@ -1036,7 +1043,7 @@ CHECK_DETAIL_TIMEOUT_S: Final = 10.0
 #: How many ancestors of a hit element the check walks, looking for the control that
 #: holds it or a landmark that covers it.
 CHECK_MAX_ANCESTORS: Final = 24
-#: Any element after the profile's one ``h1`` in document order: whether a control sits
+#: Any element after the profile's name heading in document order: whether a control sits
 #: where the top card's selector (:data:`MESSAGE_TOP_CARD`, links only) would look.
 CHECK_AFTER_HEADING: Final = "xpath=following::*"
 #: A name that starts with "Message" but isn't exactly that ("Message Zephyrine", say):
@@ -1162,6 +1169,32 @@ class CheckHit:
     scope: str | None = None
 
 
+class HeadingSource(enum.StrEnum):
+    """Where the profile's name heading was found (#552, :meth:`BrowserRun._name_heading`)."""
+
+    H1 = "the profile's one h1"
+    TOP_CARD_H2 = "the top card's one h2"
+
+
+class NoNameHeading(enum.StrEnum):
+    """Why the profile has no name heading, in fixed words for the log (#552)."""
+
+    H1S = "more than one h1"
+    CONTACT_INFO = "no h1, and not one Contact info link"
+    CONTACT_INFO_HREF = "no h1, and the Contact info link opens something else"
+    NO_H2 = "no h2 above the Contact info link"
+    H2S = "the top card holds more than one h2"
+
+
+@dataclass(frozen=True, slots=True)
+class _NameHeading:
+    """The profile's name heading: its locator, its level, and where it was found."""
+
+    locator: _MessagingLocator
+    level: int
+    source: HeadingSource
+
+
 @dataclass(frozen=True, slots=True)
 class CheckControl:
     """One element named exactly "Message", hidden ones counted (#473)."""
@@ -1206,6 +1239,7 @@ class MessageCheckSnapshot:
     zoom: float | None
     device_pixel_ratio: float | None
     heading_count: int | None
+    name_heading: str
     top_card_matched: bool
     bubble: str
     decision_4: str | None
@@ -3332,21 +3366,65 @@ class BrowserRun:
         await page.bring_to_front()
 
     async def read_profile_heading(self) -> str | None:
-        """The profile page's ``h1`` text when it has exactly one, else ``None``: LinkedIn's
-        own name for the profile, read before the click for the never-messaged chip
-        check (ADR 0007, "One click on Message"). A read, not an input."""
+        """The profile's name heading's text (:meth:`_name_heading`), else ``None``:
+        LinkedIn's own name for the profile, read before the click for the never-messaged
+        chip check (ADR 0007, "One click on Message"). A read, not an input."""
         page = self._page
         if page is None or page.is_closed() or self._message_clicked:
             return None
         tab = cast(_MessagingPage, page)
-        heading = tab.locator(PROFILE_HEADING)
         try:
-            if await heading.count() != 1:
+            heading = await self._name_heading(tab, page.url)
+            if heading is None:
                 return None
-            return await _accessible_name(tab, heading, "heading", level=1)
+            log.info("prefill: the profile's name is read from %s", heading.source.value)
+            return await _accessible_name(tab, heading.locator, "heading", level=heading.level)
         except Exception as exc:
             log.info("the profile's heading could not be read (%s)", type(exc).__name__)
             return None
+
+    async def _name_heading(self, tab: _MessagingPage, url: str) -> _NameHeading | None:
+        """The profile's name heading, or ``None`` when there isn't exactly one (#552).
+        Reads only; it raises what the page's reads raise.
+
+        - The page's one ``h1`` (:data:`PROFILE_HEADING`), as before, when it has one.
+        - With no ``h1`` at all: the one link named exactly "Contact info", hidden ones
+          counted, whose ``href`` is this page's path plus ``overlay/contact-info/``
+          (the link the enrichment's click verifies); then its nearest ancestor holding
+          an ``h2`` (:data:`TOP_CARD_FROM_CONTACT_INFO`), which must hold exactly one
+          ``h2``. Never a class, and never the page's first ``h2``: section titles are
+          ``h2`` elements too.
+
+        More than one ``h1``, or any count but one along the way, is ``None``. The
+        heading only feeds the exact chip check and the top card's choice, so a wrong
+        one refuses or picks another verified control; it never lets a check pass."""
+        h1s = tab.locator(PROFILE_HEADING)
+        h1_count = await h1s.count()
+        if h1_count == 1:
+            return _NameHeading(h1s, 1, HeadingSource.H1)
+        if h1_count:
+            log.debug("prefill: no name heading (%s)", NoNameHeading.H1S.value)
+            return None
+        links = tab.get_by_role(
+            CONTACT_INFO_ROLE, name=CONTACT_INFO_NAME, exact=True, include_hidden=True
+        )
+        if await links.count() != 1:
+            log.debug("prefill: no name heading (%s)", NoNameHeading.CONTACT_INFO.value)
+            return None
+        href = await links.get_attribute("href", timeout=MESSAGING_READ_TIMEOUT_MS)
+        expected = f"{_trim_path(urlsplit(url).path)}/{CONTACT_INFO_HREF_SUFFIX}"
+        if href is None or not _on_path(href, expected, base=url):
+            log.debug("prefill: no name heading (%s)", NoNameHeading.CONTACT_INFO_HREF.value)
+            return None
+        cards = links.locator(TOP_CARD_FROM_CONTACT_INFO)
+        if await cards.count() != 1:
+            log.debug("prefill: no name heading (%s)", NoNameHeading.NO_H2.value)
+            return None
+        h2s = cards.locator(PROFILE_NAME_H2)
+        if await h2s.count() != 1:
+            log.debug("prefill: no name heading (%s)", NoNameHeading.H2S.value)
+            return None
+        return _NameHeading(h2s, 2, HeadingSource.TOP_CARD_H2)
 
     async def click_message(
         self,
@@ -3518,10 +3596,8 @@ class BrowserRun:
         boxes: list[Mapping[str, float] | None] = []
         top_card: int | None = None
         if refusal is None:
-            headings = tab.locator(PROFILE_HEADING)
-            after_heading = (
-                headings.locator(MESSAGE_TOP_CARD) if await headings.count() == 1 else None
-            )
+            heading = await self._name_heading(tab, tab.url)
+            after_heading = heading.locator.locator(MESSAGE_TOP_CARD) if heading else None
             for href in dict.fromkeys(h for h in hrefs if h is not None):
                 bound = controls.and_(tab.locator(f"[href={_css_string(href)}]"))
                 if top_card is None and after_heading is not None:
@@ -3720,9 +3796,10 @@ class BrowserRun:
         (:meth:`_read_click_geometry`) and the choice (:func:`choose_message_target`).
         So the verdict is the click's, on this page. No pause: the caller waits it out.
 
-        Then what the click doesn't read: the ``h1`` count; every link and every button
-        named exactly "Message", hidden ones counted (its tag, whether it's visible,
-        after the ``h1``, matched by :data:`MESSAGE_TOP_CARD`, the shape of its
+        Then what the click doesn't read: the ``h1`` count and where the name heading
+        was found (:meth:`_name_heading`); every link and every button named exactly
+        "Message", hidden ones counted (its tag, whether it's visible, after the name
+        heading, matched by :data:`MESSAGE_TOP_CARD`, the shape of its
         ``href`` in fixed words, and its box); and one more CDP session
         (:meth:`_read_check_detail`) for the viewport, the scroll, the zoom, and what
         the hit test finds at each on-screen control's center and at each candidate's
@@ -3755,13 +3832,17 @@ class BrowserRun:
             choice = choose_message_target(found.boxes, found.top_card, geometry)
         verdict, category = _verdict(on_profile, bubble, found, geometry, choice)
 
-        headings = tab.locator(PROFILE_HEADING)
         heading_count: int | None = None
+        name_heading: _NameHeading | None = None
+        name_source = "none"
         try:
-            heading_count = await headings.count()
+            heading_count = await tab.locator(PROFILE_HEADING).count()
+            name_heading = await self._name_heading(tab, page.url)
+            if name_heading is not None:
+                name_source = name_heading.source.value
         except Exception as exc:
             errors.append(f"headings: {type(exc).__name__}")
-        one_heading = heading_count == 1
+            name_source = "unreadable"
         controls: list[tuple[str, str, bool, bool | None, bool | None, str, Any]] = []
         named_like: dict[str, int | None] = {}
         for role in (MESSAGE_CONTROL_ROLE, "button"):
@@ -3782,7 +3863,8 @@ class BrowserRun:
                     visible = await element.filter(visible=True).count() == 1
                     after: bool | None = None
                     top: bool | None = None
-                    if one_heading:
+                    if name_heading is not None:
+                        headings = name_heading.locator
                         after = (
                             await element.and_(headings.locator(CHECK_AFTER_HEADING)).count() == 1
                         )
@@ -3851,6 +3933,7 @@ class BrowserRun:
             zoom=detail.zoom if detail is not None else None,
             device_pixel_ratio=detail.device_pixel_ratio if detail is not None else None,
             heading_count=heading_count,
+            name_heading=name_source,
             top_card_matched=found is not None and found.top_card is not None,
             bubble=bubble,
             decision_4=None if found is None else found.refusal,

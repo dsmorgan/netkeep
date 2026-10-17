@@ -15,7 +15,8 @@ that, as it does the other observing modules). In order:
    sticky header that appears on scroll, say) and no other control clear
    (:meth:`~netkeeper.linkedin.browser.BrowserRun.message_cover`, a read), scroll back
    up to the top once, in small steps, and look (#470). The click reads the page again.
-4. Read the profile's one ``h1``, if there's exactly one, for the chip check, and open
+4. Read the profile's name heading, if there's one (its one ``h1``, or the top card's
+   one ``h2``, #552), for the chip check, and open
    the two observations the click is read through: the compose option, and the
    page's own thread request (for the conversation's URN). After this, nothing
    observes, scrolls, or navigates again.

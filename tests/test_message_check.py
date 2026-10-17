@@ -351,8 +351,46 @@ async def test_hypothesis_2_the_top_card_selector_no_longer_matches(headings: in
     assert snap.controls[0].after_heading is None and snap.controls[0].top_card_selector is None
     text = report(result)
     assert (
-        f"h1 count: {headings}; top-card selector (the h1, then following::a) matched: no" in text
+        f"h1 count: {headings}; name heading: none;"
+        " top-card selector (the name heading, then following::a) matched: no" in text
     )
+
+
+@pytest.mark.usefixtures("no_scroll")
+async def test_a_profile_with_no_h1_finds_its_top_card_by_the_h2_above_contact_info() -> None:
+    """#552: no ``h1``; the name is the top card's one ``h2``, found from the verified
+    Contact info link, never by class and never the section titles. The top card's
+    control is matched, ahead of a copy in the navigation, and the report says where
+    the heading came from."""
+    contact = f"/in/{ZEPHYRINE.slug}/overlay/contact-info/"
+    html = (
+        f'<nav data-box="0,0,1280,{NAV_HEIGHT}">{link("1100,10,90,32")}</nav>'
+        f'<main><section><div><div><h2 class="invented-hash-a">{ZEPHYRINE.name}</h2></div>'
+        f'<a href="{contact}">Contact info</a></div>'
+        f"<div>{link('40,400,110,32')}</div></section>"
+        "<section><h2>About</h2></section><section><h2>Activity</h2></section></main>"
+    )
+    site = static_site(html)
+    result, run = await check(site)
+    assert_untouched(site, run)
+    snap = last(result)
+    assert snap.heading_count == 0 and snap.name_heading == "the top card's one h2"
+    assert snap.top_card_matched and snap.top_card == 1
+    assert snap.verdict == "clicks candidate 1 (top_card)"
+    [nav_link, card_link] = snap.controls
+    assert nav_link.after_heading is False and nav_link.top_card_selector is False
+    assert card_link.after_heading is True and card_link.top_card_selector is True
+    text = report(result)
+    assert (
+        "h1 count: 0; name heading: the top card's one h2;"
+        " top-card selector (the name heading, then following::a) matched: yes" in text
+    )
+    assert_sanitized(text)
+
+    # Two h2s above the Contact info link: no name heading, and no top card.
+    two = html.replace("</h2></div>", "</h2><h2>Invented title</h2></div>", 1)
+    snap = last((await check(static_site(two)))[0])
+    assert snap.name_heading == "none" and not snap.top_card_matched
 
 
 @pytest.mark.usefixtures("no_scroll")

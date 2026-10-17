@@ -68,10 +68,11 @@ def _link(key: str, where: str) -> str:
     return f'<div componentkey="{key}">{html}</div>'
 
 
-def scrolled_profile(scroll_y: float, *, sticky_button: bool = True) -> str:
+def scrolled_profile(scroll_y: float, *, sticky_button: bool = True, h2_name: bool = False) -> str:
     """The invented profile at ``scroll_y``. The sticky header's own Message control is
     a button here, not a link (its real shape is unknown, #429): decision 4 reads links
-    only, so it's never a candidate, and nothing may click it."""
+    only, so it's never a candidate, and nothing may click it. ``h2_name`` draws the
+    name as the CP8d captures do (#552): no ``h1``, an ``h2`` beside Contact info."""
     sticky = ""
     if scroll_y >= STICKY_AFTER_PX:
         button = (
@@ -83,8 +84,14 @@ def scrolled_profile(scroll_y: float, *, sticky_button: bool = True) -> str:
             f'<header componentkey="sticky" data-box="0,{NAV_HEIGHT},1280,{STICKY_HEIGHT}">'
             f"<h2>Invented sticky header</h2>{button}</header>"
         )
+    heading = (
+        f'<div><h2 class="invented-hash">{ZEPHYRINE.name}</h2>'
+        f'<a href="/in/{ZEPHYRINE.slug}/overlay/contact-info/">Contact info</a></div>'
+        if h2_name
+        else f"<h1>{ZEPHYRINE.name}</h1>"
+    )
     return (
-        f"<main><h1>{ZEPHYRINE.name}</h1>"
+        f"<main>{heading}"
         f"{_link('top-card', f'40,{TOP_CARD_Y - scroll_y},110,32')}"
         f"<section><h2>Highlights</h2>{_link('highlights', f'40,{HIGHLIGHTS_Y - scroll_y},110,32')}"
         f"</section></main>"
@@ -114,16 +121,19 @@ class ScrollingMouse(FakeMouse):
 class ScrollingSite(MessagingSite):
     """A :class:`MessagingSite` whose profile follows its scroll position (#470)."""
 
-    def __init__(self, *, stuck: bool = False, sticky_button: bool = True) -> None:
-        super().__init__(ZEPHYRINE, profile_html=scrolled_profile(0))
+    def __init__(
+        self, *, stuck: bool = False, sticky_button: bool = True, h2_name: bool = False
+    ) -> None:
+        super().__init__(ZEPHYRINE, profile_html=scrolled_profile(0, h2_name=h2_name))
         self.viewport = VIEWPORT
         self.scroll_y = 0.0
         self.stuck = stuck
         self.sticky_button = sticky_button
+        self.h2_name = h2_name
         self.scroll_at_click: list[float] = []
 
     def render(self, scroll_y: float) -> str:
-        return scrolled_profile(scroll_y, sticky_button=self.sticky_button)
+        return scrolled_profile(scroll_y, sticky_button=self.sticky_button, h2_name=self.h2_name)
 
     def navigated(self, tab: MessagingTab, url: str) -> None:
         super().navigated(tab, url)
@@ -184,10 +194,13 @@ def test_the_invented_profile_covers_the_top_card_after_the_brief_scroll() -> No
 
 
 @pytest.mark.usefixtures("covering_scroll")
+@pytest.mark.parametrize("h2_name", [False, True], ids=["h1", "top card h2"])
 async def test_a_top_card_left_under_the_sticky_header_is_scrolled_back_to_and_clicked(
-    caplog: pytest.LogCaptureFixture,
+    caplog: pytest.LogCaptureFixture, h2_name: bool
 ) -> None:
-    site = ScrollingSite()
+    """#552: with no ``h1``, the top card's ``h2`` anchors the top card, so the scroll
+    back runs on the CP8d page shape too."""
+    site = ScrollingSite(h2_name=h2_name)
     with caplog.at_level(logging.INFO):
         ran = await prefill(site)
     assert ran.kind is MessageOutcomeKind.PREFILLED, ran.result

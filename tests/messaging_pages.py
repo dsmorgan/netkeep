@@ -1216,6 +1216,49 @@ def profile_message_controls_html(
     return f"<main><h1>{escape(recipient.name)}</h1>{controls}</main>{extra}"
 
 
+def profile_top_card_html(
+    recipient: Member,
+    *,
+    name: str | None = None,
+    in_heading: str = "",
+    pronouns: str | None = None,
+    top_card_h2s: int = 1,
+    contact_info: str | None = "",
+    copies: int = 1,
+) -> str:
+    """A profile page with no ``h1``, as the CP8d captures showed it (#552, invented): the
+    name is the top card's ``h2`` (with invented hashed classes), then the headline, the
+    Contact info link and the Message controls; below it, section ``h2`` titles.
+
+    ``name`` replaces the ``h2``'s text (a credential suffix, say), ``in_heading`` is HTML
+    added inside the ``h2`` after the name, and ``pronouns`` a sibling ``span`` after it.
+    ``top_card_h2s`` is how many ``h2`` elements the top card holds. ``contact_info`` is
+    the Contact info link's ``href`` (``""``: the profile's own; ``None``: no link)."""
+    text = escape(recipient.name if name is None else name)
+    pronoun = f"<span>({escape(pronouns)})</span>" if pronouns is not None else ""
+    extra = "".join(f"<h2>Invented top card title {i}</h2>" for i in range(1, top_card_h2s))
+    href = f"/in/{recipient.slug}/overlay/contact-info/" if contact_info == "" else contact_info
+    link = f'<a href="{escape(href)}"><span>Contact info</span></a>' if href is not None else ""
+    controls = "".join(
+        f'<div componentkey="invented-message-control-{i}">'
+        f"{message_control_html(recipient, absolute=False)}</div>"
+        for i in range(copies)
+    )
+    heading = (
+        f'<h2 class="invented-hash-a invented-hash-b">{text}{in_heading}</h2>'
+        if top_card_h2s
+        else ""
+    )
+    return (
+        "<main><section><div>"
+        f"<div>{heading}{pronoun}</div>"
+        f"<div>{escape(recipient.headline)}</div>{extra}{link}"
+        f"</div><div>{controls}</div></section>"
+        "<section><h2>About</h2><p>Invented about text</p></section>"
+        "<section><h2>Activity</h2></section></main>"
+    )
+
+
 def _composer(draft: str) -> str:
     para = f"<p>{escape(draft)}</p>" if draft else "<p><br></p>"
     return (
@@ -1425,6 +1468,12 @@ STRUCTURAL: Final = frozenset(
         "· 1st",
         "Enter message recipients",
         "People also viewed",
+        "Contact info",
+        "About",
+        "Activity",
+        "Invented about text",
+        "Invented top card title 1",
+        "invented-hash-a invented-hash-b",
         "true",
         "false",
         "auto",

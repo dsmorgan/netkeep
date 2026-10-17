@@ -588,6 +588,20 @@ class FakeLocator:
                 return _unique(out)
 
             return self._then(up, f".locator({selector})")
+        if selector == "xpath=ancestor::*[.//h2][1]":
+            # The nearest ancestor holding any h2 (#552's top card, from Contact info). The
+            # document stands in for <html>, which an XPath ancestor step reaches too.
+
+            def nearest_h2(found: list[Element]) -> list[Element]:
+                out: list[Element] = []
+                for element in found:
+                    for ancestor in element.ancestors():
+                        if any(e.tag == "h2" for e in ancestor.elements()):
+                            out.append(ancestor)
+                            break
+                return _unique(out)
+
+            return self._then(nearest_h2, f".locator({selector})")
         if selector in ("xpath=following::a", "xpath=following::*"):
             # Every <a> (or every element, for #473's check) after the element in document
             # order, outside it (#444's top card).

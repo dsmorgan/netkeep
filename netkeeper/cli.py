@@ -1933,7 +1933,9 @@ def _message_check_lines(run_id: int, result: MessageCheckResult) -> list[str]:
         lines.append(
             f"  on the profile's path: {_yes(snap.on_profile)};"
             f" h1 count: {'-' if snap.heading_count is None else snap.heading_count};"
-            f" top-card selector (the h1, then following::a) matched: {_yes(snap.top_card_matched)}"
+            f" name heading: {snap.name_heading};"
+            " top-card selector (the name heading, then following::a) matched:"
+            f" {_yes(snap.top_card_matched)}"
         )
         lines.append(f"  message bubble on the page: {snap.bubble}")
         lines.append(

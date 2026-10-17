@@ -101,7 +101,7 @@ This adjusts the maintainer's "brought to the front" wording of 2026-10-03, whic
 
 ### One click on Message
 
-Before the click, the run reads the profile page's `h1`, if there's exactly one, for the chip check below. It also opens the observations (`BrowserRun.observe`, ADR 0006) for the two requests the click causes: the compose option, and the page's own `messengerMessages` thread request. So neither answer can arrive before anyone listens.
+Before the click, the run reads the profile's name heading, if there's one, for the chip check below: the page's one `h1`, or, with no `h1` at all, the top card's one `h2` (#552, see [the name heading](#the-profiles-name-heading)). It also opens the observations (`BrowserRun.observe`, ADR 0006) for the two requests the click causes: the compose option, and the page's own `messengerMessages` thread request. So neither answer can arrive before anyone listens.
 
 `BrowserRun.click_message` clicks the **Message** control once per prefill, on the contact's profile, modeled on `BrowserRun.click_contact_info`:
 
@@ -129,7 +129,7 @@ This binds the click to the contact by URN, not by where the control sits or how
 
 "The first visible one in document order" gives Playwright such a control whenever one comes first. So the click chooses among the visible links that passed the rule above, in this order:
 
-1. **The top card's control**, when it's wholly inside the viewport and nothing is over its center. The top card's control is the first Message link after the profile's one `h1`, in document order (`xpath=following::a` from that `h1`, narrowed to the href-bound locator). With zero `h1` elements, or two or more, there is no top card.
+1. **The top card's control**, when it's wholly inside the viewport and nothing is over its center. The top card's control is the first Message link after the profile's name heading, in document order (`xpath=following::a` from that heading, narrowed to the href-bound locator). The name heading is the page's one `h1`, or with no `h1` the top card's one `h2` (#552). Without a name heading there is no top card.
 2. **Any other control** that is wholly inside the viewport with nothing over its center, in document order.
 3. **The top card's control, when it isn't wholly inside the viewport**: Playwright scrolls it into view as part of the click. A top card that is on screen but covered is never chosen this way.
 4. Otherwise the click refuses, with no click: "no Message control is on screen with nothing over it". The run ends `not_typed` before any input, and no bubble opens.
@@ -273,6 +273,19 @@ The same check runs before every key and before auto-send's Send (ADR 0008), so 
 
 The #479 report also showed that LinkedIn's profile page has **no `h1`** now, so the chip's name check is skipped (the INFO line above says so) and the top card can't be found. No replacement name source is reliable without a capture of the new page: a heading found by role could be some other heading, and netkeeper's stored name can differ from LinkedIn's (a former name, pronouns, an emoji), and either would refuse the right person. Two refusals park the enrollment. So the check stays skipped, and the card's link identity binds the recipient, as it did with zero `h1` elements before. #429 tracks the capture that would settle it.
 
+#### The profile's name heading
+
+*Added 2026-10-16 for #552.* The CP8d captures settled it: the profile's name is an `h2` with hashed classes, and the chip's text and `aria-label` hold the whole name, a credential suffix such as `, MBA` included (the "..." is CSS only). Pronouns sit in a separate span, never in the chip. So `BrowserRun._name_heading` finds the name heading this way, reading only:
+
+1. The page's one `h1`, when it has exactly one, as before.
+2. With no `h1` at all: the one link named exactly `Contact info`, hidden ones counted, whose `href` is the page's own path plus `overlay/contact-info/` (the link enrichment verifies before its click). Then that link's nearest ancestor holding an `h2` (`xpath=ancestor::*[.//h2][1]`), which must hold exactly one `h2`. That `h2` is the name heading, read as a level-2 heading with its `aria-hidden` parts left out.
+
+Never a class, and never the page's first `h2`: section titles (About, Activity) are `h2` elements too. Two `h1` elements, no single Contact info link, a Contact info link that opens something else, or a top card with zero or two `h2` elements gives no name heading: the chip check is skipped as before (`NAME_CHECK_SKIPPED`) and the card decides.
+
+The chip comparison stays **exact**: no ellipsis or prefix matching, and no stripping of credentials or pronouns on either side. The heading only feeds that equality and the top card's choice, so a wrong heading refuses, or picks another verified control; it never lets a check pass. The same heading anchors the top card's Message control (`MESSAGE_TOP_CARD`), so the top-card choice and the #470 scroll back work again, and `message-check` reports where the heading came from (`name heading: the profile's one h1`, `the top card's one h2`, or `none`). The run logs the source at INFO, in fixed words.
+
+Open gap: whether a verified badge or pronouns have readable text *inside* the name's `h2`. If they do, the exact check refuses (safe); the maintainer can capture that `h2`'s outerHTML later.
+
 ### Checked before every key
 
 The checks above don't run only once. Playwright sends keys to whatever has focus and doesn't check where that is. If focus moved mid-type, to the Send button for example, a Shift+Enter could send the message, and the rest of the body could land in the wrong place. In the never-messaged layout, focus could also move to the recipient field, and the rest of the body would become a people search.
@@ -383,7 +396,7 @@ Runtime pins, against a fake page:
 - Two `Messaging` dialogs, including a hidden or minimized one, give `not_typed` in either layout.
 - A minimized sponsored bubble (no composer, no header link, #551) beside the contact's bubble doesn't count; the same bubble not marked minimized, or holding a composer or a header link, still does.
 - A never-messaged bubble with zero chips, two chips, two `New message` headings, two `/in/` links in the scope, or a card for another slug gives `not_typed`, with or without a `role="dialog"` root. A page whose profile links the contact's slug while the bubble's card links another slug gives `not_typed`. (Amended for #481: two links to the contact, by slug or by id, and a longer path under the contact's profile, proceed. A link to the contact beside a link to anyone else, a card linking only someone else, a member id in another case, the contact's slug on another host, an unsafe or path-relative `href`, another person route, a query naming another member, an `href` on an element of any role, and no profile link each give `not_typed` with their own reason, before typing, mid-type, and before Send.)
-- A chip whose name doesn't match the profile's `h1` gives `not_typed` with the reason `recipient_name_mismatch`; the comparison collapses whitespace and normalizes to NFC. With zero or two `h1` elements, or an `h1` name the matcher doesn't confirm, the check is skipped and the card still decides. A chip name the matcher doesn't confirm gives `recipient_name_mismatch`; a chip name given through `aria-labelledby` gives `recipient_name_unreadable`; `aria-hidden` text in the `h1` or the chip isn't part of the name. A skipped `h1` check logs one fixed-words INFO line with no name and records `recipient_name_checked=False`; a checked one records `True`; an existing conversation records `None`. A name confirmed only through the candidate with its `aria-hidden` parts removed passes.
+- A chip whose name doesn't match the profile's name heading (its `h1`, or with no `h1` the top card's `h2`, #552) gives `not_typed` with the reason `recipient_name_mismatch`; the comparison collapses whitespace and normalizes to NFC. With two `h1` elements, no `h1` and no single top-card `h2` above the verified Contact info link, or a heading name the matcher doesn't confirm, the check is skipped and the card still decides. A credential suffix is compared whole on both sides; pronouns in a sibling span aren't part of the name, and readable text inside the `h2` refuses. A chip name the matcher doesn't confirm gives `recipient_name_mismatch`; a chip name given through `aria-labelledby` gives `recipient_name_unreadable`; `aria-hidden` text in the `h1` or the chip isn't part of the name. A skipped `h1` check logs one fixed-words INFO line with no name and records `recipient_name_checked=False`; a checked one records `True`; an existing conversation records `None`. A name confirmed only through the candidate with its `aria-hidden` parts removed passes.
 - A later compose option gives `another_compose`: `not_typed` in the authorizing pass, `partially_typed` with zero further keys mid-type.
 - A second composer on the page before the first key, including a hidden one, gives `not_typed`; one appearing mid-type stops typing.
 - A non-empty composer gives `not_typed`; `<p><br></p>` reads as empty; a no-break space reads as a space, in the read and in the expected text.
