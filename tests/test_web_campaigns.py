@@ -949,3 +949,26 @@ async def test_the_lifecycle_never_reaches_another_users_campaign(
         archived: CampaignStatus.ARCHIVED,
         active: CampaignStatus.ACTIVE,
     }
+
+
+async def test_a_campaign_says_whether_an_armed_mailbox_watches_its_email_replies(
+    running_app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    """#571: a LinkedIn-only campaign has no mailbox of its own; the user's armed one
+    watches its contacts' email replies, and with none armed the page says so."""
+    seed = _seed(running_app)
+    created = await _create(
+        client, seed, mailbox_id=None, steps=[{"template_id": seed["linkedin"]}]
+    )
+    assert created["email_replies_watched"] is False
+
+    factory: sessionmaker[Session] = running_app.state.session_factory
+    with session_scope(factory, write=True) as session:
+        mailbox = get_scoped(session, _local(session), Mailbox, seed["mailbox_id"])
+        assert mailbox is not None
+        mailbox.armed_at = datetime(2030, 1, 1, tzinfo=UTC)
+        mailbox.armed_by = "test"
+
+    response = await client.get(f"/api/v1/campaigns/{created['id']}")
+    assert response.status_code == 200, response.text
+    assert response.json()["email_replies_watched"] is True

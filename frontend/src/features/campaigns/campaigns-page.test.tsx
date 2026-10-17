@@ -632,6 +632,64 @@ describe('a campaign with a LinkedIn step (#383)', () => {
   })
 
   it.each([
+    [false, 'active', true],
+    [true, 'active', false],
+    [false, 'completed', false],
+  ] as const)(
+    'says email replies are not watched when no mailbox watches it (watched %s, %s) (#571)',
+    async (watched, status, shown) => {
+      mockFetch(
+        campaignBackend(
+          {
+            campaign: campaign({
+              status,
+              steps: [LINKEDIN_STEP],
+              mailbox_id: null,
+              email_replies_watched: watched,
+            }),
+            review: review(),
+          },
+          {
+            'GET /api/v1/campaigns/linkedin/ready': () =>
+              jsonResponse({ items: [], total: 0, by_step: {} }),
+            'GET /api/v1/campaigns/linkedin/waiting': () => jsonResponse({ items: [], total: 0 }),
+            'GET /api/v1/campaigns/linkedin/options': () => jsonResponse({ auto_send: false }),
+            'GET /api/v1/linkedin/status': () =>
+              jsonResponse({
+                session_flag: null,
+                session_flagged_at: null,
+                heat_tripped: false,
+                armed: false,
+                schedule_paused: false,
+                running_run_id: null,
+                can_start_runs: true,
+              }),
+          },
+        ),
+      )
+      await renderApp('/campaigns/5')
+
+      expect(await screen.findByText('Recent-contact guard')).toBeVisible()
+      const notice = screen.queryByText('Email replies aren’t watched')
+      if (shown) expect(notice).toBeVisible()
+      else expect(notice).toBeNull()
+    },
+  )
+
+  it('never says so for an email-only campaign', async () => {
+    mockFetch(
+      campaignBackend({
+        campaign: campaign({ status: 'active', email_replies_watched: false }),
+        review: review(),
+      }),
+    )
+    await renderApp('/campaigns/5')
+
+    expect(await screen.findByText('Recent-contact guard')).toBeVisible()
+    expect(screen.queryByText('Email replies aren’t watched')).toBeNull()
+  })
+
+  it.each([
     [true, 'Sends on its own. netkeeper clicks Send itself.'],
     [
       false,

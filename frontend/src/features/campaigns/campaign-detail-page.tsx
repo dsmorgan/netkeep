@@ -179,6 +179,15 @@ function Overview({ campaign }: { campaign: Campaign }) {
           ]}
         />
         {linkedIn.late !== null && <p className="text-muted-foreground">{linkedIn.late}</p>}
+        {linkedIn.repliesUnwatched && (
+          <Callout tone="warning" title="Email replies aren’t watched">
+            <p>
+              No armed mailbox watches this campaign, so a contact who answers by email isn’t seen
+              as replied and still gets the next LinkedIn steps. Arm a mailbox in Settings → Gmail
+              to watch for their email replies.
+            </p>
+          </Callout>
+        )}
         {canToggle && (
           <div className="flex items-center gap-2">
             <Button
@@ -208,9 +217,14 @@ function Overview({ campaign }: { campaign: Campaign }) {
  * What the overview says about a campaign's LinkedIn steps. `late`: once the next send's
  * time has passed and its LinkedIn step hasn't gone, when it can go or why it waits; null
  * otherwise. `cap`: for a LinkedIn-only campaign with no cap of its own, the LinkedIn
- * budget that applies; null otherwise.
+ * budget that applies; null otherwise. `repliesUnwatched`: the campaign has a LinkedIn step
+ * and is not over, but no armed mailbox watches it for email replies (#571).
  */
-function useLinkedInFacts(campaign: Campaign): { late: string | null; cap: string | null } {
+function useLinkedInFacts(campaign: Campaign): {
+  late: string | null
+  cap: string | null
+  repliesUnwatched: boolean
+} {
   const linkedin = campaign.steps.filter((step) => step.channel === 'linkedin')
   const onLinkedIn = linkedin.length > 0
   const linkedInOnly = onLinkedIn && linkedin.length === campaign.steps.length
@@ -244,7 +258,9 @@ function useLinkedInFacts(campaign: Campaign): { late: string | null; cap: strin
       late = 'Not sent yet. It waits for you to prefill it in the LinkedIn queue.'
     }
   }
-  return { late, cap }
+  const over = campaign.status === 'completed' || campaign.status === 'archived'
+  const repliesUnwatched = onLinkedIn && !over && !campaign.email_replies_watched
+  return { late, cap, repliesUnwatched }
 }
 
 /**
