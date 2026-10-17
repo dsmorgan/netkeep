@@ -500,6 +500,9 @@ PROFILE_HEADING: Final = "h1"
 #: Contact info link's nearest ancestor that holds an ``h2``, never found by class.
 PROFILE_NAME_H2: Final = "h2"
 TOP_CARD_FROM_CONTACT_INFO: Final = "xpath=ancestor::*[.//h2][1]"
+#: Every ``h2`` before the Contact info link in document order, outside it (#566): the
+#: name's ``h2`` must be one, so a section title below the top card never is.
+H2_BEFORE_CONTACT_INFO: Final = "xpath=preceding::h2"
 #: The never-messaged bubble's scope: the composer's nearest ancestor that holds the
 #: ``New message`` heading (ADR 0007), found upward from the verified composer.
 #: What the never-messaged card check reads in its scope: every element with an href (#481).
@@ -1182,7 +1185,8 @@ class NoNameHeading(enum.StrEnum):
     H1S = "more than one h1"
     CONTACT_INFO = "no h1, and not one Contact info link"
     CONTACT_INFO_HREF = "no h1, and the Contact info link opens something else"
-    NO_H2 = "no h2 above the Contact info link"
+    NO_H2 = "no ancestor of the Contact info link holds an h2"
+    NO_H2_BEFORE = "no h2 before the Contact info link"
     H2S = "the top card holds more than one h2"
 
 
@@ -3392,8 +3396,10 @@ class BrowserRun:
           counted, whose ``href`` is this page's path plus ``overlay/contact-info/``
           (the link the enrichment's click verifies); then its nearest ancestor holding
           an ``h2`` (:data:`TOP_CARD_FROM_CONTACT_INFO`), which must hold exactly one
-          ``h2``. Never a class, and never the page's first ``h2``: section titles are
-          ``h2`` elements too.
+          ``h2``, and that ``h2`` must come before the link in document order
+          (:data:`H2_BEFORE_CONTACT_INFO`, #566). Never a class, and never the page's
+          first ``h2``: section titles are ``h2`` elements too, and a top card with no
+          ``h2`` lets the climb reach one below the link.
 
         More than one ``h1``, or any count but one along the way, is ``None``. The
         heading only feeds the exact chip check and the top card's choice, so a wrong
@@ -3421,7 +3427,12 @@ class BrowserRun:
             log.debug("prefill: no name heading (%s)", NoNameHeading.NO_H2.value)
             return None
         h2s = cards.locator(PROFILE_NAME_H2)
-        if await h2s.count() != 1:
+        h2_count = await h2s.count()
+        before = await h2s.and_(links.locator(H2_BEFORE_CONTACT_INFO)).count()
+        if before == 0:
+            log.debug("prefill: no name heading (%s)", NoNameHeading.NO_H2_BEFORE.value)
+            return None
+        if h2_count != 1:
             log.debug("prefill: no name heading (%s)", NoNameHeading.H2S.value)
             return None
         return _NameHeading(h2s, 2, HeadingSource.TOP_CARD_H2)

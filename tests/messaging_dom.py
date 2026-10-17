@@ -618,6 +618,22 @@ class FakeLocator:
                 return _unique(out)
 
             return self._then(following, f".locator({selector})")
+        if selector == "xpath=preceding::h2":
+            # Every h2 before the element in document order, its ancestors left out, as
+            # XPath's preceding axis does (#566's name heading, from Contact info).
+
+            def preceding(found: list[Element]) -> list[Element]:
+                order = list(self._page.document.elements())
+                out: list[Element] = []
+                for element in found:
+                    out.extend(
+                        e
+                        for e in order[: order.index(element)]
+                        if e.tag == "h2" and not e.contains(element)
+                    )
+                return _unique(out)
+
+            return self._then(preceding, f".locator({selector})")
         if selector == "xpath=ancestor::form[1]":
 
             def form(found: list[Element]) -> list[Element]:
