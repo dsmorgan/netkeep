@@ -73,6 +73,16 @@ class HealthOut(BaseModel):
     """New for each process: it changes when netkeeper serve restarts (#597)."""
 
 
+class SessionOut(BaseModel):
+    """Whether this browser is connected to the local API (#618).
+
+    ``claimable``: the first-browser claim is still open, so ``POST /session/claim``
+    connects this browser without a link."""
+
+    connected: bool
+    claimable: bool
+
+
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

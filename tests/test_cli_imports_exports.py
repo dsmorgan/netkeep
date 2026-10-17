@@ -29,6 +29,7 @@ import factories
 import httpx
 import pytest
 from fastapi import FastAPI
+from local_api import LocalKey
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
@@ -1452,7 +1453,7 @@ async def test_get_contact_stats_agrees_with_the_cli_and_triage_progress(
         async with app.router.lifespan_context(app):
             transport = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(
-                transport=transport, base_url="http://127.0.0.1"
+                transport=transport, base_url="http://127.0.0.1", auth=LocalKey(app)
             ) as client:
                 response = await client.get("/api/v1/contacts/stats")
     finally:

@@ -24,6 +24,7 @@ from typing import Any, cast
 import pytest
 from campaign_fakes import NOW
 from inbox_fakes import record_poll
+from local_api import LocalKey
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from test_linkedin_steps import LINKEDIN, Lane, make_lane
@@ -793,7 +794,9 @@ async def test_the_schedule_gives_the_outlook_with_auto_send_on(
                 scheduler.LastFire(at=NOW, reason="heat"),
             )
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://127.0.0.1", auth=LocalKey(app)
+        ) as client:
             seen = (await client.get("/api/v1/linkedin/schedule")).json()["auto_send"]
     assert seen["on"] is True
     # Nothing has scheduled the job in this database yet.

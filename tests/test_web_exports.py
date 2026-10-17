@@ -18,6 +18,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from isolation.harness import FixedUser
+from local_api import LocalKey
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import QueuePool
@@ -307,7 +308,9 @@ async def _export_as(app: FastAPI, user_id: int, query: str) -> httpx.Response:
     app.state.auth = FixedUser(user_id)
     try:
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://127.0.0.1", auth=LocalKey(app)
+        ) as client:
             return await client.get(f"/api/v1/exports?{query}")
     finally:
         app.state.auth = previous

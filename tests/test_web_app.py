@@ -11,6 +11,7 @@ import httpx
 import pytest
 from fastapi import APIRouter, FastAPI
 from fastapi.routing import APIRoute
+from local_api import LocalKey
 from sqlalchemy import Engine, delete, select
 from typer.testing import CliRunner
 
@@ -19,6 +20,7 @@ from netkeeper.cli import app as cli
 from netkeeper.config import LinkedInSettings, Settings
 from netkeeper.db import make_session_factory
 from netkeeper.models import User, UserKind
+from netkeeper.services.local_api_key import LocalApiKey
 from netkeeper.web.api import health
 from netkeeper.web.app import API_PREFIX, create_app, discover_routers, openapi_json
 from netkeeper.worker import dev_app, serve_app
@@ -140,6 +142,9 @@ API_PATHS = {
     "/api/v1/settings/restart",
     "/api/v1/support/levels",
     "/api/v1/support/bundle",
+    "/api/v1/session",
+    "/api/v1/session/claim",
+    "/api/v1/session/connect",
     "/api/v1/campaigns",
     "/api/v1/campaigns/{campaign_id}",
     "/api/v1/campaigns/{campaign_id}/activate",
@@ -394,6 +399,7 @@ def test_known_api_modules_are_discovered() -> None:
         "posture",
         "self_contact",
         "sending_hours",
+        "session",
         "settings_config",
         "step_mode",
         "support",
@@ -452,8 +458,12 @@ def test_operation_ids_are_snake_case(app: FastAPI) -> None:
 
 
 def _static_client(app: FastAPI) -> httpx.AsyncClient:
-    # No lifespan: the static routes do not touch the database.
-    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1")
+    # No lifespan: the static routes do not touch the database. The key the lifespan would
+    # load is set here, so an /api/ path reaches the router (#618).
+    app.state.local_api_key = LocalApiKey("static-client-key")
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1", auth=LocalKey(app)
+    )
 
 
 async def test_serves_the_built_frontend(

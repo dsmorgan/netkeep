@@ -41,10 +41,11 @@ _CREDENTIAL_NAMES: Final = (
     r"access_token|refresh_token|id_token|client_secret|client-secret|api[_-]?key"
     r"|csrf[_-]?token|xsrf[_-]?token|password|passwd|secret|token|authorization"
     r"|li_at|li_rm|li_mc|liap|jsessionid|bcookie|bscookie|lidc|__Secure-[\w-]+|cookie"
+    r"|netkeeper_session\w*"
 )
 _CREDENTIAL_TRIGGERS: Final = (
     "token", "secret", "passw", "key", "authorization", "cookie", "csrf", "xsrf",
-    "li_at", "li_rm", "li_mc", "liap", "jsessionid", "lidc", "__secure-",
+    "li_at", "li_rm", "li_mc", "liap", "jsessionid", "lidc", "__secure-", "netkeeper_session",
 )  # fmt: skip
 
 _VALUE: Final = r"(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s&;,'\"<>]+)"

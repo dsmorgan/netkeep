@@ -12,6 +12,7 @@ import factories
 import httpx
 import pytest
 from fastapi import FastAPI
+from local_api import LocalKey
 from sqlalchemy.orm import Session, sessionmaker
 
 from netkeeper.crm import import_runs as import_service
@@ -129,7 +130,9 @@ async def _post(
 ) -> dict[str, Any]:
     with acting_as(app, user_id):
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://127.0.0.1", auth=LocalKey(app)
+        ) as client:
             response = await client.post(
                 f"{API_PREFIX}{path}",
                 json=body,
@@ -237,7 +240,9 @@ async def test_deleting_a_draft_import_run_is_isolated(running_app: FastAPI) -> 
 async def _delete(app: FastAPI, user_id: int, run_id: int, *, want: int) -> None:
     with acting_as(app, user_id):
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://127.0.0.1", auth=LocalKey(app)
+        ) as client:
             response = await client.delete(
                 f"{API_PREFIX}/imports/{run_id}", headers={CLIENT_HEADER: CLIENT_HEADER_VALUE}
             )
@@ -252,7 +257,9 @@ async def _delete(app: FastAPI, user_id: int, run_id: int, *, want: int) -> None
 async def _get(app: FastAPI, user_id: int, path: str) -> dict[str, Any]:
     with acting_as(app, user_id):
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://127.0.0.1", auth=LocalKey(app)
+        ) as client:
             response = await client.get(f"{API_PREFIX}{path}")
     assert response.status_code == 200, (
         f"{path} as {user_id}: {response.status_code} {response.text}"

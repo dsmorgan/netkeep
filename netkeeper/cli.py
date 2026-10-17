@@ -97,6 +97,7 @@ from netkeeper.services import (
     history_scan,
     keychain,
     linkedin_steps,
+    local_api_key,
     login_item,
     message_check,
     message_id_check,
@@ -348,6 +349,38 @@ def _display_url(url: str) -> str:
 def version() -> None:
     """Print the installed version."""
     typer.echo(__version__)
+
+
+@app.command("open")
+def open_command(
+    ctx: typer.Context,
+    port: Annotated[
+        int | None,
+        typer.Option(
+            "--port",
+            help="The port serve listens on (default: web.port from the config).",
+            show_default=False,
+        ),
+    ] = None,
+) -> None:
+    """Print a one-time link that connects a browser to netkeeper's UI.
+
+    The link works once, within two minutes. Open it in the browser you use for
+    netkeeper; that browser then stays connected, across restarts, for months.
+    A browser that isn't connected can't use the UI or the API (ADR 0013).
+    """
+    state = ctx.ensure_object(CliState)
+    settings = _file_settings_or_exit(state)
+    base = local_api_key.base_url(settings.web.host, settings.web.port if port is None else port)
+    try:
+        link = local_api_key.connect_url(base)
+    except keychain.KeychainUnavailable as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo("Open this link in the browser you use for netkeeper (it works once, within")
+    typer.echo("two minutes):")
+    typer.echo()
+    typer.echo(f"  {link}")
 
 
 @app.command()

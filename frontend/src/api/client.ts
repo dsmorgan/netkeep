@@ -16,6 +16,21 @@ export const api = createClient<paths>({
   headers: { 'X-Netkeeper-Client': '1' },
 })
 
+/** Fired on `window` when a call comes back 401 (see below). */
+export const DISCONNECTED_EVENT = 'netkeeper:disconnected'
+
+/**
+ * A 401 means this browser isn't connected to the local API (#618): its
+ * session cookie is gone or was made from an older key. The session gate
+ * listens for this event and shows the connect page.
+ */
+api.use({
+  onResponse({ response }) {
+    if (response.status === 401) window.dispatchEvent(new Event(DISCONNECTED_EVENT))
+    return undefined
+  },
+})
+
 /** Response shapes derived from the paths, so schema renames in the export do not ripple. */
 export type Health = paths['/api/v1/health']['get']['responses'][200]['content']['application/json']
 export type Me = paths['/api/v1/me']['get']['responses'][200]['content']['application/json']

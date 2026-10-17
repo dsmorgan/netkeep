@@ -9,6 +9,7 @@ from string import Formatter
 
 import httpx
 from fastapi import FastAPI, Request
+from local_api import LocalKey
 from sqlalchemy.orm import Session, sessionmaker
 
 from netkeeper.db import session_scope
@@ -188,7 +189,9 @@ async def _request_as(
 ) -> httpx.Response:
     with acting_as(app, user_id):
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://127.0.0.1", auth=LocalKey(app)
+        ) as client:
             if endpoint.method.upper() == "GET":
                 return await client.get(url)
             return await client.request(

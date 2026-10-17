@@ -28,6 +28,7 @@ import httpx
 import pytest
 from browser_fakes import FakeConnector
 from fastapi import FastAPI
+from local_api import LocalKey
 from run_fakes import Clock, ConnectionsContext, Gate, fake_provider, worker_extractor
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
@@ -99,7 +100,9 @@ async def drive(app: FastAPI, clock: Clock, until: datetime) -> None:
 
 
 def client_for(app: FastAPI) -> httpx.AsyncClient:
-    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1")
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1", auth=LocalKey(app)
+    )
 
 
 def _rows(engine: Engine) -> list[SyncRun]:

@@ -57,7 +57,15 @@ class SSEClient:
             "raw_path": b"/api/v1/events",
             "query_string": b"",
             "root_path": "",
-            "headers": [(b"host", b"127.0.0.1"), (b"accept", b"text/event-stream")],
+            # The browser's credential, as an EventSource sends it (#618): the cookie.
+            "headers": [
+                (b"host", b"127.0.0.1"),
+                (b"accept", b"text/event-stream"),
+                (
+                    b"cookie",
+                    f"netkeeper_session_80={self._app.state.local_api_key.session_value()}".encode(),
+                ),
+            ],
             "client": ("127.0.0.1", 12345),
             "server": ("testserver", 80),
         }

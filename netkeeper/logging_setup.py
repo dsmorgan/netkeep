@@ -20,7 +20,8 @@ for a call that does not.
 
 The access log never shows the query string of a path in
 :data:`REDACTED_QUERY_PATHS`: the Gmail OAuth callback carries the authorization
-code there, and a code is a credential until it is spent (CLAUDE.md "Secrets").
+code there, and the local API's connect link its one-time code (#618); a code is a
+credential until it is spent (CLAUDE.md "Secrets").
 Every other query string (a search can name a person) is marked personal, and so is
 the rest of a path under :data:`PERSONAL_PATH_PREFIXES`.
 """
@@ -71,7 +72,7 @@ PERSONAL_PATH_PREFIXES: Final = ("/api/v1/templates/dictionary/", "/api/v1/impor
 preset name): marked personal in the file, like every query string."""
 
 #: Paths whose query string the access log replaces with ``?<redacted>``.
-REDACTED_QUERY_PATHS = frozenset({"/api/v1/mailboxes/oauth/callback"})
+REDACTED_QUERY_PATHS = frozenset({"/api/v1/mailboxes/oauth/callback", "/api/v1/session/connect"})
 ACCESS_LOGGER = "uvicorn.access"
 
 _FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"

@@ -15,6 +15,7 @@ import factories
 import httpx
 import pytest
 from fastapi import FastAPI
+from local_api import LocalKey
 from sqlalchemy import Engine, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -145,7 +146,9 @@ async def test_the_app_creates_it_at_start_seeded_from_the_config(bare_engine: E
     app = create_app(settings, engine=bare_engine)
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://127.0.0.1", auth=LocalKey(app)
+        ) as client:
             shown = (await client.get("/api/v1/settings/self-contact")).json()
     assert shown == {
         "first_name": "Ada",

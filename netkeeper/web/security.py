@@ -27,6 +27,15 @@ having to guess what they mean.
 With ``web.host = "0.0.0.0"`` (a container published on a LAN), a request to the
 machine's LAN address answers ``421`` as well. That is intended: there is no
 login, so the server answers only requests addressed to loopback (spec 15).
+
+**The local API key** (#618, ADR 0013). Past the ``Host`` check, every request under
+``/api/`` must carry a credential made from the per-install key
+(:mod:`netkeeper.services.local_api_key`): the browser's session cookie or a local
+client's ``Authorization: Bearer`` key. Without one it answers ``401``. That stops a
+program on this machine that only speaks HTTP to whatever answers on a port; the
+cross-site rules above still stop a page on another site. :data:`OPEN_API_PATHS` are
+the exceptions, each for a reason given there. Paths outside ``/api/`` (the built UI,
+``/docs``) hold no data and stay open.
 """
 
 from __future__ import annotations
@@ -34,8 +43,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from urllib.parse import urlsplit
 
+from starlette.requests import cookie_parser
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
+
+from netkeeper.services.local_api_key import LocalApiKey, cookie_name
 
 CLIENT_HEADER = "x-netkeeper-client"
 CLIENT_HEADER_VALUE = "1"
@@ -46,6 +58,24 @@ RULE_CLIENT_HEADER = "client-header"
 RULE_ORIGIN = "origin"
 RULE_SEC_FETCH_SITE = "sec-fetch-site"
 RULE_HOST = "host"
+RULE_LOCAL_KEY = "local-key"
+
+#: The ``/api/`` paths that answer without the local API key (#618). Pinned by a test.
+OPEN_API_PATHS = frozenset(
+    {
+        # Liveness for the top bar and the launchd agent: a status and a version.
+        "/api/v1/health",
+        # Whether this browser is connected, and whether the first-browser claim is open.
+        "/api/v1/session",
+        # The connect link: its single-use code is the credential.
+        "/api/v1/session/connect",
+        # The first-browser claim; it refuses once spent, and the CSRF rules still apply.
+        "/api/v1/session/claim",
+        # Google's redirect back is a cross-site navigation, so a SameSite=Strict cookie
+        # never arrives with it; its one-time ``state`` is the credential.
+        "/api/v1/mailboxes/oauth/callback",
+    }
+)
 
 #: The names this server answers to (see the module docstring). Pinned by a test.
 LOOPBACK_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -57,6 +87,10 @@ _MESSAGES = {
     RULE_HOST: (
         "the Host header does not name this machine (127.0.0.1, localhost, or ::1);"
         " netkeeper only answers requests addressed to its loopback address"
+    ),
+    RULE_LOCAL_KEY: (
+        "this browser or client is not connected to netkeeper: open the link"
+        " `netkeeper open` prints, or send Authorization: Bearer with the local API key"
     ),
 }
 #: Characters a ``Host`` header never contains (#177): user info, path, query, fragment.
@@ -111,6 +145,35 @@ def host_violation(headers: Mapping[str, str], allowed: frozenset[str]) -> bool:
     return hostname is None or hostname.lower() not in allowed
 
 
+def request_port(headers: Mapping[str, str], scheme: str) -> int:
+    """The port the client addressed, from ``Host``, or the scheme's default."""
+    try:
+        port = urlsplit(f"//{headers.get('host', '')}").port
+    except ValueError:
+        port = None
+    return port if port is not None else _DEFAULT_PORTS.get(scheme.lower(), 80)
+
+
+def has_local_credential(headers: Mapping[str, str], scheme: str, key: LocalApiKey | None) -> bool:
+    """Whether the request carries the session cookie or the Bearer key for ``key``.
+
+    ``headers`` has lower-cased names. No key (a server that has not started) is no.
+    """
+    if key is None:
+        return False
+    if key.accepts_bearer(headers.get("authorization")):
+        return True
+    # Starlette's lenient parser: other programs on localhost share this host's cookie
+    # jar, and one malformed cookie of theirs must not hide ours.
+    cookies = cookie_parser(headers.get("cookie", ""))
+    return key.accepts_cookie(cookies.get(cookie_name(request_port(headers, scheme))))
+
+
+def needs_local_credential(path: str) -> bool:
+    """Whether a request for ``path`` must carry the local API key's credential."""
+    return path.startswith(GUARDED_PREFIX) and path not in OPEN_API_PATHS
+
+
 def rejection_message(rule: str) -> str:
     """The human-readable reason for a rule name from :func:`csrf_violation`."""
     return _MESSAGES[rule]
@@ -134,8 +197,16 @@ def _normalize(url: str) -> tuple[str, str, int | None] | None:
     return scheme, hostname.lower(), port if port is not None else _DEFAULT_PORTS.get(scheme)
 
 
+def _local_key(scope: Scope) -> LocalApiKey | None:
+    """The key the app's lifespan loaded, or None before it has (every guarded path fails)."""
+    app = scope.get("app")
+    key = getattr(getattr(app, "state", None), "local_api_key", None)
+    return key if isinstance(key, LocalApiKey) else None
+
+
 class CSRFMiddleware:
-    """Pure ASGI middleware applying :func:`csrf_violation` to every HTTP request.
+    """Pure ASGI middleware applying the Host check, the local API key and
+    :func:`csrf_violation` to every HTTP request, in that order.
 
     Pure ASGI rather than ``BaseHTTPMiddleware`` so streaming responses (the SSE
     stream) pass through untouched.
@@ -159,9 +230,18 @@ class CSRFMiddleware:
             )
             await response(scope, receive, send)
             return
-        rule = csrf_violation(
-            scope["method"], scope["path"], headers, scheme=scope.get("scheme", "http")
-        )
+        scheme = scope.get("scheme", "http")
+        if needs_local_credential(scope["path"]) and not has_local_credential(
+            headers, scheme, _local_key(scope)
+        ):
+            response = JSONResponse(
+                {"detail": rejection_message(RULE_LOCAL_KEY), "rule": RULE_LOCAL_KEY},
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+            await response(scope, receive, send)
+            return
+        rule = csrf_violation(scope["method"], scope["path"], headers, scheme=scheme)
         if rule is None:
             await self.app(scope, receive, send)
             return

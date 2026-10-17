@@ -15,6 +15,7 @@ import factories
 import httpx
 import pytest
 from fastapi import FastAPI
+from local_api import LocalKey
 from run_fakes import Clock, fake_provider
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
@@ -308,7 +309,9 @@ async def test_loopback_names_on_any_port_are_served(running_app: FastAPI, host:
     """The Vite dev proxy forwards the browser's Host unchanged (changeOrigin: false),
     so a dev request names the dev server's port; the name is what matters."""
     transport = httpx.ASGITransport(app=running_app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://127.0.0.1", auth=LocalKey(running_app)
+    ) as client:
         response = await client.get("/api/v1/me", headers={"host": host})
     assert response.status_code == 200
 

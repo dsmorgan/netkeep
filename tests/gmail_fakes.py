@@ -253,6 +253,12 @@ class MemoryKeyring(KeyringBackend):
         if self.entries.pop((service, username), None) is None:
             raise PasswordDeleteError(username)
 
+    def user_entries(self) -> dict[tuple[str, str], str]:
+        """The entries but the install-wide ones (``install/...``: the local API key, #618)."""
+        return {
+            key: value for key, value in self.entries.items() if not key[1].startswith("install/")
+        }
+
     def _check(self) -> None:
         if self.broken:
             raise KeyringError("the fake Keychain is locked")
