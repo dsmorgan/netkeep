@@ -680,18 +680,36 @@ class PageConnections:
             # -- an answer that ends it, or a full last answer that asks for nothing --
             # and the run must then account for every place the first screen's total
             # names (#202 review). This rests on the parser's strictness: a copy cut
-            # short does not parse, so it cannot pass for a short last answer.
+            # short does not parse, so it cannot pass for a short last answer. Hidden
+            # places count (#554): each was proven by an answer read whole that asked
+            # for a start further on than its cards, so the count stays exact, with no
+            # slack (#208 review, L1). The copy itself asks for nothing and adds none.
             places = (
                 len({card.urn for card in self._cards} | {card.urn for card in chunk.cards})
                 + self._lost_places
+                + self._hidden
             )
-            agrees = (chunk.ends_list or chunk.next_start is None) and 0 < self._total <= places
-        else:
-            agrees = (
-                chunk.next_start == next_start
-                and 0 < len(chunk.cards) <= next_start - pending.start
-            )
-        if not agrees:
+            if not (chunk.ends_list or chunk.next_start is None):
+                log.info(
+                    "connections: the streamed copy of the last answer for start %d asks"
+                    " for a next page, so it does not prove the end; not used",
+                    pending.start,
+                )
+                return False
+            if not 0 < self._total <= places:
+                log.info(
+                    "connections: the streamed copy of the last answer for start %d accounts"
+                    " for %d of the %d places the total names (%d hidden, %d lost); not used",
+                    pending.start,
+                    places,
+                    self._total,
+                    self._hidden,
+                    self._lost_places,
+                )
+                return False
+        elif not (
+            chunk.next_start == next_start and 0 < len(chunk.cards) <= next_start - pending.start
+        ):
             log.info(
                 "connections: the streamed copy of the answer for start %d does not agree"
                 " with what the page asked for next; not used",
