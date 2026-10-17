@@ -18,9 +18,14 @@ export const ACTIVITY_TEXT: Record<ActivityState, string> = {
 export const FAVICON = '/favicon.svg'
 export const FAVICON_RUNNING = '/favicon-running.svg'
 
-/** The tab icon: the running one only while a LinkedIn run is in progress. */
-export function faviconFor(attention: Attention | undefined): string {
-  return attention?.activity.state === 'running' ? FAVICON_RUNNING : FAVICON
+export const CAMPAIGN_SENDING_TEXT = 'Campaigns: sending'
+
+/**
+ * The tab icon: the running one while a LinkedIn run is in progress or a campaign send
+ * batch just ran (#547).
+ */
+export function faviconFor(attention: Attention | undefined, campaignSending = false): string {
+  return attention?.activity.state === 'running' || campaignSending ? FAVICON_RUNNING : FAVICON
 }
 
 /** What the live region says when the state changes: the short text and its sentence. */

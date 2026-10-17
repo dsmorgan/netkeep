@@ -186,6 +186,7 @@ from netkeeper.services.campaign_guards import (
     check_enrollment,
     check_step,
 )
+from netkeeper.services.events import Event, EventBus
 from netkeeper.services.mailboxes import MAILBOX_HARD_MAX_PER_DAY, mailbox_health
 from netkeeper.services.settings_kv import get_setting, set_setting
 
@@ -2824,6 +2825,9 @@ def run_tick(
 # --- the minute loop ----------------------------------------------------------------
 
 
+TICK_EVENT: Final = "campaign.tick"
+"""Published after a tick that sent at least one message, for the activity indicator."""
+
 STOP_WAIT_S: Final = 45.0
 """How long :meth:`CampaignEngine.stop` waits for a tick in flight: a send and the
 search after an unknown outcome, each under the client's 30-second timeout."""
@@ -2855,6 +2859,7 @@ class CampaignEngine:
         clock: Callable[[], datetime] = utcnow,
         rng: random.Random | None = None,
         stop_wait_s: float = STOP_WAIT_S,
+        bus: EventBus | None = None,
     ) -> None:
         if interval_s <= 0:
             raise ValueError("the campaign tick interval must be positive")
@@ -2867,6 +2872,7 @@ class CampaignEngine:
         self._clock = clock
         self._rng = rng if rng is not None else random.Random()  # noqa: S311 -- spacing, not crypto
         self._stop_wait_s = stop_wait_s
+        self._bus = bus
         self._task: asyncio.Task[None] | None = None
         self._stopping = threading.Event()
         self._inflight: asyncio.Future[list[TickResult]] | None = None
@@ -2928,11 +2934,38 @@ class CampaignEngine:
         # which stop() waits on.
         return await asyncio.shield(self._inflight)
 
+    async def tick_and_announce(self) -> list[TickResult]:
+        """:meth:`tick_once`, then a ``campaign.tick`` event per user it sent for (#547).
+
+        Display only: the event follows the tick and carries a count, no names. It
+        changes nothing the tick sends or when, and a failure to publish never fails
+        the tick. A tick that sent nothing, or only made drafts, publishes nothing.
+        """
+        results = await self.tick_once()
+        if self._bus is not None:
+            for result in results:
+                sent = sum(
+                    1 for _, sent_result in result.fired if sent_result.outcome is SendOutcome.SENT
+                )
+                if sent == 0:
+                    continue
+                try:
+                    self._bus.publish(
+                        Event(
+                            type=TICK_EVENT,
+                            data={"sent": sent},
+                            user_id=result.user_id,
+                        )
+                    )
+                except Exception:  # a display event is never worth a failed tick
+                    log.exception("publishing %s failed", TICK_EVENT)
+        return results
+
     async def _run(self) -> None:
         while True:
             await asyncio.sleep(self._interval_s)
             try:
-                await self.tick_once()
+                await self.tick_and_announce()
             except Exception:
                 log.exception("campaign tick failed; trying again next minute")
 

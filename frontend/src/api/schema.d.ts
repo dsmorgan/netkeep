@@ -3536,8 +3536,8 @@ export interface components {
         };
         /**
          * ActivityOut
-         * @description What LinkedIn is doing (#347). LinkedIn runs only: a campaign send batch or a Gmail
-         *     reply poll never shows as running.
+         * @description What LinkedIn is doing (#347). LinkedIn runs only: a campaign send batch shows beside
+         *     it from the ``campaign.tick`` event (#547), and a Gmail reply poll never shows.
          */
         ActivityOut: {
             /** Label */
