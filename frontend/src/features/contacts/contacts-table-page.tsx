@@ -1,3 +1,4 @@
+import { Link } from '@tanstack/react-router'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -428,8 +429,17 @@ export function ContactsTablePage({ search, onNavigate }: ContactsTablePageProps
 
       {page.isSuccess && rows.length === 0 && (
         <div className="grid justify-items-start gap-2 rounded-xl bg-muted/40 p-6">
-          <p className="font-medium">No contacts match this filter.</p>
-          <p className="text-muted-foreground">{page.data.describe}</p>
+          <p className="font-medium">
+            {filtered ? 'No contacts match this filter.' : 'No contacts yet.'}
+          </p>
+          <p className="text-muted-foreground">
+            {filtered ? page.data.describe : 'Import a CSV or sync LinkedIn to add your first.'}
+          </p>
+          {!filtered && (
+            <Button size="sm" render={<Link to="/imports" />}>
+              Import a CSV
+            </Button>
+          )}
           {filtered && (
             <Button
               variant="outline"

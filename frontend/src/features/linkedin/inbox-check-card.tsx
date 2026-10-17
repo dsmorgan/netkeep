@@ -43,7 +43,7 @@ export function InboxCheckCard({ onStarted }: { onStarted: (runId: number) => vo
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2 text-sm">
-        <FirstPollNote />
+        <FirstPollNote buttonIsHere />
         <Button disabled={start.isPending || checking} onClick={() => start.mutate()}>
           {start.isPending ? 'Starting…' : 'Check inbox now'}
         </Button>

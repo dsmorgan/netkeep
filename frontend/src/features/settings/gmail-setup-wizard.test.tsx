@@ -220,6 +220,16 @@ describe('Gmail setup guide', () => {
     }
   })
 
+  it('names the links inside collapsed sections', async () => {
+    render(noClient, { project_id: PROJECT })
+    await screen.findByRole('link', { name: 'Check it' })
+    expect(link('Install gcloud (opens in a new tab)')).toHaveAttribute(
+      'href',
+      'https://cloud.google.com/sdk/docs/install',
+    )
+    expect(link('Google’s split view help (opens in a new tab)')).toBeInTheDocument()
+  })
+
   it('undoes a step marked done by mistake', async () => {
     const { setup } = render(noClient, { project_id: PROJECT, done: ['project'] })
     fireEvent.click(await screen.findByRole('button', { name: /Create a Google Cloud project/ }))

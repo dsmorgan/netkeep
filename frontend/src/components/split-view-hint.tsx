@@ -22,6 +22,7 @@ export function SplitViewHint() {
           split view icon next to the address bar, then <strong>Separate split view</strong>. See{' '}
           <a
             href={SPLIT_VIEW_HELP_URL}
+            aria-label="Google’s split view help (opens in a new tab)"
             target="_blank"
             rel="noopener noreferrer"
             className="font-medium text-primary underline underline-offset-4"

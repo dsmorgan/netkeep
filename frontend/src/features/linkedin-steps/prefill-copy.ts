@@ -24,7 +24,8 @@ export const TYPING_WARNING =
 
 /** The first poll hasn't run: scheduled polls wait for one you run by hand. */
 export const FIRST_POLL_COMMAND = 'netkeeper linkedin inbox'
-export const FIRST_POLL_NOTE = `netkeeper has not read your LinkedIn inbox yet, so LinkedIn prefills are held until it has. Run ${FIRST_POLL_COMMAND} by hand in a terminal, or use Check inbox now. Scheduled polls start after the first one.`
+export const CHECK_INBOX_LABEL = 'Check inbox now'
+export const FIRST_POLL_NOTE = `netkeeper has not read your LinkedIn inbox yet, so LinkedIn prefills are held until it has. Run ${FIRST_POLL_COMMAND} by hand in a terminal, or use ${CHECK_INBOX_LABEL}. Scheduled polls start after the first one.`
 
 /** Close the bubble a refusal that followed the Message click can leave open. */
 export const CLOSE_BUBBLE =

@@ -486,9 +486,38 @@ describe('contact detail', () => {
     })
     await renderApp('/contacts/9')
     const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent(/This contact could not be loaded/)
-    expect(alert).toHaveTextContent(/no contact 9/)
+    expect(alert).toHaveTextContent(/This contact does not exist/)
+
     expect(within(alert).getByRole('link', { name: /Back to contacts/ })).toBeInTheDocument()
+  })
+
+  it('says a missing contact does not exist, with a link back, not the raw error', async () => {
+    mockApi((request) => {
+      const { pathname } = new URL(request.url)
+      if (pathname === '/api/v1/contacts/999') {
+        return jsonResponse({ detail: 'no such contact' }, 404)
+      }
+      return undefined
+    })
+    await renderApp('/contacts/999')
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('This contact does not exist.')
+    expect(alert).not.toHaveTextContent('no such contact')
+    expect(within(alert).getByRole('link', { name: /Back to contacts/ })).toHaveAttribute(
+      'href',
+      '/contacts',
+    )
+  })
+
+  it('links home from a page that does not exist', async () => {
+    mockApi(() => undefined)
+    await renderApp('/no/such/page')
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('There is no page at this address.')
+    expect(within(alert).getByRole('link', { name: /Back to the dashboard/ })).toHaveAttribute(
+      'href',
+      '/',
+    )
   })
 
   it('offers confirm and reject for a contact read off a card, and says what each did', async () => {

@@ -154,7 +154,7 @@ describe('a page past the end', () => {
     const { router } = await renderApp('/contacts?page=4')
     await waitFor(() => expect(router.state.location.search).not.toHaveProperty('page'))
     await waitFor(() => expect(lastQuery(seen).offset).toBe(0))
-    await screen.findByText('No contacts match this filter.')
+    await screen.findByText('No contacts yet.')
     // Back does not walk into `?page=4` again, only to be bounced forward.
     expect(router.history.length).toBe(1)
   })

@@ -40,6 +40,7 @@ class SSEClient:
         self._buffer = b""
         self.started = asyncio.Event()
         self.status: int | None = None
+        self.completed = False  # the final empty body (more_body false) went out
         self.headers: dict[str, str] = {}
         self._task: asyncio.Task[None] | None = None
         self.watch = Stopwatch()  # restarted by start()
@@ -73,6 +74,8 @@ class SSEClient:
             self.started.set()
         elif message["type"] == "http.response.body":
             self._chunks.put_nowait(message.get("body", b""))
+            if not message.get("more_body", False):
+                self.completed = True
 
     async def next_event(self) -> tuple[str, dict[str, Any]]:
         """The next named event as ``(name, parsed data)``; comments (pings) are skipped."""
@@ -242,4 +245,33 @@ async def test_published_events_arrive_on_the_stream(
     assert (await stream.next_event())[0] == "demo.everyone"
 
     await stream.close()
+    assert bus.subscriber_count == 0
+
+
+@pytest.mark.wall_clock
+async def test_server_shutdown_completes_the_stream_instead_of_cancelling_it(
+    running_app: FastAPI,
+) -> None:
+    """Stopping `serve` with a stream open ends the response cleanly (#584).
+
+    A cancelled stream returns from the app without the final body message, which
+    uvicorn logs as an error ("ASGI callable returned without completing response").
+    """
+    from sse_starlette.sse import AppStatus
+
+    bus: EventBus = running_app.state.bus
+    stream = SSEClient(running_app)
+    stream.start()
+    await asyncio.wait_for(stream.started.wait(), timeout=WAIT_S)
+    assert not stream.completed
+
+    AppStatus.should_exit = True  # what sse-starlette sets when uvicorn is told to stop
+    try:
+        assert stream._task is not None
+        await asyncio.wait_for(stream._task, timeout=WAIT_S)
+    finally:
+        AppStatus.should_exit = False
+
+    completed: bool = stream.completed  # set by the stream's final message
+    assert completed
     assert bus.subscriber_count == 0

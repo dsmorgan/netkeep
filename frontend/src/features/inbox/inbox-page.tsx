@@ -225,7 +225,7 @@ export function InboxPage({ enrollment }: { enrollment?: number }) {
       ) : page.data.total === 0 ? (
         <EmptyState title={handled === 'unhandled' ? 'Nothing to handle' : 'Nothing detected yet'}>
           {handled === 'unhandled'
-            ? 'Every reply, unsubscribe and bounce has been handled.'
+            ? 'Every reply, unsubscribe and bounce has been handled. New ones appear after the next mailbox sync.'
             : 'Replies and bounces to your campaigns appear here once the mailbox poll finds them.'}
         </EmptyState>
       ) : (

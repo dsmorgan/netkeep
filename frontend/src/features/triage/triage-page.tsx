@@ -609,16 +609,23 @@ function EmptyQueue({
   onUndo: () => void
   onBack: () => void
 }) {
+  // Nothing handled this run and nothing skipped: a queue that was never filled,
+  // not one you emptied.
+  const fresh = seen === 0 && !canUndo && skipped === 0
   return (
     <div
       role="status"
       className="flex flex-col items-start gap-2 rounded-xl bg-card p-6 ring-1 ring-foreground/10"
     >
-      <p className="font-heading text-lg font-medium">{EMPTY_QUEUE[filter]}</p>
+      <p className="font-heading text-lg font-medium">
+        {fresh ? 'Nothing to triage yet.' : EMPTY_QUEUE[filter]}
+      </p>
       <p className="text-muted-foreground">
         {filter === 'unknown' && skipped > 0
           ? `${skipped} contacts are waiting under Skipped.`
-          : 'Every contact in this queue has an answer.'}
+          : fresh
+            ? 'Import a CSV or sync LinkedIn, and new contacts show up here.'
+            : 'Every contact in this queue has an answer.'}
       </p>
       <div className="flex flex-wrap gap-2">
         {filter === 'unknown' && skipped > 0 && (

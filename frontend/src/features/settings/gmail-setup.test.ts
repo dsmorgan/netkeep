@@ -109,8 +109,21 @@ describe('wizardSteps', () => {
     expect(steps[0]).toMatchObject({ state: 'done', source: 'marked' })
   })
 
+  it('leaves step 1 open for a saved client with no project ID', () => {
+    const steps = wizardSteps({ done: [], project_id: null }, status(), undefined)
+    expect(states(steps).project).toBe('todo/marked')
+    expect(currentStep(steps)).toBe('project')
+  })
+
+  it('lets a saved client and a saved project ID check step 1, and a connected mailbox too', () => {
+    const withId = wizardSteps({ done: [], project_id: 'netkeeper-ab12cd' }, status(), undefined)
+    expect(states(withId).project).toBe('done/checked')
+    const live = wizardSteps({ done: [] }, status({ mailboxes: [mailbox()] }), undefined)
+    expect(states(live).project).toBe('done/checked')
+  })
+
   it('counts a saved client as proof of the console steps it needs', () => {
-    const steps = wizardSteps({ done: [] }, status(), undefined)
+    const steps = wizardSteps({ done: [], project_id: 'netkeeper-ab12cd' }, status(), undefined)
     expect(states(steps)).toMatchObject({
       project: 'done/checked',
       gmail_api: 'todo/marked',
@@ -146,7 +159,11 @@ describe('wizardSteps', () => {
 
   it('a disconnected mailbox proves nothing', () => {
     const gone = mailbox({ status: 'disabled', status_reason: 'disconnected' })
-    const steps = wizardSteps({ done: [] }, status({ mailboxes: [gone] }), undefined)
+    const steps = wizardSteps(
+      { done: [], project_id: 'netkeeper-ab12cd' },
+      status({ mailboxes: [gone] }),
+      undefined,
+    )
     expect(setupComplete(steps)).toBe(false)
     expect(currentStep(steps)).toBe('gmail_api')
   })

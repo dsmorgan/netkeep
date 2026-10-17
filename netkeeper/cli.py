@@ -557,20 +557,19 @@ def browser_launch(
         bool,
         typer.Option(
             "--json",
-            help="Print the port, profile, and CDP URL as JSON instead (for scripts/chrome.sh).",
+            help="Print the port, profile and CDP URL as JSON (for scripts).",
         ),
     ] = False,
 ) -> None:
-    """Print the command that starts Chrome with a debug port. netkeeper never runs it.
+    """Show how to start the Chrome that netkeeper attaches to.
 
-    netkeeper attaches to a browser you run; it does not own one. A browser netkeeper
-    started would be a second device on your LinkedIn account, and that is what gets
-    accounts restricted, so this command prints a command for you to run (ADR 0002).
+    Prints a command for you to run in a terminal. netkeeper never starts Chrome
+    itself: a second browser on your LinkedIn account is what gets accounts restricted.
 
-    The command itself comes from :mod:`netkeeper.services.browser_launch` --
-    the same module ``GET /api/v1/linkedin/browser`` uses (P2-12) -- so there is
-    exactly one place that knows how to build it; nothing here restates the logic.
+    Use --json for the port and profile path, for scripts.
     """
+    # The command comes from netkeeper.services.browser_launch, the same module
+    # GET /api/v1/linkedin/browser uses (P2-12), so one place knows how to build it.
     state = ctx.ensure_object(CliState)
     settings = _file_settings_or_exit(state)
     cdp_url = settings.linkedin.cdp_url

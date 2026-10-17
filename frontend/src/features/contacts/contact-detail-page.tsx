@@ -10,7 +10,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Facts } from '@/components/facts'
 import { cn } from '@/lib/utils'
 
-import { contactQuery, reviewContact, setArchived } from './api'
+import { NotFound } from '@/components/not-found'
+
+import { ApiFailure, contactQuery, reviewContact, setArchived } from './api'
 import { ContactCampaigns } from './contact-campaigns'
 import { ContactChildren } from './contact-children'
 import { ContactTags } from './contact-tags'
@@ -94,6 +96,13 @@ export function ContactDetailPage({ contactId }: { contactId: number }) {
     return <p className="text-muted-foreground">Loading contact…</p>
   }
   if (detail.isError) {
+    if (detail.error instanceof ApiFailure && detail.error.status === 404) {
+      return (
+        <NotFound to="/contacts" backLabel="Back to contacts">
+          This contact does not exist. It may have been merged into another one.
+        </NotFound>
+      )
+    }
     return (
       <div role="alert" className="grid justify-items-start gap-3">
         <p className="text-destructive">This contact could not be loaded: {detail.error.message}</p>

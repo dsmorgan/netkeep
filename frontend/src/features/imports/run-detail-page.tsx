@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
 
+import { NotFound } from '@/components/not-found'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -34,21 +35,23 @@ export function RunDetailPage({ runId }: { runId: number }) {
     return <p role="status">Loading the import…</p>
   }
   if (run.isError) {
+    if (isNotFound(run.error)) return <NoSuchRun runId={String(runId)} />
     return <ErrorNote>{message(run.error)}</ErrorNote>
   }
   return <RunDetail run={run.data} />
 }
 
-/** What `/imports/runs/<not a number>` shows instead of a backend validation error. */
+function isNotFound(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404
+}
+
+/** What `/imports/runs/<unknown or not a number>` shows instead of a raw backend message. */
 export function NoSuchRun({ runId }: { runId: string }) {
   return (
-    <div className="flex max-w-5xl flex-col gap-4">
-      <ErrorNote>“{runId}” is not an import run. Import runs are numbered.</ErrorNote>
-      <p>
-        <Link to="/imports/runs" className="underline underline-offset-2">
-          See every import
-        </Link>
-      </p>
+    <div className="max-w-5xl">
+      <NotFound to="/imports/runs" backLabel="See every import">
+        There is no import run “{runId}”.
+      </NotFound>
     </div>
   )
 }

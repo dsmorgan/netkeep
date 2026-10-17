@@ -40,7 +40,16 @@ const EMPTY: GmailSetup = { project_id: null, sender_email: null, done: [], step
  * that needs the project ID has no `href` until you save one: it shows as
  * disabled text, with a hint, rather than a link to the wrong project.
  */
-function ConsoleLink({ href, children }: { href: string | null; children: ReactNode }) {
+function ConsoleLink({
+  href,
+  label,
+  children,
+}: {
+  href: string | null
+  /** An explicit accessible name, for a link inside a collapsed section. */
+  label?: string
+  children: ReactNode
+}) {
   if (href === null) {
     return (
       <span
@@ -56,6 +65,7 @@ function ConsoleLink({ href, children }: { href: string | null; children: ReactN
   return (
     <a
       href={href}
+      aria-label={label}
       target="_blank"
       rel="noopener noreferrer"
       className="font-medium text-primary underline underline-offset-4"
@@ -314,7 +324,13 @@ function StepBody({
                 <div className="mt-2 space-y-2">
                   <p className="text-muted-foreground">
                     Run these yourself in a terminal; netkeeper never runs them.{' '}
-                    <ConsoleLink href={links.installGcloud}>Install gcloud</ConsoleLink>.
+                    <ConsoleLink
+                      href={links.installGcloud}
+                      label="Install gcloud (opens in a new tab)"
+                    >
+                      Install gcloud
+                    </ConsoleLink>
+                    .
                   </p>
                   <CopyValue label="Log in" value={commands.login} />
                   <CopyValue label="Create the project" value={commands.createProject} />
