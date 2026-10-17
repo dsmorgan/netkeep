@@ -1315,6 +1315,65 @@ async def test_a_total_past_the_slack_of_the_places_stays_incomplete_at_a_proven
     assert out.result.hidden == 3 and out.result.shortfall == 17
 
 
+async def test_hidden_places_count_when_a_quiet_last_answer_is_rescued(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#554: the same 46 places, but the last answer (40-45) is lost and the page goes
+    quiet. The copy parses and asks for nothing: 43 read plus 3 hidden is the 46 the
+    total names, with no slack, so the copy stands in and the run is complete."""
+    caplog.set_level(logging.INFO, logger="netkeeper")
+    people = many(46)
+    hide = {10: 1, 20: 1, 30: 1}
+    site = FlagshipSite(
+        people, end="short", tap=True, hide=hide, lost={40: Lost("silent", streamed="whole")}
+    )
+    out = await sync(site)
+    assert out.result.reason is StopReason.END_OF_LIST and out.result.complete
+    assert out.result.hidden == 3 and out.result.shortfall == 3
+    assert not out.result.losses
+    assert out.urns == _visible(people, hide)
+    assert "answer for start 40 was read from the copy streamed as it arrived" in caplog.text
+
+
+async def test_hidden_places_do_not_rescue_a_quiet_last_answer_short_of_the_total(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#554, #208 review L1: under a stated total of 50, 43 read plus 3 hidden is 46.
+    Counting hidden places adds no slack, so the copy is refused, its own log line says
+    how many places it accounts for, and the run stops answer_lost at 40."""
+    caplog.set_level(logging.INFO, logger="netkeeper")
+    site = FlagshipSite(
+        many(46),
+        end="short",
+        total=50,
+        tap=True,
+        hide={10: 1, 20: 1, 30: 1},
+        lost={40: Lost("silent", streamed="whole")},
+    )
+    out = await sync(site)
+    assert out.result.reason is StopReason.ANSWER_LOST and not out.result.complete
+    assert out.result.lost is not None and out.result.lost.start == 40
+    assert (
+        "the streamed copy of the last answer for start 40 accounts for 46 of the 50"
+        " places the total names (3 hidden, 0 lost); not used" in caplog.text
+    )
+    assert "asked for next" not in caplog.text
+
+
+async def test_a_quiet_last_answer_copy_cut_short_is_not_used_with_hidden_places() -> None:
+    """#554: hidden places never stand in for a copy that does not parse."""
+    site = FlagshipSite(
+        many(46),
+        end="short",
+        tap=True,
+        hide={10: 1, 20: 1, 30: 1},
+        lost={40: Lost("silent", streamed="half")},
+    )
+    out = await sync(site)
+    assert out.result.reason is StopReason.ANSWER_LOST and not out.result.complete
+    assert out.result.lost is not None and out.result.lost.start == 40
+
+
 async def test_the_places_of_a_lost_answer_are_not_counted_as_hidden() -> None:
     """Only answers read whole say how many cards they held: a lost answer's places
     are a loss, not hidden members."""
