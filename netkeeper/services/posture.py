@@ -1707,6 +1707,10 @@ def _linkedin_reply_poll(session: Session, user: User, *, now: datetime) -> Prot
     with no complete poll the value says to run ``netkeeper linkedin inbox``; the hold
     note says the same steps wait for it.
 
+    **A poll by hand after a forgotten owner** (#592). After **Forget inbox owner** a
+    scheduled poll starts nothing until one a person starts passes the owner check; a
+    note says so, and how to run it.
+
     A first poll that could not read back to the earliest outreach it watches counted
     as complete anyway, so replies older than what it read were never seen. That stays
     a warning until a person checks them by hand and acknowledges it
@@ -1747,6 +1751,12 @@ def _linkedin_reply_poll(session: Session, user: User, *, now: datetime) -> Prot
             " are noticed only when a poll completes"
         )
         notes.append(f"{reason}{why}. {effect}")
+    if inbox_apply.owner_hold(session, user):
+        notes.append(
+            "the inbox owner was forgotten, so scheduled polls wait until a poll you run by"
+            " hand records it again: click Check inbox now on the LinkedIn page, or run"
+            " `netkeeper linkedin inbox`, while Chrome is signed in to your LinkedIn account"
+        )
     warnings: tuple[str, ...] = ()
     if short_of is not None:
         warnings = (

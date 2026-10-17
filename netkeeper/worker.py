@@ -60,6 +60,7 @@ from fastapi import FastAPI
 from sqlalchemy.orm import Session, sessionmaker
 
 from netkeeper.config import LinkedInSettings, Settings, load_settings
+from netkeeper.crm.inbox_apply import owner_hold
 from netkeeper.db import CancelledWhileFailing, off_loop, session_scope
 from netkeeper.linkedin import activity_lock
 from netkeeper.linkedin.activity_lock import account_key
@@ -584,6 +585,18 @@ class BrowserWorker:
                 return (
                     "first_inbox_poll",
                     "no inbox poll has completed yet: run `netkeeper linkedin inbox` by hand first",
+                )
+            if (
+                facts.trigger is SyncRunTrigger.SCHEDULED
+                and facts.kind is SyncRunKind.INBOX
+                and owner_hold(session, user)
+            ):
+                # #592: the same second check for a forgotten inbox owner. The poll
+                # that records the owner again is a person's, by hand.
+                return (
+                    "inbox_owner_by_hand",
+                    "the inbox owner was forgotten: run `netkeeper linkedin inbox` by hand"
+                    " to record it again",
                 )
             if (
                 facts.trigger is SyncRunTrigger.SCHEDULED

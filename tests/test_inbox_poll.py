@@ -952,10 +952,11 @@ def test_the_cli_forgets_the_recorded_owner_after_confirmation(
         assert get_setting(session, session.scalars(select(User)).one(), inbox_apply.OWNER_KEY)
     done = runner.invoke(cli, ["linkedin", "inbox-forget-owner"], input="y\n")
     assert done.exit_code == 0 and "forgotten" in done.output
+    assert "scheduled inbox polls wait" in done.output
     with session_scope(cli_db) as session:
-        assert (
-            get_setting(session, session.scalars(select(User)).one(), inbox_apply.OWNER_KEY) is None
-        )
+        user = session.scalars(select(User)).one()
+        assert get_setting(session, user, inbox_apply.OWNER_KEY) is None
+        assert inbox_apply.owner_hold(session, user)
 
 
 def test_a_skipped_first_poll_fire_is_a_skip_and_the_owner_stop_names_its_cure() -> None:
@@ -1307,3 +1308,188 @@ async def test_the_worker_refuses_a_scheduled_run_outside_a_window_narrowed_in_s
     ]
     assert [(r.status, r.stop_reason) for r in scheduled] == [(SyncRunStatus.FAILED, "inactive")]
     assert connector.attaches == 0
+
+
+# --- #592: scheduled polls wait for a poll by hand after a forgotten owner ----------------
+
+
+def _forget(factory: sessionmaker[Session], user_id: int) -> bool:
+    with session_scope(factory, write=True) as session:
+        return inbox_apply.forget_owner(session, _user(session, user_id))
+
+
+def _owner_hold(factory: sessionmaker[Session], user_id: int) -> bool:
+    with session_scope(factory) as session:
+        return inbox_apply.owner_hold(session, _user(session, user_id))
+
+
+def _reply_poll_notes(factory: sessionmaker[Session], user_id: int) -> tuple[str, ...]:
+    (row,) = [p for p in _posture(factory, user_id).protections if p.name == "linkedin reply poll"]
+    return row.notes
+
+
+async def _scheduled_poll(factory: sessionmaker[Session], user_id: int, answer: object) -> str:
+    with session_scope(factory, write=True) as session:
+        user = _user(session, user_id)
+        arm_scheduled_runs(session, user, now=NOW)
+        run_id = runs.create_run(
+            session, user, SyncRunKind.INBOX, trigger=SyncRunTrigger.SCHEDULED, now=NOW
+        ).id
+    source = FakeInboxSource(answer)  # type: ignore[arg-type]
+    report = await poll_inbox(
+        factory, user_id, source, settings=SETTINGS, run_id=run_id, clock=lambda: NOW
+    )
+    return report.stop_reason
+
+
+async def test_a_forget_holds_scheduled_polls_until_a_manual_poll_records_the_owner(
+    bare_engine: Engine, settings: Settings
+) -> None:
+    settings = _night_owl(settings)
+    provider, connector = fake_provider()
+    clock = Clock(START)
+    async with serving(
+        bare_engine, settings, worker_extractor(provider, settings, clock=clock)
+    ) as app:
+        factory = app.state.session_factory
+        with session_scope(factory, write=True) as session:
+            user = _local(session)
+            account = ensure_account(session, user).id
+            arm_scheduled_runs(session, user, now=START)
+            ada = factories.make_contact(session, user, li_urn=ADA)
+            factories.make_enrollment(session, factories.make_campaign(session, user), ada)
+            set_setting(session, user, inbox_apply.OWNER_KEY, OWNER_A)
+            user_id = user.id
+        _complete_a_manual_poll(factory, user_id, START)
+        assert _forget(factory, user_id)
+        registry = serve_registry(factory, app.state.executor, app.state.tasks, clock=clock)
+
+        held = await registry[JobKind.INBOX](_job(user_id, account))
+        assert held is scheduler.JobOutcome.OWNER_BY_HAND
+        assert _owner_hold(factory, user_id)
+
+        # A manual poll records the owner the page shows and releases the hold.
+        report = await poll_inbox(
+            factory,
+            user_id,
+            FakeInboxSource(replace(delta(), owner_urn=OWNER_B)),
+            settings=SETTINGS,
+            clock=lambda: START,
+        )
+        assert report.stop_reason == READ
+        assert not _owner_hold(factory, user_id)
+        with session_scope(factory) as session:
+            assert get_setting(session, _user(session, user_id), inbox_apply.OWNER_KEY) == OWNER_B
+        assert await registry[JobKind.INBOX](_job(user_id, account)) is None
+        await app.state.tasks.join()
+    scheduled = [
+        r
+        for r in _rows(bare_engine)
+        if r.kind is SyncRunKind.INBOX and r.trigger is SyncRunTrigger.SCHEDULED
+    ]
+    assert len(scheduled) == 1
+    assert connector.attaches == 1
+
+
+def test_the_owner_hold_is_a_skip() -> None:
+    assert scheduler.JobOutcome.OWNER_BY_HAND in scheduler.SKIPPED_AFTER_GATE
+    assert scheduler.JobOutcome.OWNER_BY_HAND.value == "inbox_owner_by_hand"
+    assert "run by hand" in (runs.describe_stop_reason("inbox_owner_by_hand") or "")
+
+
+async def test_a_scheduled_poll_never_releases_the_owner_hold(
+    session_factory: sessionmaker[Session], user_id: int
+) -> None:
+    """The worker refuses a scheduled poll while the hold stands; past that, a scheduled
+    poll that records an owner still leaves the hold for a person (fail closed)."""
+    assert await _poll(session_factory, user_id, replace(delta(), owner_urn=OWNER_A)) == READ
+    assert _forget(session_factory, user_id)
+    other = replace(delta(), owner_urn=OWNER_B)
+    assert await _scheduled_poll(session_factory, user_id, other) == READ
+    assert _owner_hold(session_factory, user_id)
+
+
+async def test_a_manual_poll_that_knows_no_owner_leaves_the_hold(
+    session_factory: sessionmaker[Session], user_id: int
+) -> None:
+    assert await _poll(session_factory, user_id, replace(delta(), owner_urn=OWNER_A)) == READ
+    assert _forget(session_factory, user_id)
+    assert await _poll(session_factory, user_id, delta()) == READ
+    assert _owner_hold(session_factory, user_id)
+
+
+async def test_a_forget_with_the_owner_breaker_tripped_holds_the_same(
+    session_factory: sessionmaker[Session], user_id: int
+) -> None:
+    assert await _poll(session_factory, user_id, replace(delta(), owner_urn=OWNER_A)) == READ
+    other = replace(delta(), owner_urn=OWNER_B)
+    for _ in range(2):
+        assert await _poll(session_factory, user_id, other) == "owner_mismatch"
+    assert _owner_breaker(session_factory, user_id).tripped
+    assert _forget(session_factory, user_id)
+    assert _owner_hold(session_factory, user_id)
+    assert any(
+        "inbox owner was forgotten" in note for note in _reply_poll_notes(session_factory, user_id)
+    )
+    # The manual poll records the new mailbox, releases the hold and the breaker.
+    assert await _poll(session_factory, user_id, other) == READ
+    assert not _owner_hold(session_factory, user_id)
+    assert not _owner_breaker(session_factory, user_id).tripped
+    assert not any(
+        "inbox owner was forgotten" in note for note in _reply_poll_notes(session_factory, user_id)
+    )
+
+
+def test_a_forget_with_nothing_recorded_holds_nothing(
+    session_factory: sessionmaker[Session], user_id: int
+) -> None:
+    assert not _forget(session_factory, user_id)
+    assert not _owner_hold(session_factory, user_id)
+
+
+def test_posture_says_why_scheduled_polls_are_held(
+    session_factory: sessionmaker[Session], user_id: int
+) -> None:
+    with session_scope(session_factory, write=True) as session:
+        set_setting(session, _user(session, user_id), inbox_apply.OWNER_KEY, OWNER_A)
+    assert not any("forgotten" in note for note in _reply_poll_notes(session_factory, user_id))
+    assert _forget(session_factory, user_id)
+    (note,) = [n for n in _reply_poll_notes(session_factory, user_id) if "forgotten" in n]
+    assert "scheduled polls wait" in note
+    assert "Check inbox now" in note and "`netkeeper linkedin inbox`" in note
+
+
+async def test_the_worker_refuses_a_scheduled_inbox_run_while_the_owner_hold_stands(
+    bare_engine: Engine, settings: Settings
+) -> None:
+    settings = _night_owl(settings)
+    provider, connector = fake_provider()
+    clock = Clock(START)
+    async with serving(
+        bare_engine, settings, worker_extractor(provider, settings, clock=clock)
+    ) as app:
+        factory = app.state.session_factory
+        with session_scope(factory, write=True) as session:
+            user = _local(session)
+            account = ensure_account(session, user).id
+            arm_scheduled_runs(session, user, now=START)
+            set_setting(session, user, inbox_apply.OWNER_KEY, OWNER_A)
+            user_id = user.id
+        _complete_a_manual_poll(factory, user_id, START)
+        assert _forget(factory, user_id)
+        with session_scope(factory, write=True) as session:
+            forged = SyncRun(
+                user_id=user_id,
+                linkedin_account_id=account,
+                kind=SyncRunKind.INBOX,
+                status=SyncRunStatus.RUNNING,
+                trigger=SyncRunTrigger.SCHEDULED,
+                started_at=clock.at,
+            )
+            session.add(forged)
+            session.flush()
+            forged_id = forged.id
+        await app.state.executor.execute(forged_id, user_id)
+    assert connector.attaches == 0
+    row = next(r for r in _rows(bare_engine) if r.id == forged_id)
+    assert (row.status, row.stop_reason) == (SyncRunStatus.FAILED, "inbox_owner_by_hand")

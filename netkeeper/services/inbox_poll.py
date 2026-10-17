@@ -309,6 +309,13 @@ async def poll_inbox(
                         now=clock(),
                     )
                     return None
+                if (
+                    delta.owner_urn is not None
+                    and runs.get_run(session, user, started_run_id).trigger is SyncRunTrigger.MANUAL
+                ):
+                    # #592: a person watched the poll that recorded (or matched) the
+                    # owner, so scheduled polls held after a forget may run again.
+                    inbox_apply.release_owner_hold(session, user)
                 counts = inbox_apply.apply_delta(
                     session, user, delta, polled_at=clock(), settings=campaign_settings
                 )

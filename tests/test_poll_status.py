@@ -20,6 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from netkeeper.config import Settings
+from netkeeper.crm import inbox_apply
 from netkeeper.db import session_scope
 from netkeeper.linkedin.classify import Outcome
 from netkeeper.models import (
@@ -50,6 +51,7 @@ from netkeeper.services.scheduler import (
     establish_schedule,
     stored_due,
 )
+from netkeeper.services.settings_kv import set_setting
 
 #: 11:00 in New York, inside the default LinkedIn active hours (08:30 to 21:30).
 NOW = datetime(2026, 9, 16, 15, 0, tzinfo=UTC)
@@ -955,3 +957,23 @@ def test_a_corrupt_inbox_owner_row_blocks_the_inbox_poll_and_says_so(world: Worl
     assert "owner breaker's record can't be read, so scheduled polls stay off" in (
         inbox.reason or ""
     )
+
+
+def test_a_forgotten_inbox_owner_holds_the_scheduled_poll(world: World) -> None:
+    """#592: after Forget inbox owner, the next poll is a person's."""
+    for session, user in world.write():
+        _arm_linkedin(session, user, kinds=(JobKind.INBOX,))
+        run = runs.create_run(
+            session, user, SyncRunKind.INBOX, trigger=SyncRunTrigger.MANUAL, now=NOW
+        )
+        runs.finish_run(
+            session, user, run.id, status=SyncRunStatus.COMPLETED, now=NOW, stop_reason="inbox_read"
+        )
+        set_setting(session, user, inbox_apply.OWNER_KEY, "urn:li:fsd_profile:INVENTEDA")
+        assert inbox_apply.forget_owner(session, user)
+
+    inbox = world.read()["linkedin_inbox"]
+
+    assert inbox.state is S.BLOCKED and inbox.next_at is None
+    assert "inbox owner was forgotten" in (inbox.reason or "")
+    assert "Check inbox now" in (inbox.reason or "")

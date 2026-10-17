@@ -226,6 +226,11 @@ class JobOutcome(enum.Enum):
     """The inbox poll's first run is a person's (P4-01): no inbox poll has completed
     yet, so a scheduled fire starts nothing. The fire counts as skipped."""
 
+    OWNER_BY_HAND = "inbox_owner_by_hand"
+    """The inbox poll after a forgotten owner is a person's (#592): the next poll records
+    whichever mailbox the page shows, so until one by hand passes the owner check, a
+    scheduled fire starts nothing. The fire counts as skipped."""
+
     NOTHING_TO_WATCH = "nothing_to_watch"
     """The inbox poll's handler found no live enrollment with a LinkedIn contact
     (P4-08): it recorded no run and attached to nothing. The fire counts as skipped."""
@@ -243,6 +248,7 @@ SKIPPED_AFTER_GATE: Final = frozenset(
         JobOutcome.DISARMED_AFTER_GATE,
         JobOutcome.NOTHING_TO_WATCH,
         JobOutcome.FIRST_POLL_BY_HAND,
+        JobOutcome.OWNER_BY_HAND,
         JobOutcome.NOTHING_TO_SEND,
     }
 )
