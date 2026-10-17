@@ -707,7 +707,7 @@ Static lists are explicit membership with an `added_at`, for the "First 100" sty
 
 And should a broken list exist anyway — data edited around the API — `GET /lists` marks that one list `broken` with the reason instead of failing: it is the page someone would use to find and delete it, so one bad list may not hide the rest. Asking about that list by id still answers 422.
 
-Ids are not reused by a sequence but are by SQLite, so a reference whose list was deleted can come to name a later list with that id. The guards above refuse the version of that which breaks something; deleting a list logs the lists that named it, so the version that does not break anything is at least visible.
+SQLite reuses the id of a deleted row, so a stored filter that kept naming a deleted list or campaign would come to mean the next one created. Deleting a list or a draft campaign therefore retires its id in every filter of that user that names it (smart lists, saved views, campaign audiences): the id becomes its negative, which no row has, so the reference matches nobody for good and still reads as "deleted #7". References left over from before that change, or planted around the API, keep a positive dangling id; the guards above still refuse the writes that would make such a reference break something.
 
 Because a smart list's tree lives in the `lists` table, compiling a filter is no longer a pure function of the tree: it takes a session. It reads nothing for a filter with no `list_member` in it, and one indexed row per distinct list id for one that has, at compile time rather than per contact.
 

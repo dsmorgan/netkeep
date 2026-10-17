@@ -262,6 +262,17 @@ describe('choosing which list', () => {
     expect(tree().where).toEqual({ op: 'list_member', list_id: 4 })
   })
 
+  it('shows a retired list id as a deleted list', async () => {
+    mockApi({ ...countRoute(), ...listsRoute() })
+    renderWithClient(
+      <Harness initial={{ include_archived: false, where: { op: 'list_member', list_id: -4 } }} />,
+    )
+
+    const picker = await screen.findByRole('combobox', { name: 'List' })
+    expect(within(picker).getByRole('option', { name: 'deleted list #4' })).toBeInTheDocument()
+    expect(tree().where).toEqual({ op: 'list_member', list_id: -4 })
+  })
+
   it('says there are no lists yet rather than showing an empty picker', async () => {
     mockApi({ ...countRoute(), 'GET /api/v1/lists': () => jsonResponse([]) })
     renderWithClient(
@@ -441,5 +452,16 @@ describe('choosing campaigns', () => {
     )
     expect(await screen.findByText(/campaign #9 \(no longer there\)/)).toBeInTheDocument()
     expect(tree().where).toEqual({ op: 'enrolled_in', campaign_ids: [9] })
+  })
+
+  it('shows a retired campaign id as a deleted campaign', async () => {
+    mockApi({ ...countRoute(), ...campaignsRoute() })
+    renderWithClient(
+      <Harness
+        initial={{ include_archived: false, where: { op: 'enrolled_in', campaign_ids: [-9] } }}
+      />,
+    )
+    expect(await screen.findByText('deleted campaign #9')).toBeInTheDocument()
+    expect(tree().where).toEqual({ op: 'enrolled_in', campaign_ids: [-9] })
   })
 })

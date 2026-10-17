@@ -13,8 +13,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from netkeeper.crm.filters import MAX_LIST_EXPANSIONS
 from netkeeper.db import session_scope
-from netkeeper.models import ContactList, ContactMet, User
-from netkeeper.scoping import get_scoped
+from netkeeper.models import ContactList, ContactMet, User, UserKind
+from netkeeper.scoping import get_scoped, scoped_delete
 
 CSRF = {"X-Netkeeper-Client": "1"}
 
@@ -388,6 +388,36 @@ async def test_a_new_list_may_not_take_over_a_dangling_reference_and_close_a_cyc
     lists = await _lists_by_name(client)
     assert lists["Holder"]["member_count"] == 0
     assert lists["Holder"]["broken"] is None
+
+
+async def test_a_new_list_may_not_close_a_cycle_through_a_planted_dangling_reference(
+    client: httpx.AsyncClient, running_app: FastAPI
+) -> None:
+    """The create-time guard, with a positive dangling id planted around the API (#574).
+
+    Deleting a list now retires its id, but a reference left from before that, or
+    written straight to the database, still names the id the next list is handed.
+    """
+    holder = await _create_list(client, "Holder", **_smart({"op": "has_email"}))
+    holder_id = holder.json()["id"]
+    target = await _create_list(client, "Target", kind="static")
+    target_id = target.json()["id"]
+    assert target_id > holder_id
+    factory: sessionmaker[Session] = running_app.state.session_factory
+    with session_scope(factory, write=True) as session:
+        user = session.scalars(select(User).where(User.kind == UserKind.LOCAL)).one()
+        row = get_scoped(session, user, ContactList, holder_id)
+        assert row is not None
+        row.filter_json = {"where": {"op": "list_member", "list_id": target_id}}
+        session.execute(scoped_delete(user, ContactList).where(ContactList.id == target_id))
+
+    closing = await _create_list(
+        client, "Closing", **_smart({"op": "list_member", "list_id": holder_id})
+    )
+    assert closing.status_code == 422, closing.text
+    assert "would leave list" in closing.text and "defined in terms of itself" in closing.text
+    page = await client.get("/api/v1/lists")
+    assert "Closing" not in {row["name"] for row in page.json()}
 
 
 async def test_an_edit_below_the_expansion_cap_may_not_break_a_list_above_it(
