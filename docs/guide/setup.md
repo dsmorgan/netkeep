@@ -94,7 +94,7 @@ Go through **Settings** once:
 - **About you**: your name, title, and company, for templates.
 - **LinkedIn budgets** and **LinkedIn active hours**: how much netkeeper does on LinkedIn, and when. The defaults are conservative; treat them as the ceiling.
 - **Campaign defaults**: daily caps and spacing.
-- **Backups**: see [Backups and restore](backups.md).
+- **Backups** and **Backup files**: nightly backups (on by default), how many to keep, and **Back up now**. See [Backups and restore](backups.md).
 
 A value in `config.toml`, if you have one, wins over the page.
 
