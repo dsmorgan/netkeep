@@ -3568,3 +3568,18 @@ def test_0044_downgrades_to_enrollments_without_it(migration_engine: Engine) -> 
     assert "prefill_kept_step_id" not in columns
     assert "campaign_step_mode_changes" not in inspect(migration_engine).get_table_names()
     migrations.upgrade(migration_engine, "0044")
+
+
+# --- headline markers (0045, #557) ---------------------------------------------------------
+
+
+def test_0045_adds_the_headline_markers_and_downgrades_without_them(
+    migration_engine: Engine,
+) -> None:
+    migrations.upgrade(migration_engine, "0044")
+    migrations.upgrade(migration_engine, "0045")
+    columns = {c["name"] for c in inspect(migration_engine).get_columns("contacts")}
+    assert {"headline_via", "card_headline_seen"} <= columns
+    migrations.downgrade(migration_engine, "0044")
+    columns = {c["name"] for c in inspect(migration_engine).get_columns("contacts")}
+    assert not {"headline_via", "card_headline_seen"} & columns

@@ -1032,6 +1032,7 @@ def _harvested(
         first_name=details.first_name,
         last_name=details.last_name,
         headline=details.headline,
+        headline_via="profile",
         current_title=current.title if current is not None else None,
         current_company=current.company if current is not None else None,
         location=details.location,
@@ -1208,6 +1209,7 @@ def _incoming(
         first_name=connection.first_name,
         last_name=connection.last_name,
         headline=connection.headline,
+        headline_via="card",
         connected_on=connected_on,
     )
 
