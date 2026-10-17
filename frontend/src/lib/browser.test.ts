@@ -22,7 +22,7 @@ describe('detectBrowser', () => {
   })
 
   it('flags a fork named only by its brand, with no Chromium brand', () => {
-    const userAgentData = { brands: [{ brand: 'Not.A/Brand' }, { brand: 'Microsoft Edge' }] }
+    const userAgentData = { brands: [{ brand: 'Not.A/Brand' }, { brand: 'Brave' }] }
     expect(detectBrowser({ userAgentData, userAgent: '' })).toBe('other')
   })
 
