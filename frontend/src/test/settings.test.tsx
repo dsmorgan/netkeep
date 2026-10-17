@@ -74,5 +74,6 @@ describe('settings', () => {
     const pre = await screen.findByText(/"timezone": "America\/New_York"/)
     expect(pre.tagName).toBe('PRE')
     expect(await screen.findByRole('form', { name: 'Sending hours' })).toBeVisible()
+    expect(screen.getByText(/UI requires Google Chrome/)).toBeInTheDocument()
   })
 })

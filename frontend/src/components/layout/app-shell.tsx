@@ -4,6 +4,7 @@ import { useAttentionRefresh } from '@/features/attention/api'
 import { useFavicon } from '@/features/attention/use-favicon'
 import { ReauthBanner } from '@/features/mailboxes/reauth-banner'
 
+import { BrowserBanner } from './browser-banner'
 import { Sidebar } from './sidebar'
 import { TopBar } from './top-bar'
 import { useDocumentTitle } from './use-document-title'
@@ -73,6 +74,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           onToggleNav={() => setNavOpen((open) => !open)}
         />
         <main className="min-w-0 flex-1 p-4">
+          <BrowserBanner />
           <ReauthBanner />
           {children}
         </main>
