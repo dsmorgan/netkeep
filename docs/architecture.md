@@ -107,7 +107,7 @@ The table shows each manual step in [networking-workflow.md](networking-workflow
 ### 4.2 Non-functional
 
 - N1. macOS 14+ is the primary platform. Linux via container is supported for everything; the LinkedIn steps need Chrome on the same host as the backend.
-- N2. Chrome (or any Chromium browser) is the only supported browser for LinkedIn steps. Firefox and Safari have no CDP.
+- N2. Chrome is the only supported browser for the UI. The LinkedIn steps drive a Chrome you start yourself over CDP, separate from the browser that shows the UI and with its own profile; they work with Chrome or another Chromium build. Firefox and Safari have no CDP.
 - N3. All data lives in one SQLite file plus a secrets store in the macOS Keychain. Backups are one command.
 - N4. The web UI binds `127.0.0.1` only and needs no login in local mode, but state-changing API calls are protected against cross-site requests from other local pages.
 - N8. Every user-owned row carries `user_id`, every query is scoped through one helper, and a two-user isolation test covers every list endpoint. Nothing in v1 needs this; retrofitting it is what would be expensive.
@@ -194,7 +194,7 @@ Deferred until the local form has matured, and decided by a future ADR: login an
 |---|---|---|
 | Language | Python 3.12 | Matches igtracker; Playwright, SQLAlchemy, and the Google client libraries are mature here |
 | Package manager | `uv` | Fast, lockfile, `uv run` for scripts |
-| Browser driver | Playwright (Python) `connect_over_cdp` | No bundled browser needed in attach mode; any Chromium works |
+| Browser driver | Playwright (Python) `connect_over_cdp` | No bundled browser needed in attach mode; any Chromium works for the LinkedIn steps' own browser (the UI itself requires Chrome, N2) |
 | Database | SQLite via SQLAlchemy 2.0, Alembic migrations, WAL mode | Single file, zero ops, fast enough for 10k contacts. `UTCDateTime` decorator from igtracker |
 | Web framework | FastAPI, Pydantic v2, `sse-starlette` | Typed API, OpenAPI for free, SSE for progress |
 | Scheduler | APScheduler 3.x (asyncio) | Proven in igtracker including the restart-safe next-fire logic |

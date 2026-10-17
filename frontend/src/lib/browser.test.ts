@@ -21,6 +21,21 @@ describe('detectBrowser', () => {
     expect(detectBrowser({ userAgentData, userAgent: CHROME_UA })).toBe('other')
   })
 
+  it('flags a fork named only by its brand, with no Chromium brand', () => {
+    const userAgentData = { brands: [{ brand: 'Not.A/Brand' }, { brand: 'Microsoft Edge' }] }
+    expect(detectBrowser({ userAgentData, userAgent: '' })).toBe('other')
+  })
+
+  it('counts headless Chrome and Chrome for Testing as Chrome', () => {
+    expect(detectBrowser({ userAgent: CHROME_UA.replace('Chrome/', 'HeadlessChrome/') })).toBe(
+      'chrome',
+    )
+    const userAgentData = {
+      brands: [{ brand: 'Chromium' }, { brand: 'Google Chrome for Testing' }],
+    }
+    expect(detectBrowser({ userAgentData, userAgent: '' })).toBe('chrome')
+  })
+
   it('reads Chrome from the user agent when there are no brands', () => {
     expect(detectBrowser({ userAgent: CHROME_UA })).toBe('chrome')
   })
