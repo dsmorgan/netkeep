@@ -2,7 +2,10 @@
 
 - ``GET /login-item`` shows the state, read from the launchd plist and ``launchctl``.
 - ``PUT /login-item`` with ``{"enabled": true|false}`` installs or removes the agent,
-  as ``netkeeper login-item on|off`` does.
+  as ``netkeeper login-item on|off`` does, keeping the plist's ``--host`` and ``--port``.
+- ``POST /login-item/repair`` rewrites the plist for the installed ``netkeeper`` and adopts
+  an agent the removed install script left. It works when this server is that agent,
+  which a switch off-and-on cannot.
 
 This writes outside the data directory (``~/Library/LaunchAgents``) and is not a
 LinkedIn safety change. The agent belongs to the machine's user, not to a netkeeper
@@ -42,8 +45,11 @@ class LoginItemOut(BaseModel):
     log_path: str
     """``netkeeper.log`` in the data directory."""
     points_elsewhere: str | None
-    """The program the plist runs, when that is not the installed ``netkeeper``: turn
-    the switch off and on to point it at this one. Null when it matches."""
+    """The program the plist runs, when that is not the installed ``netkeeper``: Repair
+    points it at this one. Null when it matches."""
+    legacy: bool
+    """An agent the removed install script wrote serves this data directory, and cannot
+    start now that its wrapper script is gone: Repair adopts it."""
     message: str | None = None
     """What a change did, such as "starts at your next login, not now"; null on a read."""
 
@@ -59,6 +65,7 @@ def _out(status: Status, message: str | None = None) -> LoginItemOut:
         plist_path=str(status.plist_path),
         log_path=str(status.log_path),
         points_elsewhere=status.plist_executable if status.stale else None,
+        legacy=status.legacy,
         message=message,
     )
 
@@ -105,8 +112,28 @@ def put_login_item(request: Request, owner: Owner, body: LoginItemIn) -> LoginIt
     item = _item(request)
     try:
         outcome = (
-            item.enable(serving_here=True) if body.enabled else item.disable(serving_here=True)
+            item.enable(serving_here=True, keep_arguments=True)
+            if body.enabled
+            else item.disable(serving_here=True)
         )
+    except LoginItemError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _out(outcome.status, outcome.message)
+
+
+@router.post(
+    "/login-item/repair",
+    operation_id="repair_login_item",
+    responses={
+        403: {"description": "Only the local owner account manages the login item"},
+        409: {"description": "Not macOS, or launchctl refused: the reason is in detail"},
+    },
+)
+@read_only  # it writes a plist, never a row
+def repair_login_item(request: Request, owner: Owner) -> LoginItemOut:
+    """Rewrite the plist for this netkeeper and adopt an old script's agent."""
+    try:
+        outcome = _item(request).enable(serving_here=True, keep_arguments=True)
     except LoginItemError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _out(outcome.status, outcome.message)

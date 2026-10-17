@@ -115,7 +115,29 @@ def test_enable_writes_a_plist_for_the_installed_executable_and_the_data_dir(
     assert verbs.index("enable") < verbs.index("bootstrap")
 
 
-def test_the_plist_is_world_readable_whatever_the_umask_and_the_logs_are_private(
+def test_modes_hold_whatever_the_umask_and_an_old_log_is_tightened(
+    launchctl: FakeLaunchctl, tmp_path: Path, data: Path
+) -> None:
+    (data / "logs").mkdir(parents=True)
+    old = data / "logs" / "serve.err.log"
+    old.write_text("from the old setup\n")
+    old.chmod(0o644)
+    (data / "logs").chmod(0o755)
+    previous = os.umask(0o022)  # a umask that would leave everything readable
+    try:
+        item = make(launchctl, tmp_path, data)
+        item.enable()
+    finally:
+        os.umask(previous)
+    assert stat.S_IMODE(item.plist_path.stat().st_mode) == 0o644
+    assert item.plist_path.parent == tmp_path / "LaunchAgents"
+    assert stat.S_IMODE((data / "logs").stat().st_mode) == 0o700
+    assert stat.S_IMODE(old.stat().st_mode) == 0o600
+    assert stat.S_IMODE((data / "logs" / "serve.log").stat().st_mode) == 0o600
+    assert old.read_text() == "from the old setup\n"
+
+
+def test_the_plist_is_world_readable_under_a_tight_umask(
     launchctl: FakeLaunchctl, tmp_path: Path, data: Path
 ) -> None:
     previous = os.umask(0o077)
@@ -125,9 +147,6 @@ def test_the_plist_is_world_readable_whatever_the_umask_and_the_logs_are_private
     finally:
         os.umask(previous)
     assert stat.S_IMODE(item.plist_path.stat().st_mode) == 0o644
-    assert item.plist_path.parent == tmp_path / "LaunchAgents"
-    assert stat.S_IMODE((data / "logs").stat().st_mode) == 0o700
-    assert stat.S_IMODE((data / "logs" / "serve.err.log").stat().st_mode) == 0o600
 
 
 def test_host_and_port_pass_through_to_serve(
@@ -402,3 +421,170 @@ def test_cli_exits_non_zero_off_macos(
     result = CliRunner().invoke(cli, ["login-item", "on"])
     assert result.exit_code == 1
     assert "launchd" in result.output
+
+
+# -- an agent the removed install script left ----------------------------------------------
+
+OLD_LABEL = "fun.tnkr.netkeeper"
+WRAPPER = "/checkout/scripts/serve-launchd.sh"
+
+
+def write_old_plist(tmp_path: Path, serves: Path | None, *extra: str) -> Path:
+    """What install-launchd.sh wrote: the plain label, whichever directory it served."""
+    agents = tmp_path / "LaunchAgents"
+    agents.mkdir(exist_ok=True)
+    document: dict[str, object] = {
+        "Label": OLD_LABEL,
+        "ProgramArguments": [WRAPPER, *extra],
+        "EnvironmentVariables": {"NETKEEPER_DATA": str(serves)} if serves else {},
+    }
+    path = agents / f"{OLD_LABEL}.plist"
+    path.write_bytes(plistlib.dumps(document))
+    return path
+
+
+def test_an_old_agent_for_this_data_directory_shows_as_legacy(
+    launchctl: FakeLaunchctl, tmp_path: Path, data: Path
+) -> None:
+    write_old_plist(tmp_path, data)
+    item = make(launchctl, tmp_path, data)
+    status = item.status()
+    assert status.legacy
+    assert not status.enabled  # this label's plist is not there
+    other = make(launchctl, tmp_path, tmp_path / "elsewhere")
+    assert not other.status().legacy
+
+
+def test_enable_adopts_an_old_agent_and_keeps_its_port(
+    launchctl: FakeLaunchctl, tmp_path: Path, data: Path
+) -> None:
+    """Without adoption both agents load at the next login, one loses the serve lock,
+    and KeepAlive relaunches it every ten seconds for ever."""
+    old = write_old_plist(tmp_path, data, "--port", "8080")
+    launchctl.loaded.add(OLD_LABEL)
+    item = make(launchctl, tmp_path, data)
+    item.enable(keep_arguments=True)
+    assert not old.exists()
+    assert launchctl.loaded == {item.label}
+    verbs = launchctl.verbs()
+    assert verbs.index("bootout") < verbs.index("bootstrap")
+    assert read_plist(item)["ProgramArguments"] == [EXE, "serve", "--port", "8080"]
+    assert not item.status().legacy
+
+
+def test_adopting_leaves_an_old_agent_for_another_data_directory_alone(
+    launchctl: FakeLaunchctl, tmp_path: Path, data: Path
+) -> None:
+    old = write_old_plist(tmp_path, tmp_path / "somewhere-else")
+    launchctl.loaded.add(OLD_LABEL)
+    make(launchctl, tmp_path, data).enable()
+    assert old.exists()
+    assert OLD_LABEL in launchctl.loaded
+
+
+def test_the_default_directorys_label_will_not_overwrite_an_old_agent_for_another(
+    launchctl: FakeLaunchctl, tmp_path: Path
+) -> None:
+    other = tmp_path / "other"
+    old = write_old_plist(tmp_path, other)
+    before = old.read_bytes()
+    item = make(launchctl, tmp_path, default_data_dir())
+    with pytest.raises(LoginItemError, match="login-item on"):
+        item.enable()
+    assert old.read_bytes() == before
+    assert launchctl.calls == []
+
+
+def test_an_old_agent_with_the_plain_label_is_replaced_in_place(
+    launchctl: FakeLaunchctl, tmp_path: Path
+) -> None:
+    old = write_old_plist(tmp_path, None, "--host", "127.0.0.1")
+    launchctl.loaded.add(OLD_LABEL)
+    item = make(launchctl, tmp_path, default_data_dir())
+    assert item.status().legacy
+    item.enable(keep_arguments=True)
+    assert read_plist(item)["ProgramArguments"] == [EXE, "serve", "--host", "127.0.0.1"]
+    assert old == item.plist_path
+    assert not item.status().legacy
+    assert OLD_LABEL in launchctl.loaded  # bootstrapped again, on the new plist
+
+
+def test_repair_from_the_old_agent_does_not_boot_out_the_server_answering(
+    launchctl: FakeLaunchctl, tmp_path: Path, data: Path
+) -> None:
+    old = write_old_plist(tmp_path, data)
+    launchctl.loaded.add(OLD_LABEL)
+    item = make(launchctl, tmp_path, data, lock_held=True, environ={"XPC_SERVICE_NAME": OLD_LABEL})
+    outcome = item.enable(serving_here=True, keep_arguments=True)
+    assert "bootout" not in launchctl.verbs()
+    assert "bootstrap" not in launchctl.verbs()
+    assert not old.exists()
+    assert item.plist_path.exists()
+    assert "Repaired" in outcome.message
+    assert "off and on" not in outcome.message
+
+
+def test_a_manual_serve_adopts_an_old_agent_that_is_crash_looping(
+    launchctl: FakeLaunchctl, tmp_path: Path, data: Path
+) -> None:
+    old = write_old_plist(tmp_path, data)
+    launchctl.loaded.add(OLD_LABEL)
+    item = make(launchctl, tmp_path, data, lock_held=True)
+    item.enable(serving_here=True)
+    assert launchctl.loaded == set()
+    assert not old.exists()
+    assert "bootstrap" not in launchctl.verbs()
+
+
+def test_disable_also_removes_an_old_agent_for_this_data_directory(
+    launchctl: FakeLaunchctl, tmp_path: Path, data: Path
+) -> None:
+    old = write_old_plist(tmp_path, data)
+    launchctl.loaded.add(OLD_LABEL)
+    make(launchctl, tmp_path, data).disable()
+    assert not old.exists()
+    assert launchctl.loaded == set()
+
+
+# -- the wait for a stopping serve -----------------------------------------------------------
+
+
+def test_a_terminal_reenable_waits_out_a_slow_shutdown_then_starts(
+    launchctl: FakeLaunchctl, tmp_path: Path, data: Path
+) -> None:
+    item = make(launchctl, tmp_path, data)
+    item.enable()
+    polls = {"n": 0}
+
+    def lock_held() -> bool:
+        polls["n"] += 1
+        return polls["n"] < 300  # 30 s at the poll interval: well past the old 5 s budget
+
+    slow = LoginItem(
+        data=data,
+        agents_dir=tmp_path / "LaunchAgents",
+        runner=launchctl,
+        uid=UID,
+        executable=Path(EXE),
+        macos=True,
+        environ={},
+        lock_held=lock_held,
+        sleep=lambda _s: None,
+    )
+    outcome = slow.enable()
+    assert outcome.started
+    assert launchctl.loaded == {item.label}
+
+
+def test_a_serve_that_never_lets_go_is_reported_honestly(
+    launchctl: FakeLaunchctl, tmp_path: Path, data: Path
+) -> None:
+    item = make(launchctl, tmp_path, data)
+    item.enable()
+    stuck = make(launchctl, tmp_path, data, lock_held=True)
+    outcome = stuck.enable()
+    assert not outcome.started
+    assert "not finished stopping" in outcome.message
+    assert "running now" not in outcome.message
+    assert launchctl.loaded == set()
+    assert outcome.status.enabled  # the plist is in place for the next login

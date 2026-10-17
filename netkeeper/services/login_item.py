@@ -25,6 +25,7 @@ Nothing here runs ``launchctl`` or touches ``~/Library/LaunchAgents`` except thr
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import plistlib
@@ -55,6 +56,10 @@ UNSUPPORTED_REASON: Final = (
 
 _LAUNCHCTL_TIMEOUT_S: Final = 15
 _STOP_WAIT_S: Final = 5.0
+_LOCK_WAIT_S: Final = 50.0
+"""A serve shuts down within this: the campaign engine can wait 45 s for a send."""
+WRAPPER_NAME: Final = "serve-launchd.sh"
+"""The script the removed install-launchd.sh pointed its agent at."""
 _POLL_S: Final = 0.1
 _FILE_MODE: Final = 0o644
 _LOG_MODE: Final = 0o600
@@ -143,6 +148,9 @@ class Status:
     plist_executable: str | None
     """What the plist runs; differs from the installed ``netkeeper`` after a move."""
     stale: bool
+    legacy: bool
+    """An agent the removed install-launchd.sh wrote serves this data directory. Its
+    wrapper script is gone, so it cannot start; enabling adopts it."""
 
     @property
     def enabled(self) -> bool:
@@ -225,6 +233,7 @@ class LoginItem:
                 this_serve_is_the_agent=False,
                 plist_executable=None,
                 stale=False,
+                legacy=False,
             )
         executable = self._plist_executable()
         installed = self.plist_path.is_file()
@@ -242,17 +251,54 @@ class LoginItem:
             stale=installed
             and self._executable is not None
             and executable != str(self._executable),
+            legacy=self._adoptable_legacy() is not None,
+        )
+
+    def _adoptable_legacy(self) -> _Legacy | None:
+        legacy = self._legacy()
+        return legacy if legacy is not None and legacy.serves_here else None
+
+    def _legacy(self) -> _Legacy | None:
+        """The plist the old script wrote, if it is there. It always used the plain
+        label, whichever data directory it served, and ran ``serve-launchd.sh``."""
+        path = self._agents_dir / f"{LABEL_BASE}.plist"
+        document = _read_plist(path)
+        if document is None:
+            return None
+        arguments = _arguments(document)
+        if not arguments or Path(arguments[0]).name != WRAPPER_NAME:
+            return None
+        env = document.get("EnvironmentVariables")
+        named = env.get(paths.DATA_ENV) if isinstance(env, dict) else None
+        serves = Path(named).expanduser() if isinstance(named, str) and named else None
+        serves_here = _same_directory(serves if serves else paths.default_data_dir(), self._data)
+        return _Legacy(
+            path=path,
+            serves=serves if serves else paths.default_data_dir(),
+            serves_here=serves_here,
+            arguments=arguments,
         )
 
     def _plist_executable(self) -> str | None:
-        try:
-            with self.plist_path.open("rb") as handle:
-                arguments = plistlib.load(handle).get("ProgramArguments")
-        except (OSError, plistlib.InvalidFileException, ValueError):
-            return None
-        if isinstance(arguments, list) and arguments and isinstance(arguments[0], str):
-            return arguments[0]
-        return None
+        document = _read_plist(self.plist_path)
+        arguments = _arguments(document) if document is not None else None
+        return arguments[0] if arguments else None
+
+    def _kept_arguments(self, legacy: _Legacy | None) -> tuple[str | None, int | None]:
+        """``--host`` and ``--port`` of the plist about to be replaced (this label's, else
+        an adoptable old one), so a rewrite does not move the agent to the config's."""
+        document = _read_plist(self.plist_path)
+        arguments = _arguments(document) if document is not None else None
+        if arguments is None and legacy is not None:
+            arguments = legacy.arguments
+        host: str | None = None
+        port: int | None = None
+        for flag, value in zip(arguments or [], (arguments or [])[1:], strict=False):
+            if flag == "--host":
+                host = value
+            elif flag == "--port" and value.isdigit():
+                port = int(value)
+        return host, port
 
     def _is_loaded(self) -> bool:
         return self._runner(["print", self._service]).returncode == 0
@@ -308,7 +354,11 @@ class LoginItem:
         self._logs.mkdir(parents=True, exist_ok=True)
         self._logs.chmod(0o700)
         for name in (SERVE_LOG, SERVE_ERR_LOG):  # may hold warning text: private, like the log
-            os.close(os.open(self._logs / name, os.O_CREAT | os.O_APPEND | os.O_WRONLY, _LOG_MODE))
+            log_fd = os.open(self._logs / name, os.O_CREAT | os.O_APPEND | os.O_WRONLY, _LOG_MODE)
+            try:
+                os.fchmod(log_fd, _LOG_MODE)  # a file the old setup made keeps its old mode
+            finally:
+                os.close(log_fd)
         target = self.plist_path
         temporary = target.with_name(f".{target.name}.tmp")
         descriptor = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, _FILE_MODE)
@@ -329,19 +379,40 @@ class LoginItem:
         host: str | None = None,
         port: int | None = None,
         serving_here: bool = False,
+        keep_arguments: bool = False,
     ) -> Outcome:
-        """Install or replace the agent.
+        """Install or replace the agent, adopting one the old script installed.
 
         ``serving_here`` says the caller is a ``serve`` itself (the Settings switch is):
         the lock is then held by definition. A held lock means the agent is registered
         and enabled but not started, so there is never a second ``serve``.
+        ``keep_arguments`` keeps the ``--host`` and ``--port`` of the plist it replaces.
+
+        The old script always used the plain label, even with ``--data-dir``. An old
+        plist serving this data directory is booted out and removed once the new one
+        is in place, so two agents never fight over one serve lock. An old plist serving
+        another data directory is never touched, except that it blocks the default
+        directory's plain label, which it is: that is refused, naming the command that
+        moves it first.
         """
         self._require_macos()
+        legacy = self._legacy()
+        if legacy is not None and not legacy.serves_here and self.label == LABEL_BASE:
+            raise LoginItemError(
+                f"The login item at {legacy.path.name} was installed by the old script for"
+                f" {legacy.serves}. Run `{paths.DATA_ENV}={legacy.serves} netkeeper login-item"
+                " on` first to move it to its own name, then try again."
+            )
+        adopting = legacy if legacy is not None and legacy.serves_here else None
+        if keep_arguments and host is None and port is None:
+            host, port = self._kept_arguments(adopting)
         content = self.render_plist(host=host, port=port)
         previous = self.plist_path.read_bytes() if self.plist_path.is_file() else None
         self._write_plist(content)
         try:
-            return self._load(changed=previous != content, serving_here=serving_here)
+            return self._load(
+                changed=previous != content, serving_here=serving_here, adopting=adopting
+            )
         except LoginItemError:
             if previous is None:  # leave the state as it was: nothing half-installed
                 self.plist_path.unlink(missing_ok=True)
@@ -349,27 +420,51 @@ class LoginItem:
                 self._write_plist(previous)
             raise
 
-    def _load(self, *, changed: bool, serving_here: bool) -> Outcome:
+    def _load(self, *, changed: bool, serving_here: bool, adopting: _Legacy | None) -> Outcome:
         self._launchctl("enable", self._service)  # clears a `launchctl disable` from before
+        me = self._environ.get("XPC_SERVICE_NAME")
+        if adopting is not None and me == LABEL_BASE:
+            # This server is the old agent's job. Booting it out would end the server
+            # answering, and the new agent cannot start under it (the serve lock).
+            if self.label != LABEL_BASE:
+                adopting.path.unlink(missing_ok=True)
+            return Outcome(
+                self.status(),
+                started=False,
+                message=(
+                    "Repaired. This copy is still running under the old agent, which launchd"
+                    " cannot restart now that the old script is gone. The repaired agent takes"
+                    " over at your next login; to switch sooner, run netkeeper login-item on in"
+                    " a terminal."
+                ),
+            )
         loaded = self._is_loaded()
-        if loaded and self._environ.get("XPC_SERVICE_NAME") == self.label:
+        if loaded and me == self.label:
             # This serve is the agent. Booting it out would stop the server answering.
             note = "The login item was already on and is running this server." + (
                 " Its new settings apply the next time it starts." if changed else ""
             )
             return Outcome(self.status(), started=False, message=note)
+        stopped = False
+        if adopting is not None and self.label != LABEL_BASE:
+            stopped = self._stop(f"{self._domain}/{LABEL_BASE}") or stopped
+            adopting.path.unlink(missing_ok=True)
         if loaded:
-            self._launchctl("bootout", self._service)
-            self._wait_until(lambda: not self._is_loaded())
-            self._wait_until(lambda: not self._lock_held())
+            stopped = self._stop(self._service) or stopped
+        if stopped and not serving_here:
+            self._wait_until(lambda: not self._lock_held(), _LOCK_WAIT_S)
         if serving_here or self._lock_held():
+            if serving_here:
+                why = "netkeeper is running now"
+            else:
+                why = "the previous copy of netkeeper has not finished stopping"
             return Outcome(
                 self.status(),
                 started=False,
                 message=(
-                    "Turned on. netkeeper is running now, so launchd will start it at your next"
+                    f"Turned on. {why[0].upper()}{why[1:]}, so launchd will start it at your next"
                     " login, not before. Starting another copy now would only fail against the"
-                    " one running."
+                    " serve lock."
                 ),
             )
         self._launchctl("bootstrap", self._domain, str(self.plist_path))
@@ -379,34 +474,51 @@ class LoginItem:
             message="Turned on. netkeeper is starting now and at every login.",
         )
 
+    def _stop(self, service: str) -> bool:
+        """Boot out ``service`` if launchd has it loaded; whether it was."""
+        if self._runner(["print", service]).returncode != 0:
+            return False
+        self._launchctl("bootout", service)
+        self._wait_until(lambda: self._runner(["print", service]).returncode != 0, _STOP_WAIT_S)
+        return True
+
     def disable(self, *, serving_here: bool = False) -> Outcome:
-        """Stop the agent and remove its plist. Data and logs stay.
+        """Stop the agent and remove its plist, and an old script's for this data
+        directory. Data and logs stay.
 
         When this ``serve`` is the agent (``serving_here``), stopping it ends the server
         answering, so the stop runs a second after the reply.
         """
         self._require_macos()
-        was_loaded = self._is_loaded()
-        # The plist goes first: if the stop below fails, the item is still off at login.
+        legacy = self._adoptable_legacy()
+        services = [self._service]
+        if legacy is not None and self.label != LABEL_BASE:
+            services.append(f"{self._domain}/{LABEL_BASE}")
+        me = self._environ.get("XPC_SERVICE_NAME")
+        loaded = [
+            service for service in services if self._runner(["print", service]).returncode == 0
+        ]
+        # The plists go first: if a stop below fails, the item is still off at login.
         self.plist_path.unlink(missing_ok=True)
+        if legacy is not None:
+            legacy.path.unlink(missing_ok=True)
         message = "Turned off. netkeeper will not start at login."
-        if was_loaded:
-            if serving_here and self._environ.get("XPC_SERVICE_NAME") == self.label:
-                self._defer(lambda: self._bootout_quietly())
+        for service in loaded:
+            if serving_here and service.rsplit("/", 1)[-1] == me:
+                self._defer(functools.partial(self._bootout_quietly, service))
                 message = (
                     "Turned off. This copy of netkeeper was started by the login item, so it"
                     " stops in a moment. Run netkeeper serve to start it again."
                 )
             else:
-                self._launchctl("bootout", self._service)
-                self._wait_until(lambda: not self._is_loaded())
+                self._stop(service)
         return Outcome(self.status(), started=False, message=message)
 
     # -- helpers ----------------------------------------------------------------------
 
-    def _bootout_quietly(self) -> None:
+    def _bootout_quietly(self, service: str) -> None:
         try:
-            self._runner(["bootout", self._service])
+            self._runner(["bootout", service])
         except LoginItemError:
             log.warning("could not stop the login item", exc_info=True)
 
@@ -416,16 +528,54 @@ class LoginItem:
             detail = (done.stderr or done.stdout).strip() or f"exit status {done.returncode}"
             raise LoginItemError(f"launchctl {args[0]} failed: {detail}")
 
-    def _wait_until(self, condition: Callable[[], bool]) -> None:
-        """bootout returns before the job is gone, and a bootstrap that races it fails."""
-        for _ in range(int(_STOP_WAIT_S / _POLL_S)):
+    def _wait_until(self, condition: Callable[[], bool], budget_s: float) -> bool:
+        """bootout returns before the job is gone, and a bootstrap that races it fails.
+        Whether ``condition`` held within ``budget_s``."""
+        for _ in range(int(budget_s / _POLL_S)):
             if condition():
-                return
+                return True
             self._sleep(_POLL_S)
+        return condition()
 
     def _require_macos(self) -> None:
         if not self._macos:
             raise UnsupportedPlatform(UNSUPPORTED_REASON)
+
+
+@dataclass(frozen=True, slots=True)
+class _Legacy:
+    """A plist the removed ``install-launchd.sh`` wrote."""
+
+    path: Path
+    serves: Path
+    serves_here: bool
+    arguments: list[str]
+
+
+def _read_plist(path: Path) -> dict[str, object] | None:
+    try:
+        with path.open("rb") as handle:
+            document = plistlib.load(handle)
+    except (OSError, plistlib.InvalidFileException, ValueError):
+        return None
+    return document if isinstance(document, dict) else None
+
+
+def _arguments(document: Mapping[str, object]) -> list[str] | None:
+    arguments = document.get("ProgramArguments")
+    if isinstance(arguments, list) and arguments and all(isinstance(a, str) for a in arguments):
+        return [str(a) for a in arguments]
+    return None
+
+
+def _same_directory(left: Path, right: Path) -> bool:
+    left, right = left.expanduser().resolve(), right.expanduser().resolve()
+    if left == right:
+        return True
+    try:
+        return left.samefile(right)
+    except OSError:
+        return False
 
 
 def _serve_lock_held() -> bool:

@@ -81,7 +81,7 @@ Everything else is in the UI. These remain in a terminal or a file, most of them
 
 | Action | How |
 |---|---|
-| Start `serve` at login | Settings, Run at login, or `netkeeper login-item on`. See [Run at login](../../README.md#run-at-login-macos). |
+| Start `serve` at login | Settings, Run at login, or `netkeeper login-item on`. See [Run at login](../../README.md#run-at-login-macos). Two data directories each need their own `web.port`: the second `serve` can't bind a port the first holds, and its login item would restart it every 10 seconds. |
 | Start the LinkedIn Chrome | `make chrome`, or the command `netkeeper browser launch` prints. netkeeper never starts a browser. |
 | Check the LinkedIn Chrome (optional) | `netkeeper preflight`. |
 | Turn on LinkedIn auto-send | `config.toml`: `[campaigns] linkedin_auto_send = true`, then restart `serve`. Read [ADR 0008](../adr/0008-auto-send.md) first. |

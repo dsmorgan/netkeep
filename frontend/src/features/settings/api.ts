@@ -263,6 +263,14 @@ export async function setLoginItem(enabled: boolean): Promise<LoginItem> {
   return data
 }
 
+/** Rewrite the plist for this netkeeper and adopt an old script's agent; works when this
+ * server is that agent. */
+export async function repairLoginItem(): Promise<LoginItem> {
+  const { data, error, response } = await api.POST('/api/v1/login-item/repair')
+  if (data === undefined) throw failure(error, response, 'POST /login-item/repair')
+  return data
+}
+
 export type SupportLevels = components['schemas']['SupportLevelsOut']
 export type SupportLevel = components['schemas']['SupportLevelOut']
 export type SupportLevelName = SupportLevel['level']
