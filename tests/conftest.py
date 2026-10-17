@@ -9,6 +9,7 @@ import pytest
 from browser_guard import RealBrowserBlocked, is_personal_cdp
 from fastapi import FastAPI
 from gmail_fakes import FakeGoogle, MemoryKeyring
+from local_api import LocalKey
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -256,7 +257,9 @@ async def running_app(app: FastAPI) -> AsyncIterator[FastAPI]:
 async def client(running_app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
     """An in-process HTTP client. State-changing requests need the CSRF header."""
     transport = httpx.ASGITransport(app=running_app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://127.0.0.1", auth=LocalKey(running_app)
+    ) as client:
         yield client
 
 

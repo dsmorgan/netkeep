@@ -1,7 +1,9 @@
 """Secrets in the Keychain through ``keyring`` (spec 15; CLAUDE.md "Secrets").
 
 Every secret is stored under the service :func:`service_name` with the name
-``<user_id>/<name>``, so two users' secrets never share an entry. Nothing here
+``<user_id>/<name>``, so two users' secrets never share an entry. A secret that
+belongs to the install rather than to a user (the local API key, #618) is named
+``install/<name>``. Nothing here
 logs a secret's value; a log line names the entry at most.
 
 The service is per data directory (#580). Every fresh database has user 1 and
@@ -62,40 +64,71 @@ def entry_name(user_id: int, name: str) -> str:
     return f"{user_id}/{name}"
 
 
+def install_entry_name(name: str) -> str:
+    """An install-wide entry's name under :func:`service_name`: ``install/<name>``."""
+    if not name or name.startswith("/"):
+        raise ValueError(f"a secret needs a relative name, not {name!r}")
+    return f"install/{name}"
+
+
 def get_secret(user_id: int, name: str) -> str | None:
     """The secret stored as ``name`` for ``user_id``, or None when there is none."""
-    try:
-        return keyring.get_password(service_name(), entry_name(user_id, name))
-    except KeyringError as exc:
-        raise KeychainUnavailable(_why(exc, "read", user_id, name)) from exc
+    return _get(entry_name(user_id, name))
 
 
 def set_secret(user_id: int, name: str, value: str) -> None:
     """Store ``value`` as ``name`` for ``user_id``, replacing what was there."""
-    if not value:
-        raise ValueError("refusing to store an empty secret")
-    try:
-        keyring.set_password(service_name(), entry_name(user_id, name), value)
-    except KeyringError as exc:
-        raise KeychainUnavailable(_why(exc, "write", user_id, name)) from exc
-    log.info("stored secret %s (service %s)", entry_name(user_id, name), service_name())
+    _set(entry_name(user_id, name), value)
 
 
 def delete_secret(user_id: int, name: str) -> bool:
     """Remove ``name`` for ``user_id``. Returns whether there was one to remove."""
+    return _delete(entry_name(user_id, name))
+
+
+def get_install_secret(name: str) -> str | None:
+    """The install-wide secret stored as ``name``, or None when there is none."""
+    return _get(install_entry_name(name))
+
+
+def set_install_secret(name: str, value: str) -> None:
+    """Store the install-wide ``value`` as ``name``, replacing what was there."""
+    _set(install_entry_name(name), value)
+
+
+def delete_install_secret(name: str) -> bool:
+    """Remove the install-wide ``name``. Returns whether there was one to remove."""
+    return _delete(install_entry_name(name))
+
+
+def _get(entry: str) -> str | None:
     try:
-        keyring.delete_password(service_name(), entry_name(user_id, name))
+        return keyring.get_password(service_name(), entry)
+    except KeyringError as exc:
+        raise KeychainUnavailable(_why(exc, "read", entry)) from exc
+
+
+def _set(entry: str, value: str) -> None:
+    if not value:
+        raise ValueError("refusing to store an empty secret")
+    try:
+        keyring.set_password(service_name(), entry, value)
+    except KeyringError as exc:
+        raise KeychainUnavailable(_why(exc, "write", entry)) from exc
+    log.info("stored secret %s (service %s)", entry, service_name())
+
+
+def _delete(entry: str) -> bool:
+    try:
+        keyring.delete_password(service_name(), entry)
     except PasswordDeleteError:
         return False
     except KeyringError as exc:
-        raise KeychainUnavailable(_why(exc, "delete", user_id, name)) from exc
-    log.info("deleted secret %s (service %s)", entry_name(user_id, name), service_name())
+        raise KeychainUnavailable(_why(exc, "delete", entry)) from exc
+    log.info("deleted secret %s (service %s)", entry, service_name())
     return True
 
 
-def _why(exc: KeyringError, verb: str, user_id: int, name: str) -> str:
+def _why(exc: KeyringError, verb: str, entry: str) -> str:
     # The backend's own message names the backend, never the value.
-    return (
-        f"could not {verb} {entry_name(user_id, name)} in the Keychain"
-        f" (service {service_name()}): {exc}"
-    )
+    return f"could not {verb} {entry} in the Keychain (service {service_name()}): {exc}"

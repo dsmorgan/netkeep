@@ -4,6 +4,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import { createQueryClient } from './api/query-client'
+import { SessionGate } from './features/session/session-gate'
 import { createAppRouter } from './router'
 
 import './index.css'
@@ -18,8 +19,10 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>
+    <SessionGate>
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>
+    </SessionGate>
   </StrictMode>,
 )

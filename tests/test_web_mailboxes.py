@@ -10,6 +10,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from gmail_fakes import CLIENT_ID, CLIENT_SECRET, FAKE_EMAIL, FakeGoogle, MemoryKeyring
+from local_api import LocalKey
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -110,7 +111,7 @@ async def test_the_client_goes_to_the_keychain(
     status = await _status(client)
     assert response.json() == status
     assert (status["client_configured"], status["client_id"]) == (True, CLIENT_ID)
-    [(key, value)] = memory_keyring.entries.items()
+    [(key, value)] = memory_keyring.user_entries().items()
     assert key[1].endswith("/gmail/oauth_client")
     assert CLIENT_SECRET in value
 
@@ -138,7 +139,7 @@ async def test_a_long_client_secret_is_refused_without_being_echoed(
     assert response.status_code == 422
     assert "over 300 characters" in response.json()["detail"]
     assert "long-secret-" not in response.text
-    assert memory_keyring.entries == {}
+    assert memory_keyring.user_entries() == {}
 
 
 async def test_a_locked_keychain_answers_503(
@@ -262,7 +263,7 @@ async def test_a_second_account_is_refused_while_one_is_connected(
         "gmail": "error",
         "reason": "other_mailbox_connected",
     }
-    assert len(memory_keyring.entries) == 2  # the client and the first token only
+    assert len(memory_keyring.user_entries()) == 2  # the client and the first token only
 
 
 # --- health -------------------------------------------------------------------------
@@ -583,7 +584,9 @@ def _app(
 
 
 def _client(app: FastAPI) -> httpx.AsyncClient:
-    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1")
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1", auth=LocalKey(app)
+    )
 
 
 async def test_the_app_sends_the_flow_where_it_is_told(

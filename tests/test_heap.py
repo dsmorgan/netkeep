@@ -17,6 +17,7 @@ import test_browser_safety as browser_safety
 import test_extractor_boundary
 import test_posture
 from fastapi import FastAPI
+from local_api import LocalKey
 from sqlalchemy.orm import Session
 
 from netkeeper.models import Base
@@ -82,7 +83,9 @@ async def test_fastapis_classifier_caches_are_dropped() -> None:
         return {"ok": True}
 
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://127.0.0.1", auth=LocalKey(app)
+    ) as client:
         assert (await client.get("/local")).status_code == 200
     assert any(c.cache_info().currsize for c in caches)  # type: ignore[attr-defined]
 

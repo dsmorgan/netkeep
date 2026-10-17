@@ -25,5 +25,6 @@ An ADR records one decision, the context that forced it, and its consequences. T
 | [0010](0010-contact-channel-preference.md) | Contact channel preference: you set it, a campaign skips a mismatch unless you override, and routing comes later | Accepted |
 | [0011](0011-installation-and-updates.md) | Installation and updates: PyPI and uv first, a one-line installer in front, Homebrew next, a signed app only if needed | Proposed |
 | [0012](0012-chrome-profiles.md) | Chrome profiles: one netkeeper Chrome for the UI, LinkedIn, and setup | Proposed |
+| [0013](0013-local-api-secret.md) | A per-install key for the local API, handed to the browser as a cookie | Proposed |
 
 The mechanics behind ADRs 0006, 0007, and 0008 (the browser inputs, their checks, and their pins) are in [How netkeeper drives a LinkedIn page](../linkedin-browser-inputs.md).

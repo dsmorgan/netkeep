@@ -49,7 +49,7 @@ from netkeeper.models import User
 from netkeeper.models.base import utcnow
 from netkeeper.paths import data_dir
 from netkeeper.scoping import install_scope_guard
-from netkeeper.services import serve_lock, ui_settings
+from netkeeper.services import local_api_key, serve_lock, ui_settings
 from netkeeper.services.backup import BACKUPS_DIRNAME
 from netkeeper.services.backup_job import NightlyBackups, backs_up
 from netkeeper.services.budgets import (
@@ -259,6 +259,9 @@ def _start(app: FastAPI, engine: Engine, settings: Settings) -> TaskRunner:
     app.state.executor = None
     app.state.scheduler = None
     app.state.auth = LocalSingleUser()
+    # The per-install key every /api/ request is checked against (#618, ADR 0013); made
+    # in the Keychain on the first start.
+    app.state.local_api_key = local_api_key.load_or_create()
     # One signing key per process, never written down: an outstanding bulk
     # confirmation does not survive a restart, and nothing has to be cleaned up.
     app.state.confirmations = Signer.generated()

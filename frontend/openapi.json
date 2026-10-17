@@ -13640,6 +13640,25 @@
         "title": "SessionFlagClearIn",
         "type": "object"
       },
+      "SessionOut": {
+        "description": "Whether this browser is connected to the local API (#618).\n\n``claimable``: the first-browser claim is still open, so ``POST /session/claim``\nconnects this browser without a link.",
+        "properties": {
+          "claimable": {
+            "title": "Claimable",
+            "type": "boolean"
+          },
+          "connected": {
+            "title": "Connected",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "connected",
+          "claimable"
+        ],
+        "title": "SessionOut",
+        "type": "object"
+      },
       "Severity": {
         "enum": [
           "error",
@@ -24574,6 +24593,86 @@
         "summary": "Get Posture",
         "tags": [
           "posture"
+        ]
+      }
+    },
+    "/api/v1/session": {
+      "get": {
+        "operationId": "get_session",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Session",
+        "tags": [
+          "session"
+        ]
+      }
+    },
+    "/api/v1/session/claim": {
+      "post": {
+        "description": "Connect this browser without a link, if no browser has yet (ADR 0013 rule 6).",
+        "operationId": "claim_session",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "A browser already claimed it; use `netkeeper open`"
+          },
+          "503": {
+            "description": "The Keychain refused to record the claim"
+          }
+        },
+        "summary": "Claim Session",
+        "tags": [
+          "session"
+        ]
+      }
+    },
+    "/api/v1/session/connect": {
+      "get": {
+        "description": "Swap a connect link's one-time code for the session cookie.",
+        "operationId": "connect_session",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 200,
+              "title": "Code",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "To the UI, connected, or to /?connect=expired"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Connect Session",
+        "tags": [
+          "session"
         ]
       }
     },
