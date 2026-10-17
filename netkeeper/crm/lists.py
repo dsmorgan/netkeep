@@ -91,6 +91,7 @@ from netkeeper.crm.filters import (
     retire_ids,
 )
 from netkeeper.db import is_writer
+from netkeeper.logging_setup import personal
 from netkeeper.models import (
     LIST_NAME_MAX_LENGTH,
     VIEW_NAME_MAX_LENGTH,
@@ -384,7 +385,9 @@ def create_list(
     session.add(row)
     session.flush()
     _guard_dependents(session, user, before)
-    log.debug("created list %d %r (%s) for user %d", row.id, row.name, kind.value, user.id)
+    log.debug(
+        "created list %d %r (%s) for user %d", row.id, personal(row.name), kind.value, user.id
+    )
     return row
 
 
@@ -686,7 +689,7 @@ def member_counts(
         try:
             counts[row.id] = ListCount(_member_count_for(session, user, row, everything))
         except FilterError as exc:
-            log.warning("list %d of user %d does not compile: %s", row.id, user.id, exc)
+            log.warning("list %d of user %d does not compile: %s", row.id, user.id, personal(exc))
             counts[row.id] = ListCount(0, str(exc))
     return counts
 
@@ -738,7 +741,7 @@ def create_view(
     )
     session.add(row)
     session.flush()
-    log.debug("created view %d %r for user %d", row.id, row.name, user.id)
+    log.debug("created view %d %r for user %d", row.id, personal(row.name), user.id)
     return row
 
 

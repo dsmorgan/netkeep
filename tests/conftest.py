@@ -16,6 +16,7 @@ from netkeeper import migrations
 from netkeeper.campaigns import gmail_oauth
 from netkeeper.config import Settings
 from netkeeper.db import DATABASE_FILENAME, database_url, make_engine, make_session_factory
+from netkeeper.logging_setup import remove_file_handler
 from netkeeper.models import Base
 from netkeeper.scoping import install_scope_guard
 from netkeeper.web.app import create_app
@@ -43,12 +44,21 @@ def _clean_netkeeper_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     for name in (
         "NETKEEPER_CONFIG",
         "NETKEEPER_LOG_LEVEL",
+        "NETKEEPER_LOG_STDERR_LEVEL",
         "NETKEEPER_DATABASE_URL",
         "NETKEEPER_FRONTEND_DIST",
         "NETKEEPER_KEYCHAIN_SERVICE",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("NETKEEPER_DATA", str(tmp_path / "netkeeper-data"))
+
+
+@pytest.fixture(autouse=True)
+def _close_log_file() -> Iterator[None]:
+    """A test that set up logging (a CLI command, ``setup_logging``) leaves no log file
+    open on its data directory for the next test to write into (#602)."""
+    yield
+    remove_file_handler()
 
 
 @pytest.fixture(autouse=True)

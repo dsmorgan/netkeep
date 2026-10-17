@@ -129,6 +129,7 @@ from netkeeper.campaigns.render import MergeValues, Severity, TemplateRenderErro
 from netkeeper.campaigns.templates import block_reason, contact_fields
 from netkeeper.config import Settings
 from netkeeper.linkedin.messaging import MessageOutcome, MessageOutcomeKind
+from netkeeper.logging_setup import personal
 from netkeeper.models import (
     Campaign,
     CampaignStatus,
@@ -1103,7 +1104,10 @@ class _Claimer:
             rendered = render(template.channel, None, template.body, values, today=today)
         except TemplateRenderError as exc:
             log.warning(
-                "enrollment %d step %d did not render: %s", enrollment.id, step.position, exc
+                "enrollment %d step %d did not render: %s",
+                enrollment.id,
+                step.position,
+                personal(exc),
             )
             return self.park(enrollment, Skip.RENDER_FAILED)
         if not rendered.body.strip():

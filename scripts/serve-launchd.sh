@@ -32,6 +32,22 @@ if [ ! -x "$netkeeper" ]; then
   exit 1
 fi
 
+# Under the agent (NETKEEPER_LAUNCHD_LOG_DIR set by install-launchd.sh), stdout and
+# stderr are reopened here, after the one over ROTATE_BYTES moves to <name>.1, so
+# serve.log and serve.err.log never grow without bound. launchd's own handles stay on
+# the moved file and nothing writes to them after this.
+ROTATE_BYTES=5242880
+if [ -n "${NETKEEPER_LAUNCHD_LOG_DIR:-}" ]; then
+  mkdir -p "$NETKEEPER_LAUNCHD_LOG_DIR"
+  for name in serve.log serve.err.log; do
+    file="$NETKEEPER_LAUNCHD_LOG_DIR/$name"
+    if [ -f "$file" ] && [ "$(wc -c <"$file" | tr -d " ")" -gt "$ROTATE_BYTES" ]; then
+      mv -f "$file" "$file.1"
+    fi
+  done
+  exec >>"$NETKEEPER_LAUNCHD_LOG_DIR/serve.log" 2>>"$NETKEEPER_LAUNCHD_LOG_DIR/serve.err.log"
+fi
+
 echo "serve-launchd.sh: $(date -u +%Y-%m-%dT%H:%M:%SZ) applying migrations"
 "$netkeeper" db upgrade
 echo "serve-launchd.sh: $(date -u +%Y-%m-%dT%H:%M:%SZ) starting netkeeper serve $*"

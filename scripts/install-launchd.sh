@@ -3,8 +3,10 @@
 # and restarts it after a crash. macOS only; docs/architecture.md section 16.
 #
 # The agent runs scripts/serve-launchd.sh, which applies migrations and then
-# execs `netkeeper serve` from this repository's .venv. stdout and stderr go to
-# <data_dir>/logs/. Re-running replaces the plist and reloads the agent.
+# execs `netkeeper serve` from this repository's .venv. netkeeper writes its own
+# rotating log, <data_dir>/logs/netkeeper.log; stdout and stderr (warnings, errors,
+# crashes) go to serve.log and serve.err.log beside it, which the wrapper rotates at
+# each start. Re-running replaces the plist and reloads the agent.
 set -eu
 # pipefail is not POSIX; turn it on where the shell has it (bash, zsh, newer dash).
 (set -o pipefail) 2>/dev/null && set -o pipefail
@@ -57,7 +59,8 @@ Options:
 
 Options that take a value also accept --name=value.
 
-Logs:   <data_dir>/logs/serve.log and serve.err.log
+Logs:   <data_dir>/logs/netkeeper.log (everything), serve.log and serve.err.log
+        (stdout, and stderr's warnings, errors and crashes)
 Status: launchctl print $service
 USAGE
 }
@@ -203,15 +206,25 @@ PLIST
   <key>WorkingDirectory</key>
   <string>$(xml_escape "$repo_root")</string>
 PLIST
-  if [ -n "$data_dir" ]; then
-    cat <<PLIST
+  cat <<PLIST
   <key>EnvironmentVariables</key>
   <dict>
+PLIST
+  if [ -n "$data_dir" ]; then
+    cat <<PLIST
     <key>NETKEEPER_DATA</key>
     <string>$(xml_escape "$data_dir")</string>
-  </dict>
 PLIST
   fi
+  # The application log is <data_dir>/logs/netkeeper.log, rotated by netkeeper itself;
+  # stderr keeps warnings and crashes, and the wrapper rotates both files at each start.
+  cat <<PLIST
+    <key>NETKEEPER_LOG_STDERR_LEVEL</key>
+    <string>WARNING</string>
+    <key>NETKEEPER_LAUNCHD_LOG_DIR</key>
+    <string>$(xml_escape "$log_dir")</string>
+  </dict>
+PLIST
   cat <<PLIST
   <key>RunAtLoad</key>
   <true/>
@@ -277,5 +290,6 @@ else
   echo "Installed the $LABEL agent; netkeeper serve starts now and at every login."
 fi
 echo "  status:    launchctl print $service"
-echo "  logs:      $log_dir/serve.log and serve.err.log"
+echo "  log:       $log_dir/netkeeper.log"
+echo "  crashes:   $log_dir/serve.err.log"
 echo "  uninstall: $script_dir/install-launchd.sh --uninstall"

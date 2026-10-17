@@ -62,7 +62,7 @@ from netkeeper.linkedin.preflight import preflight as run_preflight
 from netkeeper.linkedin.rehearse import NotANeutralSite, Rehearsal, serve_replica
 from netkeeper.linkedin.rehearse import rehearse as run_rehearsal
 from netkeeper.linkedin.rehearse import render as render_rehearsal
-from netkeeper.logging_setup import setup_logging
+from netkeeper.logging_setup import log_file, set_log_rotation, setup_logging
 from netkeeper.models import (
     Campaign,
     Contact,
@@ -255,6 +255,7 @@ class _PathsBlock:
     data_dir: str
     config: str
     keychain_service: str
+    log_file: str
 
 
 @app.callback()
@@ -279,7 +280,7 @@ def _file_settings_or_exit(state: CliState) -> Settings:
     ``serve`` (which resolves them per user itself) and commands that only read
     file-only keys."""
     try:
-        return load_settings(state.config)
+        return _with_log_rotation(load_settings(state.config))
     except ConfigError as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -289,7 +290,14 @@ def _load_settings_or_exit(state: CliState) -> Settings:
     """The settings in force for the local user (#343): ``config.toml``, then the
     Settings page's values, then the defaults. A command run by hand obeys the same
     budgets and hours the web UI shows."""
-    return _with_settings_page(_file_settings_or_exit(state))
+    return _with_log_rotation(_with_settings_page(_file_settings_or_exit(state)))
+
+
+def _with_log_rotation(settings: Settings) -> Settings:
+    """``settings``, after their ``[logs]`` limits are applied to this command's log file
+    (#602). A command that never loads settings rotates at the defaults."""
+    set_log_rotation(max_mb=settings.logs.max_mb, keep=settings.logs.keep)
+    return settings
 
 
 def _with_settings_page(settings: Settings) -> Settings:
@@ -393,7 +401,10 @@ def config_show(ctx: typer.Context) -> None:
     settings = _load_settings_or_exit(state)
     source = "defaults" if settings.source_path is None else str(settings.source_path)
     paths = _PathsBlock(
-        data_dir=str(data_dir()), config=source, keychain_service=keychain.service_name()
+        data_dir=str(data_dir()),
+        config=source,
+        keychain_service=keychain.service_name(),
+        log_file=str(log_file()),
     )
     if settings.ui_keys:
         typer.echo(f"# from the Settings page: {', '.join(sorted(settings.ui_keys))}")

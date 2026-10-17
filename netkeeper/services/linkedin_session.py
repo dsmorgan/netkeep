@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 
 from netkeeper.db import is_writer
 from netkeeper.linkedin.classify import Outcome
+from netkeeper.logging_setup import personal
 from netkeeper.models import SyncRun, SyncRunKind, SyncRunStatus, User
 from netkeeper.models.base import utcnow
 from netkeeper.scoping import scoped
@@ -167,7 +168,7 @@ def clear_confirmed_flag(
         "session flag cleared by hand: %s raised %s at %s, user %d",
         current.outcome.value,
         current.flagged_at.isoformat(),
-        current.url or "/",
+        personal(current.url or "/"),
         user.id,
     )
     return current

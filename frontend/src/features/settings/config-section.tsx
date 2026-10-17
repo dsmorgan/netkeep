@@ -27,7 +27,7 @@ import {
 
 /**
  * Settings you change here instead of in config.toml (#343): LinkedIn budgets, active
- * hours, campaign defaults and backups. config.toml is optional; a key
+ * hours, campaign defaults, backups and logs. config.toml is optional; a key
  * it sets wins and shows here locked, with the file's path.
  */
 function message(error: unknown): string {
@@ -54,7 +54,14 @@ export function ConfigSections() {
             <CardHeader>
               <h2 className="font-heading text-sm leading-snug font-medium">{group.title}</h2>
               <CardDescription>
-                {group.description} Values in config.toml win over this page
+                {group.description}
+                {group.id === 'logs' && (
+                  <>
+                    {' '}
+                    The log is at <code className="break-all">{current.data.log_file}</code>.
+                  </>
+                )}{' '}
+                Values in config.toml win over this page
                 {current.data.config_path !== null ? ` (${current.data.config_path})` : ''}.
               </CardDescription>
             </CardHeader>

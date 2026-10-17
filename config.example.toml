@@ -52,3 +52,7 @@ daily_call_cap = 200
 [backup]
 nightly = true
 keep = 14
+
+[logs]
+max_mb = 10
+keep = 5
