@@ -135,6 +135,53 @@ def personal(value: object) -> Personal:
     return Personal(value)
 
 
+class PersonalExc(_Tagged):
+    """An exception in a log call: see :func:`personal_exc`."""
+
+    __slots__ = ("exc",)
+
+    def __init__(self, exc: BaseException) -> None:
+        self.exc = exc
+
+    def __str__(self) -> str:
+        return str(self.exc)
+
+    def __repr__(self) -> str:
+        return repr(self.exc)
+
+    def tagged(self) -> object:
+        return _MarkedExc(self.exc)
+
+
+class _MarkedExc:
+    """What a :class:`PersonalExc` becomes in the file: the type, then the marked message."""
+
+    __slots__ = ("exc",)
+
+    def __init__(self, exc: BaseException) -> None:
+        self.exc = exc
+
+    def __str__(self) -> str:
+        return f"{type(self.exc).__name__} {_mark(str(self.exc))}"
+
+    def __repr__(self) -> str:
+        name = type(self.exc).__name__
+        text = repr(self.exc)
+        rest = text[len(name) :] if text.startswith(name) else text
+        return f"{name}{_mark(rest)}"
+
+
+def personal_exc(exc: BaseException) -> PersonalExc:
+    """Mark an exception's text personal for one log call: ``log.info("x: %s", personal_exc(e))``.
+
+    Exception text can carry a name, a slug, an address or page text (#628). The terminal
+    shows ``str(exc)`` as it is; the file shows the type name, unmarked, then the message
+    between markers, so a support bundle redacts the message and keeps the type. Use it
+    with ``%s`` or ``%r``, never ``%d``. To log the type alone, log ``type(exc).__name__``.
+    """
+    return PersonalExc(exc)
+
+
 def _mark(text: str) -> str:
     # A marker inside the value would end the span early, and a redactor would leave the
     # rest; a value never needs one.

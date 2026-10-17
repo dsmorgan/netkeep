@@ -41,6 +41,7 @@ from typing import Any, Final
 from openpyxl import load_workbook
 from openpyxl.utils.datetime import from_excel
 
+from netkeeper.logging_setup import personal_exc
 from netkeeper.zipguard import ZipRefusal, guard_zip_members
 
 log = logging.getLogger(__name__)
@@ -196,7 +197,7 @@ def read_workbook(data: bytes) -> Workbook:
                 )
             except WorkbookError as exc:
                 skipped.append(SkippedTab(index, str(exc)))
-                log.info("history workbook: tab %d skipped (%s)", index + 1, exc)
+                log.info("history workbook: tab %d skipped (%s)", index + 1, personal_exc(exc))
     finally:
         book.close()
         formulas.close()

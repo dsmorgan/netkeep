@@ -92,6 +92,7 @@ from netkeeper.linkedin.enrich import (
     UnreadableVisit,
     run_enrichment,
 )
+from netkeeper.logging_setup import personal_exc
 from netkeeper.models import JsonValue, SyncRunKind, SyncRunStatus, SyncRunTrigger, User
 from netkeeper.services import budgets, enrich_plan, route_breaker, run_contacts, runs
 from netkeeper.services import heat as heat_service
@@ -298,7 +299,9 @@ class _Gate:
                     settings=self.settings.budget,
                 )
             except BudgetExceeded as exc:
-                log.info("enrichment: visit %d refused by the budget: %s", number, exc)
+                log.info(
+                    "enrichment: visit %d refused by the budget: %s", number, personal_exc(exc)
+                )
                 return StopReason.BUDGET
         return None
 

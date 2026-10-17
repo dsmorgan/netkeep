@@ -62,7 +62,7 @@ from netkeeper.linkedin.preflight import preflight as run_preflight
 from netkeeper.linkedin.rehearse import NotANeutralSite, Rehearsal, serve_replica
 from netkeeper.linkedin.rehearse import rehearse as run_rehearsal
 from netkeeper.linkedin.rehearse import render as render_rehearsal
-from netkeeper.logging_setup import log_file, set_log_rotation, setup_logging
+from netkeeper.logging_setup import log_file, personal_exc, set_log_rotation, setup_logging
 from netkeeper.models import (
     Campaign,
     Contact,
@@ -803,9 +803,9 @@ def _clear_session_flag_after_login(report: PreflightReport) -> list[str]:
         ]
     except OperationalError as exc:
         if _is_missing_schema(exc):
-            log.debug("no schema to clear the session flag in yet: %s", exc)
+            log.debug("no schema to clear the session flag in yet: %s", personal_exc(exc))
             return []
-        log.warning("could not clear the session flag: %s", exc)
+        log.warning("could not clear the session flag: %s", personal_exc(exc))
         return [f"could not clear the session flag: {exc.orig or exc}"]
     finally:
         engine.dispose()
@@ -855,9 +855,9 @@ def _record_session_evidence(report: PreflightReport, *, source: str) -> list[st
         return []
     except OperationalError as exc:
         if _is_missing_schema(exc):
-            log.debug("no schema to record the session check in yet: %s", exc)
+            log.debug("no schema to record the session check in yet: %s", personal_exc(exc))
             return []
-        log.warning("could not record the session check: %s", exc)
+        log.warning("could not record the session check: %s", personal_exc(exc))
         return [f"could not record the session check: {exc.orig or exc}"]
     finally:
         engine.dispose()
@@ -1223,7 +1223,9 @@ def _browser_lock_key() -> str:
     except (OperationalError, ProgrammingError) as exc:
         # SQLite says a missing table or column is operational; PostgreSQL says it
         # is a programming error. Either means a schema this cannot read yet.
-        log.debug("no account row to key the browser lock by (%s); using account 1", exc)
+        log.debug(
+            "no account row to key the browser lock by (%s); using account 1", personal_exc(exc)
+        )
         return SINGLE_ACCOUNT_KEY
     finally:
         engine.dispose()

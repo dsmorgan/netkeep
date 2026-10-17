@@ -91,7 +91,7 @@ from netkeeper.crm.filters import (
     retire_ids,
 )
 from netkeeper.db import is_writer
-from netkeeper.logging_setup import personal
+from netkeeper.logging_setup import personal, personal_exc
 from netkeeper.models import (
     LIST_NAME_MAX_LENGTH,
     VIEW_NAME_MAX_LENGTH,
@@ -689,7 +689,9 @@ def member_counts(
         try:
             counts[row.id] = ListCount(_member_count_for(session, user, row, everything))
         except FilterError as exc:
-            log.warning("list %d of user %d does not compile: %s", row.id, user.id, personal(exc))
+            log.warning(
+                "list %d of user %d does not compile: %s", row.id, user.id, personal_exc(exc)
+            )
             counts[row.id] = ListCount(0, str(exc))
     return counts
 

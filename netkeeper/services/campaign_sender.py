@@ -156,6 +156,7 @@ from netkeeper.campaigns.gmail import (
 )
 from netkeeper.config import Settings
 from netkeeper.db import session_scope
+from netkeeper.logging_setup import personal_exc
 from netkeeper.models import (
     Mailbox,
     MailboxArm,
@@ -767,7 +768,9 @@ class GmailSender:
                 gmail = self._open(user_id, mailbox_id)
             except (MailboxNotReady, MailboxNotFound) as exc:
                 log.info(
-                    "mailbox %d is not ready; the Message-ID check waits (%s)", mailbox_id, exc
+                    "mailbox %d is not ready; the Message-ID check waits (%s)",
+                    mailbox_id,
+                    personal_exc(exc),
                 )
                 continue
             mine = [c for c in checks if c.mailbox_id == mailbox_id]
@@ -782,7 +785,9 @@ class GmailSender:
             try:
                 gmail = self._open(user_id, mailbox_id)
             except (MailboxNotReady, MailboxNotFound) as exc:
-                log.info("mailbox %d is not ready; reconciling waits (%s)", mailbox_id, exc)
+                log.info(
+                    "mailbox %d is not ready; reconciling waits (%s)", mailbox_id, personal_exc(exc)
+                )
                 continue
             run.mailbox(
                 gmail,

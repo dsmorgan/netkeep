@@ -112,6 +112,7 @@ from netkeeper.linkedin.connections import (
 )
 from netkeeper.linkedin.observe import ObservationFailed
 from netkeeper.linkedin.pacing import human_delay
+from netkeeper.logging_setup import personal_exc
 from netkeeper.models import JsonValue, SyncRunKind, SyncRunStatus, SyncRunTrigger, User
 from netkeeper.services import budgets, route_breaker, run_contacts, runs
 from netkeeper.services import heat as heat_service
@@ -245,7 +246,9 @@ class _BudgetGate:
                     settings=self.settings.budget,
                 )
             except BudgetExceeded as exc:
-                log.info("connections sync: page %d refused by the budget: %s", number, exc)
+                log.info(
+                    "connections sync: page %d refused by the budget: %s", number, personal_exc(exc)
+                )
                 return False
         return True
 

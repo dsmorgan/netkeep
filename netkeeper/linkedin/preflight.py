@@ -35,6 +35,7 @@ from netkeeper.linkedin.browser import (
     ContextLike,
     PageLike,
 )
+from netkeeper.logging_setup import personal_exc
 
 log = logging.getLogger(__name__)
 
@@ -153,7 +154,7 @@ async def _read_fingerprint(page: PageLike) -> Fingerprint | None:
     try:
         raw = await page.evaluate(_FINGERPRINT_JS)
     except Exception as exc:
-        log.warning("could not read the browser fingerprint: %s", exc)
+        log.warning("could not read the browser fingerprint: %s", personal_exc(exc))
         return None
     if not isinstance(raw, Mapping):
         log.warning("the browser fingerprint came back as %s", type(raw).__name__)
@@ -189,7 +190,7 @@ async def _read_session_cookies(context: ContextLike) -> tuple[_SessionCookie, .
     try:
         jar = await context.cookies()
     except Exception as exc:
-        log.warning("could not read the browser's cookie jar: %s", exc)
+        log.warning("could not read the browser's cookie jar: %s", personal_exc(exc))
         return None
     found: list[_SessionCookie] = []
     for cookie in jar:

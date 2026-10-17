@@ -155,7 +155,7 @@ from netkeeper.campaigns.templates import activation_errors, block_reason, conta
 from netkeeper.config import Settings
 from netkeeper.crm.contacts import sendable_email
 from netkeeper.db import is_writer, session_scope
-from netkeeper.logging_setup import personal
+from netkeeper.logging_setup import personal, personal_exc
 from netkeeper.models import (
     Campaign,
     CampaignStatus,
@@ -1610,7 +1610,7 @@ class _Chooser:
             slots = self.blocks.slots or slots_for(self.settings, user)
             hours = self.blocks.hours or sending_hours.read(session, user)
         except schedule.ScheduleError as exc:
-            log.warning("campaign %d sends nothing: %s", campaign.id, exc)
+            log.warning("campaign %d sends nothing: %s", campaign.id, personal_exc(exc))
             self.block_campaign(campaign.id, (Skip.BAD_SCHEDULE,))
             self.skip(enrollment, Skip.BAD_SCHEDULE)
             return None
@@ -2799,7 +2799,7 @@ def run_tick(
         _spacing_gap(settings, random.Random(0))  # noqa: S311 -- a check, not crypto
     except ValueError as exc:
         # Refused before anything is claimed: sends are never a burst (review of #264).
-        log.error("campaign sends are held: %s", exc)
+        log.error("campaign sends are held: %s", personal_exc(exc))
         return []
     with session_scope(factory) as session:
         user_ids = list(

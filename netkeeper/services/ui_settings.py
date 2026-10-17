@@ -47,6 +47,7 @@ from typing import Any, Final, Literal
 from sqlalchemy.orm import Session
 
 from netkeeper.config import Settings
+from netkeeper.logging_setup import personal_exc
 from netkeeper.models import JsonValue, SettingKV, User
 from netkeeper.scoping import scoped
 from netkeeper.services import budgets
@@ -452,7 +453,7 @@ def apply(base: Settings, values: Mapping[str, JsonValue]) -> Settings:
         try:
             value = parse(spec, values[spec.key])
         except ValueError as exc:
-            log.warning("ignoring the stored setting %s: %s", spec.key, exc)
+            log.warning("ignoring the stored setting %s: %s", spec.key, personal_exc(exc))
             continue
         originals.append((spec.key, value_at(base, spec.key)))
         result = _with_value(result, spec.key, value)
