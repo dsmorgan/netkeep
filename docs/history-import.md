@@ -2,7 +2,7 @@
 
 Before netkeeper sends its first campaign, tell it whom your old mailing tool already emailed, and what those people said back. Without this history, someone the old tool emailed, even someone who asked to be left alone, passes every campaign guard: the guards read only what netkeeper itself sent and what you set by hand.
 
-You run two commands, each first as a dry run:
+You can do both steps on the **Old-tool history** tab of the Imports page, or run two commands. Each starts as a dry run (the page calls it a preview):
 
 1. `netkeeper history import` reads the old tool's workbook and records who each campaign reached and when.
 2. `netkeeper history scan-gmail` searches your Gmail, read-only, for what those people sent back: replies, unsubscribe requests, automatic answers, and bounces.
@@ -100,3 +100,7 @@ Open each contact the scan flagged. In the contacts table, filter on **needs rev
 - If they declined, set **Do not contact**, and then choose **Confirm**.
 
 The **Needs review** notice on the contact page describes a contact read off a LinkedIn card, because that is the other way a contact gets this mark. For a contact the scan flagged, the reply in the timeline is the reason. A LinkedIn sync never clears the mark from a contact the scan flagged, and neither does a merge: when either contact in a merge is waiting for you to read a reply, the merged contact keeps the earlier mark. Only you clear it, by confirming the contact.
+
+## In the UI
+
+Open **Imports**, then **Old-tool history**. Step 1 takes the workbook (an upload) and the same **create missing** option; step 2 takes the optional mailbox, `--limit`, and `--rescan` equivalents. **Preview** shows the report and writes nothing; **Apply** writes it. The page shows the same counts, warnings, and address lists as the commands. A scan that Gmail stops saves what it finished and says how many recipients remain; run it again to continue. Neither step has an undo, as on the command line.

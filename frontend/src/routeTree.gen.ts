@@ -25,6 +25,7 @@ import { Route as CampaignsNewRouteImport } from './routes/campaigns.new'
 import { Route as ContactsIndexRouteImport } from './routes/contacts.index'
 import { Route as ContactsContactIdRouteImport } from './routes/contacts.$contactId'
 import { Route as ImportsIndexRouteImport } from './routes/imports.index'
+import { Route as ImportsHistoryRouteImport } from './routes/imports.history'
 import { Route as ImportsRunsIndexRouteImport } from './routes/imports.runs.index'
 import { Route as ImportsRunsRunIdRouteImport } from './routes/imports.runs.$runId'
 
@@ -108,6 +109,11 @@ const ImportsIndexRoute = ImportsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ImportsRoute,
 } as any)
+const ImportsHistoryRoute = ImportsHistoryRouteImport.update({
+  id: '/history',
+  path: '/history',
+  getParentRoute: () => ImportsRoute,
+} as any)
 const ImportsRunsIndexRoute = ImportsRunsIndexRouteImport.update({
   id: '/runs/',
   path: '/runs/',
@@ -133,6 +139,7 @@ export interface FileRoutesByFullPath {
   '/campaigns/$campaignId': typeof CampaignsCampaignIdRoute
   '/campaigns/new': typeof CampaignsNewRoute
   '/contacts/$contactId': typeof ContactsContactIdRoute
+  '/imports/history': typeof ImportsHistoryRoute
   '/campaigns/': typeof CampaignsIndexRoute
   '/contacts/': typeof ContactsIndexRoute
   '/imports/': typeof ImportsIndexRoute
@@ -152,6 +159,7 @@ export interface FileRoutesByTo {
   '/campaigns/$campaignId': typeof CampaignsCampaignIdRoute
   '/campaigns/new': typeof CampaignsNewRoute
   '/contacts/$contactId': typeof ContactsContactIdRoute
+  '/imports/history': typeof ImportsHistoryRoute
   '/campaigns': typeof CampaignsIndexRoute
   '/contacts': typeof ContactsIndexRoute
   '/imports': typeof ImportsIndexRoute
@@ -173,6 +181,7 @@ export interface FileRoutesById {
   '/campaigns/$campaignId': typeof CampaignsCampaignIdRoute
   '/campaigns/new': typeof CampaignsNewRoute
   '/contacts/$contactId': typeof ContactsContactIdRoute
+  '/imports/history': typeof ImportsHistoryRoute
   '/campaigns/': typeof CampaignsIndexRoute
   '/contacts/': typeof ContactsIndexRoute
   '/imports/': typeof ImportsIndexRoute
@@ -195,6 +204,7 @@ export interface FileRouteTypes {
     | '/campaigns/$campaignId'
     | '/campaigns/new'
     | '/contacts/$contactId'
+    | '/imports/history'
     | '/campaigns/'
     | '/contacts/'
     | '/imports/'
@@ -214,6 +224,7 @@ export interface FileRouteTypes {
     | '/campaigns/$campaignId'
     | '/campaigns/new'
     | '/contacts/$contactId'
+    | '/imports/history'
     | '/campaigns'
     | '/contacts'
     | '/imports'
@@ -234,6 +245,7 @@ export interface FileRouteTypes {
     | '/campaigns/$campaignId'
     | '/campaigns/new'
     | '/contacts/$contactId'
+    | '/imports/history'
     | '/campaigns/'
     | '/contacts/'
     | '/imports/'
@@ -373,6 +385,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ImportsIndexRouteImport
       parentRoute: typeof ImportsRoute
     }
+    '/imports/history': {
+      id: '/imports/history'
+      path: '/history'
+      fullPath: '/imports/history'
+      preLoaderRoute: typeof ImportsHistoryRouteImport
+      parentRoute: typeof ImportsRoute
+    }
     '/imports/runs/': {
       id: '/imports/runs/'
       path: '/runs'
@@ -391,12 +410,14 @@ declare module '@tanstack/react-router' {
 }
 
 interface ImportsRouteChildren {
+  ImportsHistoryRoute: typeof ImportsHistoryRoute
   ImportsIndexRoute: typeof ImportsIndexRoute
   ImportsRunsRunIdRoute: typeof ImportsRunsRunIdRoute
   ImportsRunsIndexRoute: typeof ImportsRunsIndexRoute
 }
 
 const ImportsRouteChildren: ImportsRouteChildren = {
+  ImportsHistoryRoute: ImportsHistoryRoute,
   ImportsIndexRoute: ImportsIndexRoute,
   ImportsRunsRunIdRoute: ImportsRunsRunIdRoute,
   ImportsRunsIndexRoute: ImportsRunsIndexRoute,

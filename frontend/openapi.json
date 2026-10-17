@@ -1477,6 +1477,21 @@
         "title": "Body_import_archive",
         "type": "object"
       },
+      "Body_import_history": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "description": "The old tool's workbook, as .xlsx.",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_history",
+        "type": "object"
+      },
       "BreakerResetIn": {
         "additionalProperties": false,
         "description": "Reset the tripped LinkedIn breakers (#583): ``netkeeper linkedin schedule\nreset-breaker``, which clears all five at once.\n\n``confirm`` must be true, and ``tripped`` is the keys of the tripped breaker rows the\nperson saw (the posture rows offering ``reset_breaker``): a breaker that tripped or\ncleared in between refuses the reset, so it never clears one nobody was shown.",
@@ -6995,6 +7010,496 @@
           "resumes_at"
         ],
         "title": "HeatOut",
+        "type": "object"
+      },
+      "HistoryCampaignOut": {
+        "additionalProperties": false,
+        "description": "What the import did, or would do, for one campaign tab.",
+        "properties": {
+          "ambiguous": {
+            "title": "Ambiguous",
+            "type": "integer"
+          },
+          "bounces": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bounces"
+          },
+          "clicks": {
+            "title": "Clicks",
+            "type": "integer"
+          },
+          "created": {
+            "title": "Created",
+            "type": "integer"
+          },
+          "last_batch_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Batch On"
+          },
+          "listed": {
+            "title": "Listed",
+            "type": "integer"
+          },
+          "matched": {
+            "title": "Matched",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "new_interactions": {
+            "title": "New Interactions",
+            "type": "integer"
+          },
+          "new_rows": {
+            "title": "New Rows",
+            "type": "integer"
+          },
+          "opens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opens"
+          },
+          "sent_to": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent To"
+          },
+          "started_on": {
+            "format": "date",
+            "title": "Started On",
+            "type": "string"
+          },
+          "tab": {
+            "description": "The tab's position in the workbook, from 1.",
+            "title": "Tab",
+            "type": "integer"
+          },
+          "unlisted": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unlisted"
+          },
+          "unmatched": {
+            "title": "Unmatched",
+            "type": "integer"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tab",
+          "name",
+          "started_on",
+          "last_batch_on",
+          "listed",
+          "matched",
+          "unmatched",
+          "ambiguous",
+          "created",
+          "clicks",
+          "opens",
+          "bounces",
+          "sent_to",
+          "unlisted",
+          "new_rows",
+          "new_interactions",
+          "warnings"
+        ],
+        "title": "HistoryCampaignOut",
+        "type": "object"
+      },
+      "HistoryImportOut": {
+        "additionalProperties": false,
+        "properties": {
+          "ambiguous": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ambiguous",
+            "type": "array"
+          },
+          "applied": {
+            "description": "False for a dry run: nothing was written.",
+            "title": "Applied",
+            "type": "boolean"
+          },
+          "campaigns": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryCampaignOut"
+            },
+            "title": "Campaigns",
+            "type": "array"
+          },
+          "new_campaigns": {
+            "title": "New Campaigns",
+            "type": "integer"
+          },
+          "new_interactions": {
+            "title": "New Interactions",
+            "type": "integer"
+          },
+          "new_rows": {
+            "title": "New Rows",
+            "type": "integer"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/HistorySkippedTabOut"
+            },
+            "title": "Skipped",
+            "type": "array"
+          },
+          "unlisted": {
+            "description": "Recipients the workbook does not name, across all tabs.",
+            "title": "Unlisted",
+            "type": "integer"
+          },
+          "unmatched": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unmatched",
+            "type": "array"
+          }
+        },
+        "required": [
+          "applied",
+          "sha256",
+          "campaigns",
+          "skipped",
+          "new_campaigns",
+          "new_rows",
+          "new_interactions",
+          "unmatched",
+          "ambiguous",
+          "unlisted"
+        ],
+        "title": "HistoryImportOut",
+        "type": "object"
+      },
+      "HistoryReplyKind": {
+        "description": "What the Gmail scan found from or about a recipient, strongest first.\n\nA recipient row keeps the strongest kind found (:data:`REPLY_KIND_RANK`).",
+        "enum": [
+          "unsubscribe",
+          "reply",
+          "bounce",
+          "auto"
+        ],
+        "title": "HistoryReplyKind",
+        "type": "string"
+      },
+      "HistoryScanCampaignOut": {
+        "additionalProperties": false,
+        "properties": {
+          "auto": {
+            "title": "Auto",
+            "type": "integer"
+          },
+          "bounces": {
+            "title": "Bounces",
+            "type": "integer"
+          },
+          "by_subject": {
+            "title": "By Subject",
+            "type": "integer"
+          },
+          "by_subject_unsubscribe": {
+            "title": "By Subject Unsubscribe",
+            "type": "integer"
+          },
+          "campaign": {
+            "title": "Campaign",
+            "type": "string"
+          },
+          "replies": {
+            "title": "Replies",
+            "type": "integer"
+          },
+          "unsubscribes": {
+            "title": "Unsubscribes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "campaign",
+          "replies",
+          "unsubscribes",
+          "auto",
+          "bounces",
+          "by_subject",
+          "by_subject_unsubscribe"
+        ],
+        "title": "HistoryScanCampaignOut",
+        "type": "object"
+      },
+      "HistoryScanIn": {
+        "additionalProperties": false,
+        "properties": {
+          "apply": {
+            "default": false,
+            "title": "Apply",
+            "type": "boolean"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Scan at most this many recipients, and skip the subject search.",
+            "title": "Limit"
+          },
+          "mailbox": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mailbox address or ID; the connected one if omitted.",
+            "title": "Mailbox"
+          },
+          "rescan": {
+            "default": false,
+            "description": "Scan recipients an earlier apply scanned.",
+            "title": "Rescan",
+            "type": "boolean"
+          }
+        },
+        "title": "HistoryScanIn",
+        "type": "object"
+      },
+      "HistoryScanOut": {
+        "additionalProperties": false,
+        "properties": {
+          "applied": {
+            "title": "Applied",
+            "type": "boolean"
+          },
+          "campaigns": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryScanCampaignOut"
+            },
+            "title": "Campaigns",
+            "type": "array"
+          },
+          "flagged": {
+            "title": "Flagged",
+            "type": "integer"
+          },
+          "matched_late": {
+            "title": "Matched Late",
+            "type": "integer"
+          },
+          "new_interactions": {
+            "title": "New Interactions",
+            "type": "integer"
+          },
+          "no_contact": {
+            "items": {
+              "type": "string"
+            },
+            "title": "No Contact",
+            "type": "array"
+          },
+          "no_subject": {
+            "description": "Campaigns with no subject to search for.",
+            "items": {
+              "type": "string"
+            },
+            "title": "No Subject",
+            "type": "array"
+          },
+          "nothing_found": {
+            "title": "Nothing Found",
+            "type": "integer"
+          },
+          "nothing_to_scan": {
+            "description": "No imported recipients or campaign subjects were left to scan.",
+            "title": "Nothing To Scan",
+            "type": "boolean"
+          },
+          "opted_out": {
+            "title": "Opted Out",
+            "type": "integer"
+          },
+          "remaining": {
+            "description": "Recipients not reached when the scan stopped.",
+            "title": "Remaining",
+            "type": "integer"
+          },
+          "samples": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryScanSampleOut"
+            },
+            "title": "Samples",
+            "type": "array"
+          },
+          "scanned": {
+            "title": "Scanned",
+            "type": "integer"
+          },
+          "stopped": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why Gmail stopped the scan early, if it did; run it again to continue.",
+            "title": "Stopped"
+          },
+          "subject_capped": {
+            "description": "Campaigns whose subject search hit its limit.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Subject Capped",
+            "type": "array"
+          },
+          "subject_remaining": {
+            "title": "Subject Remaining",
+            "type": "integer"
+          },
+          "subject_samples": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Subject Samples",
+            "type": "array"
+          },
+          "subject_search_skipped": {
+            "description": "True when a limit skipped the subject search.",
+            "title": "Subject Search Skipped",
+            "type": "boolean"
+          },
+          "subject_unsearchable": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Subject Unsearchable",
+            "type": "array"
+          },
+          "unconfirmed_notices": {
+            "title": "Unconfirmed Notices",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "applied",
+          "nothing_to_scan",
+          "scanned",
+          "nothing_found",
+          "campaigns",
+          "samples",
+          "subject_samples",
+          "subject_capped",
+          "subject_unsearchable",
+          "no_subject",
+          "subject_search_skipped",
+          "flagged",
+          "opted_out",
+          "new_interactions",
+          "matched_late",
+          "unconfirmed_notices",
+          "no_contact",
+          "stopped",
+          "remaining",
+          "subject_remaining"
+        ],
+        "title": "HistoryScanOut",
+        "type": "object"
+      },
+      "HistoryScanSampleOut": {
+        "additionalProperties": false,
+        "properties": {
+          "addresses": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Addresses",
+            "type": "array"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/HistoryReplyKind"
+          }
+        },
+        "required": [
+          "kind",
+          "addresses"
+        ],
+        "title": "HistoryScanSampleOut",
+        "type": "object"
+      },
+      "HistorySkippedTabOut": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "tab": {
+            "title": "Tab",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tab",
+          "reason"
+        ],
+        "title": "HistorySkippedTabOut",
         "type": "object"
       },
       "ImportChangeOut": {
@@ -20743,6 +21248,115 @@
         "summary": "Get Health",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/api/v1/history/import": {
+      "post": {
+        "description": "Import the old tool's campaigns and the people its workbook names, as\n``netkeeper history import`` does. A dry run rolls the transaction back.",
+        "operationId": "import_history",
+        "parameters": [
+          {
+            "description": "Write; without it, a dry run.",
+            "in": "query",
+            "name": "apply",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Write; without it, a dry run.",
+              "title": "Apply",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Create a contact (name and address only) for each unknown address.",
+            "in": "query",
+            "name": "create_missing",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Create a contact (name and address only) for each unknown address.",
+              "title": "Create Missing",
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_history"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryImportOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "A file that is not an .xlsx workbook"
+          }
+        },
+        "summary": "Import History",
+        "tags": [
+          "history"
+        ]
+      }
+    },
+    "/api/v1/history/scan-gmail": {
+      "post": {
+        "description": "Search Gmail, read-only, for what the imported recipients sent back, as\n``netkeeper history scan-gmail`` does. A scan Gmail stops saves what it finished and\nanswers with ``stopped``; run it again to continue.",
+        "operationId": "scan_history_gmail",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HistoryScanIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryScanOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "No such mailbox, or none is connected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "description": "Gmail refused the first call"
+          }
+        },
+        "summary": "Scan History Gmail",
+        "tags": [
+          "history"
         ]
       }
     },

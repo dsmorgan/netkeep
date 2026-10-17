@@ -1811,6 +1811,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/history/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import History
+         * @description Import the old tool's campaigns and the people its workbook names, as
+         *     ``netkeeper history import`` does. A dry run rolls the transaction back.
+         */
+        post: operations["import_history"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/history/scan-gmail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Scan History Gmail
+         * @description Search Gmail, read-only, for what the imported recipients sent back, as
+         *     ``netkeeper history scan-gmail`` does. A scan Gmail stops saves what it finished and
+         *     answers with ``stopped``; run it again to continue.
+         */
+        post: operations["scan_history_gmail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/imports": {
         parameters: {
             query?: never;
@@ -4236,6 +4279,14 @@ export interface components {
              */
             file: string;
         };
+        /** Body_import_history */
+        Body_import_history: {
+            /**
+             * File
+             * @description The old tool's workbook, as .xlsx.
+             */
+            file: string;
+        };
         /**
          * BreakerResetIn
          * @description Reset the tripped LinkedIn breakers (#583): ``netkeeper linkedin schedule
@@ -5935,6 +5986,204 @@ export interface components {
             threshold: number;
             /** Tripped */
             tripped: boolean;
+        };
+        /**
+         * HistoryCampaignOut
+         * @description What the import did, or would do, for one campaign tab.
+         */
+        HistoryCampaignOut: {
+            /** Ambiguous */
+            ambiguous: number;
+            /** Bounces */
+            bounces: number | null;
+            /** Clicks */
+            clicks: number;
+            /** Created */
+            created: number;
+            /** Last Batch On */
+            last_batch_on: string | null;
+            /** Listed */
+            listed: number;
+            /** Matched */
+            matched: number;
+            /** Name */
+            name: string;
+            /** New Interactions */
+            new_interactions: number;
+            /** New Rows */
+            new_rows: number;
+            /** Opens */
+            opens: number | null;
+            /** Sent To */
+            sent_to: number | null;
+            /**
+             * Started On
+             * Format: date
+             */
+            started_on: string;
+            /**
+             * Tab
+             * @description The tab's position in the workbook, from 1.
+             */
+            tab: number;
+            /** Unlisted */
+            unlisted: number | null;
+            /** Unmatched */
+            unmatched: number;
+            /** Warnings */
+            warnings: string[];
+        };
+        /** HistoryImportOut */
+        HistoryImportOut: {
+            /** Ambiguous */
+            ambiguous: string[];
+            /**
+             * Applied
+             * @description False for a dry run: nothing was written.
+             */
+            applied: boolean;
+            /** Campaigns */
+            campaigns: components["schemas"]["HistoryCampaignOut"][];
+            /** New Campaigns */
+            new_campaigns: number;
+            /** New Interactions */
+            new_interactions: number;
+            /** New Rows */
+            new_rows: number;
+            /** Sha256 */
+            sha256: string;
+            /** Skipped */
+            skipped: components["schemas"]["HistorySkippedTabOut"][];
+            /**
+             * Unlisted
+             * @description Recipients the workbook does not name, across all tabs.
+             */
+            unlisted: number;
+            /** Unmatched */
+            unmatched: string[];
+        };
+        /**
+         * HistoryReplyKind
+         * @description What the Gmail scan found from or about a recipient, strongest first.
+         *
+         *     A recipient row keeps the strongest kind found (:data:`REPLY_KIND_RANK`).
+         * @enum {string}
+         */
+        HistoryReplyKind: "unsubscribe" | "reply" | "bounce" | "auto";
+        /** HistoryScanCampaignOut */
+        HistoryScanCampaignOut: {
+            /** Auto */
+            auto: number;
+            /** Bounces */
+            bounces: number;
+            /** By Subject */
+            by_subject: number;
+            /** By Subject Unsubscribe */
+            by_subject_unsubscribe: number;
+            /** Campaign */
+            campaign: string;
+            /** Replies */
+            replies: number;
+            /** Unsubscribes */
+            unsubscribes: number;
+        };
+        /** HistoryScanIn */
+        HistoryScanIn: {
+            /**
+             * Apply
+             * @default false
+             */
+            apply: boolean;
+            /**
+             * Limit
+             * @description Scan at most this many recipients, and skip the subject search.
+             */
+            limit?: number | null;
+            /**
+             * Mailbox
+             * @description Mailbox address or ID; the connected one if omitted.
+             */
+            mailbox?: string | null;
+            /**
+             * Rescan
+             * @description Scan recipients an earlier apply scanned.
+             * @default false
+             */
+            rescan: boolean;
+        };
+        /** HistoryScanOut */
+        HistoryScanOut: {
+            /** Applied */
+            applied: boolean;
+            /** Campaigns */
+            campaigns: components["schemas"]["HistoryScanCampaignOut"][];
+            /** Flagged */
+            flagged: number;
+            /** Matched Late */
+            matched_late: number;
+            /** New Interactions */
+            new_interactions: number;
+            /** No Contact */
+            no_contact: string[];
+            /**
+             * No Subject
+             * @description Campaigns with no subject to search for.
+             */
+            no_subject: string[];
+            /** Nothing Found */
+            nothing_found: number;
+            /**
+             * Nothing To Scan
+             * @description No imported recipients or campaign subjects were left to scan.
+             */
+            nothing_to_scan: boolean;
+            /** Opted Out */
+            opted_out: number;
+            /**
+             * Remaining
+             * @description Recipients not reached when the scan stopped.
+             */
+            remaining: number;
+            /** Samples */
+            samples: components["schemas"]["HistoryScanSampleOut"][];
+            /** Scanned */
+            scanned: number;
+            /**
+             * Stopped
+             * @description Why Gmail stopped the scan early, if it did; run it again to continue.
+             */
+            stopped: string | null;
+            /**
+             * Subject Capped
+             * @description Campaigns whose subject search hit its limit.
+             */
+            subject_capped: string[];
+            /** Subject Remaining */
+            subject_remaining: number;
+            /** Subject Samples */
+            subject_samples: string[];
+            /**
+             * Subject Search Skipped
+             * @description True when a limit skipped the subject search.
+             */
+            subject_search_skipped: boolean;
+            /** Subject Unsearchable */
+            subject_unsearchable: string[];
+            /** Unconfirmed Notices */
+            unconfirmed_notices: number;
+        };
+        /** HistoryScanSampleOut */
+        HistoryScanSampleOut: {
+            /** Addresses */
+            addresses: string[];
+            kind: components["schemas"]["HistoryReplyKind"];
+        };
+        /** HistorySkippedTabOut */
+        HistorySkippedTabOut: {
+            /** Reason */
+            reason: string;
+            /** Tab */
+            tab: number;
         };
         /**
          * ImportChangeOut
@@ -13220,6 +13469,89 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HealthOut"];
                 };
+            };
+        };
+    };
+    import_history: {
+        parameters: {
+            query?: {
+                /** @description Write; without it, a dry run. */
+                apply?: boolean;
+                /** @description Create a contact (name and address only) for each unknown address. */
+                create_missing?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_import_history"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HistoryImportOut"];
+                };
+            };
+            /** @description A file that is not an .xlsx workbook */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    scan_history_gmail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HistoryScanIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HistoryScanOut"];
+                };
+            };
+            /** @description No such mailbox, or none is connected */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Gmail refused the first call */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

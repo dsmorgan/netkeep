@@ -19,6 +19,9 @@ function ImportsLayout() {
         <Link to="/imports/runs" className={TAB_CLASS}>
           History
         </Link>
+        <Link to="/imports/history" className={TAB_CLASS}>
+          Old-tool history
+        </Link>
       </nav>
       <Outlet />
     </div>
