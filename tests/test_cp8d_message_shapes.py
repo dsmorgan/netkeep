@@ -55,6 +55,21 @@ def test_the_by_id_answer_of_a_group_is_not_a_list_variant() -> None:
     assert shapes.answer_field(body) is None
 
 
+def _realtime_result(sent: mp.Msg) -> dict[str, Any]:
+    """The captured extras: the full conversation inline, and ``previousMessages`` stubs."""
+    result = mp.message(sent)
+    result["conversation"] = mp.conversation(
+        mp.Conv(sent.conversation, (mp.QUILLON,), sent, creator=mp.QUILLON)
+    )
+    result["previousMessages"] = {
+        "_type": "com.linkedin.restli.common.CollectionResponse",
+        "elements": [
+            {"_type": "com.linkedin.messenger.Message", "entityUrn": "urn:li:msg_message:stub"}
+        ],
+    }
+    return result
+
+
 def test_a_realtime_new_message_result_parses_with_message() -> None:
     sent = mp.Msg(16, 5, mp.QUILLON, "Invented realtime line.", mp.INBOUND_LAST.at_ms)
     event: dict[str, Any] = {
@@ -65,7 +80,7 @@ def test_a_realtime_new_message_result_parses_with_message() -> None:
                 "data": {
                     "doDecorateMessageMessengerRealtimeDecoration": {
                         "_type": "com.linkedin.restli.common.ActionResponse",
-                        "result": mp.message(sent),
+                        "result": _realtime_result(sent),
                     }
                 },
             },
@@ -76,3 +91,10 @@ def test_a_realtime_new_message_result_parses_with_message() -> None:
     parsed = shapes._message(decoration["result"], owner=mp.OWNER.urn, where="a realtime event")
     assert not parsed.outbound and parsed.sender_urn == mp.QUILLON.urn
     assert parsed.text_snippet == "Invented realtime line."
+    # The inline conversation is a full one, and parses as a list item would.
+    result = decoration["result"]
+    [item] = shapes.parse_conversation_list(
+        mp.conversations_by_sync_token([mp.Conv(16, (mp.QUILLON,), sent, creator=mp.QUILLON)])
+    ).items
+    assert result["conversation"]["entityUrn"] == item.conversation_urn
+    assert result["backendConversationUrn"] == result["conversation"]["backendUrn"]
