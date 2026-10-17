@@ -108,6 +108,7 @@ from netkeeper.services import (
     serve_lock,
     simulate_campaign,
     step_mode,
+    support_bundle,
     template_adoption,
     ui_settings,
     user_dictionary,
@@ -236,6 +237,11 @@ history_app = typer.Typer(
 app.add_typer(history_app, name="history")
 templates_app = typer.Typer(help="Message templates.", no_args_is_help=True)
 app.add_typer(templates_app, name="templates")
+support_app = typer.Typer(
+    help="Collect what someone helping you needs, into one file you send (#603).",
+    no_args_is_help=True,
+)
+app.add_typer(support_app, name="support")
 dictionary_app = typer.Typer(
     help="Your dictionary: words the template spelling check accepts (#522).",
     no_args_is_help=True,
@@ -2745,6 +2751,102 @@ def restore(
     typer.echo(f"ran db upgrade: the database is at migration {result.revision}")
     if result.previous is not None:
         typer.echo(f"to undo, run: netkeeper restore {result.previous.name}")
+
+
+FULL_CONFIRMATION: Final = "full"
+"""What `support bundle --level full` asks you to type before it writes real names."""
+
+
+@support_app.command("bundle")
+def support_bundle_command(
+    ctx: typer.Context,
+    level: Annotated[
+        support_bundle.Level,
+        typer.Option(
+            "--level",
+            case_sensitive=False,
+            help="standard: no personal data (attach it to an issue). detailed: the same,"
+            " with longer logs. full: real names and ids, for a hard bug; send it privately.",
+        ),
+    ] = support_bundle.Level.STANDARD,
+    since: Annotated[
+        str | None,
+        typer.Option(
+            "--since",
+            help="How far back the logs and runs go, such as 7d, 36h or 2w (default: 7d for"
+            " standard, 30d otherwise).",
+            show_default=False,
+        ),
+    ] = None,
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "-o",
+            "--output",
+            help="Where to write the .zip (default: netkeeper-support-<level>-<time>.zip"
+            " here). An existing file is never overwritten.",
+            show_default=False,
+        ),
+    ] = None,
+    confirm_full: Annotated[
+        bool,
+        typer.Option(
+            "--confirm-full",
+            help="With --level full: skip the typed confirmation (for a script).",
+        ),
+    ] = False,
+) -> None:
+    """Write a support bundle: versions, settings, posture, breakers, runs and logs in one
+    .zip. Reads only; never attaches to Chrome; never includes a secret. netkeeper never
+    uploads it: you send it yourself."""
+    settings = _load_settings_or_exit(ctx.ensure_object(CliState))
+    try:
+        window = None if since is None else support_bundle.parse_since(since)
+    except support_bundle.SupportBundleError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    if output is not None and output.exists():
+        typer.echo(f"error: {output} already exists; choose another -o", err=True)
+        raise typer.Exit(code=1)
+    if level is support_bundle.Level.FULL and not confirm_full:
+        warning = support_bundle.LEVELS[level].warning
+        typer.echo(f"warning: {warning}", err=True)
+        typed = typer.prompt(
+            f"Type {FULL_CONFIRMATION} to make it", default="", show_default=False, err=True
+        )
+        if typed.strip().lower() != FULL_CONFIRMATION:
+            typer.echo("not confirmed; nothing written", err=True)
+            raise typer.Exit(code=1)
+    engine = make_engine(database_url())
+    try:
+        factory = make_session_factory(engine)
+        install_scope_guard(factory)
+        with session_scope(factory) as session:
+            user = _local_user_or_exit(session)
+            bundle = support_bundle.build_bundle(
+                session, user, settings=settings, level=level, since=window
+            )
+    finally:
+        engine.dispose()
+    target = Path(bundle.filename) if output is None else output
+    try:
+        with open(target, "xb", opener=_private_file) as handle:
+            handle.write(bundle.data)
+    except FileExistsError as exc:
+        typer.echo(f"error: {target} already exists; choose another -o", err=True)
+        raise typer.Exit(code=1) from exc
+    except OSError as exc:
+        typer.echo(f"error: cannot write {target}: {exc.strerror}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"wrote {target} ({_human_size(len(bundle.data))}, {level.value} level)")
+    if level is support_bundle.Level.FULL:
+        typer.echo("it holds real names and ids: send it privately, never to a public issue")
+    else:
+        typer.echo("attach it to your GitHub issue, with screenshots of what you saw")
+
+
+def _private_file(path: str, flags: int) -> int:
+    return os.open(path, flags, 0o600)
 
 
 @tags_app.command("list")
