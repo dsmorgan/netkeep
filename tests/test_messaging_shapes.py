@@ -200,6 +200,7 @@ _PRIMARY = mp.category_predicate(mp.PRIMARY_INBOX)
 _INMAIL = mp.category_predicate(mp.INMAIL)
 #: An invented predicate of another kind, as an Unread filter might add.
 _UNREAD = "(readStatePredicate:(read:false))"
+_PLAIN_QUERY = f"(predicateUnions:List({_PRIMARY}))"
 
 
 @pytest.mark.parametrize("next_cursor", [None, "invented-cursor-1"])
@@ -237,12 +238,53 @@ def test_any_other_list_request_is_filtered(predicates: tuple[str, ...]) -> None
         f"(query:(predicateUnions:List({_PRIMARY}))",  # unbalanced
         f"(query:(predicateUnions:List({_PRIMARY}))))",  # unbalanced
         f"(outer:(query:(predicateUnions:List({_PRIMARY})))",  # not at the top level
+        f"(query:(x),query:{_PLAIN_QUERY},lastUpdatedBefore:1)",  # repeated, plain last
+        f"(query:{_PLAIN_QUERY})(a:b)",  # text after the record closes
+        f"(query:{_PLAIN_QUERY},count:(20)",  # the record never closes
+        f"(query:{_PLAIN_QUERY},count:20,keywords:invented,lastUpdatedBefore:1)",
     ],
 )
 def test_a_query_that_is_not_exactly_the_primary_inbox_is_filtered(variables: str) -> None:
     url = mp.conversations_category_url(last_updated_before=1)
     head, _, _ = url.partition("&variables=")
     assert not shapes.request_is_primary_inbox(f"{head}&variables={variables}")
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        "count:20",
+        "mailboxUrn:urn%3Ali%3Afsd_profile%3Ainvented",
+        "lastUpdatedBefore:1",
+        "nextCursor:invented-cursor-1",
+    ],
+)
+def test_each_key_an_unfiltered_page_carries_is_allowed(extra: str) -> None:
+    url = mp.conversations_category_url(last_updated_before=1)
+    head, _, _ = url.partition("&variables=")
+    assert shapes.request_is_primary_inbox(f"{head}&variables=(query:{_PLAIN_QUERY},{extra})")
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        f"(query:(x),query:{_PLAIN_QUERY},count:1)",  # a repeated key
+        f"(query:{_PLAIN_QUERY})(count:20)",  # text after the record closes
+        f"(query:{_PLAIN_QUERY},count:(20)",  # never closed
+        "(query:(x)))",  # closed twice
+        "query:(x)",  # not a record
+        "(query)",  # a field without a value
+    ],
+)
+def test_a_record_that_is_not_one_balanced_record_has_no_fields(record: str) -> None:
+    assert shapes.record_fields(record) is None
+
+
+def test_a_record_s_fields_are_read_at_the_top_level_only() -> None:
+    assert shapes.record_fields(f"(query:{_PLAIN_QUERY},count:20)") == {
+        "query": _PLAIN_QUERY,
+        "count": "20",
+    }
 
 
 def test_a_list_request_without_a_query_is_not_the_primary_inbox() -> None:
