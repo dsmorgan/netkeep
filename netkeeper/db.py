@@ -48,7 +48,9 @@ SQLITE_BUSY_TIMEOUT_MS = 5000
 IMMEDIATE_OPTION = "netkeeper_immediate"
 # How long a send's record waits before each retry when the write lock is still held
 # after SQLITE_BUSY_TIMEOUT_MS (#627). Each try itself waits up to the busy timeout, so
-# the five tries take at most about 40 s: under the campaign engine's 45 s stop wait.
+# the five tries take at most about 40 s. With the send before them, a tick in flight can
+# outlast the campaign engine's 45 s stop wait; its message then stays scheduled for
+# reconcile, as any tick that outlasts the wait leaves it.
 RECORD_RETRY_WAITS_S: tuple[float, ...] = (1.0, 2.0, 4.0, 8.0)
 
 log = logging.getLogger(__name__)

@@ -2123,19 +2123,27 @@ that did not wait, or a send whose answer never came. Before that it may still b
 the sender's hands, and a message just sent may not be in Gmail's search yet."""
 
 RECONCILE_BATCH: Final = 10
+"""At most this many leftovers per mailbox per tick. Per mailbox, so a mailbox that
+cannot be searched (disconnected, waiting for re-authorization) never holds another's
+slots (#273 review)."""
 
-RECORD_PENDING_AFTER: Final = timedelta(minutes=2)
+
+RECORD_PENDING_AFTER: Final = timedelta(minutes=5)
 """An email message still ``scheduled`` this long after its claim has no recorded
-outcome: the tick's send (under the Gmail client's 30 s timeout) and its record retries
-(:data:`~netkeeper.db.RECORD_RETRY_WAITS_S`) are over by then. It is a leftover for
-reconcile, and posture warns about it (#627)."""
+outcome. The tick's send makes several Gmail requests in a row (the token, the thread,
+the label, the send), each under the client's 30 s timeout, and its record retries
+(:data:`~netkeeper.db.RECORD_RETRY_WAITS_S`) take up to about 40 s more: a slow but
+working send is over well before this. It is a leftover for reconcile, and posture
+warns about it (#627)."""
 
 
 def unrecorded_sends(session: Session, user: User, *, now: datetime) -> int:
     """How many of the user's email messages are claimed and still have no recorded
     outcome :data:`RECORD_PENDING_AFTER` after the claim: a record that failed, a crash
-    or a stop mid-send, or an answer that never came. Each is never sent again, and
-    reconcile settles it by its Message-ID. Read-only."""
+    or a stop mid-send, or an answer that never came. A message the person put in
+    Gmail's Schedule send (:data:`SCHEDULED_IN_GMAIL`) is theirs to wait for, not a
+    missing record, and is left out. Each is never sent again, and reconcile settles it
+    by its Message-ID. Read-only."""
     return (
         session.scalar(
             scoped(user, Message)
@@ -2145,15 +2153,12 @@ def unrecorded_sends(session: Session, user: User, *, now: datetime) -> int:
                 Message.direction == MessageDirection.OUT,
                 Message.status == MessageStatus.SCHEDULED,
                 Message.scheduled_at <= now - RECORD_PENDING_AFTER,
+                or_(Message.error.is_(None), Message.error != SCHEDULED_IN_GMAIL),
             )
         )
         or 0
     )
 
-
-"""At most this many leftovers per mailbox per tick. Per mailbox, so a mailbox that
-cannot be searched (disconnected, waiting for re-authorization) never holds another's
-slots (#273 review)."""
 
 RECONCILE_SEARCH_EVERY: Final = timedelta(minutes=20)
 """A leftover whose search found nothing is searched again no sooner than this."""

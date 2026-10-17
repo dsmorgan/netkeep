@@ -1600,10 +1600,11 @@ def _send_records(session: Session, user: User, *, now: datetime) -> Protection:
         )
     if linkedin:
         warnings.append(
-            f"{linkedin} LinkedIn message(s) were claimed by a run that stopped with no"
-            " recorded outcome, and an auto-sent one may have gone out. None is typed"
-            " again: check the conversation in LinkedIn, then discard it from the"
-            " messages waiting for you"
+            f"{linkedin} LinkedIn message(s) were claimed by a run that stopped, or was"
+            " left behind, with no recorded outcome, and an auto-sent one may have gone"
+            " out. None is typed again: check the conversation in LinkedIn. Each is listed"
+            " in the messages waiting for you once its run has ended (a run left behind"
+            " is ended at the next start), and you can discard it there"
         )
     return Protection(
         name="send records",
