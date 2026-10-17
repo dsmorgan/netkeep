@@ -68,6 +68,10 @@ export function ConnectionCard() {
                 <code className="font-mono text-xs break-all">{status.data.client_id}</code>
               )}
             </p>
+            <p className="flex flex-wrap items-center gap-2">
+              <span className="font-medium">Keychain service</span>
+              <code className="font-mono text-xs break-all">{status.data.keychain_service}</code>
+            </p>
 
             {live.length === 0 ? (
               <p className="text-muted-foreground">

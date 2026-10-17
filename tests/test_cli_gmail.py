@@ -26,6 +26,7 @@ from netkeeper.db import database_url, make_engine, make_session_factory, sessio
 from netkeeper.models import Mailbox, MailboxArm, MailboxStatus, User
 from netkeeper.models.base import utcnow
 from netkeeper.scoping import install_scope_guard, unscoped
+from netkeeper.services import keychain
 from netkeeper.services import mailboxes as mailbox_service
 from netkeeper.services.users import ensure_local_user
 
@@ -328,6 +329,7 @@ def test_status_shows_each_step_to_arming_to_send(
     mailbox_id = _connected(cli_db)
     first = runner.invoke(cli, ["gmail", "status"])
     assert first.exit_code == 0, first.output
+    assert f"keychain service: {keychain.service_name()}" in first.output  # #580
     assert f"{FAKE_EMAIL}: arming to send" in first.output
     assert "1. armed for drafts: not yet" in first.output
     assert "2. netkeeper found its own draft: arm it for drafts first" in first.output

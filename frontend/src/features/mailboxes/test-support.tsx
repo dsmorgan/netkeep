@@ -41,6 +41,7 @@ export function status(overrides: Partial<MailboxStatus> = {}): MailboxStatus {
   return {
     client_configured: true,
     client_id: '1234-fake.apps.googleusercontent.com',
+    keychain_service: 'netkeeper',
     mailboxes,
     reauth_required: mailboxes.some((row) => row.status === 'reauth_required'),
     arm_steps: [],

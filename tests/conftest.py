@@ -45,6 +45,7 @@ def _clean_netkeeper_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
         "NETKEEPER_LOG_LEVEL",
         "NETKEEPER_DATABASE_URL",
         "NETKEEPER_FRONTEND_DIST",
+        "NETKEEPER_KEYCHAIN_SERVICE",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("NETKEEPER_DATA", str(tmp_path / "netkeeper-data"))

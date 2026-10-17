@@ -6735,6 +6735,8 @@ export interface components {
             client_configured: boolean;
             /** Client Id */
             client_id: string | null;
+            /** Keychain Service */
+            keychain_service: string;
             /** Mailboxes */
             mailboxes: components["schemas"]["MailboxOut"][];
             /** Reauth Required */

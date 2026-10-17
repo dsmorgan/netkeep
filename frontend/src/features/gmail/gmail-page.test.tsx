@@ -232,6 +232,13 @@ describe('Gmail page', () => {
     expect(screen.queryByRole('button', { name: 'Re-authorize' })).not.toBeInTheDocument()
   })
 
+  it('shows which Keychain service holds the client and token (#580)', async () => {
+    renderPage({ mailboxes: status({ keychain_service: 'netkeeper@0123456789ab' }) })
+
+    expect(await screen.findByText('Keychain service')).toBeInTheDocument()
+    expect(screen.getByText('netkeeper@0123456789ab')).toBeInTheDocument()
+  })
+
   it('re-authorizes a mailbox that needs it', async () => {
     const assign = vi.spyOn(navigation, 'assign').mockImplementation(() => undefined)
     renderPage({

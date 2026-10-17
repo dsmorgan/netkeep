@@ -254,6 +254,7 @@ class CliState:
 class _PathsBlock:
     data_dir: str
     config: str
+    keychain_service: str
 
 
 @app.callback()
@@ -391,7 +392,9 @@ def config_show(ctx: typer.Context) -> None:
     state = ctx.ensure_object(CliState)
     settings = _load_settings_or_exit(state)
     source = "defaults" if settings.source_path is None else str(settings.source_path)
-    paths = _PathsBlock(data_dir=str(data_dir()), config=source)
+    paths = _PathsBlock(
+        data_dir=str(data_dir()), config=source, keychain_service=keychain.service_name()
+    )
     if settings.ui_keys:
         typer.echo(f"# from the Settings page: {', '.join(sorted(settings.ui_keys))}")
     typer.echo(_with_derived_week(render_toml(settings), settings), nl=False)
@@ -5442,6 +5445,7 @@ def gmail_status() -> None:
         client = _keychain_or_exit(lambda: mailbox_service.load_client(user.id))
     finally:
         engine.dispose()
+    typer.echo(f"keychain service: {keychain.service_name()}")
     typer.echo(f"client: {'not set' if client is None else client.client_id}")
     if not rows:
         typer.echo("no mailboxes; run `netkeeper gmail login`")

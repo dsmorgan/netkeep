@@ -17,6 +17,7 @@ from netkeeper.config import CampaignSettings, Settings
 from netkeeper.db import DATABASE_FILENAME, session_scope
 from netkeeper.models import Mailbox, MailboxArm, User, UserKind
 from netkeeper.scoping import unscoped
+from netkeeper.services import keychain
 from netkeeper.services import mailboxes as mailbox_service
 from netkeeper.services.events import EventBus, Subscription
 from netkeeper.services.scheduled_runs import ServeExtractor
@@ -89,6 +90,7 @@ async def test_nothing_is_set_up_at_first(client: httpx.AsyncClient, running_app
     assert await _status(client) == {
         "client_configured": False,
         "client_id": None,
+        "keychain_service": keychain.service_name(),
         "mailboxes": [],
         "reauth_required": False,
         "arm_steps": [],

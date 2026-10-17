@@ -9384,6 +9384,10 @@
             ],
             "title": "Client Id"
           },
+          "keychain_service": {
+            "title": "Keychain Service",
+            "type": "string"
+          },
           "mailboxes": {
             "items": {
               "$ref": "#/components/schemas/MailboxOut"
@@ -9399,6 +9403,7 @@
         "required": [
           "client_configured",
           "client_id",
+          "keychain_service",
           "mailboxes",
           "reauth_required"
         ],

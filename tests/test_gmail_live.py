@@ -27,15 +27,20 @@ from netkeeper.services import mailboxes as service
 
 LIVE_ENV = "NETKEEPER_GMAIL_TESTS"
 
+#: The Keychain service your shell's environment uses (#580), read at import, before
+#: conftest points ``NETKEEPER_DATA`` at a scratch directory.
+SHELL_SERVICE = keychain.service_name()
+
 pytestmark = pytest.mark.skipif(
     os.environ.get(LIVE_ENV) != "1", reason=f"talks to real Gmail; set {LIVE_ENV}=1 to run"
 )
 
 
 @pytest.fixture
-def live() -> GmailClient:
+def live(monkeypatch: pytest.MonkeyPatch) -> GmailClient:
     """A client for the connected mailbox, over the real Keychain and Google."""
     keyring.set_keyring(keyring.core.init_backend())  # conftest restores its own afterwards
+    monkeypatch.setenv(keychain.SERVICE_ENV, SHELL_SERVICE)
     user_id = int(os.environ.get("NETKEEPER_GMAIL_TEST_USER", "1"))
     mailbox_id = int(os.environ.get("NETKEEPER_GMAIL_TEST_MAILBOX", "1"))
     client = service.load_client(user_id)

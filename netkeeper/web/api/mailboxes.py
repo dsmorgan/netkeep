@@ -162,6 +162,7 @@ def _status(request: Request, session: Session, user: User) -> MailboxStatusOut:
     return MailboxStatusOut(
         client_configured=client is not None,
         client_id=None if client is None else client.client_id,
+        keychain_service=keychain.service_name(),
         mailboxes=[MailboxOut.model_validate(row) for row in rows],
         reauth_required=any(row.status is MailboxStatus.REAUTH_REQUIRED for row in rows),
         arm_steps=[

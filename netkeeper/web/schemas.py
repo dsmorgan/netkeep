@@ -2480,6 +2480,8 @@ class MailboxStatusOut(BaseModel):
     """Whether an OAuth client ID and secret are stored."""
     client_id: str | None
     """The stored client ID (not secret), so the page can show which one."""
+    keychain_service: str
+    """The Keychain service this data directory's client and tokens are stored under."""
     mailboxes: list[MailboxOut]
     reauth_required: bool
     """Whether any mailbox needs someone to authorize it again."""

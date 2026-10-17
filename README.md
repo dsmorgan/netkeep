@@ -77,7 +77,7 @@ tail -f "$HOME/Library/Application Support/netkeeper/logs/serve.err.log"   # app
 scripts/install-launchd.sh --uninstall         # stop the agent and remove the plist
 ```
 
-Logs live under `<data_dir>/logs/`: `serve.log` for stdout and `serve.err.log` for stderr, which is where the application logs. Add `--dry-run` to any invocation to see the plist and the `launchctl` commands without changing anything. Chrome is not managed by launchd; the dashboard tells you when it is not reachable.
+Logs live under `<data_dir>/logs/`: `serve.log` for stdout and `serve.err.log` for stderr, which is where the application logs. Each data directory keeps its Gmail secrets under its own Keychain service: `netkeeper` for the default directory, and `netkeeper@<hash of the path>` for any other, so a second data directory never reads or replaces the first one's Gmail sign-in. Set `NETKEEPER_KEYCHAIN_SERVICE` to choose the service yourself; `netkeeper config show` prints the one in use. Add `--dry-run` to any invocation to see the plist and the `launchctl` commands without changing anything. Chrome is not managed by launchd; the dashboard tells you when it is not reachable.
 
 ## A plain note about LinkedIn's terms
 
