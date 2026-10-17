@@ -3184,6 +3184,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/support/bundle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Bundle
+         * @description Make the bundle at ``level`` covering ``since_days`` (the level's default when
+         *     absent), and send it as an attachment.
+         */
+        get: operations["download_support_bundle"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/support/levels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Levels
+         * @description What each level of the support bundle includes and leaves out.
+         */
+        get: operations["list_support_levels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tags": {
         parameters: {
             query?: never;
@@ -6759,6 +6800,11 @@ export interface components {
          */
         LeftoverKind: "discarded" | "ended" | "waiting" | "test";
         /**
+         * Level
+         * @enum {string}
+         */
+        Level: "standard" | "detailed" | "full";
+        /**
          * LinkKind
          * @enum {string}
          */
@@ -8773,6 +8819,33 @@ export interface components {
             delay_days: number;
             /** Send Time */
             send_time?: string | null;
+        };
+        /** SupportLevelOut */
+        SupportLevelOut: {
+            /** Default Since Days */
+            default_since_days: number;
+            /** Includes */
+            includes: string[];
+            /** Leaves Out */
+            leaves_out: string[];
+            level: components["schemas"]["Level"];
+            /** Needs Confirmation */
+            needs_confirmation: boolean;
+            /** Redacted */
+            redacted: boolean;
+            /** Summary */
+            summary: string;
+            /** Title */
+            title: string;
+            /** Warning */
+            warning: string | null;
+        };
+        /** SupportLevelsOut */
+        SupportLevelsOut: {
+            /** Levels */
+            levels: components["schemas"]["SupportLevelOut"][];
+            /** Max Since Days */
+            max_since_days: number;
         };
         /**
          * SyncRunKind
@@ -16001,6 +16074,73 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    download_support_bundle: {
+        parameters: {
+            query?: {
+                level?: components["schemas"]["Level"];
+                since_days?: number | null;
+                confirm_full?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The support bundle, a .zip file. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": string;
+                };
+            };
+            /** @description Only the local owner account makes a support bundle */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The full level without confirm_full=true */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_support_levels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportLevelsOut"];
+                };
             };
         };
     };

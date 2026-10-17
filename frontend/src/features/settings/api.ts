@@ -196,3 +196,33 @@ export async function createBackup(): Promise<Backups> {
   if (data === undefined) throw failure(error, response, 'POST /backups')
   return data
 }
+
+export type SupportLevels = components['schemas']['SupportLevelsOut']
+export type SupportLevel = components['schemas']['SupportLevelOut']
+export type SupportLevelName = SupportLevel['level']
+
+/** What each level of the support bundle includes and leaves out (#603). */
+export const supportLevelsQuery = queryOptions({
+  queryKey: ['support', 'levels'] as const,
+  queryFn: async ({ signal }): Promise<SupportLevels> => {
+    const { data, error, response } = await api.GET('/api/v1/support/levels', { signal })
+    if (data === undefined) throw failure(error, response, 'GET /support/levels')
+    return data
+  },
+})
+
+/**
+ * The URL that downloads a support bundle. A plain navigation, as an export is, so the
+ * browser saves the `.zip` under the name the server gives it. `confirmFull` is sent
+ * only for the full level, after you tick its confirmation; the server refuses that
+ * level without it.
+ */
+export function supportBundleUrl(
+  level: SupportLevelName,
+  sinceDays: number,
+  confirmFull: boolean,
+): string {
+  const params = new URLSearchParams({ level, since_days: String(sinceDays) })
+  if (level === 'full' && confirmFull) params.set('confirm_full', 'true')
+  return `/api/v1/support/bundle?${params.toString()}`
+}

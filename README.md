@@ -112,6 +112,7 @@ User guides:
 - [Your first campaign](docs/guide/first-campaign.md): templates, an email campaign, and a LinkedIn step.
 - [Backups and restore](docs/guide/backups.md).
 - [Troubleshooting](docs/guide/troubleshooting.md): what a run's stop reason or a posture warning means, and the actions that stay on the command line.
+- [Reporting a problem](docs/guide/reporting-a-problem.md): the support bundle to attach to an issue.
 - [Gmail setup](docs/gmail-setup.md): your own Google Cloud OAuth client, step by step.
 - [Import the old mailing tool's history](docs/history-import.md) (optional).
 - [Importing into macOS Contacts](docs/macos-contacts.md).

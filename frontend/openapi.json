@@ -9046,6 +9046,15 @@
         "title": "LeftoverKind",
         "type": "string"
       },
+      "Level": {
+        "enum": [
+          "standard",
+          "detailed",
+          "full"
+        ],
+        "title": "Level",
+        "type": "string"
+      },
       "LinkKind": {
         "enum": [
           "website",
@@ -14152,6 +14161,92 @@
           "delay_days"
         ],
         "title": "StepScheduleIn",
+        "type": "object"
+      },
+      "SupportLevelOut": {
+        "properties": {
+          "default_since_days": {
+            "title": "Default Since Days",
+            "type": "integer"
+          },
+          "includes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Includes",
+            "type": "array"
+          },
+          "leaves_out": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Leaves Out",
+            "type": "array"
+          },
+          "level": {
+            "$ref": "#/components/schemas/Level"
+          },
+          "needs_confirmation": {
+            "title": "Needs Confirmation",
+            "type": "boolean"
+          },
+          "redacted": {
+            "title": "Redacted",
+            "type": "boolean"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning"
+          }
+        },
+        "required": [
+          "level",
+          "title",
+          "summary",
+          "includes",
+          "leaves_out",
+          "default_since_days",
+          "redacted",
+          "needs_confirmation",
+          "warning"
+        ],
+        "title": "SupportLevelOut",
+        "type": "object"
+      },
+      "SupportLevelsOut": {
+        "properties": {
+          "levels": {
+            "items": {
+              "$ref": "#/components/schemas/SupportLevelOut"
+            },
+            "title": "Levels",
+            "type": "array"
+          },
+          "max_since_days": {
+            "title": "Max Since Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "levels",
+          "max_since_days"
+        ],
+        "title": "SupportLevelsOut",
         "type": "object"
       },
       "SyncRunKind": {
@@ -24328,6 +24423,106 @@
         "summary": "Set Sending Hours",
         "tags": [
           "settings"
+        ]
+      }
+    },
+    "/api/v1/support/bundle": {
+      "get": {
+        "description": "Make the bundle at ``level`` covering ``since_days`` (the level's default when\nabsent), and send it as an attachment.",
+        "operationId": "download_support_bundle",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "level",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Level",
+              "default": "standard"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since_days",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 365,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since Days"
+            }
+          },
+          {
+            "in": "query",
+            "name": "confirm_full",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Confirm Full",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The support bundle, a .zip file."
+          },
+          "403": {
+            "description": "Only the local owner account makes a support bundle"
+          },
+          "409": {
+            "description": "The full level without confirm_full=true"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Bundle",
+        "tags": [
+          "support"
+        ]
+      }
+    },
+    "/api/v1/support/levels": {
+      "get": {
+        "description": "What each level of the support bundle includes and leaves out.",
+        "operationId": "list_support_levels",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportLevelsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Levels",
+        "tags": [
+          "support"
         ]
       }
     },

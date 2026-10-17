@@ -6,6 +6,8 @@ For a LinkedIn run, open the **LinkedIn** page and click the run's row under **R
 
 For Gmail, see the reason codes in [Gmail setup](../gmail-setup.md#troubleshooting).
 
+Still stuck? Open an issue with a support bundle and screenshots: see [Reporting a problem](reporting-a-problem.md).
+
 ## Installing and opening the UI
 
 | What you see | What to do |

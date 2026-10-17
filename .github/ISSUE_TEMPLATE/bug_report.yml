@@ -5,7 +5,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Never paste cookies, OAuth tokens, or other people's names, emails, or phone numbers. Redact run notes before attaching them.
+        Attach the **standard support bundle** and screenshots of what you saw. Make the bundle on Settings, under Support, or with `netkeeper support bundle`; see [Reporting a problem](https://github.com/dsmorgan/netkeeper/blob/main/docs/guide/reporting-a-problem.md). The standard bundle holds no personal data and no secrets.
+
+        Never attach a **full** bundle here: it holds real names. Never paste cookies, OAuth tokens, or other people's names, emails, or phone numbers.
   - type: textarea
     id: what
     attributes:
@@ -39,7 +41,16 @@ body:
       label: Platform
       placeholder: "macOS 15.1, Chrome 150 / Ubuntu 24.04 container"
   - type: textarea
+    id: bundle
+    attributes:
+      label: Support bundle and screenshots
+      description: Drag the standard bundle (netkeeper-support-standard-....zip) and your screenshots here.
+      placeholder: Attach the .zip and screenshots by dragging them into this box.
+    validations:
+      required: true
+  - type: textarea
     id: logs
     attributes:
-      label: Redacted logs or run notes
+      label: Anything else from the logs
+      description: Optional. The bundle already holds the last 7 days of logs, redacted.
       render: text

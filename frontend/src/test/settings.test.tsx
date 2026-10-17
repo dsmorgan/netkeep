@@ -59,6 +59,9 @@ describe('settings', () => {
       if (pathname === '/api/v1/backups') {
         return jsonResponse({ directory: '/data/backups', available: true, backups: [] })
       }
+      if (pathname === '/api/v1/support/levels') {
+        return jsonResponse({ levels: [], max_since_days: 365 })
+      }
       if (pathname === '/api/v1/gmail-setup') {
         return jsonResponse({ project_id: null, sender_email: null, done: [], steps: [] })
       }
