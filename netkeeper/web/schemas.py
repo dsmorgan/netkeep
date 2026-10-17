@@ -2603,8 +2603,8 @@ class AttentionFlagsOut(BaseModel):
 
 
 class ActivityOut(BaseModel):
-    """What LinkedIn is doing (#347). LinkedIn runs only: a campaign send batch or a Gmail
-    reply poll never shows as running."""
+    """What LinkedIn is doing (#347). LinkedIn runs only: a campaign send batch shows beside
+    it from the ``campaign.tick`` event (#547), and a Gmail reply poll never shows."""
 
     state: ActivityState
     """The first that applies, in this order: running, stopped, paused, armed, idle."""

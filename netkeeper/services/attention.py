@@ -16,9 +16,10 @@ do not contact or is on the do-not-send list (Gmail, :func:`leftover_drafts.flag
 #543), the session flagged or heat tripped (LinkedIn), and a tripped breaker (Settings;
 breakers only, not the full posture check).
 
-The activity state covers LinkedIn runs only (``sync_runs``); a campaign send batch or a
-Gmail reply poll never shows as running. The first match wins: Running, Stopped,
-Paused, Armed, Idle.
+The activity state covers LinkedIn runs only (``sync_runs``). A campaign send batch shows
+as running beside it, from the ``campaign.tick`` event in the browser (#547), never here;
+the Gmail reply poll does not show (it takes seconds and would only blink).
+The first match wins: Running, Stopped, Paused, Armed, Idle.
 
 ``title_total`` adds up the number badges for the browser tab, without Triage: after an
 import its backlog can run to thousands, and the tab would never read clean.

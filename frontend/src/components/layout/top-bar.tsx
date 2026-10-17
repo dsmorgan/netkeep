@@ -44,7 +44,7 @@ export function TopBar({ menuButtonRef, navId, navOpen, onToggleNav }: TopBarPro
         <h1 className="truncate font-medium">{sectionLabel(pathname)}</h1>
       </div>
       <div className="flex min-w-0 items-center gap-3">
-        <ActivityIndicator compact announce />
+        <ActivityIndicator compact announce campaigns />
         <PollStatusHeader />
         <BackendHealth />
       </div>

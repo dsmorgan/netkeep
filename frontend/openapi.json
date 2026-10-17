@@ -43,7 +43,7 @@
         "type": "object"
       },
       "ActivityOut": {
-        "description": "What LinkedIn is doing (#347). LinkedIn runs only: a campaign send batch or a Gmail\nreply poll never shows as running.",
+        "description": "What LinkedIn is doing (#347). LinkedIn runs only: a campaign send batch shows beside\nit from the ``campaign.tick`` event (#547), and a Gmail reply poll never shows.",
         "properties": {
           "label": {
             "title": "Label",

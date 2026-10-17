@@ -163,7 +163,9 @@ def create_app(
                     if campaign_sender is not None
                     else _gmail_sender(app.state.session_factory, gmail, resolved, failures)
                 )
-                campaigns = CampaignEngine(app.state.session_factory, resolved, sender)
+                campaigns = CampaignEngine(
+                    app.state.session_factory, resolved, sender, bus=app.state.bus
+                )
                 teardown.push_async_callback(campaigns.stop)
                 campaigns.start()
                 app.state.campaign_engine = campaigns

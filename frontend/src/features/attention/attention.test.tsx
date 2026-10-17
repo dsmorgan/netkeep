@@ -18,6 +18,7 @@ import {
   normalize,
   type Attention,
 } from './api'
+import { CAMPAIGN_SENDING_MS } from './use-campaign-sending'
 import { ACTIVITY_TEXT, FAVICON, FAVICON_RUNNING, announcement, faviconFor } from './activity'
 
 function attention(overrides: Partial<Attention> = {}): Attention {
@@ -487,5 +488,59 @@ describe('the running favicon', () => {
     } finally {
       link.remove()
     }
+  })
+})
+
+describe('campaign send batches (#547)', () => {
+  it('shows "Campaigns: sending" beside the LinkedIn state, then clears it', async () => {
+    serve(() => activity('idle', 'Scheduled LinkedIn runs are off.'))
+    await renderApp('/exports')
+    const chip = await screen.findByTestId('activity-indicator')
+    expect(screen.queryByTestId('campaign-activity')).toBeNull()
+
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      act(() => FakeEventSource.instances.at(-1)?.emit('campaign.tick', { sent: 1 }))
+      expect(await screen.findByTestId('campaign-activity')).toHaveTextContent('Campaigns: sending')
+      // The LinkedIn state is untouched.
+      expect(chip).toHaveAttribute('data-state', 'idle')
+      expect(chip).toHaveTextContent('LinkedIn: off')
+
+      act(() => {
+        vi.advanceTimersByTime(CAMPAIGN_SENDING_MS + 1)
+      })
+      expect(screen.queryByTestId('campaign-activity')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('swaps the tab icon while a batch shows, and back after', async () => {
+    const link = document.createElement('link')
+    link.rel = 'icon'
+    link.href = FAVICON
+    document.head.append(link)
+    try {
+      serve(() => activity('idle', 'Scheduled LinkedIn runs are off.'))
+      await renderApp('/exports')
+      await screen.findByTestId('activity-indicator')
+      expect(link.getAttribute('href')).toBe(FAVICON)
+
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      act(() => FakeEventSource.instances.at(-1)?.emit('campaign.tick', { sent: 1 }))
+      await waitFor(() => expect(link.getAttribute('href')).toBe(FAVICON_RUNNING))
+      act(() => {
+        vi.advanceTimersByTime(CAMPAIGN_SENDING_MS + 1)
+      })
+      expect(link.getAttribute('href')).toBe(FAVICON)
+    } finally {
+      vi.useRealTimers()
+      link.remove()
+    }
+  })
+
+  it('leaves the LinkedIn-only favicon rule alone', () => {
+    expect(faviconFor(activity('idle', 'x'), true)).toBe(FAVICON_RUNNING)
+    expect(faviconFor(activity('idle', 'x'))).toBe(FAVICON)
   })
 })

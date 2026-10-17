@@ -69,6 +69,7 @@ from netkeeper.services.campaign_engine import (
     run_tick,
     schedule_next,
 )
+from netkeeper.services.events import EventBus
 from netkeeper.services.settings_kv import set_setting
 
 EMAIL = TemplateChannel.EMAIL
@@ -1735,6 +1736,51 @@ async def test_the_engine_ticks_in_a_worker_thread(world: World) -> None:
     [result] = [r for r in await engine.tick_once() if r.user_id == world.user.id]
     assert len(result.fired) == 1
     assert seen and seen[0] != threading.get_ident()
+
+
+async def test_a_tick_that_sent_announces_it(world: World) -> None:
+    """#547: one ``campaign.tick`` for the user, after the send, with a count only."""
+    bus = EventBus()
+    subscription = bus.subscribe()
+    world.enroll_new()
+    engine = CampaignEngine(world.factory, SETTINGS, world.sender, clock=lambda: NOW, bus=bus)
+    results = await engine.tick_and_announce()
+    bus.unsubscribe(subscription)
+    events = [event async for event in subscription]
+    assert [(e.type, e.user_id, e.data) for e in events] == [
+        ("campaign.tick", world.user.id, {"sent": 1})
+    ]
+    assert len(world.sender.firings) == sum(len(r.fired) for r in results) == 1
+
+
+async def test_a_tick_that_sent_nothing_announces_nothing(world: World) -> None:
+    bus = EventBus()
+    subscription = bus.subscribe()
+    engine = CampaignEngine(world.factory, SETTINGS, world.sender, clock=lambda: NOW, bus=bus)
+    await engine.tick_and_announce()
+    bus.unsubscribe(subscription)
+    assert [event async for event in subscription] == []
+
+
+async def test_a_tick_that_only_drafted_announces_nothing(world: World) -> None:
+    bus = EventBus()
+    subscription = bus.subscribe()
+    world.enroll_new()
+    world.sender.outcome = SendOutcome.DRAFTED
+    engine = CampaignEngine(world.factory, SETTINGS, world.sender, clock=lambda: NOW, bus=bus)
+    await engine.tick_and_announce()
+    bus.unsubscribe(subscription)
+    assert [event async for event in subscription] == []
+
+
+async def test_announcing_never_changes_what_the_tick_sends(world: World) -> None:
+    """The same world sends the same with and without a bus."""
+    world.enroll_new()
+    engine = CampaignEngine(
+        world.factory, SETTINGS, world.sender, clock=lambda: NOW, bus=EventBus()
+    )
+    [result] = [r for r in await engine.tick_and_announce() if r.user_id == world.user.id]
+    assert len(result.fired) == 1
 
 
 def test_the_engine_refuses_no_interval(world: World) -> None:

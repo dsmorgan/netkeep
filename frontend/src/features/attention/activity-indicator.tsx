@@ -4,8 +4,9 @@ import { useEffect, useRef, useState } from 'react'
 
 import { cn } from '@/lib/utils'
 
-import { ACTIVITY_TEXT, announcement, type ActivityState } from './activity'
+import { ACTIVITY_TEXT, CAMPAIGN_SENDING_TEXT, announcement, type ActivityState } from './activity'
 import { attentionQuery } from './api'
+import { useCampaignSending } from './use-campaign-sending'
 
 const ICON_CLASS = 'size-4 shrink-0'
 
@@ -52,8 +53,8 @@ function ActivityIcon({ state }: { state: ActivityState }) {
 
 /**
  * What LinkedIn is doing (#347), from `GET /attention`: an icon and a short text, the
- * full sentence on hover. LinkedIn runs only; a campaign send batch or a Gmail poll
- * never shows as running. `compact` (the top bar) keeps only the icon below `sm`,
+ * full sentence on hover. A campaign send batch shows beside it as its own "Campaigns:
+ * sending" (#547) and never changes the LinkedIn state; the Gmail poll does not show. `compact` (the top bar) keeps only the icon below `sm`,
  * with the text still there for screen readers.
  *
  * `announce` mounts the one polite live region: it speaks only when the state
@@ -63,11 +64,15 @@ function ActivityIcon({ state }: { state: ActivityState }) {
 export function ActivityIndicator({
   compact = false,
   announce = false,
+  campaigns = false,
 }: {
   compact?: boolean
   announce?: boolean
+  /** Also show a campaign send batch (the top bar does; the LinkedIn schedule card does not). */
+  campaigns?: boolean
 }) {
   const attention = useQuery(attentionQuery)
+  const campaignSending = useCampaignSending()
   const activity = attention.data?.activity
   const [spoken, setSpoken] = useState('')
   const previous = useRef<ActivityState | null>(null)
@@ -94,6 +99,21 @@ export function ActivityIndicator({
             {ACTIVITY_TEXT[activity.state]}
           </span>
           {activity.label !== '' && <span className="sr-only">. {activity.label}</span>}
+        </span>
+      )}
+      {campaigns && campaignSending && (
+        <span
+          data-testid="campaign-activity"
+          className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground"
+        >
+          <LoaderCircle
+            aria-hidden="true"
+            data-icon="campaign-sending"
+            className={cn(ICON_CLASS, 'animate-spin text-primary motion-reduce:animate-none')}
+          />
+          <span className={cn('truncate', compact && 'max-sm:sr-only')}>
+            {CAMPAIGN_SENDING_TEXT}
+          </span>
         </span>
       )}
       {announce && (
