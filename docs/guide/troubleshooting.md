@@ -63,7 +63,7 @@ Each warning starts with the protection it belongs to. These are the ones you're
 | "LinkedIn answered with a checkpoint on …" or "LinkedIn answered with a logged out on …" | The session flag is up. Clear it as in the table above. |
 | "scheduled jobs: no job kind has a due time for this account, so nothing fires on its own" | Expected until `serve` has run with scheduled runs armed. |
 | "the first LinkedIn inbox poll couldn't read back to …" | Check older LinkedIn replies by hand, then choose **Acknowledge** under **Posture**. |
-| "linkedin_auto_send is on in the [campaigns] section of config.toml" | You turned on LinkedIn auto-send. Turn it off there and restart `serve`, unless you mean it. |
+| "LinkedIn auto-send is on (campaigns.linkedin_auto_send)" | You turned on LinkedIn auto-send. Unless you mean it, turn it off on the Settings page, or in `config.toml` when the file sets it (the page shows it locked then). Off applies at once. |
 | "linkedin.pacing.… is …", or "linkedin.cdp_url points at …, not this machine's loopback" | A value in `config.toml` weakens a protection. Remove it to get the default back. |
 | "the last complete full sync (run …) refused to age anyone" | A sync would have marked too many connections gone at once, so it marked none. Check the run it names. The warning clears after a later complete full sync. |
 
@@ -84,6 +84,6 @@ Everything else is in the UI. These remain in a terminal or a file, most of them
 | Start `serve` at login | Settings, Run at login, or `netkeeper login-item on`. See [Run at login](../../README.md#run-at-login-macos). Two data directories each need their own `web.port`: the second `serve` can't bind a port the first holds, and its login item would restart it every 10 seconds. |
 | Start the LinkedIn Chrome | `make chrome`, or the command `netkeeper browser launch` prints. netkeeper never starts a browser. |
 | Check the LinkedIn Chrome (optional) | `netkeeper preflight`. |
-| Turn on LinkedIn auto-send | `config.toml`: `[campaigns] linkedin_auto_send = true`, then restart `serve`. Read [ADR 0008](../adr/0008-auto-send.md) first. |
+| Turn on LinkedIn auto-send | Settings, **Campaign defaults**, **LinkedIn auto-send**, and confirm. It applies from the next auto-send check, within 10 minutes. `config.toml`'s `[campaigns] linkedin_auto_send` still works and wins over the page. Read [ADR 0008](../adr/0008-auto-send.md) first. |
 | Import the old mailing tool's history (optional) | `netkeeper history import` and `netkeeper history scan-gmail`. See [the guide](../history-import.md). |
 | Restore a backup | `netkeeper restore <name or path>`, with `serve` stopped. The **Backup files** card in Settings shows each backup's command. See [Backups and restore](backups.md). |

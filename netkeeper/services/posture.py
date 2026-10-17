@@ -231,8 +231,8 @@ MISSING_MEANS: Final[dict[JobKind, str]] = {
     JobKind.ENRICH: "enrichment never runs on its own",
     JobKind.INBOX: "the LinkedIn inbox poll never runs on its own, so LinkedIn replies wait",
     JobKind.AUTO_SEND: (
-        "auto-send never runs; `netkeeper serve` schedules it at start while"
-        " `[campaigns] linkedin_auto_send` is on, so restart it after turning that on"
+        "auto-send never runs; `netkeeper serve` schedules it when it starts, so start"
+        " `netkeeper serve`"
     ),
 }
 
@@ -764,8 +764,8 @@ GAPS: Final[tuple[str, ...]] = (
     " and attaches as a second CDP client. Nothing in netkeeper deletes it; only a"
     " manual `rm` can cause this, so leave `locks/` alone while `netkeeper serve` runs.",
     "`netkeeper serve` runs the scheduler for the connections syncs,"
-    " enrichment, the LinkedIn inbox poll, and LinkedIn auto-send while"
-    " `[campaigns] linkedin_auto_send` is on. A"
+    " enrichment, the LinkedIn inbox poll, and LinkedIn auto-send, which sends only"
+    " while `campaigns.linkedin_auto_send` is on. A"
     " scheduled run fires only while the scheduled-runs row above says armed;"
     " this report reads that flag from the database and cannot see a scheduler"
     " some process was started with differently.",
@@ -2408,7 +2408,8 @@ def _scheduler_posture(
             schedule.interval.total_seconds() / 3600,
             stored_due(session, user, account_id, kind),
         )
-        # Auto-send (ADR 0008) only while its flag is on: then `serve` schedules it.
+        # Auto-send (ADR 0008) only while its flag is on: `serve` always schedules it,
+        # and each fire claims nothing while it is off (#598).
         for kind, schedule in served_schedules(auto_send).items()
     )
     not_applicable = tuple(

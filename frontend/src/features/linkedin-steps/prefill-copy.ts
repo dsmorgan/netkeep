@@ -237,7 +237,7 @@ const BEFORE_CLICK: readonly Rule[] = [
   // Auto-send's own gates (ADR 0008), checked before anything opens.
   {
     match: 'auto-send is off',
-    text: 'Auto-send is off in config.toml, so netkeeper sent nothing.',
+    text: 'Auto-send is off in Settings, so netkeeper sent nothing.',
     bubble: 'closed',
   },
   {

@@ -30,8 +30,11 @@ and enrichment). A handler:
    nobody, so the week's full sync is not done, and the scheduler offers it again
    a day later instead of a week later.
 
-The auto-send kind (ADR 0008, scheduled only while ``[campaigns] linkedin_auto_send``
-is on) has a handler of its own, :func:`_auto_send_handler`. It checks the flag again,
+The auto-send kind (ADR 0008) has a handler of its own, :func:`_auto_send_handler`.
+``serve`` schedules it whatever the flag says, so turning auto-send on on the Settings
+page applies from the next fire with no restart (#598). At each fire it first reads
+``[campaigns] linkedin_auto_send`` as it is in force for the user then (``config.toml``,
+then the Settings page) and, off, claims nothing and notes nothing. On, it
 waits out the spacing since the last auto-send, and claims one due ``auto_send`` step
 (:func:`netkeeper.services.linkedin_steps.claim_auto_send`), which records its scheduled
 ``message_send`` run; then it runs that run like any other. When it claims nothing it
@@ -120,19 +123,17 @@ def serve_registry(
 ) -> JobRegistry:
     """One handler per kind in :data:`RUN_KIND` and :data:`INBOX_RUN_KIND`, each recording
     and running a scheduled run. The inbox handler first checks there is anyone to watch.
-    The auto-send kind's handler is registered only when ``settings`` turn
-    ``[campaigns] linkedin_auto_send`` on (ADR 0008)."""
+    The auto-send kind's handler is always registered: it reads the flag for the user at
+    each fire, over ``settings`` (the file's; the defaults when None), #598."""
     registry: dict[JobKind, JobHandler] = {
         kind: _handler(factory, executor, tasks, run_kind, clock=clock)
         for kind, run_kind in RUN_KIND.items()
     }
     for kind, run_kind in INBOX_RUN_KIND.items():
         registry[kind] = _handler(factory, executor, tasks, run_kind, clock=clock, watch_check=True)
-    if settings is not None and settings.campaigns.linkedin_auto_send:
-        # ADR 0008: with the flag off there is no auto-send handler at all.
-        registry[JobKind.AUTO_SEND] = _auto_send_handler(
-            factory, executor, tasks, settings, clock=clock
-        )
+    registry[JobKind.AUTO_SEND] = _auto_send_handler(
+        factory, executor, tasks, settings if settings is not None else Settings(), clock=clock
+    )
     return registry
 
 
@@ -344,11 +345,20 @@ def _auto_send_handler(
     *,
     clock: Callable[[], datetime],
 ) -> JobHandler:
-    """The auto-send fire (ADR 0008): claim one due ``auto_send`` step and run it."""
+    """The auto-send fire (ADR 0008): claim one due ``auto_send`` step and run it.
+    ``settings`` are the file's; the flag and every other value are resolved for the user
+    at each fire (#343, #598), never kept from one fire to the next."""
+
+    def auto_send_on(user_id: int) -> bool:
+        """The flag in force for the user now, in a read session: off, the fire takes no
+        write lock."""
+        with session_scope(factory) as session:
+            user = session.get(User, user_id)
+            return user is not None and ui_settings.auto_send_on(session, user, settings)
 
     def claim(ctx: JobContext) -> int | str:
         """The claimed run's id, or why nothing was claimed, in fixed words."""
-        if not settings.campaigns.linkedin_auto_send:
+        if not auto_send_on(ctx.user_id):
             return AUTO_SEND_OFF_WORDS
         with session_scope(factory, write=True) as session:
             user = session.get(User, ctx.user_id)
@@ -399,7 +409,7 @@ def _auto_send_handler(
         if isinstance(claimed, str):
             log.info("scheduled auto-send claimed nothing: %s", claimed)
             if claimed != AUTO_SEND_OFF_WORDS:
-                # With the flag off the handler opens no session at all, so it notes nothing.
+                # With the flag off the handler only reads the flag, so it notes nothing.
                 await note(ctx, reason=claimed)
             return JobOutcome.NOTHING_TO_SEND
         task_id, result = submit_run(tasks, executor, claimed, ctx.user_id)
@@ -475,7 +485,8 @@ def start_serve_scheduler(
     (``build_scheduler``'s default, never turned off here). The scheduler runs
     :data:`~netkeeper.services.scheduler.SERVED_SCHEDULES` only (the inbox poll
     included since P4-01) with the configured heat gate and active hours, and auto-send
-    (ADR 0008) only while ``campaign_settings`` turn ``[campaigns] linkedin_auto_send`` on.
+    (ADR 0008), whose handler reads ``[campaigns] linkedin_auto_send`` for each user at
+    each fire (#598).
 
     ``active_hours`` is each user's own window, read at every heartbeat (#464; see
     :func:`user_active_hours`); ``settings.active_hours`` is only the default for a caller
@@ -486,7 +497,8 @@ def start_serve_scheduler(
     start, end = (time.fromisoformat(value) for value in settings.active_hours)
     whole = campaign_settings if campaign_settings is not None else Settings()
     whole = dataclasses.replace(whole, linkedin=settings)
-    schedules = served_schedules(whole.campaigns.linkedin_auto_send)
+    # Auto-send is always scheduled: its handler reads the flag at each fire (#598).
+    schedules = served_schedules(True)
     built = build_scheduler(
         factory,
         _local_accounts(factory),
@@ -501,7 +513,8 @@ def start_serve_scheduler(
     )
     built.start()
     log.info("scheduler started: %s", ", ".join(kind.value for kind in schedules))
-    if JobKind.AUTO_SEND in schedules:
+    if whole.campaigns.linkedin_auto_send:
+        # The value in force at start; the Settings page logs its own when it is saved.
         log.warning(
             "LinkedIn auto-send is on: netkeeper clicks Send itself for steps set to Auto-send"
         )

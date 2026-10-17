@@ -13,12 +13,12 @@ export { TYPING } from './prefill-copy'
 export const REVIEW_AND_SEND = 'Review it in Chrome and click Send yourself.'
 
 /**
- * An `auto_send` step in the queue, with auto-send on or off in config.toml. With it on,
+ * An `auto_send` step in the queue, with auto-send on or off (Settings, or config.toml). With it on,
  * the row says when the step goes ({@link autoSendStepText}), then this.
  */
 export const PREFILL_IT_YOURSELF = 'You can still prefill it yourself.'
 export const AUTO_SEND_STEP_OFF =
-  'Auto-send step, but auto-send is off in config.toml, so it waits for you to prefill it.'
+  'Auto-send step, but auto-send is off in Settings, so it waits for you to prefill it.'
 
 /** A Prefill step in the queue: nothing happens until you prefill it. */
 export const WAITS_FOR_PREFILL = 'Waits for you to prefill.'
@@ -52,7 +52,7 @@ export const REASON_TEXT: Readonly<Record<string, string>> = {
   run_in_progress: 'another LinkedIn run is going; wait for it to finish',
   prefill_open: 'another prefill is open: send or discard it first',
   outside_active_hours: "it's outside your LinkedIn active hours",
-  auto_send_off: 'auto-send is off in config.toml',
+  auto_send_off: 'auto-send is off in Settings',
   not_an_auto_send_step: "this step isn't an auto-send step",
   bad_active_hours: "your LinkedIn active hours can't be read; fix them in config.toml",
   not_a_linkedin_step: "this enrollment's next step isn't a LinkedIn step",
@@ -170,7 +170,7 @@ export type AutoSendOutlook = NonNullable<Schedule['auto_send']>
  * (`netkeeper/services/auto_send_outlook.py`); a code not here is shown spaced out.
  */
 export const AUTO_SEND_WAIT_TEXT: Readonly<Record<string, string>> = {
-  auto_send_off: 'Auto-send is off in config.toml.',
+  auto_send_off: 'Auto-send is off in Settings.',
   not_scheduled:
     "The auto-send check isn't scheduled yet. netkeeper serve schedules it when it starts.",
   disarmed: 'Scheduled runs are off, so the auto-send check sends nothing.',

@@ -27,6 +27,7 @@ function field(overrides: Partial<ConfigField>): ConfigField {
     source: 'default',
     editable: true,
     locked_reason: null,
+    confirm_text: null,
     restart_pending: false,
     stored_unreadable: false,
     warnings: [],
@@ -58,8 +59,7 @@ const AUTO_SEND = field({
   warn_above: null,
   value: false,
   default: false,
-  editable: false,
-  locked_reason: 'Only config.toml can change it.',
+  confirm_text: 'With auto-send on, netkeeper clicks Send on LinkedIn by itself.',
 })
 const POLL = field({
   key: 'campaigns.reply_poll_minutes',
@@ -95,6 +95,7 @@ function renderSections(
   overrides: Partial<ConfigSettings> = {},
 ) {
   const puts: Record<string, unknown>[] = []
+  const confirms: boolean[] = []
   const restarts: string[] = []
   const restartBodies: unknown[] = []
   const cancels: string[] = []
@@ -128,8 +129,12 @@ function renderSections(
     if (pathname !== '/api/v1/settings/config') return jsonResponse({}, 500)
     if (request.method === 'GET') return jsonResponse(current)
     expect(request.headers.get('X-Netkeeper-Client')).not.toBeNull()
-    const { values } = (await request.json()) as { values: Record<string, unknown> }
+    const { values, confirm } = (await request.json()) as {
+      values: Record<string, unknown>
+      confirm?: boolean
+    }
     puts.push(values)
+    confirms.push(confirm === true)
     current = {
       ...current,
       fields: current.fields.map((f) =>
@@ -154,7 +159,7 @@ function renderSections(
       <ConfigSections />
     </QueryClientProvider>,
   )
-  return { puts, restarts, restartBodies, cancels }
+  return { puts, confirms, restarts, restartBodies, cancels }
 }
 
 describe('ConfigSections', () => {
@@ -189,14 +194,73 @@ describe('ConfigSections', () => {
     await waitFor(() => expect(puts).toEqual([{ 'logs.max_mb': 25 }]))
   })
 
-  it('never offers auto-send as a switch it can turn on', async () => {
-    renderSections()
+  it('turns auto-send on only after a confirmation that states the risks', async () => {
+    const { puts, confirms } = renderSections()
     const campaigns = within(await screen.findByRole('form', { name: 'Campaign defaults' }))
-    expect(campaigns.getByRole('checkbox', { name: 'LinkedIn auto-send' })).toHaveAttribute(
-      'aria-disabled',
-      'true',
+    const box = campaigns.getByRole('checkbox', { name: 'LinkedIn auto-send' })
+    fireEvent.click(box)
+    const dialog = within(await screen.findByRole('alertdialog'))
+    expect(dialog.getByText(AUTO_SEND.confirm_text ?? '')).toBeVisible()
+    fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(puts).toEqual([])
+    expect(box).not.toBeChecked()
+
+    fireEvent.click(box)
+    fireEvent.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', {
+        name: 'Turn on auto-send',
+      }),
     )
-    expect(campaigns.getByText('Only config.toml can change it.')).toBeVisible()
+    await waitFor(() => expect(puts).toEqual([{ [AUTO_SEND.key]: true }]))
+    expect(confirms).toEqual([true])
+    await waitFor(() =>
+      expect(campaigns.getByRole('checkbox', { name: 'LinkedIn auto-send' })).toBeChecked(),
+    )
+    expect(campaigns.getByText('On: netkeeper clicks Send')).toBeVisible()
+  })
+
+  it('turns auto-send off at once, with no question and no Save', async () => {
+    const on = { ...AUTO_SEND, value: true, ui_value: true, source: 'ui' as const }
+    const { puts, confirms } = renderSections([PREFILLS, on, POLL])
+    const campaigns = within(await screen.findByRole('form', { name: 'Campaign defaults' }))
+    fireEvent.click(campaigns.getByRole('checkbox', { name: 'LinkedIn auto-send' }))
+    await waitFor(() => expect(puts).toEqual([{ [AUTO_SEND.key]: false }]))
+    expect(confirms).toEqual([false])
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+  })
+
+  it('never saves auto-send with the rest of its group', async () => {
+    const { puts } = renderSections()
+    const campaigns = within(await screen.findByRole('form', { name: 'Campaign defaults' }))
+    const poll = within(
+      campaigns.getByRole('group', { name: 'Check Gmail for replies every (minutes)' }),
+    )
+    fireEvent.change(poll.getByRole('spinbutton'), { target: { value: '7' } })
+    fireEvent.click(campaigns.getByRole('button', { name: 'Save campaign defaults' }))
+    await waitFor(() => expect(puts).toEqual([{ [POLL.key]: 7 }]))
+  })
+
+  it('shows auto-send locked when config.toml sets it', async () => {
+    const pinned = {
+      ...AUTO_SEND,
+      value: true,
+      file_value: true,
+      source: 'file' as const,
+      editable: false,
+      locked_reason: 'Set in /etc/nk.toml, which wins over this page.',
+    }
+    const { puts } = renderSections([PREFILLS, pinned])
+    const campaigns = within(await screen.findByRole('form', { name: 'Campaign defaults' }))
+    const box = campaigns.getByRole('checkbox', { name: 'LinkedIn auto-send' })
+    expect(box).toHaveAttribute('aria-disabled', 'true')
+    expect(box).toBeChecked()
+    const group = within(campaigns.getByRole('group', { name: 'LinkedIn auto-send' }))
+    expect(group.getByText('config.toml')).toBeVisible()
+    expect(group.getByText(/Set in \/etc\/nk.toml, which wins/)).toBeVisible()
+    fireEvent.click(box)
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(puts).toEqual([])
   })
 
   it('warns above 20 before saving, saves only what changed, and shows the note after', async () => {

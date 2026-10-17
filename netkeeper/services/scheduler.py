@@ -183,8 +183,8 @@ class JobKind(enum.StrEnum):
     ENRICH = "enrich"
     INBOX = "inbox"
     #: LinkedIn auto-send (P4-04, ADR 0008): one ``auto_send`` step per fire, as a
-    #: ``message_send`` run. Scheduled only while ``[campaigns] linkedin_auto_send``
-    #: is on (:func:`served_schedules`).
+    #: ``message_send`` run. ``serve`` always schedules it; each fire reads
+    #: ``[campaigns] linkedin_auto_send`` for the user and, off, claims nothing (#598).
     AUTO_SEND = "auto_send"
 
 
@@ -383,9 +383,10 @@ AUTO_SEND_SCHEDULE: Final = JobSchedule(JobKind.AUTO_SEND, AUTO_SEND_INTERVAL)
 
 
 def served_schedules(auto_send: bool) -> dict[JobKind, JobSchedule]:
-    """What ``netkeeper serve`` schedules: :data:`SERVED_SCHEDULES`, plus auto-send only
-    while ``[campaigns] linkedin_auto_send`` is on (ADR 0008). With it off the kind has
-    no due time and no fire at all."""
+    """:data:`SERVED_SCHEDULES`, plus auto-send when ``auto_send`` (ADR 0008).
+    ``netkeeper serve`` passes True: the auto-send handler reads the flag at each fire,
+    so the Settings page can turn it on or off with no restart (#598). The posture
+    report passes the flag in force, to list the job only while auto-send is on."""
     schedules = dict(SERVED_SCHEDULES)
     if auto_send:
         schedules[JobKind.AUTO_SEND] = AUTO_SEND_SCHEDULE

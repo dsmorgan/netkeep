@@ -281,7 +281,7 @@ describe('PostureSection: LinkedIn sends and the first inbox poll (#383)', () =>
     notes: [],
   }
   const AUTO_SEND_WARNING =
-    'linkedin_auto_send is on in the [campaigns] section of config.toml, so netkeeper sends' +
+    'LinkedIn auto-send is on (campaigns.linkedin_auto_send), so netkeeper sends' +
     ' LinkedIn messages itself for steps set to Auto-send, rather than prefilling them for you' +
     ' to send. It is off by default: an automated send is the action LinkedIn restricts hardest'
   const SHORT_POLL_WARNING =

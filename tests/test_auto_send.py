@@ -87,6 +87,7 @@ from netkeeper.services import (
     runs,
     scheduled_runs,
     scheduler,
+    ui_settings,
 )
 from netkeeper.services import heat as heat_service
 from netkeeper.services.budgets import ActionClass
@@ -813,7 +814,8 @@ def test_an_auto_sent_message_is_listed_only_once_stale(lane: Lane) -> None:
 # --- the scheduler -------------------------------------------------------------------------
 
 
-def test_auto_send_is_scheduled_only_with_the_flag_on() -> None:
+def test_the_auto_send_schedule_is_listed_only_with_the_flag_on() -> None:
+    """``served_schedules`` is what the posture report lists; serve passes True (#598)."""
     assert scheduler.JobKind.AUTO_SEND not in scheduler.served_schedules(False)
     assert scheduler.JobKind.AUTO_SEND not in scheduler.SERVED_SCHEDULES
     on = scheduler.served_schedules(True)
@@ -821,29 +823,107 @@ def test_auto_send_is_scheduled_only_with_the_flag_on() -> None:
     assert on[scheduler.JobKind.AUTO_SEND].respect_active_hours
 
 
+def test_serve_schedules_auto_send_whatever_the_file_says() -> None:
+    """#598: the Settings page can turn auto-send on with no restart, so `serve` always
+    schedules the job, and its handler decides at each fire."""
+    import inspect
+
+    source = inspect.getsource(scheduled_runs.start_serve_scheduler)
+    assert "served_schedules(True)" in source
+    assert "served_schedules(whole" not in source
+
+
 class _NoTasks:
     def submit(self, *args: Any, **kwargs: Any) -> Any:
         raise AssertionError("nothing may be submitted")
 
 
-def _no_database() -> Any:
-    raise AssertionError("the handler opened a session with auto-send off")
+class _SeenTasks:
+    """Takes the claimed run and never starts it: the test only asks whether one was."""
+
+    def __init__(self) -> None:
+        self.submitted = 0
+
+    def submit(self, *args: Any, **kwargs: Any) -> Any:
+        self.submitted += 1
+        return type("Info", (), {"id": "task"})()
+
+    async def wait(self, task_id: str) -> None:
+        return None
+
+
+OFF = replace(AUTO, campaigns=replace(AUTO.campaigns, linkedin_auto_send=False))
+
+
+def _page_auto_send(on: bool) -> Callable[[Session, User], None]:
+    """The Settings page's switch, as ``PUT /settings/config`` writes it (#598)."""
+
+    def write(session: Session, user: User) -> None:
+        ui_settings.write(
+            session, user, Settings(), {ui_settings.AUTO_SEND_KEY: on}, confirm_auto_send=on
+        )
+
+    return write
+
+
+async def _fire(lane: Lane, base: Settings, tasks: Any) -> scheduler.JobOutcome | None:
+    account = lane.read(lambda s, u: ensure_account(s, u).id)
+    ctx = scheduler.JobContext(lane.user_id, account, scheduler.JobKind.AUTO_SEND, NOW, False)
+    handler = scheduled_runs._auto_send_handler(
+        lane.factory, cast(Any, None), cast(Any, tasks), base, clock=lambda: NOW
+    )
+    return await handler(ctx)
+
+
+def _last_fire(lane: Lane) -> Any:
+    account = lane.read(lambda s, u: ensure_account(s, u).id)
+    return lane.read(lambda s, u: scheduler.last_fire(s, u, account, scheduler.JobKind.AUTO_SEND))
 
 
 async def test_the_handler_claims_nothing_with_the_flag_off(lane: Lane) -> None:
     lane.enroll(contact=dict(CONTACT))
-    off = replace(AUTO, campaigns=replace(AUTO.campaigns, linkedin_auto_send=False))
-    handler = scheduled_runs._auto_send_handler(
-        cast(Any, _no_database),  # the flag is checked before any session
-        cast(Any, None),
-        cast(Any, _NoTasks()),
-        off,
-        clock=lambda: NOW,
-    )
-    account = lane.read(lambda s, u: ensure_account(s, u).id)
-    ctx = scheduler.JobContext(lane.user_id, account, scheduler.JobKind.AUTO_SEND, NOW, False)
-    assert await handler(ctx) is scheduler.JobOutcome.NOTHING_TO_SEND
+    lane.write(lambda s, u: record_poll(s, u, NOW - timedelta(minutes=1)))
+    assert await _fire(lane, OFF, _NoTasks()) is scheduler.JobOutcome.NOTHING_TO_SEND
     assert lane.runs() == []
+    assert _last_fire(lane) is None  # off, the fire notes nothing
+
+
+async def test_the_page_turning_auto_send_on_applies_from_the_next_fire(lane: Lane) -> None:
+    """#598: the file says off, the Settings page says on, and the same handler, built
+    once as `serve` builds it, claims at its next fire with no restart."""
+    lane.enroll(contact=dict(CONTACT))
+    lane.write(lambda s, u: record_poll(s, u, NOW - timedelta(minutes=1)))
+    tasks = _SeenTasks()
+    lane.write(_page_auto_send(True))
+    assert await _fire(lane, OFF, tasks) is None
+    assert tasks.submitted == 1
+    [run] = lane.runs()
+    assert (run.kind, run.trigger) == (SyncRunKind.MESSAGE_SEND, SyncRunTrigger.SCHEDULED)
+
+
+async def test_the_page_turning_auto_send_off_stops_the_next_fire(lane: Lane) -> None:
+    lane.enroll(contact=dict(CONTACT))
+    lane.write(lambda s, u: record_poll(s, u, NOW - timedelta(minutes=1)))
+    lane.write(_page_auto_send(False))
+    assert await _fire(lane, AUTO, _NoTasks()) is scheduler.JobOutcome.NOTHING_TO_SEND
+    assert lane.runs() == []
+    # The step waits for a person instead: it is in the ready-to-prefill queue.
+    in_force = lane.read(lambda s, u: ui_settings.resolve(s, u, AUTO))
+    rows, _ = lane.read(
+        lambda s, u: linkedin_steps.ready_to_prefill(s, u, now=NOW, settings=in_force, limit=10)
+    )
+    assert len(rows) == 1
+
+
+async def test_with_the_file_setting_auto_send_the_page_cannot_stop_it(lane: Lane) -> None:
+    """One source of truth: a row the page holds never overrides a key the file sets."""
+    lane.enroll(contact=dict(CONTACT))
+    lane.write(lambda s, u: record_poll(s, u, NOW - timedelta(minutes=1)))
+    lane.write(lambda s, u: set_setting(s, u, "config." + ui_settings.AUTO_SEND_KEY, False))
+    pinned = replace(AUTO, file_keys=frozenset({ui_settings.AUTO_SEND_KEY}))
+    tasks = _SeenTasks()
+    assert await _fire(lane, pinned, tasks) is None
+    assert tasks.submitted == 1
 
 
 async def test_the_handler_waits_out_the_spacing(lane: Lane) -> None:
@@ -1103,9 +1183,12 @@ def _last_key_does(a: Auto, act: Callable[[Session, User], Any]) -> None:
     [
         (lambda s, u: disarm_scheduled_runs(s, u), "scheduled runs are disarmed"),
         (lambda s, u: pause_schedule(s, u, now=NOW), "the schedule is paused"),
+        # #598: the Settings page's switch, read again right before the click. The run
+        # started with auto-send on; a gate that kept those settings would click Send.
+        (_page_auto_send(False), "auto-send is off"),
     ],
 )
-async def test_disarming_or_pausing_after_the_last_key_stops_the_click(
+async def test_disarming_pausing_or_turning_auto_send_off_after_the_last_key_stops_the_click(
     lane: Lane, act: Callable[[Session, User], Any], why: str
 ) -> None:
     a = Auto(lane)
@@ -1337,16 +1420,21 @@ def test_posture_lists_the_auto_send_job_only_with_the_flag_on(lane: Lane) -> No
     assert "auto_send" not in [kind for kind, _, _ in off.jobs]
 
 
-def test_the_serve_registry_has_no_auto_send_handler_with_the_flag_off(lane: Lane) -> None:
-    off = replace(AUTO, campaigns=replace(AUTO.campaigns, linkedin_auto_send=False))
-    none = scheduled_runs.serve_registry(
-        lane.factory, cast(Any, None), cast(Any, _NoTasks()), clock=lambda: NOW, settings=off
+@pytest.mark.parametrize("base", [OFF, AUTO, None])
+async def test_the_serve_registry_always_has_the_auto_send_handler(
+    lane: Lane, base: Settings | None
+) -> None:
+    """#598: registered whatever the file says; with the flag off it claims nothing."""
+    registry = scheduled_runs.serve_registry(
+        lane.factory, cast(Any, None), cast(Any, _NoTasks()), clock=lambda: NOW, settings=base
     )
-    assert scheduler.JobKind.AUTO_SEND not in none
-    on = scheduled_runs.serve_registry(
-        lane.factory, cast(Any, None), cast(Any, _NoTasks()), clock=lambda: NOW, settings=AUTO
-    )
-    assert scheduler.JobKind.AUTO_SEND in on
+    handler = registry[scheduler.JobKind.AUTO_SEND]
+    if base is not AUTO:
+        lane.enroll(contact=dict(CONTACT))
+        account = lane.read(lambda s, u: ensure_account(s, u).id)
+        ctx = scheduler.JobContext(lane.user_id, account, scheduler.JobKind.AUTO_SEND, NOW, False)
+        assert await handler(ctx) is scheduler.JobOutcome.NOTHING_TO_SEND
+        assert lane.runs() == []
 
 
 # --- #458 review, second pass: the close checks, the hold's own gates, the refund guard ----
@@ -2690,3 +2778,90 @@ async def test_a_browser_error_after_the_runner_started_is_not_given_back_unopen
     run = a.run()
     assert not (run.notes or "").startswith(linkedin_steps.NOT_STARTED_NOTE)
     assert (run.counts_json or {}).get("opened") is not False
+
+
+# --- #598: the Settings page's switch, with every other precondition --------------------
+
+
+def _spend_auto_budget(session: Session, user: User) -> None:
+    account = ensure_account(session, user)
+    key = budgets._day_key(account.id, ActionClass.LI_MESSAGES_AUTO, NOW.date())
+    limit = budgets._limits_for(ActionClass.LI_MESSAGES_AUTO, AUTO.linkedin.budget).day
+    set_setting(session, user, key, limit)
+
+
+def _heat_up(session: Session, user: User) -> None:
+    account = ensure_account(session, user).id
+    for _ in range(10):
+        heat_service.raise_heat(session, user, account, now=NOW, settings=AUTO.linkedin.heat)
+
+
+def _hold(session: Session, user: User) -> None:
+    account = ensure_account(session, user).id
+    linkedin_steps.hold_auto_send(
+        session, user, account, reason=linkedin_steps.AUTO_SEND_HOLD_BUBBLE, now=NOW, run_id=1
+    )
+
+
+def _prefill_steps(session: Session, user: User) -> None:
+    for step in session.scalars(scoped(user, CampaignStep)):
+        step.mode = StepMode.PREFILL
+
+
+@pytest.mark.parametrize(
+    ("precondition", "outcome"),
+    [
+        (lambda s, u: disarm_scheduled_runs(s, u), scheduler.JobOutcome.DISARMED_AFTER_GATE),
+        (lambda s, u: pause_schedule(s, u, now=NOW), scheduler.JobOutcome.PAUSED_AFTER_GATE),
+        (_prefill_steps, scheduler.JobOutcome.NOTHING_TO_SEND),
+        (_spend_auto_budget, scheduler.JobOutcome.NOTHING_TO_SEND),
+        (_heat_up, scheduler.JobOutcome.NOTHING_TO_SEND),
+        (_hold, scheduler.JobOutcome.NOTHING_TO_SEND),
+    ],
+    ids=["disarmed", "paused", "prefill-step", "budget-spent", "hot", "held"],
+)
+async def test_with_the_page_switch_on_every_precondition_still_holds(
+    lane: Lane,
+    precondition: Callable[[Session, User], Any],
+    outcome: scheduler.JobOutcome,
+) -> None:
+    """The switch turns on the flag and nothing else: arming, the pause, the step's mode,
+    the li_messages_auto budget, heat and the hold each still stop the fire."""
+    lane.enroll(contact=dict(CONTACT))
+    lane.write(lambda s, u: record_poll(s, u, NOW - timedelta(minutes=1)))
+    lane.write(_page_auto_send(True))
+    lane.write(precondition)
+    assert await _fire(lane, OFF, _NoTasks()) is outcome
+    assert lane.runs() == []
+
+
+async def test_with_the_file_off_the_page_switch_on_sends(lane: Lane) -> None:
+    lane.write(_page_auto_send(True))
+    a = Auto(lane, worker_settings=OFF)
+    await a.execute()
+    message = a.message()
+    assert message is not None and message.send_clicked_at is not None
+    assert a.site.sent == [message.body_rendered]
+
+
+async def test_a_run_the_page_switch_allows_still_keeps_its_gates(lane: Lane) -> None:
+    """With the file off and the page on, a gate the run meets (here the step switched
+    to Prefill while it typed) still stops the click."""
+    lane.write(_page_auto_send(True))
+    a = Auto(lane, worker_settings=OFF)
+    _last_key_does(a, _prefill_steps)
+    await a.execute()
+    _no_send(a)
+    assert a.run().notes == "not sent: the step is not an auto-send step"
+
+
+async def test_the_page_switch_off_before_the_run_opens_nothing(lane: Lane) -> None:
+    """Claimed with auto-send on, then turned off on the page: the run gives the claim
+    back before it attaches, and the step waits for a person."""
+    lane.write(_page_auto_send(True))
+    a = Auto(lane, worker_settings=OFF)
+    lane.write(_page_auto_send(False))
+    await a.execute()
+    assert a.site.navigations == [] and a.connector.attaches == 0
+    _no_send(a)
+    _given_back_unopened(a, "auto-send is off")

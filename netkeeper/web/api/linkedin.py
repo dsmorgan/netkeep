@@ -599,7 +599,8 @@ def _auto_send_out(request: Request, session: Session, user: User) -> AutoSendOu
     seen = auto_send_outlook.outlook(session, user, now=utcnow(), settings=settings)
     last = seen.last_fire
     return AutoSendOutlookOut(
-        on=settings.campaigns.linkedin_auto_send,
+        # The flag in force for this user (#598), as the fire reads it: not the file's alone.
+        on=effective_settings(request, session, user).campaigns.linkedin_auto_send,
         next_fire=seen.next_fire,
         checked_at=seen.checked_at,
         would_send=seen.would_send,

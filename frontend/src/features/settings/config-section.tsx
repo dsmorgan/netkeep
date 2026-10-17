@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
@@ -71,7 +72,7 @@ export function ConfigSections() {
               <GroupForm
                 title={group.title}
                 fields={fields}
-                key={JSON.stringify(fields.map((f) => f.value))}
+                key={JSON.stringify(fields.filter((f) => !confirmed(f)).map((f) => f.value))}
               />
             </CardContent>
           </Card>
@@ -81,6 +82,14 @@ export function ConfigSections() {
   )
 }
 
+/**
+ * A switch that saves on its own, outside the group's Save: turning it on asks first,
+ * with the backend's own words for what it means (LinkedIn auto-send, #598).
+ */
+function confirmed(field: ConfigField): boolean {
+  return field.kind === 'bool' && field.confirm_text !== null
+}
+
 function GroupForm({ title, fields }: { title: string; fields: ConfigField[] }) {
   const queryClient = useQueryClient()
   const [drafts, setDrafts] = useState<Record<string, Draft>>(() =>
@@ -88,14 +97,14 @@ function GroupForm({ title, fields }: { title: string; fields: ConfigField[] }) 
   )
   const [saved, setSaved] = useState(false)
   const save = useMutation({
-    mutationFn: saveConfigSettings,
+    mutationFn: (values: Record<string, unknown>) => saveConfigSettings(values),
     onSuccess: (data: ConfigSettings) => {
       queryClient.setQueryData(configSettingsQuery.queryKey, data)
       void queryClient.invalidateQueries({ queryKey: postureQuery.queryKey })
       setSaved(true)
     },
   })
-  const editable = fields.filter((f) => f.editable)
+  const editable = fields.filter((f) => f.editable && !confirmed(f))
   const problems = editable
     .map((f) => draftProblem(f, drafts[f.key] ?? draftOf(f)))
     .filter((p) => p !== null)
@@ -118,16 +127,20 @@ function GroupForm({ title, fields }: { title: string; fields: ConfigField[] }) 
         if (problems.length === 0 && Object.keys(changes).length > 0) save.mutate(changes)
       }}
     >
-      {fields.map((field) => (
-        <FieldRow
-          key={field.key}
-          field={field}
-          draft={drafts[field.key] ?? draftOf(field)}
-          onChange={(draft) => set(field.key, draft)}
-          onReset={() => save.mutate({ [field.key]: null })}
-          resetting={save.isPending}
-        />
-      ))}
+      {fields.map((field) =>
+        confirmed(field) ? (
+          <ConfirmedSwitch key={field.key} field={field} />
+        ) : (
+          <FieldRow
+            key={field.key}
+            field={field}
+            draft={drafts[field.key] ?? draftOf(field)}
+            onChange={(draft) => set(field.key, draft)}
+            onReset={() => save.mutate({ [field.key]: null })}
+            resetting={save.isPending}
+          />
+        ),
+      )}
       {editable.length > 0 && (
         <div className="flex items-center gap-2">
           <Button
@@ -231,6 +244,77 @@ function FieldRow({
           {n}
         </p>
       ))}
+    </div>
+  )
+}
+
+/**
+ * LinkedIn auto-send (#598). Off saves at once with no question: it stops any auto-send
+ * that hasn't clicked Send. On saves only after the dialog, which states the risks in
+ * the backend's words, and sends `confirm` with it. A value config.toml sets shows
+ * locked, with the file's path.
+ */
+function ConfirmedSwitch({ field }: { field: ConfigField }) {
+  const id = useId()
+  const queryClient = useQueryClient()
+  const [asking, setAsking] = useState(false)
+  const save = useMutation({
+    mutationFn: (on: boolean) => saveConfigSettings({ [field.key]: on }, { confirm: on }),
+    onSuccess: (data: ConfigSettings) => {
+      queryClient.setQueryData(configSettingsQuery.queryKey, data)
+      // The posture report, the LinkedIn queue and the campaign pages all show it.
+      void queryClient.invalidateQueries()
+      setAsking(false)
+    },
+  })
+  const on = field.value === true
+  return (
+    <div className="space-y-1.5" role="group" aria-label={field.label}>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id={id}
+            checked={on}
+            disabled={!field.editable || save.isPending}
+            onCheckedChange={(checked) => {
+              if (checked === true) {
+                save.reset()
+                setAsking(true)
+              } else {
+                save.mutate(false)
+              }
+            }}
+          />
+          <Label htmlFor={id}>{field.label}</Label>
+        </div>
+        <Badge variant={field.source === 'file' ? 'secondary' : 'outline'}>
+          {SOURCE_LABEL[field.source]}
+        </Badge>
+        {on && <Badge variant="destructive">On: netkeeper clicks Send</Badge>}
+      </div>
+      <p className="text-muted-foreground">
+        {field.help} {field.applies_note}
+      </p>
+      {field.locked_reason !== null && (
+        <p className="text-muted-foreground">{field.locked_reason}</p>
+      )}
+      {!asking && save.isError && <p role="alert">{message(save.error)}</p>}
+      {field.warnings.map((w) => (
+        <p key={w} role="alert" className="text-destructive">
+          Warning: {w}
+        </p>
+      ))}
+      <ConfirmDialog
+        open={asking}
+        onOpenChange={setAsking}
+        title={`Turn on ${field.label}?`}
+        confirmLabel="Turn on auto-send"
+        onConfirm={() => save.mutateAsync(true)}
+        pending={save.isPending}
+        error={save.isError ? message(save.error) : null}
+      >
+        <p>{field.confirm_text}</p>
+      </ConfirmDialog>
     </div>
   )
 }

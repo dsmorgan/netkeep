@@ -185,11 +185,83 @@ def test_a_stored_value_that_fails_validation_is_ignored() -> None:
     assert (view.stored_unreadable, view.source, view.ui_value) == (True, "default", None)
 
 
-def test_auto_send_is_never_taken_from_the_page() -> None:
-    key = "campaigns.linkedin_auto_send"
-    assert ui_settings.apply(Settings(), {key: True}).campaigns.linkedin_auto_send is False
-    view = _view(ui_settings.describe(Settings(), {key: True}), key)
-    assert view.editable is False and view.value is False
+AUTO = "campaigns.linkedin_auto_send"
+
+
+def test_auto_send_is_a_switch_the_page_holds() -> None:
+    """#598: the page's value is in force unless the file sets the key."""
+    assert ui_settings.apply(Settings(), {AUTO: True}).campaigns.linkedin_auto_send is True
+    view = _view(ui_settings.describe(Settings(), {AUTO: True}), AUTO)
+    assert (view.editable, view.value, view.source, view.default) == (True, True, "ui", False)
+    assert view.spec.applies == "now"
+    assert view.spec.confirm_text == ui_settings.AUTO_SEND_CONFIRM
+    off = _view(ui_settings.describe(Settings(), {}), AUTO)
+    assert (off.value, off.source, off.editable) == (False, "default", True)
+
+
+def test_the_auto_send_confirmation_states_the_risks() -> None:
+    """Written out, not read from the module: the words a person confirms before
+    netkeeper may click Send by itself."""
+    text = ui_settings.AUTO_SEND_CONFIRM
+    for phrase in (
+        "clicks Send on LinkedIn by itself",
+        "with nobody watching",
+        "can't be taken back",
+        "what LinkedIn restricts accounts for fastest",
+        "scheduled runs must be armed",
+        "the step must be set to Auto-send",
+        "auto-send budget, active hours, spacing and heat all hold",
+        "Turning it off here stops any auto-send that hasn't clicked Send yet",
+    ):
+        assert phrase in text
+    # Only auto-send asks for a confirmation.
+    assert [spec.key for spec in ui_settings.FIELDS if spec.confirm_text] == [AUTO]
+
+
+def test_turning_auto_send_on_needs_the_confirmation(session: Session, user: User) -> None:
+    with pytest.raises(ui_settings.SettingsRefused) as refused:
+        ui_settings.write(session, user, Settings(), {AUTO: True, "backup.keep": 5})
+    assert set(refused.value.problems) == {AUTO}
+    assert "needs your confirmation" in refused.value.problems[AUTO]
+    assert ui_settings.stored(session, user) == {}  # nothing, the other key included
+    assert ui_settings.auto_send_on(session, user, Settings()) is False
+
+    ui_settings.write(session, user, Settings(), {AUTO: True}, confirm_auto_send=True)
+    assert get_setting(session, user, "config." + AUTO) is True
+    assert ui_settings.auto_send_on(session, user, Settings()) is True
+
+
+@pytest.mark.parametrize("off", [False, None])
+def test_turning_auto_send_off_needs_nothing_and_applies_at_once(
+    session: Session, user: User, off: bool | None
+) -> None:
+    ui_settings.write(session, user, Settings(), {AUTO: True}, confirm_auto_send=True)
+    ui_settings.write(session, user, Settings(), {AUTO: off})  # no confirmation
+    assert ui_settings.auto_send_on(session, user, Settings()) is False
+
+
+def test_the_confirmation_turns_nothing_else_on(session: Session, user: User) -> None:
+    ui_settings.write(session, user, Settings(), {PREFILLS: 20}, confirm_auto_send=True)
+    assert ui_settings.auto_send_on(session, user, Settings()) is False
+
+
+@pytest.mark.parametrize(("file_value", "page_value"), [(False, True), (True, False)])
+def test_config_toml_wins_over_the_auto_send_switch(
+    session: Session, user: User, file_value: bool, page_value: bool
+) -> None:
+    """One source of truth: a key the file sets is the value in force, the page shows it
+    locked with the file's path, and the page cannot write it either way."""
+    base = _pinned(campaigns__linkedin_auto_send=file_value)
+    set_setting(session, user, "config." + AUTO, page_value)  # a row from before the file
+    assert ui_settings.auto_send_on(session, user, base) is file_value
+    view = _view(ui_settings.describe(base, ui_settings.stored(session, user)), AUTO)
+    assert (view.value, view.source, view.editable) == (file_value, "file", False)
+    assert view.file_value is file_value
+    assert view.locked_reason is not None and view.locked_reason.startswith("Set in /etc/nk.toml")
+    with pytest.raises(ui_settings.SettingsRefused) as refused:
+        ui_settings.write(session, user, base, {AUTO: page_value}, confirm_auto_send=True)
+    assert "/etc/nk.toml sets it" in refused.value.problems[AUTO]
+    assert ui_settings.auto_send_on(session, user, base) is file_value
 
 
 # --- writing ----------------------------------------------------------------------

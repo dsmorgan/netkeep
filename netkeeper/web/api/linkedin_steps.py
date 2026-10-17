@@ -365,7 +365,7 @@ def _not_sent_reason(notes: str | None) -> str | None:
 @router.get("/options", operation_id="get_linkedin_step_options")
 def get_options(request: Request, user: CurrentUser, session: SessionDep) -> OptionsOut:
     """Whether ``auto_send`` may be chosen for a LinkedIn step: the config flag."""
-    # Auto-send itself is file-only (#343); the budget warning reads the page's values.
+    # The flag and the budget warning both read the values in force (#343, #598).
     settings = _settings(request, session, user)
     hold = service.auto_send_hold(session, user, account_id_for(session, user))
     return OptionsOut(
