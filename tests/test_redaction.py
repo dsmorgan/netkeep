@@ -76,11 +76,24 @@ def test_classify(value: str, kind: str) -> None:
         "phone 555-010-4477 end",
         "phone +15550104477 end",
         "phone +44 20 7946 0958 end",
+        "phone +44 (0)20 7946 0958 end",
+        "phone 020 7946 0958 end",
+        "phone 07946 095800 end",
+        "phone 555-0142 end",
     ],
 )
 def test_the_second_line_of_defense_catches_unmarked_values(line: str) -> None:
     out = Redactor().text(line)
-    for fragment in (EMAIL, "ACoAAQuorbelleX9", SLUG, "010 4477", "010-4477", "5550104477", "7946"):
+    for fragment in (
+        EMAIL,
+        "ACoAAQuorbelleX9",
+        SLUG,
+        "010 4477",
+        "010-4477",
+        "5550104477",
+        "7946",
+        "0142",
+    ):
         assert fragment not in out
 
 
@@ -131,6 +144,13 @@ def test_data_and_home_directories_are_replaced(tmp_path: Path) -> None:
         ("{'refresh_token': 'invented-refresh-in-repr'}", "invented-refresh-in-repr"),
         ("csrf_token=inventedCsrfValue&x=1", "inventedCsrfValue"),
         ("password = inventedPassw0rd", "inventedPassw0rd"),
+        ("token: inventedColonToken", "inventedColonToken"),
+        ("csrf-token: ajax:1234567890", "ajax:1234567890"),
+        ('JSESSIONID="ajax:8888"', "ajax:8888"),
+        ("the value ajax:9876543210 alone", "ajax:9876543210"),
+        ("q=refresh_token%3D1inventedEncoded%26x", "1inventedEncoded"),
+        ("{'name': 'li_at', 'value': 'AQEDinventedDict', 'path': '/'}", "AQEDinventedDict"),
+        ('{"name": "JSESSIONID", "value": "inventedDictJ", "secure": true}', "inventedDictJ"),
     ],
 )
 def test_secrets_are_stripped(line: str, secret: str) -> None:
@@ -152,7 +172,7 @@ def test_json_values_are_redacted_and_keys_kept() -> None:
     assert out == {"error": "no profile at <url-1>", "counts": [1, {"note": "<email-1>"}], "n": 3}
 
 
-def test_a_traceback_keeps_its_exception_type_but_not_its_message() -> None:
+def test_a_traceback_keeps_its_exception_type_but_not_its_message_() -> None:
     text = (
         f"2026-10-17 14:16:12 ERROR x failed for {_mark(NAME)}\n"
         "Traceback (most recent call last):\n"
@@ -168,3 +188,114 @@ def test_a_traceback_keeps_its_exception_type_but_not_its_message() -> None:
 def test_a_checkpoint_path_loses_its_challenge_id() -> None:
     out = Redactor().text("checkpoint at /checkpoint/challenge/AgInventedChallengeId")
     assert out == "checkpoint at /checkpoint/challenge/<slug-1>"
+
+
+def test_a_devtools_path_loses_its_session_id() -> None:
+    out = Redactor().text("attached ws://127.0.0.1:9222/devtools/browser/0b1d-invented-id")
+    assert out == "attached ws://127.0.0.1:9222/devtools/<id>"
+
+
+def _traceback(*body: str) -> str:
+    return "\n".join(
+        [
+            "2026-10-17 14:16:12 ERROR x it failed",
+            "Traceback (most recent call last):",
+            '  File "/srv/app.py", line 3, in handler',
+            "    do_it(name)",
+            "    ~~~~~^^^^^^",
+            *body,
+            "2026-10-17 14:16:13 INFO x next record",
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    ("body", "kept"),
+    [
+        # SQLAlchemy: the message runs on with the statement and its parameters.
+        (
+            [
+                "sqlalchemy.exc.IntegrityError: (sqlite3.IntegrityError) UNIQUE failed",
+                "[SQL: INSERT INTO contacts (first_name) VALUES (?)]",
+                f"[parameters: ('{NAME}',)]",
+                "(Background on this error at: https://sqlalche.me/e/20/gkpj)",
+            ],
+            ["sqlalchemy.exc.IntegrityError: <message left out>", "<message left out>"],
+        ),
+        # pydantic: the detail lines carry the input.
+        (
+            [
+                "pydantic_core._pydantic_core.ValidationError: 1 validation error for M",
+                "name",
+                f"  String should be short [type=too_long, input_value='{NAME}', input_type=str]",
+            ],
+            [
+                "pydantic_core._pydantic_core.ValidationError: <message left out>",
+                "<message left out>",
+            ],
+        ),
+        # A message over several lines.
+        (
+            [f"ValueError: first {NAME}", f"{NAME} again", "Quorbelle"],
+            ["ValueError: <message left out>", "<message left out>"],
+        ),
+        # A bare name on its own line looks like a type; it is not one.
+        (["KeyError", "Fictionary"], ["KeyError", "<message left out>"]),
+    ],
+)
+def test_a_traceback_keeps_only_its_shape(body: list[str], kept: list[str]) -> None:
+    out = Redactor().log(_traceback(*body)).splitlines()
+    assert NAME not in "\n".join(out)
+    assert "Quorbelle" not in "\n".join(out) and "Fictionary" not in "\n".join(out)
+    assert out[:5] == [
+        "2026-10-17 14:16:12 ERROR x it failed",
+        "Traceback (most recent call last):",
+        '  File "/srv/app.py", line 3, in handler',
+        "    do_it(name)",
+        "    ~~~~~^^^^^^",
+    ]
+    assert out[5:-1] == kept
+    assert out[-1] == "2026-10-17 14:16:13 INFO x next record"
+
+
+def test_an_exception_group_keeps_its_drawing_and_types_only() -> None:
+    text = _traceback(
+        "  | ExceptionGroup: two failed (2 sub-exceptions)",
+        "  +-+---------------- 1 ----------------",
+        "    | Traceback (most recent call last):",
+        '    |   File "/srv/app.py", line 9, in inner',
+        "    |     raise ValueError(message)",
+        f"    | ValueError: {NAME} bad",
+        f"    | {NAME} second line",
+        "    +---------------- 2 ----------------",
+        f"    | KeyError: '{SLUG}'",
+        "    +------------------------------------",
+    )
+    out = Redactor().log(text)
+    assert NAME not in out and SLUG not in out
+    assert "  | ExceptionGroup: <message left out>" in out
+    assert "    | ValueError: <message left out>" in out
+    assert "    | KeyError: <message left out>" in out
+    assert '    |   File "/srv/app.py", line 9, in inner' in out
+    assert "    +---------------- 2 ----------------" in out
+
+
+def test_a_multi_line_message_outside_a_traceback_keeps_its_first_line() -> None:
+    text = f"2026-10-17 14:16:12 WARNING x validation failed\n  name\n    input_value='{NAME}'"
+    assert Redactor().log(text) == (
+        "2026-10-17 14:16:12 WARNING x validation failed\n<message left out>"
+    )
+
+
+def test_a_frame_line_keeps_only_frame_shape() -> None:
+    # A frame without a source line: the next line is not taken for code.
+    lines = (
+        Redactor()
+        .log(
+            "2026-10-17 14:16:12 ERROR x\nTraceback (most recent call last):\n"
+            '  File "<string>", line 1, in <module>\n'
+            f"ValueError: {NAME}"
+        )
+        .splitlines()
+    )
+    assert lines[-1] == "ValueError: <message left out>"

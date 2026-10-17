@@ -16099,7 +16099,7 @@ export interface operations {
                     "application/zip": string;
                 };
             };
-            /** @description Only the local owner account makes a support bundle */
+            /** @description Only the local owner account makes a support bundle, and only from this site's own page or a request with X-Netkeeper-Client */
             403: {
                 headers: {
                     [name: string]: unknown;

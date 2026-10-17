@@ -46,7 +46,13 @@ from netkeeper.config import Settings
 from netkeeper.logging_setup import LOG_DIRNAME, LOG_FILENAME
 from netkeeper.models import SyncRun, User
 from netkeeper.paths import data_dir
-from netkeeper.redaction import Redactor, strip_secrets
+from netkeeper.redaction import (
+    MESSAGE_LEFT_OUT,
+    RECORD_START,
+    Redactor,
+    strip_secrets,
+    strip_url_path,
+)
 from netkeeper.scoping import scoped, scoped_count
 from netkeeper.services import posture as posture_service
 from netkeeper.services import route_breaker, runs, scheduler, ui_settings
@@ -101,7 +107,7 @@ LEVELS: Final[dict[Level, LevelSpec]] = {
     Level.STANDARD: LevelSpec(
         level=Level.STANDARD,
         title="Standard",
-        summary="No personal data. Attach this one to a GitHub issue.",
+        summary="No personal data. Send it privately to the person helping you.",
         includes=(
             *_STANDARD_INCLUDES,
             "The log file for the chosen days, with names, emails, phone numbers, web"
@@ -111,7 +117,7 @@ LEVELS: Final[dict[Level, LevelSpec]] = {
         leaves_out=(
             _ALWAYS_OUT,
             "Names, emails, phone numbers, LinkedIn URLs, slugs and URNs, message text and"
-            " subject lines, and run notes",
+            " subject lines, run notes, and exception messages (only the type is kept)",
         ),
         default_since_days=7,
         max_log_bytes=5 * _MB,
@@ -133,7 +139,7 @@ LEVELS: Final[dict[Level, LevelSpec]] = {
         leaves_out=(
             _ALWAYS_OUT,
             "Names, emails, phone numbers, LinkedIn URLs, slugs and URNs, message text and"
-            " subject lines, and run notes",
+            " subject lines, run notes, and exception messages (only the type is kept)",
         ),
         default_since_days=30,
         max_log_bytes=25 * _MB,
@@ -250,8 +256,11 @@ def _settings_json(settings: Settings) -> dict[str, Any]:
             if key in settings.ui_keys
             else "default"
         )
+        value = ui_settings.value_at(settings, key)
+        if key == "linkedin.cdp_url" and isinstance(value, str):
+            value = strip_url_path(value)  # a /devtools/browser/<id> path names one session
         values[key] = {
-            "value": ui_settings.to_json(ui_settings.value_at(settings, key)),
+            "value": ui_settings.to_json(value),
             "source": source,
         }
     return {"config_file": settings.source_path is not None, "values": values}
@@ -378,7 +387,22 @@ def _jobs(session: Session, user: User, account_id: int) -> dict[str, Any]:
     }
 
 
-def _run(run: SyncRun, *, notes: bool) -> dict[str, Any]:
+_ERROR_TYPE: Final = re.compile(r"^\s*([A-Za-z_][\w.]*)\s*:")
+
+
+def error_type(error: str | None) -> str | None:
+    """A run's ``error`` below the full level: the exception's type and nothing else.
+
+    ``error`` is ``Type: first line of the message`` (``runs.describe``), and the
+    message is whatever the code put in it, a name or a bare slug as often as not, with
+    nothing to mark it. An error that does not start with a type keeps none of it."""
+    if error is None:
+        return None
+    found = _ERROR_TYPE.match(error)
+    return f"{found.group(1)}: {MESSAGE_LEFT_OUT}" if found else MESSAGE_LEFT_OUT
+
+
+def _run(run: SyncRun, *, redacted: bool) -> dict[str, Any]:
     derived = runs.view(run)
     ended = run.completed_at
     out: dict[str, Any] = {
@@ -402,15 +426,15 @@ def _run(run: SyncRun, *, notes: bool) -> dict[str, Any]:
         "heartbeat_at": _when(run.heartbeat_at),
         "counts": run.counts_json,
         "progress": run.progress_json,
-        "error": run.error,
+        "error": error_type(run.error) if redacted else run.error,
     }
-    if notes:
+    if not redacted:
         out["notes"] = run.notes
     return out
 
 
 def _runs(
-    session: Session, user: User, *, since: datetime, limit: int, notes: bool
+    session: Session, user: User, *, since: datetime, limit: int, redacted: bool
 ) -> dict[str, Any]:
     total = session.scalar(scoped_count(user, SyncRun).where(SyncRun.started_at >= since)) or 0
     rows = session.scalars(
@@ -423,7 +447,7 @@ def _runs(
         "since": since.isoformat(),
         "in_window": total,
         "shown": len(rows),
-        "runs": [_run(run, notes=notes) for run in rows],
+        "runs": [_run(run, redacted=redacted) for run in rows],
     }
 
 
@@ -438,12 +462,11 @@ def _posture(
 
 # --- the log file -------------------------------------------------------------------------
 
-_RECORD_START: Final = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) ")
-
 
 @dataclass(frozen=True, slots=True)
 class LogExcerpt:
-    text: str
+    parts: tuple[str, ...]
+    """The records, in order, each a whole record."""
     files: tuple[str, ...]
     records: int
     truncated: bool
@@ -493,7 +516,7 @@ def log_excerpt(directory: Path, *, since_local: datetime, max_bytes: int) -> Lo
         try:
             with path.open(encoding="utf-8", errors="replace") as handle:
                 for line in handle:
-                    started = _RECORD_START.match(line)
+                    started = RECORD_START.match(line)
                     if started is not None:
                         if current is not None:
                             keep(current)
@@ -507,7 +530,7 @@ def log_excerpt(directory: Path, *, since_local: datetime, max_bytes: int) -> Lo
         if current is not None:
             keep(current)
     return LogExcerpt(
-        text="".join(text for text, _ in kept),
+        parts=tuple(text for text, _ in kept),
         files=tuple(used),
         records=len(kept),
         truncated=truncated,
@@ -525,20 +548,27 @@ class Bundle:
     files: tuple[str, ...]
 
 
+_LOG_CHUNK_RECORDS: Final = 2000
+
+
 @dataclass(slots=True)
 class _Files:
     redactor: Redactor | None
     written: dict[str, str] = field(default_factory=dict)
     problems: list[str] = field(default_factory=list)
 
-    def add(self, name: str, text: str, *, log_text: bool = False) -> None:
-        if self.redactor is None:
-            cleaned = strip_secrets(text)
-        elif log_text:
-            cleaned = self.redactor.log(text)
-        else:
-            cleaned = self.redactor.text(text)
+    def add(self, name: str, text: str) -> None:
+        cleaned = strip_secrets(text) if self.redactor is None else self.redactor.text(text)
         self.written[name] = cleaned
+
+    def add_log(self, name: str, records: Sequence[str]) -> None:
+        """The log, redacted a chunk of whole records at a time: the copies redaction
+        makes stay the size of a chunk, not of the log."""
+        chunks: list[str] = []
+        for start in range(0, len(records), _LOG_CHUNK_RECORDS):
+            text = "".join(records[start : start + _LOG_CHUNK_RECORDS])
+            chunks.append(strip_secrets(text) if self.redactor is None else self.redactor.log(text))
+        self.written[name] = "".join(chunks)
 
     def add_json(self, name: str, value: object) -> None:
         self.add(name, json.dumps(value, indent=2, ensure_ascii=False, default=str) + "\n")
@@ -607,7 +637,7 @@ def build_bundle(
         "runs",
         lambda: out.add_json(
             "runs.json",
-            _runs(session, user, since=start, limit=spec.max_runs, notes=not spec.redacted),
+            _runs(session, user, since=start, limit=spec.max_runs, redacted=spec.redacted),
         ),
     )
     out.section("database", lambda: out.add_json("database.json", _database(session)))
@@ -619,7 +649,7 @@ def build_bundle(
         max_bytes=spec.max_log_bytes,
     )
     if excerpt.files:
-        out.add("logs/netkeeper.log", excerpt.text, log_text=True)
+        out.add_log("logs/netkeeper.log", excerpt.parts)
     if redactor is not None and level is Level.DETAILED:
         out.add_json(
             "redactions.json",
@@ -718,13 +748,21 @@ def _readme(
     if out.problems:
         lines += ["Sections that could not be read (the error type only):"]
         lines += [f"  {problem}" for problem in out.problems] + [""]
+    if spec.redacted:
+        lines += [
+            "Known gap: a name or other value the code logged without marking it, inside a"
+            " log message, can still appear in logs/netkeeper.log when no pattern"
+            " recognizes it. Skim that file before you share the bundle.",
+            "",
+        ]
     lines += [
         "How to send it: netkeeper never uploads this file. "
         + (
             "Send it privately to the person helping you; never attach it to a public issue."
             if not spec.redacted
-            else "Attach it to your GitHub issue (the Bug report template), with screenshots"
-            " of what you saw."
+            else "Send it privately (by email) to the person helping you, and say in your"
+            " GitHub issue that you have one. Attach it to a public issue only after you"
+            " have skimmed it."
         ),
         "",
     ]

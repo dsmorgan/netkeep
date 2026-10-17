@@ -47,6 +47,9 @@ _CREDENTIAL_TRIGGERS: Final = (
     "li_at", "li_rm", "li_mc", "liap", "jsessionid", "lidc", "__secure-",
 )  # fmt: skip
 
+_VALUE: Final = r"(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s&;,'\"<>]+)"
+"""A credential's value: quoted, or up to the next separator."""
+
 Replacement = str | Callable[[re.Match[str]], str]
 
 
@@ -75,11 +78,29 @@ _SECRET_GATES: Final[tuple[_Gate, ...]] = (
         ("authorization", "cookie"),
         rf"\g<1>{SECRET}",
     ),
-    # key=value, as a query string, a cookie or a log line spells it.
+    # key=value, as a query string, a cookie or a log line spells it; the value bare or
+    # quoted (JSESSIONID="ajax:..."), the = written or URL-encoded (%3D).
     _Gate(
-        re.compile(rf"(?i)\b({_CREDENTIAL_NAMES})(\s*=\s*)[^\s&;,'\"<>]+"),
+        re.compile(rf"(?i)\b({_CREDENTIAL_NAMES})(\s*=\s*|%3D){_VALUE}"),
         _CREDENTIAL_TRIGGERS,
         rf"\g<1>\g<2>{SECRET}",
+    ),
+    # key: value, unquoted (a header or a log line): csrf-token: ajax:123, token: abc.
+    _Gate(
+        re.compile(rf"(?i)\b({_CREDENTIAL_NAMES})\b(\s*:\s*)(?!{SECRET}){_VALUE}"),
+        _CREDENTIAL_TRIGGERS,
+        rf"\g<1>\g<2>{SECRET}",
+    ),
+    # LinkedIn's CSRF token is the JSESSIONID cookie's value, "ajax:" and digits.
+    _Gate(re.compile(r"(?i)\bajax:\d+"), ("ajax:",), SECRET),
+    # A browser cookie as a dict ({'name': 'li_at', 'value': '...'}, as Playwright has it).
+    _Gate(
+        re.compile(
+            rf"(?i)([\"']name[\"']\s*:\s*[\"'](?:{_CREDENTIAL_NAMES})[\"'][^}}]*?"
+            rf"[\"']value[\"']\s*:\s*)([\"'])(?:(?!\2).)*\2"
+        ),
+        ("'name'", '"name"'),
+        rf"\g<1>\g<2>{SECRET}\g<2>",
     ),
     # An OAuth authorization code in a query string (a credential until it is spent).
     _Gate(re.compile(r"(?i)([?&]code=)[^\s&#'\"<>]+"), ("code=",), rf"\g<1>{SECRET}"),
@@ -137,7 +158,8 @@ def strip_secrets(text: str) -> str:
 
 _EMAIL: Final = re.compile(r"[\w.%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
 _URN: Final = re.compile(r"urn:li:[A-Za-z_]+:[^\s,;)\]}\"'<>]+")
-_URL: Final = re.compile(r"\bhttps?://[^\s\"'<>)\]}]+", re.IGNORECASE)
+_URL: Final = re.compile(r"\b(?:https?|wss?|ftp)://[^\s\"'<>)\]}]+", re.IGNORECASE)
+_URL_TRIGGERS: Final = ("http", "ws://", "wss://", "ftp://")
 _BARE_LINKEDIN: Final = re.compile(
     r"(?<![\w/.-])(?:[\w-]+\.)?linkedin\.com(?:/[^\s\"'<>)\]}]*)?", re.IGNORECASE
 )
@@ -151,15 +173,39 @@ _PHONE: Final = re.compile(
     r"(?:\+\d{1,3}[\s.-]?\d{2,4}[\s.-]?\d{3,4}[\s.-]?\d{3,4}"
     r"|\+\d{8,15}"
     r"|(?:\(\d{2,4}\)\s?|\d{3}[\s.-])\d{3,4}[\s.-]\d{4})"
+    # The UK: +44 (0)20 7946 0321, 020 7946 0321, 07946 032100.
+    r"|\+\d{1,3}\s?\(0\)\s?\d{2,4}[\s.-]?\d{3,4}[\s.-]?\d{3,4}"
+    r"|0\d{2,4}[\s.-]\d{3,4}[\s.-]\d{3,4}"
+    r"|0\d{4}\s?\d{6}"
+    # A seven-digit local number: 555-0142.
+    r"|\d{3}-\d{4}"
     r"(?![\w.:/-])"
 )
 _SLUG_TRIGGERS: Final = ("/in/", "/pub/", "/company/", "/school/", "/checkpoint/")
 _HOME_DIRS: Final = re.compile(r"(?<![\w.-])/(Users|home)/(?!<)[^/\s\"'<>]+")
 _LOOPBACK: Final = frozenset({"127.0.0.1", "localhost", "::1", "[::1]", "0.0.0.0"})  # noqa: S104
 
-_EXCEPTION_LINE: Final = re.compile(r"(?m)^([A-Za-z_][\w.]*): \S.*$")
-"""A traceback's last line, ``ValueError: message``: never a record's first line (that
-starts with a date), never a frame (those are indented)."""
+RECORD_START: Final = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) ")
+"""The start of a log record: its date and time. Any other line continues the record."""
+
+_PREFIX: Final = re.compile(r"^(\s*(?:\|\s*)*)(.*?)\s*$")
+_FRAME: Final = re.compile(r'^File ".*", line \d+(?:, in \S.*)?$')
+_TRACEBACK_HEADS: Final = frozenset(
+    {
+        "Traceback (most recent call last):",
+        "Exception Group Traceback (most recent call last):",
+        "During handling of the above exception, another exception occurred:",
+        "The above exception was the direct cause of the following exception:",
+    }
+)
+_DRAWING: Final = re.compile(
+    r"^(?:[\s|+\-~^\d]*|\.\.\. \(\d+ more exceptions?\)"
+    r"|\[Previous line repeated \d+ more times?\])$"
+)
+_TYPE_LINE: Final = re.compile(r"^((?:[A-Za-z_]\w*\.)*[A-Za-z_]\w*)(:.*)?$")
+_BUILTIN_TYPE: Final = re.compile(
+    r"^[A-Z]\w*(?:Error|Exception|Warning|Exit|Interrupt|Group|Iteration|Cancelled)$"
+)
 MESSAGE_LEFT_OUT: Final = "<message left out>"
 
 KINDS: Final = ("personal", "email", "phone", "url", "urn", "slug", "path")
@@ -203,7 +249,7 @@ class Redactor:
             _Gate(_HOME_DIRS, ("/users/", "/home/"), lambda m: f"/{m.group(1)}/<user>"),
             _Gate(_EMAIL, ("@",), self._typed("email")),
             _Gate(_URN, ("urn:li:",), self._typed("urn")),
-            _Gate(_URL, ("http",), self._url),
+            _Gate(_URL, _URL_TRIGGERS, self._url),
             _Gate(_BARE_LINKEDIN, ("linkedin.com",), self._typed("url")),
             _Gate(_SLUG, _SLUG_TRIGGERS, self._slug),
             # Every log line has a digit and a separator, so this one runs everywhere.
@@ -231,11 +277,11 @@ class Redactor:
         return self.scrub(text)
 
     def log(self, text: str) -> str:
-        """Log file text: :meth:`text`, after each traceback's exception message is
-        left out (the type is kept). A message is whatever the code put in it, a name
-        or an address as often as not, and nothing marked it."""
+        """Log file text: :meth:`text`, with only a record's first line and the shape of a
+        traceback kept (:func:`continuations`). A message is whatever the code put in
+        it, a name or an address as often as not, and nothing marked it."""
         text = PERSONAL_PATTERN.sub(self._marked, strip_secrets(text))
-        return self.scrub(_EXCEPTION_LINE.sub(rf"\g<1>: {MESSAGE_LEFT_OUT}", text))
+        return self.scrub(continuations(text))
 
     def scrub(self, text: str) -> str:
         """The regular-expression pass alone: what nothing marked, but looks personal."""
@@ -275,12 +321,72 @@ class Redactor:
             return self.placeholder("url", url)
         if (parts.hostname or "").lower() in _LOOPBACK:
             # netkeeper's own address and the browser's debug port say where things
-            # listen; a query string or a fragment can still name somebody.
-            kept = f"{parts.scheme}://{parts.netloc}{parts.path}"
+            # listen; a query string or a fragment can still name somebody, and a
+            # /devtools/ path names one browser session.
+            path = "/devtools/<id>" if parts.path.startswith("/devtools/") else parts.path
+            kept = f"{parts.scheme}://{parts.netloc}{path}"
             if parts.query:
                 kept += f"?{self.placeholder('url', parts.query)}"
             return kept
         return self.placeholder("url", url)
+
+
+def strip_url_path(url: str) -> str:
+    """``url`` as its scheme, host and port alone (a CDP URL's path names a session)."""
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return url
+    return f"{parts.scheme}://{parts.netloc}" if parts.scheme and parts.netloc else url
+
+
+def continuations(text: str) -> str:
+    """Log text with every line after a record's first replaced by
+    :data:`MESSAGE_LEFT_OUT`, except a traceback's shape.
+
+    Kept: the ``Traceback``, ``During handling`` and ``The above exception`` lines, each
+    frame (``File "...", line N, in f``) with the source line under it, an exception
+    group's drawing, and each exception's type (``ValueError``, or a dotted name such
+    as ``sqlalchemy.exc.IntegrityError``) without its message. Everything else, a
+    message's later lines, SQLAlchemy's ``[parameters: ...]``, pydantic's
+    ``input_value=...``, goes, and a run of left-out lines becomes one.
+    """
+    out: list[str] = []
+    in_traceback = False
+    frame_indent: int | None = None  # the frame line's indent, until its source line
+    for line in text.split("\n"):
+        if RECORD_START.match(line) or not line:
+            out.append(line)
+            in_traceback, frame_indent = False, None
+            continue
+        found = _PREFIX.match(line)
+        prefix, body = (found.group(1), found.group(2)) if found else ("", line)
+        kept: str | None = None
+        if body in _TRACEBACK_HEADS:
+            in_traceback, kept = True, line
+        elif in_traceback and _FRAME.match(body):
+            out.append(line)
+            frame_indent = len(prefix)
+            continue
+        elif in_traceback and frame_indent is not None and len(prefix) > frame_indent:
+            kept = line  # the frame's source line: code, not a value
+        elif in_traceback and _DRAWING.match(body):
+            kept = line
+        elif in_traceback and (typed := _TYPE_LINE.match(body)) is not None:
+            name = typed.group(1)
+            if "." in name or _BUILTIN_TYPE.match(name):
+                rest = typed.group(2)
+                kept = f"{prefix}{name}" + (
+                    f": {MESSAGE_LEFT_OUT}" if rest and rest[1:].strip() else ""
+                )
+        frame_indent = None
+        if kept is None:
+            # An exception group's bar stays, so the drawing still lines up.
+            kept = f"{prefix if '|' in prefix else ''}{MESSAGE_LEFT_OUT}"
+            if out and out[-1] == kept:
+                continue
+        out.append(kept)
+    return "\n".join(out)
 
 
 def _spellings(path: Path) -> list[str]:

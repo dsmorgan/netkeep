@@ -5,6 +5,13 @@
   holds real names, so it is refused (409) without ``confirm_full=true``, which the page
   sends only after you tick its confirmation.
 
+A download is a plain ``GET``, which the CSRF guard does not check, so this one checks
+for itself, at every level: a page on another site that navigated here would save a
+bundle into your Downloads folder, and for the full level skip the confirmation. The
+request must say ``Sec-Fetch-Site: same-origin`` (the page's link) or ``none`` (typed
+into the address bar); one without the header must carry ``X-Netkeeper-Client: 1``
+(the CLI's or a script's request, which a cross-site page cannot set).
+
 Both read only, and never attach to a browser (posture comes from stored state). The
 bundle holds the log file, which belongs to the whole data directory rather than to a
 user, so only the local owner account may make one (403 for anyone else), as with
@@ -14,7 +21,7 @@ user, so only the local owner account may make one (403 for anyone else), as wit
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Annotated
+from typing import Annotated, Final
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
@@ -24,6 +31,7 @@ from netkeeper.models import User
 from netkeeper.services import support_bundle
 from netkeeper.services.users import local_owner
 from netkeeper.web.deps import CurrentUser, SessionDep, effective_settings
+from netkeeper.web.security import CLIENT_HEADER, CLIENT_HEADER_VALUE
 
 router = APIRouter(tags=["support"])
 
@@ -57,6 +65,15 @@ def _owner(session: SessionDep, user: CurrentUser) -> User:
 
 Owner = Annotated[User, Depends(_owner)]
 _MAX_DAYS = support_bundle.MAX_SINCE.days
+_SAME_SITE: Final = frozenset({"same-origin", "none"})
+
+
+def cross_site(request: Request) -> bool:
+    """Whether the download could have come from another site's page (module docstring)."""
+    site = request.headers.get("sec-fetch-site")
+    if site is not None:
+        return site.strip().lower() not in _SAME_SITE
+    return request.headers.get(CLIENT_HEADER) != CLIENT_HEADER_VALUE
 
 
 @router.get("/support/levels", operation_id="list_support_levels")
@@ -90,7 +107,10 @@ def get_levels(owner: Owner) -> SupportLevelsOut:
             "description": "The support bundle, a .zip file.",
             "content": {"application/zip": {"schema": {"type": "string", "format": "binary"}}},
         },
-        403: {"description": "Only the local owner account makes a support bundle"},
+        403: {
+            "description": "Only the local owner account makes a support bundle, and only"
+            " from this site's own page or a request with X-Netkeeper-Client"
+        },
         409: {"description": "The full level without confirm_full=true"},
     },
 )
@@ -104,6 +124,11 @@ def download_bundle(
 ) -> Response:
     """Make the bundle at ``level`` covering ``since_days`` (the level's default when
     absent), and send it as an attachment."""
+    if cross_site(request):
+        raise HTTPException(
+            status_code=403,
+            detail="a support bundle downloads only from netkeeper's own Settings page",
+        )
     spec = support_bundle.LEVELS[level]
     if spec.needs_confirmation and not confirm_full:
         raise HTTPException(
