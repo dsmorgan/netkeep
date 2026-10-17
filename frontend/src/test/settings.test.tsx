@@ -56,6 +56,9 @@ describe('settings', () => {
       if (pathname === '/api/v1/settings/config') {
         return jsonResponse({ config_path: null, fields: [] })
       }
+      if (pathname === '/api/v1/backups') {
+        return jsonResponse({ directory: '/data/backups', available: true, backups: [] })
+      }
       if (pathname === '/api/v1/gmail-setup') {
         return jsonResponse({ project_id: null, sender_email: null, done: [], steps: [] })
       }
@@ -75,5 +78,6 @@ describe('settings', () => {
     expect(pre.tagName).toBe('PRE')
     expect(await screen.findByRole('form', { name: 'Sending hours' })).toBeVisible()
     expect(screen.getByText(/UI requires Google Chrome/)).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Back up now' })).toBeVisible()
   })
 })

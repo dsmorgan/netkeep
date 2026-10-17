@@ -1,5 +1,5 @@
-"""Command-line entry point: serve, db, config, backup, openapi, tags, import/export, gmail,
-campaigns, history, version."""
+"""Command-line entry point: serve, db, config, backup, restore, openapi, tags,
+import/export, gmail, campaigns, history, version."""
 
 from __future__ import annotations
 
@@ -105,6 +105,7 @@ from netkeeper.services import (
     route_breaker,
     run_diagnostics,
     runs,
+    serve_lock,
     simulate_campaign,
     step_mode,
     template_adoption,
@@ -118,9 +119,12 @@ from netkeeper.services import sending_hours as sending_hours_service
 from netkeeper.services.backup import (
     BACKUPS_DIRNAME,
     BackupError,
+    RestoreError,
     create_backup,
+    find_backup,
     list_backups,
     prune_backups,
+    restore_backup,
 )
 from netkeeper.services.browser_launch import cdp_port, chrome_launch_command, remote_host_note
 from netkeeper.services.events import EventBus
@@ -349,6 +353,17 @@ def serve(
     settings = _file_settings_or_exit(state)
     bind_host = settings.web.host if host is None else host
     bind_port = settings.web.port if port is None else port
+    # The lifespan takes the serve lock and refuses there too; this says so without a
+    # traceback in the common case.
+    running = serve_lock.state()
+    if running.held:
+        who = running.holder.describe() if running.holder is not None else "another process"
+        typer.echo(
+            f"error: {who} holds {running.path}: netkeeper serve is already running, or a"
+            " netkeeper restore is",
+            err=True,
+        )
+        raise typer.Exit(code=1)
     # log_config=None keeps uvicorn's records on the root logger set up in main().
     if reload:
         # The reloader imports the factory in a worker process it restarts on change,
@@ -2643,6 +2658,57 @@ def _backup_create(ctx: typer.Context) -> None:
     typer.echo(f"wrote {written} ({_human_size(written.stat().st_size)})")
     noun = "backup" if len(removed) == 1 else "backups"
     typer.echo(f"pruned {len(removed)} older {noun} (keeping the newest {keep})")
+
+
+@app.command("restore")
+def restore(
+    backup: Annotated[
+        str,
+        typer.Argument(
+            help="A backup's name, as netkeeper backup list prints it, or the path to one.",
+            show_default=False,
+        ),
+    ],
+) -> None:
+    """Put a backup in place of the database. Stop netkeeper serve first.
+
+    Refuses while serve runs. Backs up the database in place into backups/ first, so a
+    restore can be undone by restoring that backup. Then copies the backup to a
+    temporary file beside the database, renames it over the database (the database is
+    always either the old file or the whole restored one), and runs db upgrade.
+    """
+    directory = data_dir() / BACKUPS_DIRNAME
+    try:
+        source = find_backup(backup, directory)
+    except RestoreError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    try:
+        held = serve_lock.claim()
+    except serve_lock.ServeRunning as exc:
+        typer.echo(
+            f"error: netkeeper serve is running ({exc}). Stop it, then run netkeeper restore"
+            " again.",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+    try:
+        result = restore_backup(source, database_url(), directory)
+    except RestoreError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    finally:
+        held.release()
+    if result.previous is None:
+        typer.echo(f"no database at {result.database}, so there was nothing to back up first")
+    else:
+        typer.echo(f"backed up the database in place to {result.previous}")
+    typer.echo(
+        f"restored {result.source} (migration {result.source_revision}) to {result.database}"
+    )
+    typer.echo(f"ran db upgrade: the database is at migration {result.revision}")
+    if result.previous is not None:
+        typer.echo(f"to undo, run: netkeeper restore {result.previous.name}")
 
 
 @tags_app.command("list")

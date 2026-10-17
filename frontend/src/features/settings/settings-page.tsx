@@ -4,6 +4,7 @@ import { meQuery } from '@/api/queries'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
 import { AboutYouSection } from './about-you-section'
+import { BackupsSection } from './backups-section'
 import { ConfigSections } from './config-section'
 import { DoNotSendSection } from './do-not-send-section'
 import { type GmailOutcome, GmailSection } from './gmail-section'
@@ -20,7 +21,7 @@ export function SettingsPage({ gmail = {} }: { gmail?: GmailOutcome }) {
           <CardTitle level={2}>Settings</CardTitle>
           <CardDescription>
             Gmail auth, sending hours, about you, LinkedIn budgets and hours, campaign defaults,
-            LLM, backups. You change them here; config.toml is optional, and a value it sets wins.
+            backups. You change them here; config.toml is optional, and a value it sets wins.
           </CardDescription>
           <p className="text-sm text-muted-foreground">
             netkeeper’s UI requires Google Chrome. Other browsers may work, but they are not tested
@@ -36,6 +37,8 @@ export function SettingsPage({ gmail = {} }: { gmail?: GmailOutcome }) {
       <AboutYouSection />
 
       <ConfigSections />
+
+      <BackupsSection />
 
       <DoNotSendSection />
 

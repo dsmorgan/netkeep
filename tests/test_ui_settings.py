@@ -101,7 +101,7 @@ def test_a_value_at_the_hard_max_is_kept_and_one_above_it_refused(key: str, maxi
         ("campaigns.send_spacing_floor_s", 0),
         ("campaigns.reply_poll_minutes", 0),
         ("backup.keep", 0),
-        ("llm.enabled", 1),
+        ("backup.nightly", 1),
         (WINDOW, ["09:00", "09:00"]),  # all 24 hours
         (WINDOW, ["05:00", "21:30"]),  # 16.5 hours, past the 16 that is still a window
         (WINDOW, ["9:00", "17:00"]),
