@@ -129,3 +129,59 @@ def test_retire_ids_returns_the_same_object_when_nothing_is_named() -> None:
     assert retire_ids(stored, campaign_id=4, list_id=4) is stored
     assert retire_ids(stored, campaign_id=3) == _stored(_enrolled(-3))
     assert stored["where"] == _enrolled(3)
+
+
+def test_a_refused_delete_leaves_filters_alone(writer: Session) -> None:
+    user = factories.make_user(writer)
+    active = factories.make_campaign(writer, user, status=CampaignStatus.ACTIVE)
+    smart = list_service.create_list(
+        writer, user, "Active", ListKind.SMART, filter=_tree(**_enrolled(active.id))
+    )
+    before = _stored(_enrolled(active.id))
+    with pytest.raises(service.CampaignConflict):
+        service.delete_campaign(writer, user, active.id)
+    assert smart.filter_json == before
+
+
+def test_a_nested_filter_with_several_ids_is_rewritten_once_and_only_where_it_names_the_id() -> (
+    None
+):
+    stored = _stored(
+        {
+            "op": "not",
+            "child": {
+                "op": "and",
+                "children": [
+                    {"op": "replied_in", "campaign_ids": [7, 9, 7]},
+                    {
+                        "op": "or",
+                        "children": [
+                            {"op": "list_member", "list_id": 7},
+                            {"op": "list_member", "list_id": 9},
+                        ],
+                    },
+                ],
+            },
+        }
+    )
+    once = retire_ids(stored, campaign_id=7, list_id=7)
+    assert once["where"]["child"]["children"][0]["campaign_ids"] == [-7, 9, -7]
+    ors = once["where"]["child"]["children"][1]["children"]
+    assert [node["list_id"] for node in ors] == [-7, 9]
+    assert retire_ids(once, campaign_id=7, list_id=7) is once
+
+
+def test_deleting_a_list_retires_it_in_a_saved_view_and_a_campaign_audience(
+    writer: Session,
+) -> None:
+    user = factories.make_user(writer)
+    campaign = factories.make_campaign(writer, user, status=CampaignStatus.DRAFT)
+    gone = list_service.create_list(writer, user, "Gone", ListKind.STATIC)
+    gone_id = gone.id
+    member = {"op": "list_member", "list_id": gone_id}
+    view = list_service.create_view(writer, user, "V", ["first_name"], filter=_tree(**member))
+    campaign.filter_json = _stored(member)
+    list_service.delete_list(writer, user, gone_id)
+    retired = _stored({"op": "list_member", "list_id": -gone_id})
+    assert view.filter_json == retired
+    assert campaign.filter_json == retired

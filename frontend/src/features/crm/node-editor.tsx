@@ -265,7 +265,11 @@ function ListPicker({
         onChange={(event) => onChange(Number(event.target.value))}
       >
         <option value="0">Choose a list…</option>
-        {missing && <option value={String(listId)}>list #{listId} (no longer there)</option>}
+        {missing && (
+          <option value={String(listId)}>
+            {listId < 0 ? `deleted list #${-listId}` : `list #${listId} (no longer there)`}
+          </option>
+        )}
         {choices.map((list) => (
           <option key={list.id} value={String(list.id)}>
             {list.name} ({list.kind})
@@ -408,7 +412,7 @@ function CampaignPicker({
           className="rounded-4xl border border-dashed border-amber-500/60 px-2 py-0.5 text-xs"
           title="No campaign has this id any more — it matches nobody."
         >
-          campaign #{id} (no longer there)
+          {id < 0 ? `deleted campaign #${-id}` : `campaign #${id} (no longer there)`}
         </button>
       ))}
     </div>

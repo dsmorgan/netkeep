@@ -238,6 +238,10 @@ def check_list_references(session: Session, user: User, tree: FilterTree) -> Non
     list you mean to name already exists when you name it.
     """
     for list_id, path in list_ids_in(tree).items():
+        if list_id < 0:
+            raise ListReferenceError(
+                path, f"list #{-list_id} was deleted; choose another list", (list_id,)
+            )
         if get_scoped(session, user, ContactList, list_id) is None:
             raise ListReferenceError(path, f"there is no list {list_id}", (list_id,))
 
@@ -438,8 +442,10 @@ def delete_list(session: Session, user: User, list_id: int) -> None:
     """Delete a list; the database cascades to its members (if static).
 
     Never refused: a filter naming a deleted list matches nobody, so a delete
-    cannot leave another list unreadable. It can leave one quietly meaning less
-    than it says, so the lists that name this one are logged as they lose it.
+    cannot leave another list unreadable. Every stored filter naming it has the id
+    retired (:func:`retire_references`), so it keeps matching nobody even when the id
+    is reused. A list that named it quietly means less than it says, so those lists
+    are logged as they lose it.
     """
     _require_writer(session)
     row = get_list(session, user, list_id)
@@ -449,7 +455,7 @@ def delete_list(session: Session, user: User, list_id: int) -> None:
     retire_references(session, user, list_id=list_id)
     if naming:
         log.warning(
-            "deleted list %d for user %d; %s now names a list that is gone and matches nobody",
+            "deleted list %d for user %d; %s named it, and now matches nobody there",
             list_id,
             user.id,
             ", ".join(f"list {other}" for other in naming),
@@ -468,6 +474,11 @@ def retire_references(
     id into its negative, which matches nobody and is never issued (#574). Covers smart
     lists, saved views and the audience filter of a campaign. Returns how many rows
     changed.
+
+    The audience filter of a campaign under review is rewritten too: it matches the
+    same contacts as before, but the review hashes the stored filter, so that campaign
+    comes back stale once, and ``updated_at`` moves on rows nobody edited. Both are
+    expected, not a bug.
     """
     changed = 0
     models: tuple[type[ContactList] | type[SavedView] | type[Campaign], ...] = (
