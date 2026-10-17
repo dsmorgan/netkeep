@@ -684,6 +684,9 @@ class PageConnections:
             # places count (#554): each was proven by an answer read whole that asked
             # for a start further on than its cards, so the count stays exact, with no
             # slack (#208 review, L1). The copy itself asks for nothing and adds none.
+            # Hidden places are exact only while the list holds still: a member added
+            # or removed mid-run can shift a hidden member into the next answer and
+            # count them twice, just as it can for a last answer read normally.
             places = (
                 len({card.urn for card in self._cards} | {card.urn for card in chunk.cards})
                 + self._lost_places
