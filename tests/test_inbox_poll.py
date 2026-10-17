@@ -29,6 +29,7 @@ from netkeeper import migrations
 from netkeeper.cli import app as cli
 from netkeeper.config import BudgetSettings, LinkedInSettings, Settings
 from netkeeper.crm import inbox_apply
+from netkeeper.crm.self_contact import ensure_self_contact
 from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
 from netkeeper.linkedin.browser import BrowserRun, BrowserUnavailable
 from netkeeper.linkedin.classify import Outcome
@@ -38,6 +39,7 @@ from netkeeper.linkedin.page_inbox import PageInbox
 from netkeeper.models import (
     EnrollmentStatus,
     Interaction,
+    LiConversation,
     SyncRun,
     SyncRunKind,
     SyncRunStatus,
@@ -1397,16 +1399,38 @@ def test_the_owner_hold_is_a_skip() -> None:
     assert "run by hand" in (runs.describe_stop_reason("inbox_owner_by_hand") or "")
 
 
-async def test_a_scheduled_poll_never_releases_the_owner_hold(
+async def test_a_scheduled_poll_already_running_at_the_forget_records_no_owner(
     session_factory: sessionmaker[Session], user_id: int
 ) -> None:
-    """The worker refuses a scheduled poll while the hold stands; past that, a scheduled
-    poll that records an owner still leaves the hold for a person (fail closed)."""
+    """The worker refuses a scheduled poll while the hold stands; one that started before
+    the forget is refused at the owner check: it records no owner, applies nothing, and
+    leaves the hold for a person (fail closed)."""
     assert await _poll(session_factory, user_id, replace(delta(), owner_urn=OWNER_A)) == READ
     assert _forget(session_factory, user_id)
-    other = replace(delta(), owner_urn=OWNER_B)
-    assert await _scheduled_poll(session_factory, user_id, other) == READ
+    other = replace(delta(a_thread_with(ADA, NOW - timedelta(hours=1))), owner_urn=OWNER_B)
+    assert await _scheduled_poll(session_factory, user_id, other) == "inbox_owner_by_hand"
     assert _owner_hold(session_factory, user_id)
+    with session_scope(session_factory) as session:
+        user = _user(session, user_id)
+        assert get_setting(session, user, inbox_apply.OWNER_KEY) is None
+        assert session.scalars(scoped(user, LiConversation)).all() == []
+        run = session.scalars(
+            scoped(user, SyncRun).where(SyncRun.trigger == SyncRunTrigger.SCHEDULED)
+        ).one()
+        assert (run.status, run.stop_reason) == (SyncRunStatus.ABORTED, "inbox_owner_by_hand")
+
+
+def test_a_forget_while_your_own_contact_has_a_linkedin_id_holds_nothing(
+    session_factory: sessionmaker[Session], user_id: int
+) -> None:
+    """``owner_matches`` compares the self contact's ID first, so no poll records an
+    owner and there is nothing to hold for."""
+    with session_scope(session_factory, write=True) as session:
+        user = _user(session, user_id)
+        ensure_self_contact(session, user).li_urn = OWNER_A
+        set_setting(session, user, inbox_apply.OWNER_KEY, OWNER_A)
+    assert _forget(session_factory, user_id)
+    assert not _owner_hold(session_factory, user_id)
 
 
 async def test_a_manual_poll_that_knows_no_owner_leaves_the_hold(
@@ -1457,6 +1481,7 @@ def test_posture_says_why_scheduled_polls_are_held(
     (note,) = [n for n in _reply_poll_notes(session_factory, user_id) if "forgotten" in n]
     assert "scheduled polls wait" in note
     assert "Check inbox now" in note and "`netkeeper linkedin inbox`" in note
+    assert "the hold stays: poll again once a conversation shows" in note
 
 
 async def test_the_worker_refuses_a_scheduled_inbox_run_while_the_owner_hold_stands(

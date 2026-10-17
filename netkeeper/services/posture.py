@@ -1755,7 +1755,9 @@ def _linkedin_reply_poll(session: Session, user: User, *, now: datetime) -> Prot
         notes.append(
             "the inbox owner was forgotten, so scheduled polls wait until a poll you run by"
             " hand records it again: click Check inbox now on the LinkedIn page, or run"
-            " `netkeeper linkedin inbox`, while Chrome is signed in to your LinkedIn account"
+            " `netkeeper linkedin inbox`, while Chrome is signed in to your LinkedIn account."
+            " A poll that sees no conversation records no owner, and the hold stays: poll"
+            " again once a conversation shows in your LinkedIn inbox"
         )
     warnings: tuple[str, ...] = ()
     if short_of is not None:

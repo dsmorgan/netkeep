@@ -76,6 +76,9 @@ READ: Final = "inbox_read"
 
 #: The ``stop_reason`` of a poll whose page showed somebody else's mailbox: nothing written.
 OWNER_MISMATCH: Final = "owner_mismatch"
+#: The ``stop_reason`` of a scheduled poll that reached the owner check while the hold
+#: after a forgotten owner stood (#592): it records no owner and applies nothing.
+OWNER_BY_HAND: Final = "inbox_owner_by_hand"
 
 #: The ``stop_reason`` of a poll whose page did not prove that: the next poll reads again.
 INCOMPLETE: Final = "inbox_incomplete"
@@ -284,10 +287,26 @@ async def poll_inbox(
 
     def apply_and_finish(
         delta: InboxDelta, reason: str, since: datetime | None
-    ) -> inbox_apply.InboxCounts | None:
+    ) -> inbox_apply.InboxCounts | str:
+        """What the poll applied, or the ``stop_reason`` it ended aborted with, writing
+        nothing."""
         try:
             with session_scope(factory, write=True) as session:
                 user = _load_user(session, user_id)
+                trigger = runs.get_run(session, user, started_run_id).trigger
+                if trigger is SyncRunTrigger.SCHEDULED and inbox_apply.owner_hold(session, user):
+                    # #592: a scheduled poll that started before a forget must not record
+                    # whichever mailbox the page shows: a person records it, by hand.
+                    runs.finish_run(
+                        session,
+                        user,
+                        started_run_id,
+                        status=SyncRunStatus.ABORTED,
+                        now=clock(),
+                        stop_reason=OWNER_BY_HAND,
+                        counts=_zero_counts(),
+                    )
+                    return OWNER_BY_HAND
                 if not inbox_apply.owner_matches(session, user, delta.owner_urn):
                     # The page is not this account's inbox: write nothing, end aborted.
                     runs.finish_run(
@@ -308,11 +327,8 @@ async def poll_inbox(
                         completed=False,
                         now=clock(),
                     )
-                    return None
-                if (
-                    delta.owner_urn is not None
-                    and runs.get_run(session, user, started_run_id).trigger is SyncRunTrigger.MANUAL
-                ):
+                    return OWNER_MISMATCH
+                if delta.owner_urn is not None and trigger is SyncRunTrigger.MANUAL:
                     # #592: a person watched the poll that recorded (or matched) the
                     # owner, so scheduled polls held after a forget may run again.
                     inbox_apply.release_owner_hold(session, user)
@@ -392,17 +408,19 @@ async def poll_inbox(
             raise InboxPollFailed(f"reading the inbox failed: {type(exc).__name__}") from None
         reason = _ending(delta, plan)
         counts = await off_loop(apply_and_finish, delta, reason, spec.since)
-        if counts is not None and reason != INCOMPLETE:
+        if isinstance(counts, str):
+            log.error(
+                "inbox poll %d: %s; nothing written",
+                started_run_id,
+                "the page showed another mailbox"
+                if counts == OWNER_MISMATCH
+                else "the inbox owner was forgotten, so a scheduled poll records none",
+            )
+            return InboxPollReport(run_id=started_run_id, account_id=account_id, stop_reason=counts)
+        if reason != INCOMPLETE:
             # The poll completed: a poll that reads again clears the inbox breaker.
             await off_loop(record_breaker, route_changed=False, completed=True)
             await off_loop(record_owner_cleared)
-        if counts is None:
-            log.error(
-                "inbox poll %d: the page showed another mailbox; nothing written", started_run_id
-            )
-            return InboxPollReport(
-                run_id=started_run_id, account_id=account_id, stop_reason=OWNER_MISMATCH
-            )
     return InboxPollReport(
         run_id=started_run_id, account_id=account_id, stop_reason=reason, counts=counts
     )
