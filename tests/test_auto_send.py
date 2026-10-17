@@ -26,11 +26,13 @@ from campaign_fakes import NOW
 from inbox_fakes import record_poll
 from messaging_dom import Bubble, MessagingSite, MessagingTab
 from messaging_pages import (
+    MARISOL,
     OWNER,
     THADDEUS,
     ZEPHYRINE,
     existing_bubble_html,
     never_messaged_bubble_html,
+    sponsored_bubble_html,
 )
 from run_fakes import fake_provider
 from sqlalchemy.orm import Session, sessionmaker
@@ -1370,6 +1372,29 @@ def _dialog(tab: MessagingTab) -> Any:
 async def test_a_second_messaging_dialog_keeps_the_sent_bubble_open() -> None:
     def another(tab: MessagingTab) -> None:
         tab.add_html('<div role="dialog" aria-label="Messaging" hidden><p>other</p></div>')
+
+    result, _ = await _close_after(another)
+    assert result.close_refusal == "the sent message is not in one conversation bubble"
+
+
+async def test_a_sponsored_bubble_beside_the_sent_bubble_is_left_alone() -> None:
+    """#551: a minimized sponsored bubble in the overlay doesn't stop the send or the
+    close; the close control is the contact's bubble's, and the sponsored one's own
+    close control, which names two people too, is never clicked."""
+    site = MessagingSite(ZEPHYRINE, before=sponsored_bubble_html(MARISOL))
+    result, run, _ = await page_run(site, send=permit())
+    assert result.outcome.kind is MessageOutcomeKind.SEND_CLICKED, result
+    assert result.bubble_closed is True and result.close_refusal is None
+    [close] = closes(site)
+    assert ZEPHYRINE.name in close.text() and MARISOL.name not in close.text()
+    dialogs = [e for e in site.tab.document.elements() if e.attrs.get("role") == "dialog"]
+    assert [MARISOL.name in d.text() for d in dialogs] == [True]
+    assert run.tab_closed
+
+
+async def test_a_sponsored_bubble_not_marked_minimized_keeps_the_sent_bubble_open() -> None:
+    def another(tab: MessagingTab) -> None:
+        tab.add_html(sponsored_bubble_html(MARISOL, minimized=False))
 
     result, _ = await _close_after(another)
     assert result.close_refusal == "the sent message is not in one conversation bubble"

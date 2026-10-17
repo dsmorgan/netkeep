@@ -101,6 +101,8 @@ def _html() -> dict[str, str]:
             mp.ZEPHYRINE, mp.THREAD_ONE_TO_ONE, draft="Invented draft"
         ),
         "never_messaged_bubble_html": mp.never_messaged_bubble_html([mp.THADDEUS]),
+        "sponsored_bubble_html": mp.sponsored_bubble_html(mp.MARISOL),
+        "new_message_bubble_html": mp.new_message_bubble_html(mp.THADDEUS, pronouns="they/them"),
     }
 
 

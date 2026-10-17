@@ -1336,6 +1336,72 @@ def never_messaged_bubble_html(chips: Sequence[Member], *, draft: str = "") -> s
     )
 
 
+def sponsored_bubble_html(sender: Member, owner: Member = OWNER, *, minimized: bool = True) -> str:
+    """A sponsored InMail's bubble, minimized, as the CP8d captures showed it beside every
+    New message bubble (#551, invented people): ``role="dialog"`` named "Messaging", the
+    conversation bubble's ``data-view-name``, marked minimized; a header ``h2`` holding the
+    sender's name as text, **no link**; a close control naming both people; and a
+    sponsored body with **no form and no composer**. ``minimized=False`` marks it open."""
+    pair = escape(header_pair(sender, owner, owner_first=False))
+    return (
+        '<div id="ember-invented-5" data-msg-overlay-conversation-bubble-open="" '
+        "data-msg-overlay-conversation-bubble-is-minimized="
+        f'"{"true" if minimized else "false"}" tabindex="-1" role="dialog" '
+        f'aria-label="{BUBBLE_DIALOG_LABEL}" '
+        'data-view-name="message-overlay-conversation-bubble-item">'
+        '<header tabindex="0">'
+        f'<h2 tabindex="-1">{escape(sender.name)}</h2>'
+        f"<button><span>Close your conversation with {pair}</span></button>"
+        "</header>"
+        f"<div><p>{SPONSORED_LABEL}</p><p>Invented sponsored message body</p></div>"
+        "</div>"
+    )
+
+
+def new_message_bubble_html(
+    recipient: Member, *, chip_name: str | None = None, pronouns: str | None = None
+) -> str:
+    """The New message bubble as the CP8d captures showed it (2026-10-16, invented
+    people): rooted in ``role="dialog"`` named "Messaging", not minimized; a header ``h2``
+    "New message" with no link, and minimize and close controls that name no one; the
+    recipient field's label, one chip (a button named ``Remove <name>``, its text the
+    whole name, never cut), the ``combobox`` search field and an add-recipients button;
+    the profile card with two relative ``/in/<slug>/`` links (the photo and the name), a
+    pronoun ``span`` after the name link when ``pronouns`` is given, and the degree
+    badge; then the composer and a disabled Send. ``chip_name`` replaces the chip's name."""
+    name = escape(recipient.name if chip_name is None else chip_name)
+    card = escape(recipient.name)
+    slug = recipient.slug
+    pronoun = f'<span class="t-14">({escape(pronouns)})</span>' if pronouns is not None else ""
+    return (
+        '<div id="ember-invented-6" data-msg-overlay-conversation-bubble-open="" '
+        'data-msg-overlay-conversation-bubble-is-minimized="false" tabindex="-1" role="dialog" '
+        f'aria-label="{BUBBLE_DIALOG_LABEL}" '
+        'data-view-name="message-overlay-conversation-bubble-item">'
+        f'<header tabindex="0"><h2 tabindex="-1">{NEW_MESSAGE_HEADING}</h2>'
+        '<button aria-expanded="true"><span>Minimize your conversation</span></button>'
+        "<button><span>Close your draft conversation</span></button></header>"
+        "<div>"
+        '<label for="ember-invented-7-search-field">Enter message recipients</label>'
+        '<section><div tabindex="-1">'
+        f'<button aria-label="Remove {name}" type="button"><span>{name}</span>'
+        '<svg aria-hidden="true"></svg></button>'
+        '<input id="ember-invented-7-search-field" role="combobox" type="text" '
+        'autocomplete="off" aria-autocomplete="list" aria-expanded="false">'
+        '<button type="button"><span>Add more recipients for your message</span></button>'
+        "</div></section></div>"
+        "<div>"
+        f'<a href="/in/{slug}/"><img alt="{card} Profile"></a>'
+        f'<a href="/in/{slug}/"><span>{card}</span></a>{pronoun}'
+        '<div><span>1st degree connection</span><span aria-hidden="true">· 1st</span></div>'
+        f"<div><div>{escape(recipient.headline)}</div></div>"
+        "</div>"
+        '<form id="msg-form-ember-invented-8">'
+        f"{_composer('')}{_send_footer(disabled=True)}</form>"
+        "</div>"
+    )
+
+
 # --- every value here, for the no-copy check -------------------------------------------
 
 #: Strings that are structure, not data: they appear in the capture by design.
@@ -1353,6 +1419,10 @@ STRUCTURAL: Final = frozenset(
         "Send",
         "Minimize your conversation",
         "Close your draft conversation",
+        "Add more recipients for your message",
+        "Invented sponsored message body",
+        "1st degree connection",
+        "· 1st",
         "Enter message recipients",
         "People also viewed",
         "true",
