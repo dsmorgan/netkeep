@@ -432,9 +432,9 @@ function RowActionDialog({
           purpose: the next inbox poll records whichever account the page shows.
         </p>
         <p>
-          This touches no browser and visits nothing. Afterward, run an inbox poll by hand (
-          <code className="font-mono text-xs">netkeeper linkedin inbox</code>) to record the new
-          mailbox.
+          This touches no browser and visits nothing. Afterward, poll the inbox by hand to record
+          the new mailbox: click <strong className="font-medium">Check inbox now</strong> on the
+          LinkedIn page, or run <code className="font-mono text-xs">netkeeper linkedin inbox</code>.
         </p>
       </ConfirmDialog>
     )

@@ -964,7 +964,8 @@ def test_a_skipped_first_poll_fire_is_a_skip_and_the_owner_stop_names_its_cure()
     text = runs.describe_stop_reason("owner_mismatch") or ""
     assert (
         "sign back in to yours" in text
-        and "otherwise run `netkeeper linkedin inbox-forget-owner`" in text
+        and "otherwise click **Forget inbox owner** under Posture on the Settings page" in text
+        and "or run `netkeeper linkedin inbox-forget-owner`" in text
     )
     assert "cannot edit it yet" in text
 
