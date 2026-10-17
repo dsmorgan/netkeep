@@ -820,6 +820,7 @@ async def run_prefill(
     try:
         return await _record_retrying(
             run_id,
+            clock,
             functools.partial(
                 record,
                 factory,
@@ -827,7 +828,6 @@ async def run_prefill(
                 run_id,
                 result.outcome,
                 settings=settings,
-                now=clock(),
                 prefilled_at=result.typing_started_at,
                 click_attempted=source.message_click_attempted,
                 clicked=source.message_clicked,
@@ -855,16 +855,19 @@ async def run_prefill(
         raise
 
 
-async def _record_retrying(for_run: int, call: Callable[[], PrefillReport]) -> PrefillReport:
+async def _record_retrying(
+    for_run: int, clock: Clock, call: Callable[..., PrefillReport]
+) -> PrefillReport:
     """:func:`record` off the loop, tried again after each of
     :data:`~netkeeper.db.RECORD_RETRY_WAITS_S` while another writer holds the write lock
     past the busy timeout (#627). The page work is done and is never repeated: only the
-    record's one transaction, rolled back whole by the failure, runs again. The waits are
-    on the loop, so the background-database thread serves other writes meanwhile."""
+    record's one transaction, rolled back whole by the failure, runs again, at each try's
+    own ``now``. The waits are on the loop, so the background-database thread serves
+    other writes meanwhile."""
     waits = iter(RECORD_RETRY_WAITS_S)
     while True:
         try:
-            return await off_loop(call)
+            return await off_loop(call, now=clock())
         except OperationalError as exc:
             wait = next(waits, None)
             if not is_lock_timeout(exc) or wait is None:

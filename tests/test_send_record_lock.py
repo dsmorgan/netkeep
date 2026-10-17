@@ -25,12 +25,14 @@ from test_linkedin_steps import Lane
 
 from netkeeper import db
 from netkeeper.linkedin.messaging import PrefillResult
-from netkeeper.models import MessageStatus, SyncRunStatus
+from netkeeper.models import Message, MessageStatus, SyncRunStatus
+from netkeeper.scoping import get_scoped
 from netkeeper.services import campaign_engine as engine_module
 from netkeeper.services import message_send
 from netkeeper.services import posture as posture_module
 from netkeeper.services.campaign_engine import (
     RECORD_PENDING_AFTER,
+    SCHEDULED_IN_GMAIL,
     STOP_WAIT_S,
     Firing,
     SendResult,
@@ -122,8 +124,9 @@ def test_the_retry_waits_are_pinned_and_fit_the_stop_wait() -> None:
     tries = len(db.RECORD_RETRY_WAITS_S) + 1
     worst = sum(db.RECORD_RETRY_WAITS_S) + tries * db.SQLITE_BUSY_TIMEOUT_MS / 1000
     assert worst < STOP_WAIT_S
-    assert timedelta(minutes=2) == RECORD_PENDING_AFTER
-    assert RECORD_PENDING_AFTER.total_seconds() > 30 + worst  # Gmail's timeout, then the record
+    assert timedelta(minutes=5) == RECORD_PENDING_AFTER
+    # A send's several Gmail requests (30 s timeout each), then the record's retries.
+    assert RECORD_PENDING_AFTER.total_seconds() > 4 * 30 + worst
 
 
 def test_a_lock_timeout_is_told_from_other_operational_errors(
@@ -212,6 +215,15 @@ def test_a_record_that_never_lands_leaves_the_claim_and_never_sends_again(
     assert later.key == posture_module.KEY_SEND_RECORDS
     [warning] = later.warnings
     assert warning.startswith("1 email send(s)") and "None is sent again" in warning
+
+    # One the person put in Gmail's Schedule send waits for them, not for a record.
+    world.write(
+        lambda s: setattr(
+            get_scoped(s, world.user, Message, claimed.id), "error", SCHEDULED_IN_GMAIL
+        )
+    )
+    assert pending(NOW + timedelta(hours=1)) == 0
+    assert row(NOW + timedelta(hours=1)).warnings == ()
 
     world.sender.__class__ = FakeSender  # the lock is gone; sends would go through
     for hours in (1, 2, 24):
@@ -321,3 +333,37 @@ async def test_an_auto_send_whose_record_never_lands_is_held_and_never_sent_agai
     assert hold is not None and hold.reason == AUTO_SEND_HOLD_INTERRUPTED
     assert lane.enrollment(other).next_action_at is not None  # not claimed
     assert len(a.site.sent) == 1
+
+
+async def test_a_linkedin_record_that_fails_for_another_reason_is_not_retried(
+    lane: Lane, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    a = Auto(lane)
+    waited = _async_waits(monkeypatch, lambda: None)
+
+    def broken(*_: Any, **__: Any) -> None:
+        raise OperationalError("UPDATE messages", {}, sqlite3.OperationalError("disk I/O error"))
+
+    monkeypatch.setattr(message_send, "record", broken)
+    await a.execute()  # the worker fails the run, which the database still allows
+    assert waited == []
+    assert a.run().status is SyncRunStatus.FAILED
+    assert len(a.site.sent) == 1
+
+
+async def test_each_linkedin_record_try_takes_its_own_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    _async_waits(monkeypatch, lambda: None)
+    report = message_send.PrefillReport(1, None)
+    times = iter([NOW, NOW + timedelta(seconds=7)])
+    seen: list[Any] = []
+
+    def call(*, now: Any) -> Any:
+        seen.append(now)
+        if len(seen) == 1:
+            raise OperationalError(
+                "BEGIN IMMEDIATE", {}, sqlite3.OperationalError("database is locked")
+            )
+        return report
+
+    assert await message_send._record_retrying(1, lambda: next(times), call) is report
+    assert seen == [NOW, NOW + timedelta(seconds=7)]
