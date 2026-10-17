@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from netkeeper.config import Settings
 from netkeeper.db import make_session_factory, session_scope
 from netkeeper.models import User
+from netkeeper.models.base import utcnow
 from netkeeper.scoping import install_scope_guard
 from netkeeper.services import ui_settings
 from netkeeper.services.scheduled_runs import ServeExtractor
@@ -259,10 +260,14 @@ async def test_the_auto_send_budget_warning_reads_the_settings_page(
 
 
 async def test_the_posture_report_shows_a_setting_serve_cannot_read_on_its_row(
-    running_app: FastAPI, client: httpx.AsyncClient
+    running_app: FastAPI, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """#464: a persistent read failure shows on the row it governs, and the verdict
     counts it, so the person sees it where the UI looks."""
+    # The active-hours row prints "now HH:MM". Three reports are compared, so a wall
+    # clock that ticks over a minute between them fails the comparison (#584 CI).
+    frozen = utcnow()
+    monkeypatch.setattr("netkeeper.web.api.posture.utcnow", lambda: frozen)
     with session_scope(running_app.state.session_factory) as session:
         first = session.scalars(select(User)).first()
         assert first is not None
