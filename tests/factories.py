@@ -20,11 +20,13 @@ from netkeeper.models import (
     CampaignStep,
     Contact,
     ContactEmail,
+    ContactList,
     ContactPhone,
     ContactPosition,
     ContactSource,
     Enrollment,
     EnrollmentStatus,
+    ListKind,
     Message,
     MessageDirection,
     MessageStatus,
@@ -220,3 +222,21 @@ def make_message(
     session.add(message)
     session.flush()
     return message
+
+
+def make_self_naming_list(session: Session, user: User) -> ContactList:
+    """A flushed smart list whose filter names itself: a filter that names it does not
+    compile. Only reachable by writing the row directly, since the lists service
+    refuses the cycle; for a test that needs a filter the compiler refuses now that no
+    predicate is a placeholder (#513)."""
+    row = ContactList(
+        user_id=user.id,
+        name=f"Self-naming {next(_campaigns)}",
+        kind=ListKind.SMART,
+        filter_json={"where": {"op": "has_email"}, "include_archived": False},
+    )
+    session.add(row)
+    session.flush()
+    row.filter_json = {"where": {"op": "list_member", "list_id": row.id}, "include_archived": False}
+    session.flush()
+    return row

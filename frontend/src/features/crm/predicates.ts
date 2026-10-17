@@ -6,10 +6,11 @@
  * node to insert, and a complete example the tests validate against the
  * published JSON Schema.
  *
- * Three predicates parse but do not compile: the backend raises
- * `UnsupportedPredicate` for them. They are listed here with `unavailable` set
- * and rendered visibly out of reach rather than left out, because a builder
- * that silently omits part of the language is a builder nobody can trust.
+ * A predicate that parses but does not compile (the backend raises
+ * `UnsupportedPredicate`) is listed here with `unavailable` set and rendered
+ * visibly out of reach rather than left out, because a builder that silently
+ * omits part of the language is a builder nobody can trust. None is today:
+ * `enrolled_in` and `replied_in` were the last, until #513.
  *
  * Two tests keep this honest and neither can be satisfied by editing only one
  * side: `predicates.test.ts` compares the ops here with the discriminator
@@ -17,10 +18,10 @@
  * with `filters.OPS` and `filters.PLACEHOLDERS`, so a predicate added to — or
  * graduated inside — the language fails the build until the builder catches up.
  */
-import type { FilterNode, FilterOp } from './types'
+import type { CampaignOutcome, FilterNode, FilterOp } from './types'
 
 /** Where a predicate sits in the picker. */
-export type PredicateGroup = 'logic' | 'field' | 'presence' | 'time' | 'tags'
+export type PredicateGroup = 'logic' | 'field' | 'presence' | 'time' | 'tags' | 'campaigns'
 
 export interface PredicateSpec {
   readonly op: FilterOp
@@ -46,7 +47,19 @@ export const GROUP_LABELS: Record<PredicateGroup, string> = {
   presence: 'What a contact has',
   time: 'Time',
   tags: 'Tags',
+  campaigns: 'Campaigns',
 }
+
+/** How `campaign_outcome` reads each outcome, in the order the language declares them. */
+export const OUTCOME_CHOICES: readonly { value: CampaignOutcome; label: string }[] = [
+  { value: 'replied', label: 'replied' },
+  { value: 'no_reply', label: 'no reply' },
+  { value: 'active', label: 'still active' },
+  { value: 'completed', label: 'completed without reply' },
+  { value: 'bounced', label: 'bounced' },
+  { value: 'opted_out', label: 'opted out' },
+  { value: 'removed', label: 'removed' },
+]
 
 /** The heading the picker puts placeholders under, kept separate from the groups. */
 export const UNAVAILABLE_GROUP_LABEL = 'Not available yet'
@@ -254,23 +267,27 @@ export const PREDICATES: readonly PredicateSpec[] = [
   },
   {
     op: 'enrolled_in',
-    label: 'is enrolled in the campaign',
-    group: 'logic',
-    hint: 'Anyone a campaign has enrolled.',
-    unavailable:
-      "netkeeper can't filter by campaign yet, so this condition isn't available. The server refuses a filter that uses it.",
-    create: () => ({ op: 'enrolled_in', campaign_id: 0 }),
-    example: { op: 'enrolled_in', campaign_id: 1 },
+    label: 'was enrolled in any of the campaigns',
+    group: 'campaigns',
+    hint: 'Anyone any of the campaigns enrolled, whatever happened next. Put it under “None of” for “never in these campaigns”.',
+    create: () => ({ op: 'enrolled_in', campaign_ids: [] }),
+    example: { op: 'enrolled_in', campaign_ids: [1] },
   },
   {
     op: 'replied_in',
-    label: 'replied in the campaign',
-    group: 'logic',
-    hint: 'Anyone who answered a campaign.',
-    unavailable:
-      "netkeeper can't filter by campaign yet, so this condition isn't available. The server refuses a filter that uses it.",
-    create: () => ({ op: 'replied_in', campaign_id: 0 }),
-    example: { op: 'replied_in', campaign_id: 1 },
+    label: 'replied to any of the campaigns',
+    group: 'campaigns',
+    hint: 'Anyone who answered, including a response you recorded by hand. Put it under “None of” for “never replied”.',
+    create: () => ({ op: 'replied_in', campaign_ids: [] }),
+    example: { op: 'replied_in', campaign_ids: [1, 2] },
+  },
+  {
+    op: 'campaign_outcome',
+    label: 'ended up in any of the campaigns as',
+    group: 'campaigns',
+    hint: 'How their enrollment ended up: replied, no reply, bounced, opted out, still active and so on.',
+    create: () => ({ op: 'campaign_outcome', campaign_ids: [], outcome: 'no_reply' }),
+    example: { op: 'campaign_outcome', campaign_ids: [1], outcome: 'no_reply' },
   },
 ]
 

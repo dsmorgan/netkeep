@@ -182,6 +182,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/campaigns/audience-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Campaign Audience
+         * @description How many of the source's contacts each guard would skip, before the campaign is
+         *     saved (#513). Gates nothing: the guards decide again at enrollment and every send.
+         */
+        post: operations["preview_campaign_audience"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/campaigns/linkedin/auto-send/resume": {
         parameters: {
             query?: never;
@@ -483,6 +504,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/campaigns/{campaign_id}/lists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create List From Campaign
+         * @description A new list of the people one outcome selects in the campaign (#513). Sends nothing,
+         *     enrolls nobody: a campaign built from it goes through the guards like any other.
+         */
+        post: operations["create_list_from_campaign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/campaigns/{campaign_id}/mode-changes": {
         parameters: {
             query?: never;
@@ -495,6 +537,26 @@ export interface paths {
          * @description The campaign's step mode switches, newest first (at most 200).
          */
         get: operations["list_step_mode_changes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/campaigns/{campaign_id}/outcomes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Campaign Outcomes
+         * @description How many contacts each outcome's list would hold (#513).
+         */
+        get: operations["get_campaign_outcomes"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3854,6 +3916,29 @@ export interface components {
             title_total: number;
         };
         /**
+         * AudiencePreviewIn
+         * @description The audience source the builder holds, and the first step's channel.
+         */
+        AudiencePreviewIn: {
+            channel: components["schemas"]["TemplateChannel"];
+            filter?: components["schemas"]["FilterTree-Input"] | null;
+            /** List Id */
+            list_id?: number | null;
+        };
+        /** AudiencePreviewOut */
+        AudiencePreviewOut: {
+            /** Audience */
+            audience: number;
+            /** Contacted Within Days */
+            contacted_within_days: number;
+            /** Skipped */
+            skipped: components["schemas"]["GuardSkipsOut"][];
+            /** Summary */
+            summary: string;
+            /** Will Start */
+            will_start: number;
+        };
+        /**
          * AutoSendHoldOut
          * @description An auto-send hold (ADR 0008): fixed words, never page text.
          */
@@ -4305,6 +4390,33 @@ export interface components {
             status: components["schemas"]["CampaignStatus"];
             /** Steps */
             steps: components["schemas"]["StepOut"][];
+        };
+        /**
+         * CampaignOutcome
+         * @description How one contact's enrollment in a campaign ended up (#513). See "Campaigns" above.
+         * @enum {string}
+         */
+        CampaignOutcome: "replied" | "no_reply" | "active" | "completed" | "bounced" | "opted_out" | "removed";
+        /**
+         * CampaignOutcomeIs
+         * @description An enrollment in any of the campaigns ended up as ``outcome``.
+         */
+        CampaignOutcomeIs: {
+            /** Campaign Ids */
+            campaign_ids: number[];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "campaign_outcome";
+            outcome: components["schemas"]["CampaignOutcome"];
+        };
+        /** CampaignOutcomesOut */
+        CampaignOutcomesOut: {
+            /** Campaign Id */
+            campaign_id: number;
+            /** Outcomes */
+            outcomes: components["schemas"]["OutcomeCountOut"][];
         };
         /** CampaignResultsOut */
         CampaignResultsOut: {
@@ -5340,10 +5452,13 @@ export interface components {
             /** Summary */
             summary: string;
         };
-        /** EnrolledIn */
+        /**
+         * EnrolledIn
+         * @description Enrolled, in any status, in any of the campaigns.
+         */
         EnrolledIn: {
-            /** Campaign Id */
-            campaign_id: number;
+            /** Campaign Ids */
+            campaign_ids: number[];
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -5431,8 +5546,8 @@ export interface components {
          * @enum {string}
          */
         FieldGroup: "contact" | "personal" | "campaign";
-        "FilterNode-Input": components["schemas"]["And-Input"] | components["schemas"]["Or-Input"] | components["schemas"]["Not-Input"] | components["schemas"]["Eq"] | components["schemas"]["Neq"] | components["schemas"]["Contains"] | components["schemas"]["StartsWith"] | components["schemas"]["IsEmpty"] | components["schemas"]["Gt"] | components["schemas"]["Gte"] | components["schemas"]["Lt"] | components["schemas"]["Lte"] | components["schemas"]["Between"] | components["schemas"]["HasEmail"] | components["schemas"]["HasPhone"] | components["schemas"]["HasLiUrl"] | components["schemas"]["HasPosition"] | components["schemas"]["EmailContains"] | components["schemas"]["LastContacted"] | components["schemas"]["ConnectedWithinDays"] | components["schemas"]["ChangedJobsWithinDays"] | components["schemas"]["TagAny"] | components["schemas"]["TagAll"] | components["schemas"]["TagNone"] | components["schemas"]["ListMember"] | components["schemas"]["EnrolledIn"] | components["schemas"]["RepliedIn"];
-        "FilterNode-Output": components["schemas"]["And-Output"] | components["schemas"]["Or-Output"] | components["schemas"]["Not-Output"] | components["schemas"]["Eq"] | components["schemas"]["Neq"] | components["schemas"]["Contains"] | components["schemas"]["StartsWith"] | components["schemas"]["IsEmpty"] | components["schemas"]["Gt"] | components["schemas"]["Gte"] | components["schemas"]["Lt"] | components["schemas"]["Lte"] | components["schemas"]["Between"] | components["schemas"]["HasEmail"] | components["schemas"]["HasPhone"] | components["schemas"]["HasLiUrl"] | components["schemas"]["HasPosition"] | components["schemas"]["EmailContains"] | components["schemas"]["LastContacted"] | components["schemas"]["ConnectedWithinDays"] | components["schemas"]["ChangedJobsWithinDays"] | components["schemas"]["TagAny"] | components["schemas"]["TagAll"] | components["schemas"]["TagNone"] | components["schemas"]["ListMember"] | components["schemas"]["EnrolledIn"] | components["schemas"]["RepliedIn"];
+        "FilterNode-Input": components["schemas"]["And-Input"] | components["schemas"]["Or-Input"] | components["schemas"]["Not-Input"] | components["schemas"]["Eq"] | components["schemas"]["Neq"] | components["schemas"]["Contains"] | components["schemas"]["StartsWith"] | components["schemas"]["IsEmpty"] | components["schemas"]["Gt"] | components["schemas"]["Gte"] | components["schemas"]["Lt"] | components["schemas"]["Lte"] | components["schemas"]["Between"] | components["schemas"]["HasEmail"] | components["schemas"]["HasPhone"] | components["schemas"]["HasLiUrl"] | components["schemas"]["HasPosition"] | components["schemas"]["EmailContains"] | components["schemas"]["LastContacted"] | components["schemas"]["ConnectedWithinDays"] | components["schemas"]["ChangedJobsWithinDays"] | components["schemas"]["TagAny"] | components["schemas"]["TagAll"] | components["schemas"]["TagNone"] | components["schemas"]["ListMember"] | components["schemas"]["EnrolledIn"] | components["schemas"]["RepliedIn"] | components["schemas"]["CampaignOutcomeIs"];
+        "FilterNode-Output": components["schemas"]["And-Output"] | components["schemas"]["Or-Output"] | components["schemas"]["Not-Output"] | components["schemas"]["Eq"] | components["schemas"]["Neq"] | components["schemas"]["Contains"] | components["schemas"]["StartsWith"] | components["schemas"]["IsEmpty"] | components["schemas"]["Gt"] | components["schemas"]["Gte"] | components["schemas"]["Lt"] | components["schemas"]["Lte"] | components["schemas"]["Between"] | components["schemas"]["HasEmail"] | components["schemas"]["HasPhone"] | components["schemas"]["HasLiUrl"] | components["schemas"]["HasPosition"] | components["schemas"]["EmailContains"] | components["schemas"]["LastContacted"] | components["schemas"]["ConnectedWithinDays"] | components["schemas"]["ChangedJobsWithinDays"] | components["schemas"]["TagAny"] | components["schemas"]["TagAll"] | components["schemas"]["TagNone"] | components["schemas"]["ListMember"] | components["schemas"]["EnrolledIn"] | components["schemas"]["RepliedIn"] | components["schemas"]["CampaignOutcomeIs"];
         /**
          * FilterTree
          * @description The root: a predicate (or none) and the archived-contacts switch.
@@ -5574,6 +5689,15 @@ export interface components {
             op: "gte";
             /** Value */
             value: string | number | boolean;
+        };
+        /** GuardSkipsOut */
+        GuardSkipsOut: {
+            /** Count */
+            count: number;
+            /** Label */
+            label: string;
+            /** Reason */
+            reason: string;
         };
         /**
          * GuardsOut
@@ -7026,6 +7150,40 @@ export interface components {
              */
             op: "or";
         };
+        /** OutcomeCountOut */
+        OutcomeCountOut: {
+            /** Count */
+            count: number;
+            /** Label */
+            label: string;
+            outcome: components["schemas"]["CampaignOutcome"];
+        };
+        /** OutcomeListIn */
+        OutcomeListIn: {
+            /**
+             * Kind
+             * @default static
+             * @enum {string}
+             */
+            kind: "static" | "smart";
+            /** Name */
+            name?: string | null;
+            outcome: components["schemas"]["CampaignOutcome"];
+        };
+        /** OutcomeListOut */
+        OutcomeListOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "static" | "smart";
+            /** List Id */
+            list_id: number;
+            /** Members */
+            members: number;
+            /** Name */
+            name: string;
+        };
         /**
          * OutsideResponseIn
          * @description A response outside netkeeper. ``at`` must carry a timezone, and be neither in the
@@ -7437,10 +7595,13 @@ export interface components {
             /** Detail */
             detail: string;
         };
-        /** RepliedIn */
+        /**
+         * RepliedIn
+         * @description Responded to any of the campaigns, including a response recorded by hand (#512).
+         */
         RepliedIn: {
-            /** Campaign Id */
-            campaign_id: number;
+            /** Campaign Ids */
+            campaign_ids: number[];
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -9410,6 +9571,44 @@ export interface operations {
             };
         };
     };
+    preview_campaign_audience: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AudiencePreviewIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AudiencePreviewOut"];
+                };
+            };
+            /** @description No such campaign or list for this user */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A value the list or the preview cannot be made from */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     resume_linkedin_auto_send: {
         parameters: {
             query?: never;
@@ -10037,6 +10236,53 @@ export interface operations {
             };
         };
     };
+    create_list_from_campaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OutcomeListIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutcomeListOut"];
+                };
+            };
+            /** @description No such campaign or list for this user */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A list already has the name given */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A value the list or the preview cannot be made from */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list_step_mode_changes: {
         parameters: {
             query?: never;
@@ -10058,6 +10304,44 @@ export interface operations {
                 };
             };
             /** @description No such campaign, template, mailbox or list */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_campaign_outcomes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignOutcomesOut"];
+                };
+            };
+            /** @description No such campaign or list for this user */
             404: {
                 headers: {
                     [name: string]: unknown;

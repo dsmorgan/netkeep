@@ -25,10 +25,8 @@ says what it is:
   ``names``, matched without regard to case; a name the user has no tag for
   matches no contact.
 - Lists (spec 10.4): ``list_member`` over a ``list_id``. See "Lists" below.
-- Placeholders for tables that do not exist yet: ``enrolled_in`` and
-  ``replied_in`` (P3-04). They parse, so the builder's schema is complete, and
-  compiling one raises :class:`UnsupportedPredicate` naming the item that
-  delivers it.
+- Campaigns (#513): ``enrolled_in``, ``replied_in`` and ``campaign_outcome``
+  over ``campaign_ids``. See "Campaigns" below.
 
 Semantics
 ---------
@@ -107,6 +105,29 @@ on a backend that hands a deleted id back (SQLite does, a sequence does not);
 ``netkeeper.crm.lists`` refuses the write when that breaks a list and logs the
 lists that lose theirs when one is deleted.
 
+Campaigns
+---------
+Each campaign predicate is an ``EXISTS`` over ``enrollments`` for the contact
+in **any** of ``campaign_ids``; "none of them" is the same predicate under
+``not``, which every leaf here supports exactly because each is two-valued. A
+campaign id the user does not have (deleted, or someone else's) matches no
+contact, the way an unknown tag does: the subquery carries ``user_id``.
+
+- ``enrolled_in``: an enrollment of any status, ``removed`` included.
+- ``replied_in``: an enrollment with a response on record, ``replied_at`` set
+  (or ``replied`` status). That counts a response a person recorded from
+  outside netkeeper (#512), which ends the enrollment the same way a detected
+  reply does, and a reply that asked to unsubscribe.
+- ``campaign_outcome``: how the enrollment ended up, one of
+  :class:`CampaignOutcome`. ``replied``, ``opted_out``, ``bounced``,
+  ``removed``, ``completed`` and ``active`` split every enrollment exactly once:
+  ``opted_out`` wins over a reply (an opt-out is a reply too, and has its own
+  outcome), and a reply wins over everything else, so ``bounced``,
+  ``removed``, ``completed`` and ``active`` are each "and never replied".
+  ``no_reply`` is ``completed`` plus ``active``: everyone the campaign reached
+  or is still reaching who has not answered, without the people it could not
+  reach or was told to stop at.
+
 Errors
 ------
 :func:`parse_filter` and :func:`parse_sort` raise :class:`FilterError`. Its
@@ -120,6 +141,7 @@ document at all.
 
 from __future__ import annotations
 
+import enum
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -158,6 +180,8 @@ from netkeeper.models import (
     ContactSource,
     ContactTag,
     EmailStatus,
+    Enrollment,
+    EnrollmentStatus,
     ListKind,
     MetSource,
     Tag,
@@ -654,14 +678,54 @@ class ListMember(_Node):
     list_id: StrictInt
 
 
+CampaignIds = Annotated[list[StrictInt], Field(min_length=1, max_length=200)]
+"""The campaigns a campaign predicate asks about; it matches when **any** of them does."""
+
+
+class CampaignOutcome(enum.StrEnum):
+    """How one contact's enrollment in a campaign ended up (#513). See "Campaigns" above."""
+
+    REPLIED = "replied"
+    NO_REPLY = "no_reply"
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    BOUNCED = "bounced"
+    OPTED_OUT = "opted_out"
+    REMOVED = "removed"
+
+
+OUTCOME_LABELS: Final[dict[CampaignOutcome, str]] = {
+    CampaignOutcome.REPLIED: "replied",
+    CampaignOutcome.NO_REPLY: "no reply",
+    CampaignOutcome.ACTIVE: "still active",
+    CampaignOutcome.COMPLETED: "completed without reply",
+    CampaignOutcome.BOUNCED: "bounced",
+    CampaignOutcome.OPTED_OUT: "opted out",
+    CampaignOutcome.REMOVED: "removed",
+}
+"""How a list name and a filter's reading say each outcome."""
+
+
 class EnrolledIn(_Node):
+    """Enrolled, in any status, in any of the campaigns."""
+
     op: Literal["enrolled_in"]
-    campaign_id: StrictInt
+    campaign_ids: CampaignIds
 
 
 class RepliedIn(_Node):
+    """Responded to any of the campaigns, including a response recorded by hand (#512)."""
+
     op: Literal["replied_in"]
-    campaign_id: StrictInt
+    campaign_ids: CampaignIds
+
+
+class CampaignOutcomeIs(_Node):
+    """An enrollment in any of the campaigns ended up as ``outcome``."""
+
+    op: Literal["campaign_outcome"]
+    campaign_ids: CampaignIds
+    outcome: CampaignOutcome
 
 
 type FilterNode = Annotated[
@@ -691,20 +755,18 @@ type FilterNode = Annotated[
     | TagNone
     | ListMember
     | EnrolledIn
-    | RepliedIn,
+    | RepliedIn
+    | CampaignOutcomeIs,
     Field(discriminator="op"),
 ]
 
-PLACEHOLDERS: Final[dict[str, str]] = {
-    "enrolled_in": "P3-04",
-    "replied_in": "P3-04",
-}
+PLACEHOLDERS: Final[dict[str, str]] = {}
 """Predicates that parse but do not compile yet, and the item that delivers each.
 
-``list_member`` was here until P1-27 (#73), naming P1-08 — which shipped lists
-without it, so the message named an item that had already been and gone. It
-compiles now; a predicate leaves this table by compiling, never by being
-re-pointed at the next item."""
+Empty since #513. ``list_member`` was here until P1-27 (#73), and ``enrolled_in``
+and ``replied_in`` until #513 (they named P3-04, which shipped campaigns without
+them). A predicate leaves this table by compiling, never by being re-pointed at
+the next item."""
 
 NODE_TYPES: Final[tuple[type[_Node], ...]] = get_args(get_args(FilterNode.__value__)[0])
 """Every predicate model, in the order the union lists them."""
@@ -1137,8 +1199,16 @@ class _Compiler:
                 return not_(self._tagged(node.names).exists())
             case ListMember():
                 return self._list_member(node.list_id, path)
-            case EnrolledIn() | RepliedIn():
-                raise UnsupportedPredicate(node.op, path, PLACEHOLDERS[node.op])
+            case EnrolledIn():
+                return self._enrollments(node.campaign_ids).exists()
+            case RepliedIn():
+                return self._enrollments(node.campaign_ids).where(_REPLIED).exists()
+            case CampaignOutcomeIs():
+                return (
+                    self._enrollments(node.campaign_ids)
+                    .where(_OUTCOME_WHERE[node.outcome])
+                    .exists()
+                )
             case _ as unreachable:
                 assert_never(unreachable)
 
@@ -1252,6 +1322,23 @@ class _Compiler:
                 self._expanding = self._expanding[:-1]
         return and_(*clauses)
 
+    def _enrollments(self, campaign_ids: Sequence[int]) -> Select[int]:
+        """This contact's enrollments in any of ``campaign_ids``; correlated, and scoped
+        like :meth:`_child_rows`, so another user's campaign id finds nothing.
+
+        ``(user_id, campaign_id, contact_id)`` is the table's unique constraint, so
+        a contact has at most one enrollment per campaign and this is an index lookup.
+        """
+        return (
+            select(Enrollment.id)
+            .where(
+                Enrollment.contact_id == Contact.id,
+                Enrollment.user_id == self.user.id,
+                Enrollment.campaign_id.in_(sorted(set(campaign_ids))),
+            )
+            .correlate(Contact)
+        )
+
     def _tagged(self, names: Sequence[str]) -> Select[int]:
         """``contact_tags`` rows of this contact whose tag is named in ``names``.
 
@@ -1274,6 +1361,33 @@ class _Compiler:
 
     def _ago(self, days: int) -> datetime:
         return self.clock.now - timedelta(days=days)
+
+
+_REPLIED: Final[ColumnElement[bool]] = or_(
+    Enrollment.replied_at.is_not(None), Enrollment.status == EnrollmentStatus.REPLIED
+)
+"""An enrollment with a response on record. Every reply path sets ``replied_at``
+(``netkeeper.services.campaign_replies._after_reply``, which a response recorded by
+hand goes through too); the status is there for a row that somehow has one without
+the other."""
+
+_STILL_IN: Final = (EnrollmentStatus.PENDING, EnrollmentStatus.ACTIVE, EnrollmentStatus.PAUSED)
+
+
+def _unanswered(*statuses: EnrollmentStatus) -> ColumnElement[bool]:
+    return and_(Enrollment.status.in_(statuses), not_(_REPLIED))
+
+
+_OUTCOME_WHERE: Final[dict[CampaignOutcome, ColumnElement[bool]]] = {
+    CampaignOutcome.REPLIED: and_(_REPLIED, Enrollment.status != EnrollmentStatus.OPTED_OUT),
+    CampaignOutcome.OPTED_OUT: Enrollment.status == EnrollmentStatus.OPTED_OUT,
+    CampaignOutcome.BOUNCED: _unanswered(EnrollmentStatus.BOUNCED),
+    CampaignOutcome.REMOVED: _unanswered(EnrollmentStatus.REMOVED),
+    CampaignOutcome.COMPLETED: _unanswered(EnrollmentStatus.COMPLETED),
+    CampaignOutcome.ACTIVE: _unanswered(*_STILL_IN),
+    CampaignOutcome.NO_REPLY: _unanswered(*_STILL_IN, EnrollmentStatus.COMPLETED),
+}
+"""Each outcome as a condition on one ``enrollments`` row. See "Campaigns" above."""
 
 
 def _present(column: InstrumentedAttribute[Any], test: ColumnElement[bool]) -> ColumnElement[bool]:
@@ -1309,8 +1423,7 @@ def describe(tree: FilterTree) -> str:
     """A short reading for a list header: "met, has email, connected in the last 365 days".
 
     Top-level ``and`` terms are comma-separated; nested groups are parenthesized
-    with ``and`` / ``or`` spelled out. Placeholders are described like any other
-    predicate.
+    with ``and`` / ``or`` spelled out.
     """
     text = "all contacts" if tree.where is None else _describe(tree.where, top=True)
     return f"{text}, including archived" if tree.include_archived else text
@@ -1372,11 +1485,18 @@ def _describe(node: FilterNode, *, top: bool = False) -> str:
         case ListMember():
             return f"in list #{node.list_id}"
         case EnrolledIn():
-            return f"enrolled in campaign #{node.campaign_id}"
+            return f"enrolled in {_campaigns(node.campaign_ids)}"
         case RepliedIn():
-            return f"replied in campaign #{node.campaign_id}"
+            return f"replied to {_campaigns(node.campaign_ids)}"
+        case CampaignOutcomeIs():
+            return f"{OUTCOME_LABELS[node.outcome]} in {_campaigns(node.campaign_ids)}"
         case _ as unreachable:
             assert_never(unreachable)
+
+
+def _campaigns(ids: Sequence[int]) -> str:
+    named = ", ".join(f"#{i}" for i in ids)
+    return f"campaign {named}" if len(ids) == 1 else f"any of campaigns {named}"
 
 
 def _describe_eq(field: str, value: str | int | bool, *, negated: bool) -> str:

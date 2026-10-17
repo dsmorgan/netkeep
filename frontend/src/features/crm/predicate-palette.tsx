@@ -1,18 +1,25 @@
 /**
  * The list of predicates you can add to a filter.
  *
- * Every predicate the language defines appears here, including the three the
- * server parses but refuses to compile. Those are shown disabled with the
- * reason spelled out rather than left off the list: a builder that quietly
- * omits part of the language teaches people the language is smaller than it
- * is, and hides that the gap is temporary.
+ * Every predicate the language defines appears here, including any the server
+ * parses but refuses to compile (none since #513). Those are shown disabled
+ * with the reason spelled out rather than left off the list: a builder that
+ * quietly omits part of the language teaches people the language is smaller
+ * than it is, and hides that the gap is temporary.
  */
 import { Badge } from '@/components/ui/badge'
 
 import { GROUP_LABELS, PREDICATES, UNAVAILABLE_GROUP_LABEL } from './predicates'
 import type { PredicateGroup, PredicateSpec } from './predicates'
 
-const GROUP_ORDER: readonly PredicateGroup[] = ['field', 'presence', 'time', 'tags', 'logic']
+const GROUP_ORDER: readonly PredicateGroup[] = [
+  'field',
+  'presence',
+  'time',
+  'tags',
+  'campaigns',
+  'logic',
+]
 
 interface PredicatePaletteProps {
   onPick: (spec: PredicateSpec) => void
@@ -55,28 +62,30 @@ export function PredicatePalette({ onPick, onCancel }: PredicatePaletteProps) {
         )
       })}
 
-      <section aria-label={UNAVAILABLE_GROUP_LABEL}>
-        <h4 className="mb-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          {UNAVAILABLE_GROUP_LABEL}
-        </h4>
-        <div className="grid gap-1">
-          {unavailable.map((spec) => (
-            <div
-              key={spec.op}
-              data-op={spec.op}
-              data-unavailable="true"
-              aria-disabled="true"
-              className="rounded-md border border-dashed px-2 py-1.5 opacity-80"
-            >
-              <span className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                {spec.label}
-                <Badge variant="outline">Unavailable</Badge>
-              </span>
-              <span className="block text-xs text-muted-foreground">{spec.unavailable}</span>
-            </div>
-          ))}
-        </div>
-      </section>
+      {unavailable.length > 0 && (
+        <section aria-label={UNAVAILABLE_GROUP_LABEL}>
+          <h4 className="mb-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            {UNAVAILABLE_GROUP_LABEL}
+          </h4>
+          <div className="grid gap-1">
+            {unavailable.map((spec) => (
+              <div
+                key={spec.op}
+                data-op={spec.op}
+                data-unavailable="true"
+                aria-disabled="true"
+                className="rounded-md border border-dashed px-2 py-1.5 opacity-80"
+              >
+                <span className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                  {spec.label}
+                  <Badge variant="outline">Unavailable</Badge>
+                </span>
+                <span className="block text-xs text-muted-foreground">{spec.unavailable}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <button
         type="button"

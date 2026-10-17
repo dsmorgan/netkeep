@@ -98,7 +98,7 @@ describe('every predicate is reachable from the builder', () => {
     expect(LANGUAGE_OPS.length).toBeGreaterThan(0)
   })
 
-  it('makes the twenty-five usable predicates clickable', () => {
+  it('makes every predicate clickable', () => {
     mockApi(countRoute())
     const { container } = renderWithClient(<Harness initial={emptyTree()} />)
     openPalette()
@@ -109,29 +109,18 @@ describe('every predicate is reachable from the builder', () => {
       expect(element?.tagName, spec.op).toBe('BUTTON')
       expect(element?.getAttribute('aria-disabled')).toBeNull()
     }
-    expect(usable).toHaveLength(LANGUAGE_OPS.length - 2)
+    expect(usable).toHaveLength(LANGUAGE_OPS.length)
   })
 
-  it('shows the two the server refuses as unavailable, with the reason', () => {
-    // `list_member` was the third until P1-27 taught the compiler to inline a
-    // list; it is an ordinary clickable predicate now, with a picker of its own.
+  it('shows no "not available yet" section once nothing is unavailable', () => {
+    // `enrolled_in` and `replied_in` were the last two the server refused, until #513.
     mockApi(countRoute())
     const { container } = renderWithClient(<Harness initial={emptyTree()} />)
     openPalette()
-
-    for (const op of ['enrolled_in', 'replied_in']) {
-      const element = container.querySelector(`[data-op="${op}"]`)
-      expect(element, op).not.toBeNull()
-      expect(element?.getAttribute('data-unavailable')).toBe('true')
-      expect(element?.getAttribute('aria-disabled')).toBe('true')
-      expect(element?.tagName).not.toBe('BUTTON')
-    }
-    expect(container.querySelector('[data-op="list_member"]')?.tagName).toBe('BUTTON')
-    expect(screen.getAllByText(/can.t filter by campaign yet/).length).toBe(2)
+    expect(container.querySelector('[data-unavailable="true"]')).toBeNull()
+    expect(screen.queryByText(/not available yet/i)).toBeNull()
   })
-})
 
-describe('building a filter', () => {
   it('produces the tree the API accepts', () => {
     mockApi(countRoute())
     renderWithClient(<Harness initial={emptyTree()} />)
@@ -226,19 +215,6 @@ describe('an existing filter', () => {
       },
     }
     expect(tree()).toEqual(expected)
-  })
-
-  it('explains a placeholder it was given rather than dropping it', () => {
-    mockApi(countRoute())
-    renderWithClient(
-      <Harness
-        initial={{ include_archived: false, where: { op: 'enrolled_in', campaign_id: 4 } }}
-      />,
-    )
-    expect(screen.getByText(/campaign #4/)).toBeInTheDocument()
-    // Once beside the node and once in the "not ready to run" summary.
-    expect(screen.getAllByText(/can.t filter by campaign yet/)).toHaveLength(2)
-    expect(screen.getByRole('status')).toHaveTextContent(/finish the conditions/i)
   })
 })
 
@@ -413,5 +389,57 @@ describe('the live count', () => {
     })
     renderWithClient(<Harness initial={{ include_archived: false, where: { op: 'has_email' } }} />)
     expect(await screen.findByText(/not available yet/)).toBeInTheDocument()
+  })
+})
+
+describe('choosing campaigns', () => {
+  const CAMPAIGNS = [
+    { id: 4, name: 'Autumn hello', status: 'completed' },
+    { id: 5, name: 'Winter hello', status: 'active' },
+  ]
+  const ARCHIVED = [{ id: 2, name: 'Spring hello', status: 'archived' }]
+
+  function campaignsRoute() {
+    return {
+      'GET /api/v1/campaigns': ({ url }: { url: URL }) =>
+        jsonResponse(url.searchParams.get('archived') ? ARCHIVED : CAMPAIGNS),
+    }
+  }
+
+  it('picks any of several campaigns, archived ones too, for an outcome', async () => {
+    mockApi({ ...countRoute(), ...campaignsRoute() })
+    renderWithClient(<Harness initial={emptyTree()} />)
+    openPalette()
+    pick('campaign_outcome')
+
+    expect(tree().where).toEqual({ op: 'campaign_outcome', campaign_ids: [], outcome: 'no_reply' })
+    // Nothing chosen yet: the builder asks for one instead of counting.
+    expect(screen.getByRole('status')).toHaveTextContent(/finish the conditions/i)
+    expect(screen.getAllByText(/needs at least one campaign/).length).toBeGreaterThan(0)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Autumn hello' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Spring hello' }))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Outcome' }), {
+      target: { value: 'replied' },
+    })
+    expect(tree().where).toEqual({
+      op: 'campaign_outcome',
+      campaign_ids: [4, 2],
+      outcome: 'replied',
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Autumn hello' }))
+    expect(tree().where).toEqual({ op: 'campaign_outcome', campaign_ids: [2], outcome: 'replied' })
+  })
+
+  it('keeps a campaign that is no longer there rather than dropping it', async () => {
+    mockApi({ ...countRoute(), ...campaignsRoute() })
+    renderWithClient(
+      <Harness
+        initial={{ include_archived: false, where: { op: 'enrolled_in', campaign_ids: [9] } }}
+      />,
+    )
+    expect(await screen.findByText(/campaign #9 \(no longer there\)/)).toBeInTheDocument()
+    expect(tree().where).toEqual({ op: 'enrolled_in', campaign_ids: [9] })
   })
 })

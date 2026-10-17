@@ -687,7 +687,7 @@ A tag can also carry `met_signal`: the user's own reading of their own label, `m
 
 ### 10.4 Lists and the filter language
 
-Smart lists store a filter tree serialized as JSON and compiled to SQLAlchemy. Supported predicates: field comparisons, tag any/all/none, `met`, `has_email`, `has_phone`, `has_li_url`, `last_contacted before/after`, `enrolled_in`, `replied_in`, `changed_jobs_within` (a job change as 9.8 defines it, the same rows as the dashboard card; #313, #323), `connected_on` ranges, `list_member`. The same filter powers the Contacts table, campaign enrollment, and exports, so "the people who get this campaign" is always a visible, re-runnable definition.
+Smart lists store a filter tree serialized as JSON and compiled to SQLAlchemy. Supported predicates: field comparisons, tag any/all/none, `met`, `has_email`, `has_phone`, `has_li_url`, `last_contacted before/after`, `enrolled_in`, `replied_in`, `campaign_outcome` (each over any of several campaigns; #513), `changed_jobs_within` (a job change as 9.8 defines it, the same rows as the dashboard card; #313, #323), `connected_on` ranges, `list_member`. The same filter powers the Contacts table, campaign enrollment, and exports, so "the people who get this campaign" is always a visible, re-runnable definition. A campaign's page makes a list from one outcome ("Replied (7)", "No reply (23)"): a static snapshot by default, or a smart list over `campaign_outcome`; `replied_in` and the `replied` outcome count a response recorded by hand (#512).
 
 Static lists are explicit membership with an `added_at`, for the "First 100" style batches in the training.
 

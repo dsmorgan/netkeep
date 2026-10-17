@@ -94,9 +94,28 @@ def test_a_static_list_takes_no_filter_and_a_smart_list_needs_one(
 def test_a_broken_or_unsupported_filter_is_refused_at_write_time(
     writer: Session, user: User
 ) -> None:
-    ok_placeholder = parse_filter({"where": {"op": "enrolled_in", "campaign_id": 1}})
-    with pytest.raises(FilterError):  # UnsupportedPredicate: campaigns arrive with P3-04
-        create_list(writer, user, "bad filter", ListKind.SMART, filter=ok_placeholder)
+    # No predicate is a placeholder since #513; a list the user does not have is refused.
+    names_nothing = parse_filter({"where": {"op": "list_member", "list_id": 999_999}})
+    with pytest.raises(FilterError):
+        create_list(writer, user, "bad filter", ListKind.SMART, filter=names_nothing)
+
+
+def test_a_smart_list_over_campaign_results_is_accepted(writer: Session, user: User) -> None:
+    """#513: ``enrolled_in`` and ``replied_in`` refused this write until they compiled."""
+    tree = parse_filter(
+        {
+            "where": {
+                "op": "and",
+                "children": [
+                    {"op": "enrolled_in", "campaign_ids": [1, 2]},
+                    {"op": "not", "child": {"op": "replied_in", "campaign_ids": [1, 2]}},
+                    {"op": "campaign_outcome", "campaign_ids": [1], "outcome": "no_reply"},
+                ],
+            }
+        }
+    )
+    row = create_list(writer, user, "Never replied", ListKind.SMART, filter=tree)
+    assert row.filter_json == tree.model_dump(mode="json")
 
 
 def test_duplicate_list_name_is_refused(writer: Session, user: User) -> None:

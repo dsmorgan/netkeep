@@ -255,21 +255,29 @@ def _pending(session: Session, user: User, campaign_id: int) -> list[Enrollment]
 
 def source_contact_ids(session: Session, user: User, campaign: Campaign) -> set[int]:
     """The contacts of the campaign's audience source: its list or its filter."""
-    if campaign.filter_json is not None:
-        tree = parse_filter(campaign.filter_json)
+    return audience_contact_ids(
+        session, user, list_id=campaign.source_list_id, filter_json=campaign.filter_json
+    )
+
+
+def audience_contact_ids(
+    session: Session, user: User, *, list_id: int | None, filter_json: dict[str, Any] | None
+) -> set[int]:
+    """The contacts of an audience source, a list or a filter, whether or not a campaign
+    holds it yet (the builder's preview, #513)."""
+    if filter_json is not None:
+        tree = parse_filter(filter_json)
         return set(
             session.scalars(
                 compile_filter(user, tree, session=session).with_only_columns(Contact.id)
             )
         )
-    if campaign.source_list_id is None:
+    if list_id is None:
         return set()
     found: set[int] = set()
     offset = 0
     while True:
-        page, total = crm_lists.list_members(
-            session, user, campaign.source_list_id, limit=LIST_PAGE, offset=offset
-        )
+        page, total = crm_lists.list_members(session, user, list_id, limit=LIST_PAGE, offset=offset)
         found.update(contact.id for contact in page)
         offset += LIST_PAGE
         if offset >= total or not page:

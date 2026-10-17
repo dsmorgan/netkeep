@@ -1178,15 +1178,20 @@ def test_cli_export_rejects_invalid_filter_json(cli_db: sessionmaker[Session]) -
     assert "--filter" in result.output
 
 
-def test_cli_export_says_why_a_predicate_is_unavailable(cli_db: sessionmaker[Session]) -> None:
-    """The CLI half of #95: it parses, the compiler refuses it, and nobody sees a traceback."""
+def test_cli_export_says_why_a_filter_does_not_compile(cli_db: sessionmaker[Session]) -> None:
+    """The CLI half of #95: it parses, the compiler refuses it, and nobody sees a traceback.
+
+    A list defined in terms of itself, since no predicate is a placeholder any more (#513).
+    """
     with session_scope(cli_db, write=True) as session:
-        factories.make_contact(session, ensure_local_user(session))
-    tree = json.dumps({"where": {"op": "enrolled_in", "campaign_id": 1}})
+        user = ensure_local_user(session)
+        factories.make_contact(session, user)
+        list_id = factories.make_self_naming_list(session, user).id
+    tree = json.dumps({"where": {"op": "list_member", "list_id": list_id}})
     result = CliRunner().invoke(cli, ["export", "--filter", tree])
     assert result.exit_code == 1
     assert "Traceback" not in result.output
-    assert "enrolled_in is not available yet" in result.output
+    assert f"list {list_id} is defined in terms of itself" in result.output
 
 
 def test_cli_export_rejects_a_filter_that_does_not_compile(cli_db: sessionmaker[Session]) -> None:

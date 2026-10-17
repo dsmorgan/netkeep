@@ -140,7 +140,7 @@ describe('the predicate catalog and the filter language', () => {
     // A failure here means the language grew or shrank. That is allowed — add
     // the predicate to `predicates.ts` and change this number deliberately, so
     // nobody widens the language without deciding how the builder shows it.
-    expect(languageOps).toHaveLength(27)
+    expect(languageOps).toHaveLength(28)
   })
 
   it('lists no predicate the language does not have', () => {
@@ -152,7 +152,8 @@ describe('the predicate catalog and the filter language', () => {
   it('marks exactly the predicates the compiler refuses as unavailable', () => {
     // `filters.PLACEHOLDERS`; `tests/test_filter_builder.py` checks this side
     // against the backend's own dict, which is where a graduation shows up.
-    expect([...UNAVAILABLE_OPS].sort()).toEqual(['enrolled_in', 'replied_in'])
+    // Empty since #513 taught it the campaign predicates.
+    expect([...UNAVAILABLE_OPS]).toEqual([])
   })
 
   it('gives every unavailable predicate a reason worth reading', () => {

@@ -30,6 +30,7 @@ from netkeeper.crm.filters import (
     OPS,
     PLACEHOLDERS,
     AnyField,
+    CampaignOutcome,
     EmptyableField,
     FilterError,
     FilterTree,
@@ -37,7 +38,6 @@ from netkeeper.crm.filters import (
     OrderedField,
     SortKey,
     StringField,
-    UnsupportedPredicate,
     apply_sort,
     compile_count,
     compile_filter,
@@ -57,9 +57,13 @@ from netkeeper.models import (
     ContactSource,
     ContactTag,
     EmailStatus,
+    EnrollmentStatus,
     ListKind,
     ListMember,
+    MessageDirection,
+    MessageStatus,
     MetSource,
+    ResponseVia,
     Tag,
     TagSource,
     User,
@@ -193,12 +197,24 @@ EXAMPLES: list[tuple[dict[str, Any], str]] = [
             "where": {
                 "op": "and",
                 "children": [
-                    {"op": "enrolled_in", "campaign_id": 2},
-                    {"op": "not", "child": {"op": "replied_in", "campaign_id": 2}},
+                    {"op": "enrolled_in", "campaign_ids": [2]},
+                    {"op": "not", "child": {"op": "replied_in", "campaign_ids": [2, 5]}},
                 ],
             }
         },
-        "enrolled in campaign #2, not replied in campaign #2",
+        "enrolled in campaign #2, not replied to any of campaigns #2, #5",
+    ),
+    (
+        {
+            "where": {
+                "op": "and",
+                "children": [
+                    {"op": "campaign_outcome", "campaign_ids": [2], "outcome": "no_reply"},
+                    {"op": "tag_any", "names": ["founder"]},
+                ],
+            }
+        },
+        "no reply in campaign #2, tagged any of founder",
     ),
     (
         {
@@ -320,10 +336,12 @@ def test_field_sets_agree_with_fields_and_with_the_contact_columns() -> None:
         assert "eq" in spec.ops and "neq" in spec.ops
 
 
-def test_every_op_has_one_node_type_and_placeholders_are_ops() -> None:
-    assert len(OPS) == len(set(OPS)) == len(NODE_TYPES) == 27
-    assert set(PLACEHOLDERS) < set(OPS)
-    assert set(PLACEHOLDERS.values()) == {"P3-04"}
+def test_every_op_has_one_node_type_and_nothing_is_a_placeholder() -> None:
+    assert len(OPS) == len(set(OPS)) == len(NODE_TYPES) == 28
+    assert PLACEHOLDERS == {}, (
+        "enrolled_in and replied_in graduated with #513; a predicate leaves PLACEHOLDERS by "
+        "compiling, so anything in here is new"
+    )
 
 
 def test_examples_cover_every_op() -> None:
@@ -713,34 +731,247 @@ def test_archived_contacts_need_include_archived_and_merged_never_appear(
     assert matching(session, user, only_archived, include_archived=True) == [archived.id]
 
 
-# --- placeholders -----------------------------------------------------------
+# --- campaigns (#513) ------------------------------------------------------
 
-PLACEHOLDER_NODES: dict[str, dict[str, Any]] = {
-    "enrolled_in": {"op": "enrolled_in", "campaign_id": 2},
-    "replied_in": {"op": "replied_in", "campaign_id": 2},
+
+def _campaign_cast(session: Session, user: User) -> tuple[Any, dict[str, int]]:
+    """One campaign and one contact per enrollment end state, by name."""
+    campaign = factories.make_campaign(session, user)
+    people: dict[str, int] = {}
+    states: dict[str, dict[str, Any]] = {
+        "replied": {"status": EnrollmentStatus.REPLIED, "replied_at": NOW},
+        # A response recorded by hand (#512) ends the enrollment the same way.
+        "replied_by_hand": {"status": EnrollmentStatus.REPLIED, "replied_at": NOW},
+        # A reply after the sequence finished leaves it completed (campaign_replies).
+        "replied_late": {"status": EnrollmentStatus.COMPLETED, "replied_at": NOW},
+        "opted_out": {"status": EnrollmentStatus.OPTED_OUT, "replied_at": NOW},
+        "bounced": {"status": EnrollmentStatus.BOUNCED},
+        "removed": {"status": EnrollmentStatus.REMOVED},
+        "completed": {"status": EnrollmentStatus.COMPLETED},
+        "active": {"status": EnrollmentStatus.ACTIVE},
+        "pending": {"status": EnrollmentStatus.PENDING},
+        "paused": {"status": EnrollmentStatus.PAUSED},
+    }
+    for name, fields in states.items():
+        contact = factories.make_contact(session, user)
+        enrollment = factories.make_enrollment(session, campaign, contact, **fields)
+        if name == "replied_by_hand":
+            factories.make_message(
+                session,
+                enrollment,
+                direction=MessageDirection.IN,
+                status=MessageStatus.RECEIVED,
+                outside_via=ResponseVia.CALL,
+            )
+        people[name] = contact.id
+    people["never_enrolled"] = factories.make_contact(session, user).id
+    return campaign, people
+
+
+def _ids(people: dict[str, int], *names: str) -> list[int]:
+    return sorted(people[name] for name in names)
+
+
+OUTCOME_PEOPLE: dict[str, tuple[str, ...]] = {
+    "replied": ("replied", "replied_by_hand", "replied_late"),
+    "opted_out": ("opted_out",),
+    "bounced": ("bounced",),
+    "removed": ("removed",),
+    "completed": ("completed",),
+    "active": ("active", "pending", "paused"),
+    "no_reply": ("completed", "active", "pending", "paused"),
 }
 
 
-@pytest.mark.parametrize("op", list(PLACEHOLDER_NODES))
-def test_placeholders_parse_but_do_not_compile(session: Session, user: User, op: str) -> None:
-    node = PLACEHOLDER_NODES[op]
-    tree = parse_filter({"where": {"op": "and", "children": [{"op": "has_email"}, node]}})
-    assert tree.model_dump(mode="json")["where"]["children"][1] == node
-    with pytest.raises(UnsupportedPredicate) as info:
-        compile_where(user, tree, session=session)
-    assert info.value.op == op
-    assert info.value.item == PLACEHOLDERS[op]
-    assert isinstance(info.value, FilterError)
-    assert [issue.path for issue in info.value.issues] == ["where.children[1]"]
-    assert str(info.value) == f"where.children[1]: {op} is not available yet"
+def test_outcomes_are_written_out_in_full() -> None:
+    """The outcome set is the issue's list; a new status needs a decision, not a default."""
+    assert [o.value for o in CampaignOutcome] == [
+        "replied",
+        "no_reply",
+        "active",
+        "completed",
+        "bounced",
+        "opted_out",
+        "removed",
+    ]
+    assert set(OUTCOME_PEOPLE) == {o.value for o in CampaignOutcome}
 
 
-def test_placeholder_set_is_exactly_the_campaign_two(user: User) -> None:
-    assert set(PLACEHOLDER_NODES) == set(PLACEHOLDERS)
-    assert set(PLACEHOLDERS) == {"enrolled_in", "replied_in"}, (
-        "list_member graduated with P1-27 (#73); a predicate leaves PLACEHOLDERS by "
-        "compiling, so anything else in here is new"
+def test_enrolled_in_is_any_status_and_nobody_else(session: Session, user: User) -> None:
+    campaign, people = _campaign_cast(session, user)
+    everyone = sorted(v for k, v in people.items() if k != "never_enrolled")
+    assert matching(session, user, {"op": "enrolled_in", "campaign_ids": [campaign.id]}) == everyone
+
+
+def test_replied_in_counts_a_response_recorded_by_hand_and_an_opt_out_reply(
+    session: Session, user: User
+) -> None:
+    campaign, people = _campaign_cast(session, user)
+    replied = matching(session, user, {"op": "replied_in", "campaign_ids": [campaign.id]})
+    assert replied == _ids(people, "replied", "replied_by_hand", "replied_late", "opted_out")
+
+
+@pytest.mark.parametrize("outcome", list(OUTCOME_PEOPLE))
+def test_each_outcome_selects_its_people(session: Session, user: User, outcome: str) -> None:
+    campaign, people = _campaign_cast(session, user)
+    node = {"op": "campaign_outcome", "campaign_ids": [campaign.id], "outcome": outcome}
+    assert matching(session, user, node) == _ids(people, *OUTCOME_PEOPLE[outcome])
+
+
+def test_the_outcomes_but_no_reply_split_the_enrollments_once(session: Session, user: User) -> None:
+    campaign, people = _campaign_cast(session, user)
+    seen: list[int] = []
+    for outcome in CampaignOutcome:
+        if outcome is CampaignOutcome.NO_REPLY:
+            continue
+        seen += matching(
+            session,
+            user,
+            {"op": "campaign_outcome", "campaign_ids": [campaign.id], "outcome": outcome.value},
+        )
+    assert sorted(seen) == sorted(v for k, v in people.items() if k != "never_enrolled")
+
+
+def test_any_of_and_none_of_several_campaigns(session: Session, user: User) -> None:
+    """ "Never replied to any of these campaigns" is ``not replied_in`` over all of them."""
+    spring = factories.make_campaign(session, user)
+    autumn = factories.make_campaign(session, user)
+    both = factories.make_contact(session, user)
+    spring_only = factories.make_contact(session, user)
+    autumn_reply = factories.make_contact(session, user)
+    nobody = factories.make_contact(session, user)
+    factories.make_enrollment(session, spring, both, status=EnrollmentStatus.COMPLETED)
+    factories.make_enrollment(session, autumn, both, status=EnrollmentStatus.COMPLETED)
+    factories.make_enrollment(session, spring, spring_only, status=EnrollmentStatus.COMPLETED)
+    factories.make_enrollment(
+        session, autumn, autumn_reply, status=EnrollmentStatus.REPLIED, replied_at=NOW
     )
+    ids = [spring.id, autumn.id]
+    assert matching(session, user, {"op": "enrolled_in", "campaign_ids": ids}) == sorted(
+        [both.id, spring_only.id, autumn_reply.id]
+    )
+    assert matching(session, user, {"op": "enrolled_in", "campaign_ids": [autumn.id]}) == sorted(
+        [both.id, autumn_reply.id]
+    )
+    never_replied = {
+        "op": "and",
+        "children": [
+            {"op": "enrolled_in", "campaign_ids": ids},
+            {"op": "not", "child": {"op": "replied_in", "campaign_ids": ids}},
+        ],
+    }
+    assert matching(session, user, never_replied) == sorted([both.id, spring_only.id])
+    none_of = {"op": "not", "child": {"op": "enrolled_in", "campaign_ids": ids}}
+    assert matching(session, user, none_of) == [nobody.id]
+
+
+def test_campaign_predicates_compose_with_other_predicates(session: Session, user: User) -> None:
+    campaign = factories.make_campaign(session, user)
+    founder = _tag(session, user, "founder")
+    wanted = factories.make_contact(session, user, current_company="Acme Corp")
+    _assign(session, user, wanted, founder)
+    untagged = factories.make_contact(session, user, current_company="Acme Corp")
+    elsewhere = factories.make_contact(session, user, current_company="Globex")
+    _assign(session, user, elsewhere, founder)
+    replied = factories.make_contact(session, user, current_company="Acme Corp")
+    _assign(session, user, replied, founder)
+    for contact in (wanted, untagged, elsewhere):
+        factories.make_enrollment(session, campaign, contact, status=EnrollmentStatus.COMPLETED)
+    factories.make_enrollment(
+        session, campaign, replied, status=EnrollmentStatus.REPLIED, replied_at=NOW
+    )
+    static = ContactList(user_id=user.id, name="Shortlist", kind=ListKind.STATIC)
+    session.add(static)
+    session.flush()
+    for contact in (wanted, untagged, elsewhere, replied):
+        session.add(ListMember(user_id=user.id, list_id=static.id, contact_id=contact.id))
+    session.flush()
+    where = {
+        "op": "and",
+        "children": [
+            {"op": "campaign_outcome", "campaign_ids": [campaign.id], "outcome": "no_reply"},
+            {"op": "tag_any", "names": ["founder"]},
+            {"op": "eq", "field": "current_company", "value": "acme corp"},
+            {"op": "list_member", "list_id": static.id},
+        ],
+    }
+    assert matching(session, user, where) == [wanted.id]
+    either = {
+        "op": "or",
+        "children": [
+            {"op": "replied_in", "campaign_ids": [campaign.id]},
+            {"op": "eq", "field": "current_company", "value": "Globex"},
+        ],
+    }
+    assert matching(session, user, either) == sorted([replied.id, elsewhere.id])
+
+
+def test_a_smart_list_over_an_outcome_is_live(session: Session, user: User) -> None:
+    """A dynamic list re-evaluates: a later reply moves the person out of "no reply"."""
+    campaign = factories.make_campaign(session, user)
+    contact = factories.make_contact(session, user)
+    enrollment = factories.make_enrollment(session, campaign, contact)
+    node = {"op": "campaign_outcome", "campaign_ids": [campaign.id], "outcome": "no_reply"}
+    smart = _smart_list(session, user, "Autumn hello: no reply", node)
+    assert [c.id for c in list_members(session, user, smart.id, limit=10)[0]] == [contact.id]
+    enrollment.status = EnrollmentStatus.REPLIED
+    enrollment.replied_at = NOW
+    session.flush()
+    assert list_members(session, user, smart.id, limit=10)[0] == []
+
+
+def test_another_users_campaign_matches_nobody(session: Session, user: User, other: User) -> None:
+    theirs = factories.make_campaign(session, other)
+    their_contact = factories.make_contact(session, other)
+    factories.make_enrollment(session, theirs, their_contact)
+    mine = factories.make_contact(session, user)
+    for node in (
+        {"op": "enrolled_in", "campaign_ids": [theirs.id]},
+        {"op": "campaign_outcome", "campaign_ids": [theirs.id], "outcome": "active"},
+    ):
+        assert matching(session, user, node) == []
+        assert matching(session, user, {"op": "not", "child": node}) == [mine.id]
+
+
+def test_campaign_predicates_carry_the_user_term(session: Session, user: User) -> None:
+    tree = parse_filter({"where": {"op": "enrolled_in", "campaign_ids": [7]}})
+    sql = str(
+        compile_filter(user, tree, session=session).compile(compile_kwargs={"literal_binds": True})
+    )
+    assert f"enrollments.user_id = {user.id}" in sql
+    assert "enrollments.campaign_id IN (7)" in sql
+
+
+def test_a_bulk_update_through_an_outcome_touches_only_its_people(
+    session: Session, user: User
+) -> None:
+    """Triage's bulk "mark met" runs through compile_update."""
+    campaign = factories.make_campaign(session, user)
+    replied = factories.make_contact(session, user)
+    silent = factories.make_contact(session, user)
+    factories.make_enrollment(
+        session, campaign, replied, status=EnrollmentStatus.REPLIED, replied_at=NOW
+    )
+    factories.make_enrollment(session, campaign, silent, status=EnrollmentStatus.COMPLETED)
+    tree = parse_filter(
+        {"where": {"op": "campaign_outcome", "campaign_ids": [campaign.id], "outcome": "replied"}}
+    )
+    session.execute(compile_update(user, tree, session=session).values(met=ContactMet.MET))
+    session.expire_all()
+    assert session.get(Contact, replied.id).met is ContactMet.MET  # type: ignore[union-attr]
+    assert session.get(Contact, silent.id).met is not ContactMet.MET  # type: ignore[union-attr]
+
+
+def test_campaign_ids_must_name_at_least_one_campaign() -> None:
+    with pytest.raises(FilterError) as info:
+        parse_filter({"where": {"op": "enrolled_in", "campaign_ids": []}})
+    assert info.value.issues[0].path == "where.campaign_ids"
+    with pytest.raises(FilterError):
+        parse_filter({"where": {"op": "enrolled_in", "campaign_id": 1}})
+    with pytest.raises(FilterError):
+        parse_filter(
+            {"where": {"op": "campaign_outcome", "campaign_ids": [1], "outcome": "ghosted"}}
+        )
 
 
 # --- tags -------------------------------------------------------------------
@@ -1559,14 +1790,9 @@ def test_every_example_round_trips_through_json(tree: dict[str, Any]) -> None:
 
 
 @pytest.mark.parametrize("tree", [e[0] for e in EXAMPLES], ids=[e[1][:40] for e in EXAMPLES])
-def test_every_example_compiles_or_is_a_placeholder(
-    session: Session, user: User, tree: dict[str, Any]
-) -> None:
+def test_every_example_compiles(session: Session, user: User, tree: dict[str, Any]) -> None:
     parsed = parse_filter(tree)
-    try:
-        session.scalars(compile_filter(user, parsed, session=session, now=NOW)).all()
-    except UnsupportedPredicate as exc:
-        assert exc.op in PLACEHOLDERS
+    session.scalars(compile_filter(user, parsed, session=session, now=NOW)).all()
 
 
 def test_schema_snapshot_is_current() -> None:

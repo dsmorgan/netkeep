@@ -87,6 +87,50 @@
       "title": "Between",
       "type": "object"
     },
+    "CampaignOutcome": {
+      "description": "How one contact's enrollment in a campaign ended up (#513). See \"Campaigns\" above.",
+      "enum": [
+        "replied",
+        "no_reply",
+        "active",
+        "completed",
+        "bounced",
+        "opted_out",
+        "removed"
+      ],
+      "title": "CampaignOutcome",
+      "type": "string"
+    },
+    "CampaignOutcomeIs": {
+      "additionalProperties": false,
+      "description": "An enrollment in any of the campaigns ended up as ``outcome``.",
+      "properties": {
+        "op": {
+          "const": "campaign_outcome",
+          "title": "Op",
+          "type": "string"
+        },
+        "campaign_ids": {
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 200,
+          "minItems": 1,
+          "title": "Campaign Ids",
+          "type": "array"
+        },
+        "outcome": {
+          "$ref": "#/$defs/CampaignOutcome"
+        }
+      },
+      "required": [
+        "op",
+        "campaign_ids",
+        "outcome"
+      ],
+      "title": "CampaignOutcomeIs",
+      "type": "object"
+    },
     "ChangedJobsWithinDays": {
       "additionalProperties": false,
       "description": "A job change noticed in the last ``days`` days, up to now (spec 9.8).\n\nThe same contacts as the dashboard's \"changed jobs\" card: an enrichment\nfound a different title or company than an earlier enrichment recorded. A\nnew headline or location alone, a contact's first enrichment, and an import\ndo not match.",
@@ -201,20 +245,26 @@
     },
     "EnrolledIn": {
       "additionalProperties": false,
+      "description": "Enrolled, in any status, in any of the campaigns.",
       "properties": {
         "op": {
           "const": "enrolled_in",
           "title": "Op",
           "type": "string"
         },
-        "campaign_id": {
-          "title": "Campaign Id",
-          "type": "integer"
+        "campaign_ids": {
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 200,
+          "minItems": 1,
+          "title": "Campaign Ids",
+          "type": "array"
         }
       },
       "required": [
         "op",
-        "campaign_id"
+        "campaign_ids"
       ],
       "title": "EnrolledIn",
       "type": "object"
@@ -283,6 +333,7 @@
         "mapping": {
           "and": "#/$defs/And",
           "between": "#/$defs/Between",
+          "campaign_outcome": "#/$defs/CampaignOutcomeIs",
           "changed_jobs_within_days": "#/$defs/ChangedJobsWithinDays",
           "connected_within_days": "#/$defs/ConnectedWithinDays",
           "contains": "#/$defs/Contains",
@@ -392,6 +443,9 @@
         },
         {
           "$ref": "#/$defs/RepliedIn"
+        },
+        {
+          "$ref": "#/$defs/CampaignOutcomeIs"
         }
       ]
     },
@@ -866,20 +920,26 @@
     },
     "RepliedIn": {
       "additionalProperties": false,
+      "description": "Responded to any of the campaigns, including a response recorded by hand (#512).",
       "properties": {
         "op": {
           "const": "replied_in",
           "title": "Op",
           "type": "string"
         },
-        "campaign_id": {
-          "title": "Campaign Id",
-          "type": "integer"
+        "campaign_ids": {
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 200,
+          "minItems": 1,
+          "title": "Campaign Ids",
+          "type": "array"
         }
       },
       "required": [
         "op",
-        "campaign_id"
+        "campaign_ids"
       ],
       "title": "RepliedIn",
       "type": "object"

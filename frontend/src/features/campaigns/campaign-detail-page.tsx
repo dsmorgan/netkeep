@@ -62,6 +62,7 @@ import {
 import { sourceBody, sourceProblem, type AudienceSource } from './audience'
 import { AudiencePicker } from './audience-picker'
 import { CampaignStatusBadge, EnrollmentStatusBadge } from './badges'
+import { CampaignListsCard } from './campaign-lists-card'
 import {
   CONDITION_LABELS,
   ENROLLMENT_STATUSES,
@@ -125,6 +126,7 @@ export function CampaignDetailPage({
       {!reviewable && (
         <ResultsCard campaignId={data.id} mailboxId={data.mailbox_id} results={results} />
       )}
+      {!reviewable && <CampaignListsCard campaignId={data.id} />}
       <StepsCard campaign={data} results={results.data} />
       {onLinkedIn && !reviewable && <LinkedInStepsSection campaignId={data.id} />}
       {reviewable && <AudienceCard campaign={data} />}
