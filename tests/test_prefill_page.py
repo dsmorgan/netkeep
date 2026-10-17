@@ -36,7 +36,9 @@ from messaging_pages import (
     existing_bubble_html,
     message_control_html,
     never_messaged_bubble_html,
+    new_message_bubble_html,
     profile_message_controls_html,
+    sponsored_bubble_html,
 )
 from run_fakes import fake_provider
 
@@ -983,6 +985,168 @@ async def test_two_messaging_dialogs_after_the_click_refuse_without_a_second_com
         assert_no_keys(ran)
         assert len(ran.tab.clicks) == 1
         assert "another message bubble is on the page" in ran.result.outcome.reason
+
+
+# --- #551: a minimized sponsored message's bubble isn't counted ------------------------
+
+SPONSORED = sponsored_bubble_html(MARISOL)
+IGNORED_LOG = (
+    "a minimized Messaging dialog with no composer and no header profile link"
+    " (a sponsored message) was left out of the bubble count"
+)
+
+
+def _sponsored_with(inside: str) -> str:
+    """The sponsored bubble with ``inside`` (HTML) added to its body."""
+    return SPONSORED.replace("<div><p>", f"<div>{inside}<p>", 1)
+
+
+#: Sponsored-bubble variants that still count as a bubble, each with what makes it one.
+STILL_COUNTED = {
+    "not marked minimized": sponsored_bubble_html(MARISOL, minimized=False),
+    "minimized mark not exactly true": SPONSORED.replace('is-minimized="true"', 'is-minimized="1"'),
+    "no minimized mark": SPONSORED.replace(
+        ' data-msg-overlay-conversation-bubble-is-minimized="true"', ""
+    ),
+    "a textbox of another name": _sponsored_with(
+        '<div contenteditable="true" role="textbox" aria-label="Reply"><p><br></p></div>'
+    ),
+    "a hidden textbox": _sponsored_with(
+        '<div hidden><div role="textbox" aria-label="Write a reply"></div></div>'
+    ),
+    "a form": _sponsored_with("<form><p>empty form</p></form>"),
+    "something contenteditable": _sponsored_with('<div contenteditable="true"></div>'),
+    "a header h2 link": SPONSORED.replace(
+        f'<h2 tabindex="-1">{MARISOL.name}</h2>',
+        f'<h2 tabindex="-1"><a href="/in/{MARISOL.profile_id}/">{MARISOL.name}</a></h2>',
+    ),
+    "an href in the header": SPONSORED.replace(
+        "</header>", f'<a href="/in/{MARISOL.slug}/">profile</a></header>'
+    ),
+    "a New message heading": _sponsored_with("<h3>New message</h3>"),
+    "a recipient field": _sponsored_with(
+        '<label for="invented-field">Enter message recipients</label>'
+        '<input id="invented-field" role="combobox" type="text">'
+    ),
+}
+
+
+def test_every_still_counted_variant_differs_from_the_sponsored_bubble() -> None:
+    for name, html in STILL_COUNTED.items():
+        assert html != SPONSORED, name
+
+
+@pytest.mark.parametrize("hidden", [False, True])
+async def test_a_sponsored_bubble_beside_the_new_message_bubble_is_typed(
+    hidden: bool, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The CP8d page (#551): a minimized sponsored bubble already in the overlay, then the
+    New message bubble as captured, both ``Messaging`` dialogs. The sponsored one is
+    left out of both counts, logged, and never clicked."""
+    before = f'<div style="display:none">{SPONSORED}</div>' if hidden else SPONSORED
+    bubble = Bubble(ZEPHYRINE, None, html=new_message_bubble_html(ZEPHYRINE))
+    site = MessagingSite(ZEPHYRINE, before=before, bubble=bubble)
+    with caplog.at_level("DEBUG", logger="netkeeper.linkedin.browser"):
+        ran = await prefill(site)
+    assert ran.kind is MessageOutcomeKind.PREFILLED, ran.result
+    assert composer_text(ran.tab) == BODY
+    [clicked] = ran.tab.clicks
+    assert clicked.tag == "a" and clicked.attrs["href"] == compose_href(ZEPHYRINE)
+    assert IGNORED_LOG in caplog.text
+    assert MARISOL.name not in caplog.text
+
+
+async def test_a_sponsored_bubble_beside_an_existing_conversation_is_typed() -> None:
+    ran = await prefill(MessagingSite(ZEPHYRINE, before=SPONSORED))
+    assert ran.kind is MessageOutcomeKind.PREFILLED, ran.result
+    assert composer_text(ran.tab) == BODY
+    assert len(ran.tab.clicks) == 1
+
+
+@pytest.mark.parametrize("pronouns", [None, "they/them"])
+async def test_the_new_message_bubble_as_captured_is_typed(pronouns: str | None) -> None:
+    """The CP8d New message bubble (#551's fixture): its card links the contact twice and
+    its pronouns sit outside the chip, so the exact chip check passes."""
+    html = new_message_bubble_html(ZEPHYRINE, pronouns=pronouns)
+    ran = await prefill(MessagingSite(ZEPHYRINE, bubble=Bubble(ZEPHYRINE, None, html=html)))
+    assert ran.kind is MessageOutcomeKind.PREFILLED, ran.result
+    assert composer_text(ran.tab) == BODY
+
+
+async def test_the_captured_new_message_bubble_for_someone_else_still_refuses() -> None:
+    html = new_message_bubble_html(ZEPHYRINE).replace(ZEPHYRINE.slug, THADDEUS.slug)
+    site = MessagingSite(ZEPHYRINE, before=SPONSORED, bubble=Bubble(ZEPHYRINE, None, html=html))
+    ran = await prefill(site)
+    assert_no_keys(ran)
+    assert ran.result.outcome.reason == "the new-message bubble is for someone else"
+
+
+@pytest.mark.parametrize("variant", sorted(STILL_COUNTED))
+async def test_a_dialog_that_is_not_a_minimized_sponsored_bubble_still_refuses_before_the_click(
+    variant: str,
+) -> None:
+    ran = await prefill(MessagingSite(ZEPHYRINE, before=STILL_COUNTED[variant]))
+    assert_no_keys(ran)
+    assert ran.result.outcome.reason == browser_module.BUBBLE_ALREADY_OPEN
+    assert ran.tab.clicks == [] and not ran.run.message_click_attempted
+
+
+@pytest.mark.parametrize("variant", sorted(STILL_COUNTED))
+async def test_a_dialog_that_is_not_a_minimized_sponsored_bubble_still_refuses_after_the_click(
+    variant: str,
+) -> None:
+    """Drawn with the click, beside a sponsored bubble and the New message bubble: the
+    sponsored one is left out, the other still makes two."""
+    html = SPONSORED + STILL_COUNTED[variant] + new_message_bubble_html(ZEPHYRINE)
+    ran = await prefill(MessagingSite(ZEPHYRINE, bubble=Bubble(ZEPHYRINE, None, html=html)))
+    assert_no_keys(ran)
+    assert len(ran.tab.clicks) == 1
+    assert "another message bubble is on the page" in ran.result.outcome.reason
+
+
+async def test_a_sponsored_bubble_and_a_second_real_bubble_still_refuse() -> None:
+    before = SPONSORED + existing_bubble_html(THADDEUS)
+    ran = await prefill(MessagingSite(ZEPHYRINE, before=before))
+    assert_no_keys(ran)
+    assert ran.result.outcome.reason == browser_module.BUBBLE_ALREADY_OPEN
+    # After the click: a sponsored bubble, an empty dialog and the contact's bubble.
+    dialog = '<div role="dialog" aria-label="Messaging" hidden><p>minimized</p></div>'
+    for bubble in (
+        Bubble(ZEPHYRINE, html=SPONSORED + dialog + existing_bubble_html(ZEPHYRINE)),
+        Bubble(ZEPHYRINE, None, html=SPONSORED + dialog + new_message_bubble_html(ZEPHYRINE)),
+    ):
+        ran = await prefill(MessagingSite(ZEPHYRINE, bubble=bubble))
+        assert_no_keys(ran)
+        assert "another message bubble is on the page" in ran.result.outcome.reason
+
+
+async def test_two_sponsored_bubbles_are_both_left_out() -> None:
+    second = SPONSORED.replace(MARISOL.name, THADDEUS.name)
+    bubble = Bubble(ZEPHYRINE, None, html=new_message_bubble_html(ZEPHYRINE))
+    ran = await prefill(MessagingSite(ZEPHYRINE, before=SPONSORED + second, bubble=bubble))
+    assert ran.kind is MessageOutcomeKind.PREFILLED, ran.result
+
+
+async def test_a_minimized_bubble_with_a_composer_but_no_link_still_counts() -> None:
+    """A minimized dialog holding a ``Write a message…`` composer and no header link:
+    the composer counts on its own, and the dialog counts too."""
+    html = _sponsored_with(
+        '<form><div contenteditable="true" role="textbox" aria-label="Write a message…">'
+        "<p><br></p></div></form>"
+    )
+    ran = await prefill(MessagingSite(ZEPHYRINE, before=html))
+    assert_no_keys(ran)
+    assert ran.result.outcome.reason == browser_module.BUBBLE_ALREADY_OPEN
+
+
+async def test_the_sponsored_check_reads_the_dialog_count_as_two_without_its_mark() -> None:
+    """Kill check: with the mark gone from both, a sponsored bubble and the New message
+    bubble are two bubbles again, and the click refuses as before #551."""
+    plain = SPONSORED.replace('is-minimized="true"', 'is-minimized="false"')
+    html = plain + new_message_bubble_html(ZEPHYRINE)
+    ran = await prefill(MessagingSite(ZEPHYRINE, bubble=Bubble(ZEPHYRINE, None, html=html)))
+    assert_no_keys(ran)
+    assert "another message bubble is on the page" in ran.result.outcome.reason
 
 
 async def test_a_url_change_before_the_first_key_types_nothing() -> None:

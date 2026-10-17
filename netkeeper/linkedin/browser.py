@@ -474,6 +474,12 @@ BUBBLE_ROLE: Final = "dialog"
 BUBBLE_NAME: Final = "Messaging"
 #: Where the existing conversation's bubble names its recipient: its header's ``h2`` link.
 BUBBLE_HEADER_LINK: Final = "header h2 a"
+#: A bubble the overlay shows minimized carries this attribute set to ``"true"`` (#551).
+BUBBLE_MINIMIZED_ATTR: Final = "data-msg-overlay-conversation-bubble-is-minimized"
+#: In a bubble, anything that takes text or names a person in its header (#551). A
+#: minimized ``Messaging`` dialog with none of these, and no textbox, is a sponsored
+#: message's: it isn't counted as an open bubble, and nothing ever clicks it.
+BUBBLE_COUNTED_PARTS: Final = "form, [contenteditable], header h2 a, header [href]"
 #: The never-messaged bubble: its heading, its recipient field, and its recipient chip.
 NEW_MESSAGE_ROLE: Final = "heading"
 NEW_MESSAGE_NAME: Final = "New message"
@@ -1759,6 +1765,52 @@ def _card_line(cards: Sequence[CardLink]) -> str:
     """The never-messaged card's links in fixed words: their count, then each one's."""
     links = "; ".join(f"link {n} {card.describe()}" for n, card in enumerate(cards, 1))
     return f"{len(cards)} profile link(s)" + (f": {links}" if links else "")
+
+
+async def _counted_bubbles(tab: _MessagingPage) -> int:
+    """How many ``Messaging`` dialogs on the page count as message bubbles, hidden ones
+    included (decision 3), leaving out a minimized sponsored message's (#551,
+    :func:`_sponsored_minimized`). Reads only; it raises what the page's reads raise."""
+    dialogs = tab.get_by_role(BUBBLE_ROLE, name=BUBBLE_NAME, exact=True, include_hidden=True)
+    counted = 0
+    for index in range(await dialogs.count()):
+        if not await _sponsored_minimized(tab, dialogs.nth(index)):
+            counted += 1
+    return counted
+
+
+async def _sponsored_minimized(tab: _MessagingPage, dialog: _MessagingLocator) -> bool:
+    """Whether ``dialog``, one ``Messaging`` dialog, is a minimized sponsored message's
+    bubble, which the bubble counts leave out (#551, the maintainer's decision of
+    2026-10-16). All of these must hold, hidden elements counted:
+
+    - it is minimized: :data:`BUBBLE_MINIMIZED_ATTR` is exactly ``"true"``;
+    - it holds no composer: no textbox of any name, no form, nothing contenteditable;
+    - its header names no one: no ``header h2 a`` and no ``href`` in its header;
+    - it holds no ``New message`` heading and no recipient field.
+
+    Anything else, a dialog that isn't marked minimized included, is a bubble. Logged
+    at debug, in fixed words, when one is left out."""
+    minimized = await dialog.get_attribute(BUBBLE_MINIMIZED_ATTR, timeout=MESSAGING_READ_TIMEOUT_MS)
+    if minimized != "true":
+        return False
+    if await dialog.get_by_role(COMPOSER_ROLE, include_hidden=True).count():
+        return False
+    if await dialog.locator(BUBBLE_COUNTED_PARTS).count():
+        return False
+    heading = dialog.get_by_role(
+        NEW_MESSAGE_ROLE, name=NEW_MESSAGE_NAME, exact=True, include_hidden=True
+    )
+    field = dialog.get_by_role(
+        RECIPIENTS_FIELD_ROLE, name=RECIPIENTS_FIELD_NAME, exact=True, include_hidden=True
+    )
+    if await heading.count() or await field.count():
+        return False
+    log.debug(
+        "a minimized Messaging dialog with no composer and no header profile link"
+        " (a sponsored message) was left out of the bubble count"
+    )
+    return True
 
 
 def _one_composer(count: int) -> bool:
@@ -3492,14 +3544,14 @@ class BrowserRun:
 
     async def _bubble_already_open(self, tab: _MessagingPage) -> bool:
         """Whether any message composer or ``Messaging`` dialog is on the page, hidden ones
-        counted: decision 3's own queries, read before the click (#444)."""
+        counted: decision 3's own queries, read before the click (#444). A minimized
+        sponsored message's dialog isn't counted (#551, :func:`_counted_bubbles`)."""
         composers = tab.get_by_role(
             COMPOSER_ROLE, name=COMPOSER_NAME, exact=True, include_hidden=True
         )
         if await composers.count():
             return True
-        dialogs = tab.get_by_role(BUBBLE_ROLE, name=BUBBLE_NAME, exact=True, include_hidden=True)
-        return await dialogs.count() > 0
+        return await _counted_bubbles(tab) > 0
 
     async def _read_click_geometry(
         self,
@@ -4265,8 +4317,13 @@ class BrowserRun:
     ) -> _MessagingLocator | str:
         """The sent bubble's one close control, or why there isn't one. Reads only."""
         dialogs = tab.get_by_role(BUBBLE_ROLE, name=BUBBLE_NAME, exact=True, include_hidden=True)
-        if await dialogs.count() != 1 or await dialogs.filter(has=composer).count() != 1:
+        # A minimized sponsored message's dialog isn't counted (#551), and the close
+        # control is looked for only in the one dialog that holds the composer, so its
+        # own close control is never a candidate.
+        own = dialogs.filter(has=composer)
+        if await _counted_bubbles(tab) != 1 or await own.count() != 1:
             return "the sent message is not in one conversation bubble"
+        dialogs = own
         links = dialogs.locator(BUBBLE_HEADER_LINK)
         if await links.count() != 1:
             return "the sent bubble's header does not name one person"
@@ -4530,7 +4587,8 @@ class BrowserRun:
         """The bubble the compose option named, for this contact (ADR 0007, "The recipient", 3).
 
         Page-wide: exactly one composer, hidden ones counted (decision 3:
-        :func:`_one_composer`), and at most one ``Messaging`` dialog.
+        :func:`_one_composer`), and at most one ``Messaging`` dialog, a minimized
+        sponsored message's not counted (#551, :func:`_sponsored_minimized`).
 
         - Existing conversation: exactly one ``Messaging`` dialog, holding the composer,
           no ``New message`` heading and no recipient field anywhere, and the dialog's
@@ -4554,7 +4612,10 @@ class BrowserRun:
                 " close the other bubbles"
             )
         dialogs = tab.get_by_role(BUBBLE_ROLE, name=BUBBLE_NAME, exact=True, include_hidden=True)
-        dialog_count = await dialogs.count()
+        # A minimized sponsored message's dialog isn't counted (#551). It holds no
+        # composer, no header link, no "New message" heading and no recipient field, so
+        # every check below on ``dialogs`` reads the same with it there or not.
+        dialog_count = await _counted_bubbles(tab)
         if dialog_count > 1:
             return (
                 "another message bubble is on the page, open or minimized, in this or another"
