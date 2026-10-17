@@ -191,9 +191,14 @@ LIST_CATEGORY: Final = "PRIMARY_INBOX"
 _PLAIN_INBOX_QUERY: Final = (
     f"(predicateUnions:List((conversationCategoryPredicate:(category:{LIST_CATEGORY}))))"
 )
+#: The top-level ``variables`` keys of an unfiltered older page (captured 2026-10-05, and
+#: CP8d's filtered pages beside them). Any other key may narrow the list, so it is a filter.
+_PLAIN_INBOX_KEYS: Final = frozenset(
+    {"query", "count", "mailboxUrn", "lastUpdatedBefore", "nextCursor"}
+)
 
 
-def _record_fields(record: str) -> dict[str, str] | None:
+def record_fields(record: str) -> dict[str, str] | None:
     """The top-level ``key:value`` fields of a Rest.li record ``(k:v,...)``, values kept
     verbatim; ``None`` when it is not one record, its parentheses do not balance, or a
     key repeats."""
@@ -220,13 +225,18 @@ def _record_fields(record: str) -> dict[str, str] | None:
 
 def request_is_primary_inbox(url: str) -> bool:
     """Whether an older-page request is the plain primary inbox: its ``query`` is exactly
-    one ``conversationCategoryPredicate`` of :data:`LIST_CATEGORY` and nothing else.
+    one ``conversationCategoryPredicate`` of :data:`LIST_CATEGORY` and nothing else, and
+    every other top-level key is one an unfiltered page carries.
 
-    Any other query is a filter, whatever the order of its predicates or their kinds: a
+    Anything else is a filter, whatever the order of its predicates or their kinds: a
     filtered page is a subset of the inbox, and reading it as the whole list would miss
     replies (#555)."""
-    fields = _record_fields(variables(url))
-    return fields is not None and fields.get("query") == _PLAIN_INBOX_QUERY
+    fields = record_fields(variables(url))
+    return (
+        fields is not None
+        and fields.get("query") == _PLAIN_INBOX_QUERY
+        and fields.keys() <= _PLAIN_INBOX_KEYS
+    )
 
 
 def request_last_updated_before(url: str) -> int | None:
