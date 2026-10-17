@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -1104,7 +1104,7 @@ requires-dist = [
     { name = "regex", specifier = ">=2026.9.10" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
     { name = "sqlalchemy", specifier = ">=2.1" },
-    { name = "sse-starlette", specifier = ">=2.1" },
+    { name = "sse-starlette", specifier = ">=3.3" },
     { name = "towncrier", marker = "extra == 'dev'", specifier = ">=24.8" },
     { name = "typer", specifier = ">=0.12" },
     { name = "types-openpyxl", marker = "extra == 'dev'", specifier = ">=3.1" },

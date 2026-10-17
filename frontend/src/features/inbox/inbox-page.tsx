@@ -10,6 +10,7 @@ import { Select } from '@/components/ui/select'
 import { EnrollmentStatusBadge } from '@/features/campaigns/badges'
 import { formatWhen } from '@/features/campaigns/format'
 import { OUTCOME_LABELS, VIA_LABELS } from '@/features/campaigns/response-labels'
+import { mailboxListQuery } from '@/features/mailboxes/api'
 import { contactsKeys } from '@/features/contacts/api'
 import { EmptyState, ErrorNote, LoadingNote } from '@/features/crm/controls'
 import { threadUrl } from '@/features/linkedin-steps/format'
@@ -108,6 +109,9 @@ export function InboxPage({ enrollment }: { enrollment?: number }) {
     setEnrollmentLabel(undefined)
   }
   const page = useQuery(inboxQuery({ handled, kind, enrollment, offset }))
+  // With no mailbox connected, an empty inbox is not "all handled": nothing can arrive.
+  const mailboxes = useQuery(mailboxListQuery)
+  const noMailbox = mailboxes.isSuccess && mailboxes.data.every((m) => m.status === 'disabled')
   const navigate = useNavigate()
   const kindPicker = useRef<HTMLSelectElement>(null)
   // "Unhandled" or "All" is which inbox you are reading, not a filter on it, so
@@ -224,9 +228,19 @@ export function InboxPage({ enrollment }: { enrollment?: number }) {
         </EmptyState>
       ) : page.data.total === 0 ? (
         <EmptyState title={handled === 'unhandled' ? 'Nothing to handle' : 'Nothing detected yet'}>
-          {handled === 'unhandled'
-            ? 'Every reply, unsubscribe and bounce has been handled. New ones appear after the next mailbox sync.'
-            : 'Replies and bounces to your campaigns appear here once the mailbox poll finds them.'}
+          {noMailbox ? (
+            <>
+              No mailbox is connected, so nothing can arrive yet. Connect Gmail on the{' '}
+              <Link to="/gmail" className="font-medium text-primary underline underline-offset-4">
+                Gmail page
+              </Link>
+              .
+            </>
+          ) : handled === 'unhandled' ? (
+            'Nothing needs handling. New replies, unsubscribes and bounces appear after the next mailbox sync.'
+          ) : (
+            'Replies and bounces to your campaigns appear here once the mailbox poll finds them.'
+          )}
         </EmptyState>
       ) : (
         <Card>
