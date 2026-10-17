@@ -1350,9 +1350,12 @@ async def test_a_forget_holds_scheduled_polls_until_a_manual_poll_records_the_ow
     settings = _night_owl(settings)
     provider, connector = fake_provider()
     clock = Clock(START)
-    async with serving(
-        bare_engine, settings, worker_extractor(provider, settings, clock=clock)
-    ) as app:
+    # The scheduled poll reads, through a fake source, the mailbox the manual poll recorded.
+    read = replace(delta(a_thread_with(ADA, START - timedelta(hours=1))), owner_urn=OWNER_B)
+    extractor = worker_extractor(
+        provider, settings, clock=clock, inbox_sources=lambda run, **_: FakeInboxSource(read)
+    )
+    async with serving(bare_engine, settings, extractor) as app:
         factory = app.state.session_factory
         with session_scope(factory, write=True) as session:
             user = _local(session)
@@ -1390,6 +1393,7 @@ async def test_a_forget_holds_scheduled_polls_until_a_manual_poll_records_the_ow
         if r.kind is SyncRunKind.INBOX and r.trigger is SyncRunTrigger.SCHEDULED
     ]
     assert len(scheduled) == 1
+    assert (scheduled[0].status, scheduled[0].stop_reason) == (SyncRunStatus.COMPLETED, READ)
     assert connector.attaches == 1
 
 
@@ -1418,6 +1422,24 @@ async def test_a_scheduled_poll_already_running_at_the_forget_records_no_owner(
             scoped(user, SyncRun).where(SyncRun.trigger == SyncRunTrigger.SCHEDULED)
         ).one()
         assert (run.status, run.stop_reason) == (SyncRunStatus.ABORTED, "inbox_owner_by_hand")
+
+
+async def test_a_scheduled_poll_with_no_hold_completes_and_applies_what_it_read(
+    session_factory: sessionmaker[Session], user_id: int
+) -> None:
+    """The owner-hold check refuses only a held scheduled poll: with no hold, a scheduled
+    poll passes the owner check, applies the conversation it read and completes."""
+    assert await _poll(session_factory, user_id, replace(delta(), owner_urn=OWNER_A)) == READ
+    assert not _owner_hold(session_factory, user_id)
+    read = replace(delta(a_thread_with(ADA, NOW - timedelta(hours=1))), owner_urn=OWNER_A)
+    assert await _scheduled_poll(session_factory, user_id, read) == READ
+    with session_scope(session_factory) as session:
+        user = _user(session, user_id)
+        assert len(session.scalars(scoped(user, LiConversation)).all()) == 1
+        run = session.scalars(
+            scoped(user, SyncRun).where(SyncRun.trigger == SyncRunTrigger.SCHEDULED)
+        ).one()
+        assert (run.status, run.stop_reason) == (SyncRunStatus.COMPLETED, READ)
 
 
 def test_a_forget_while_your_own_contact_has_a_linkedin_id_holds_nothing(

@@ -109,8 +109,10 @@ def worker_extractor(
     clock: Callable[[], datetime],
     sleep: Callable[[float], Awaitable[None]] = no_sleep,
     rng: random.Random | None = None,
+    inbox_sources: Callable[..., InboxSource] = fast_inbox,
 ) -> ServeExtractor:
-    """What ``netkeeper.worker.serve_extractor`` builds, on ``provider`` and ``clock``."""
+    """What ``netkeeper.worker.serve_extractor`` builds, on ``provider`` and ``clock``.
+    ``inbox_sources`` replaces the page source an inbox poll reads through."""
 
     def executor(factory: sessionmaker[Session], bus: EventBus) -> runs.RunExecutor:
         return BrowserWorker(
@@ -122,7 +124,7 @@ def worker_extractor(
             sleep=sleep,
             rng=rng,
             profiles=fast_profiles,
-            inbox_sources=fast_inbox,
+            inbox_sources=inbox_sources,
         )
 
     return ServeExtractor(executor=executor, clock=clock, rng=rng or random.Random(0))
