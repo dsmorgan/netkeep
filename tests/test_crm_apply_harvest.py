@@ -39,6 +39,7 @@ from netkeeper.models import (
     EmailKind,
     InteractionKind,
     LinkKind,
+    PhoneKind,
     User,
 )
 from netkeeper.scoping import scoped
@@ -974,6 +975,28 @@ def test_a_copy_with_an_address_or_a_number_is_applied_as_usual(
     apply_harvest(writer, user, _from_copy(contact, PRIYA, info), counts)
     assert (contact.enrich_priority, contact.last_enriched_at) == (0, NOW)
     assert counts.kept_due == 0
+
+
+@pytest.mark.parametrize(
+    ("label", "kind"),
+    [
+        ("Mobile", PhoneKind.MOBILE),
+        ("Home", PhoneKind.HOME),
+        ("work", PhoneKind.WORK),
+        ("Pager", PhoneKind.OTHER),
+        (None, PhoneKind.OTHER),
+    ],
+)
+def test_a_phone_is_stored_as_the_kind_its_label_names(
+    writer: Session, user: User, label: str | None, kind: PhoneKind
+) -> None:
+    """#553: the overlay's ``(Mobile)`` beside a number names its kind; any other is OTHER."""
+    contact = _stored(writer, user, PRIYA)
+    info = ContactInfo(
+        phones=("5550100199",), phone_labels=(("5550100199", label),) if label else ()
+    )
+    apply_harvest(writer, user, replace(_harvest(contact, PRIYA), contact_info=info))
+    assert [(p.raw, p.kind) for p in contact.phones] == [("5550100199", kind)]
 
 
 def test_a_thin_overlay_read_from_its_own_body_is_applied_as_usual(

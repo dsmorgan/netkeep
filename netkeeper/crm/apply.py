@@ -117,6 +117,7 @@ from netkeeper.models import (
     Interaction,
     InteractionKind,
     LinkKind,
+    PhoneKind,
     User,
     normalize_public_id,
 )
@@ -173,6 +174,14 @@ _NAME_JOINERS: Final = frozenset("\u200c\u200d")
 CARD_HEADLINE_MAX_CHARS: Final = 500
 #: A slug as LinkedIn's own routing allows it: one path segment, no whitespace.
 _CARD_SLUG: Final = re.compile(r"[^\s/?#]{1,100}")
+
+#: The phone labels the Contact info overlay shows (``(Mobile)`` was captured, #520; the
+#: others by analogy), folded, and the kind each is stored as. Any other is ``OTHER``.
+_PHONE_KINDS: Final = {
+    "mobile": PhoneKind.MOBILE,
+    "home": PhoneKind.HOME,
+    "work": PhoneKind.WORK,
+}
 
 
 def no_field_changes() -> dict[str, int]:
@@ -1058,10 +1067,14 @@ def _emails(info: ContactInfo) -> tuple[IncomingEmail, ...]:
 
 
 def _phones(info: ContactInfo) -> tuple[IncomingPhone, ...]:
+    """The overlay's numbers, each with the kind its label names (``Mobile``); any other
+    label, or none, is ``OTHER``."""
+    labels = dict(info.phone_labels)
     phones: list[IncomingPhone] = []
     for raw in info.phones:
+        label = labels.get(raw, "").strip().casefold()
         try:
-            phones.append(IncomingPhone(raw))
+            phones.append(IncomingPhone(raw, kind=_PHONE_KINDS.get(label, PhoneKind.OTHER)))
         except ValueError:
             continue  # no digits: nothing to dial, nothing to key on
     return tuple(phones)

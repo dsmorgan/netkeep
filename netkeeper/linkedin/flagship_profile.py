@@ -27,10 +27,11 @@ Contact info link and its payload, the email and website sections, the profile l
 the overlay) is read strictly: a shape that moved is ``RouteChanged``, and the job
 counts the profile unreadable. A website a person listed on LinkedIn's own host is not a
 shape that moved (#203): one to their own profile is skipped, and any other is kept.
-What the capture did not show -- the phone, address, birthday, Twitter, and messaging
-sections, education, grouped roles -- is read by analogy and fails soft: a value that
-does not read is left out, never guessed and never a run stop. An experience entry that
-does not read is skipped, not the profile: positions are upserted and never removed, so
+What the capture did not show -- the address, Twitter, and messaging sections,
+education, grouped roles -- is read by analogy and fails soft: a value that does not
+read is left out, never guessed and never a run stop. The phone and birthday, which a
+later capture (#520) did show, fail soft too. An experience entry that does not read
+is skipped, not the profile: positions are upserted and never removed, so
 a skipped entry costs nothing it could take away. The headline and location are read
 from the top card's text runs by position; when the runs are not the captured layout
 they are left unknown, which ``crm/apply.py`` reads as "not provided".
@@ -54,7 +55,13 @@ from netkeeper.linkedin.flagship import (
     CONTACT_DETAILS_SCREEN_ID,
     URN_PREFIX,
 )
-from netkeeper.linkedin.flight import FlightPayload, element_props, is_element, parse_flight
+from netkeeper.linkedin.flight import (
+    MAX_NODES,
+    FlightPayload,
+    element_props,
+    is_element,
+    parse_flight,
+)
 from netkeeper.linkedin.voyager import (
     ContactInfo,
     EducationEntry,
@@ -108,10 +115,10 @@ CONTACT_INFO_OVERLAY_SUFFIX: Final = "overlay/contact-info/"  # captured 2026-09
 SECTION_PROFILE: Final = "contact-your-profile"  # captured 2026-09-24
 SECTION_WEBSITE: Final = "contact-website"  # captured 2026-09-24
 SECTION_EMAIL: Final = "contact-email"  # captured 2026-09-24
-#: **Invented**, by analogy: the capture's profile shared none of these.
-SECTION_PHONE: Final = "contact-phone"
+SECTION_PHONE: Final = "contact-phone"  # captured 2026-10-16 (#520)
+SECTION_BIRTHDAY: Final = "contact-birthday"  # captured 2026-10-16 (#520)
+#: **Invented**, by analogy: neither capture's profile shared these.
 SECTION_TWITTER: Final = "contact-twitter"
-SECTION_BIRTHDAY: Final = "contact-birthday"
 SECTION_ADDRESS: Final = "contact-address"
 #: Seen on the first live run (#203), not in the capture: a messaging handle. The CRM has
 #: no field for one (spec 8.1), so the section is recognized and read no further.
@@ -187,6 +194,8 @@ EMPLOYMENT_TYPES: Final = frozenset(
 MAX_TEXT: Final = 500
 _EMAIL: Final = re.compile(r"[^@\s<>\"'()]{1,200}@[^@\s<>\"'()]{1,200}\.[^@\s<>\"'()]{1,63}")
 _PHONE: Final = re.compile(r"\+?[\d][\d\s().-]{4,40}")
+#: A phone's type label, as the #520 capture showed one: ``(Mobile)``.
+_PHONE_LABEL: Final = re.compile(r"\(([A-Za-z][A-Za-z ]{0,30})\)")
 _HANDLE: Final = re.compile(r"@?([A-Za-z0-9_]{1,50})")
 _LINE_BREAKS: Final = "\u2028\u2029"
 
@@ -809,7 +818,7 @@ def parse_contact_info(body: bytes | str, *, slug: str) -> ContactInfo:
             raise RouteChanged(endpoint, "an overlay for another profile than the tab's")
     emails = _emails(payload, sections.get(SECTION_EMAIL, []), endpoint=endpoint)
     websites = _websites(payload, sections.get(SECTION_WEBSITE, []), slug=slug, endpoint=endpoint)
-    phones = _soft_phones(payload, sections.get(SECTION_PHONE, []), endpoint=endpoint)
+    phones, phone_labels = _soft_phones(payload, sections.get(SECTION_PHONE, []), endpoint=endpoint)
     handles = _soft_handles(payload, sections.get(SECTION_TWITTER, []), endpoint=endpoint)
     birthday = _soft_value(payload, sections.get(SECTION_BIRTHDAY, []), endpoint=endpoint)
     address = _soft_value(payload, sections.get(SECTION_ADDRESS, []), endpoint=endpoint)
@@ -830,6 +839,7 @@ def parse_contact_info(body: bytes | str, *, slug: str) -> ContactInfo:
     return ContactInfo(
         emails=emails,
         phones=phones,
+        phone_labels=phone_labels,
         websites=websites,
         twitter_handles=handles,
         birthday=birthday,
@@ -947,24 +957,67 @@ def _is_own_profile(path: str, slug: str) -> bool:
 
 
 def _section_texts(payload: FlightPayload, node: object, *, endpoint: str) -> list[str]:
-    """A section's own strings in page order, after its heading: the value's text."""
+    """A section's own text runs in page order, after its heading: the value's text.
+
+    The #520 capture (CP8d) frames every section the same way: an icon row's reference
+    (``$L<id>``) first, then a ``p`` heading (``Phone``, ``Birthday``), then the value in
+    a text component's ``textProps.children``. Runs come from an element's ``children``
+    and its ``textProps.children``, through references to other rows; any other
+    ``$``-string (the icon's import, React's markers) is skipped, and so is a link's
+    text, which :func:`_links` reads. The heading is the first ``p``: its runs, and any
+    later run with the same text, are dropped. A section with no ``p`` reads as nothing,
+    since its heading cannot be told from its value.
+    """
     texts: list[str] = []
-    for child in payload.walk(node, follow=True, endpoint=endpoint):
-        props = element_props(child)
-        children = props.get("children") if props is not None else None
-        if (
-            isinstance(children, list)
-            and not is_element(children)
-            and props is not None
-            and "action" not in props
-        ):
-            texts.extend(c for c in children if isinstance(c, str))
-    return texts[1:]
+    heading: list[str] = []
+    seen_heading = False
+    stack: list[tuple[object, bool]] = [(node, False)]
+    entered: set[str] = set()
+    visited = 0
+    while stack:
+        current, in_heading = stack.pop()
+        visited += 1
+        if visited > MAX_NODES:
+            raise RouteChanged(endpoint, f"a walk passed {MAX_NODES} nodes")
+        if isinstance(current, str):
+            if current.startswith("$"):
+                target = payload.resolve(current)
+                if target is not None and current not in entered:
+                    entered.add(current)
+                    stack.append((target, in_heading))
+            elif current.strip():
+                (heading if in_heading else texts).append(current)
+        elif (props := element_props(current)) is not None:
+            if "action" in props:
+                continue
+            text_props = props.get("textProps")
+            kids = [
+                props.get("children"),
+                text_props.get("children") if isinstance(text_props, dict) else None,
+            ]
+            if isinstance(current, list) and current[1] == "p" and not seen_heading:
+                seen_heading, in_heading = True, True
+            stack.extend((kid, in_heading) for kid in reversed(kids))
+        elif isinstance(current, list):
+            stack.extend((kid, in_heading) for kid in reversed(current))
+    if not seen_heading:
+        return []
+    dropped = {" ".join(run.split()).casefold() for run in heading}
+    return [run for run in texts if " ".join(run.split()).casefold() not in dropped]
 
 
-def _soft_phones(payload: FlightPayload, nodes: list[object], *, endpoint: str) -> tuple[str, ...]:
-    """Phone numbers (**invented** section): ``tel:`` links, else number-shaped text."""
+def _soft_phones(
+    payload: FlightPayload, nodes: list[object], *, endpoint: str
+) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...]]:
+    """Phone numbers (``tel:`` links, else number-shaped runs) and their labels.
+
+    The #520 capture showed a number as its own run, then a space, then its type as a
+    bare run (``(Mobile)``). A ``(<word>)`` run right after a number is that number's
+    label, kept without the parentheses. A run that is the number and its label
+    together was not seen, and does not read.
+    """
     found: list[str] = []
+    labels: dict[str, str] = {}
     for node in nodes:
         for url, _ in _links(payload, node, endpoint=endpoint):
             if url.lower().startswith("tel:"):
@@ -972,11 +1025,16 @@ def _soft_phones(payload: FlightPayload, nodes: list[object], *, endpoint: str) 
                 if _PHONE.fullmatch(number):
                     found.append(number)
         if not found:
-            for text in _section_texts(payload, node, endpoint=endpoint):
-                number = " ".join(text.split())
-                if _PHONE.fullmatch(number):
-                    found.append(number)
-    return tuple(dict.fromkeys(found))
+            runs = [" ".join(t.split()) for t in _section_texts(payload, node, endpoint=endpoint)]
+            for index, number in enumerate(runs):
+                if not _PHONE.fullmatch(number):
+                    continue
+                found.append(number)
+                label = _PHONE_LABEL.fullmatch(runs[index + 1]) if index + 1 < len(runs) else None
+                if label is not None:
+                    labels.setdefault(number, label.group(1))
+    numbers = tuple(dict.fromkeys(found))
+    return numbers, tuple((n, labels[n]) for n in numbers if n in labels)
 
 
 def _soft_handles(payload: FlightPayload, nodes: list[object], *, endpoint: str) -> tuple[str, ...]:
@@ -1009,9 +1067,17 @@ def _connected_since(payload: FlightPayload, *, endpoint: str) -> date | None:
     strings: list[str] = []
     for node in payload.nodes(endpoint=endpoint):
         props = element_props(node)
-        children = props.get("children") if props is not None else None
-        if isinstance(children, list) and not is_element(children):
-            strings.extend(c for c in children if isinstance(c, str))
+        if props is None:
+            continue
+        # The #520 capture put the day in a text component's ``textProps.children``,
+        # right after the ``p``; an element's own ``children`` is the older shape.
+        text_props = props.get("textProps")
+        for children in (
+            props.get("children"),
+            text_props.get("children") if isinstance(text_props, dict) else None,
+        ):
+            if isinstance(children, list) and not is_element(children):
+                strings.extend(c for c in children if isinstance(c, str))
     for index, text in enumerate(strings):
         if text.strip() == CONNECTED_SINCE and index + 1 < len(strings):
             return _day(" ".join(strings[index + 1].split()))
