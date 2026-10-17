@@ -909,7 +909,10 @@ def test_a_tripped_inbox_owner_breaker_blocks_the_inbox_poll_and_names_the_fix(
     reason = inbox.reason or ""
     assert "showed another mailbox" in reason
     assert "sign back in to yours" in reason
-    assert "otherwise run `netkeeper linkedin inbox-forget-owner`" in reason
+    assert (
+        "otherwise click **Forget inbox owner** under Posture on the Settings page, or run"
+        " `netkeeper linkedin inbox-forget-owner`"
+    ) in reason
     assert checks["linkedin_enrich"].state in (S.SCHEDULED, S.DUE)
 
 

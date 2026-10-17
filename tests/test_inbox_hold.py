@@ -19,6 +19,7 @@ from test_campaign_engine import World, make_world
 from test_linkedin_steps import EMAIL, LANE_SETTINGS, LINKEDIN, Lane, make_lane
 
 from netkeeper.config import LinkedInSettings, Settings
+from netkeeper.crm import inbox_apply
 from netkeeper.models import (
     Campaign,
     Enrollment,
@@ -43,8 +44,9 @@ from netkeeper.services.inbox_hold import (
 )
 from netkeeper.services.inbox_poll import INCOMPLETE, poll_inbox
 from netkeeper.services.linkedin_steps import USER_REFUSALS, Refusal
-from netkeeper.services.posture import Protection, Status, posture
+from netkeeper.services.posture import ACTION_FORGET_INBOX_OWNER, Protection, Status, posture
 from netkeeper.services.scheduler import DEFAULT_SCHEDULES, RETRY_MAX_MINUTES, JobKind
+from netkeeper.services.settings_kv import set_setting
 
 LIMIT = stale_after()
 
@@ -781,8 +783,21 @@ def test_posture_names_how_the_newest_poll_ended_with_the_hold_text(
     (note,) = row.notes
     assert "the newest poll ended owner_mismatch" in note
     assert "sign back in to yours" in note
-    assert "otherwise run `netkeeper linkedin inbox-forget-owner`" in note
+    assert (
+        "otherwise click **Forget inbox owner** under Posture on the Settings page, or run"
+        " `netkeeper linkedin inbox-forget-owner`"
+    ) in note
     assert "wait until a poll completes" in note  # the hold, in the same note
+    # Nothing is recorded yet, so there is nothing to forget: no button (#583).
+    assert row.actions == ()
+
+    def record_owner(session: Session) -> None:
+        assert inbox_apply.owner_matches(session, world.user, "urn:li:fsd_profile:INVENTED")
+
+    world.write(record_owner)
+    recorded = _row(world)
+    assert recorded is not None
+    assert recorded.actions == (ACTION_FORGET_INBOX_OWNER,)
 
 
 def test_posture_hold_note_names_the_contact_id_case_when_the_self_contact_has_one(
@@ -799,8 +814,11 @@ def test_posture_hold_note_names_the_contact_id_case_when_the_self_contact_has_o
         user = session.get(User, world.user.id)
         assert user is not None
         ensure_self_contact(session, user).li_urn = "urn:li:fsd_profile:INVENTED"
+        # A mailbox recorded too, so only the self contact's ID keeps the button away.
+        set_setting(session, user, inbox_apply.OWNER_KEY, "urn:li:fsd_profile:OTHERINVENTED")
     row = _row(world)
     assert row is not None
     (note,) = row.notes
     assert "your own contact's LinkedIn ID does not match" in note
     assert "inbox-forget-owner" not in note
+    assert row.actions == ()  # forgetting could not fix it (#583)
