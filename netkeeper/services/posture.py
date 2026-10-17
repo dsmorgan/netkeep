@@ -104,7 +104,13 @@ from netkeeper.services.budgets import (
     profile_visit_week_note,
 )
 from netkeeper.services.budgets import status as budget_status
-from netkeeper.services.campaign_engine import UpcomingFire, hours_for, upcoming
+from netkeeper.services.campaign_engine import (
+    RECORD_PENDING_AFTER,
+    UpcomingFire,
+    hours_for,
+    unrecorded_sends,
+    upcoming,
+)
 from netkeeper.services.linkedin_accounts import (
     find_account,
     schedule_pause_state,
@@ -121,6 +127,7 @@ from netkeeper.services.linkedin_steps import (
     AutoSendHold,
     auto_send_budget_warning,
     auto_send_hold,
+    unrecorded_prefills,
 )
 from netkeeper.services.runs import latest_run
 from netkeeper.services.runs import view as run_view
@@ -258,6 +265,7 @@ KEY_GMAIL_REPLY_POLL: Final = "gmail_reply_poll"
 KEY_SENDING_HOURS: Final = "sending_hours"
 KEY_NEXT_CAMPAIGN_SEND: Final = "next_campaign_send"
 KEY_CAMPAIGN_TEMPLATES: Final = "campaign_templates"
+KEY_SEND_RECORDS: Final = "send_records"
 """The keys of the rows that concern Gmail and campaign sending; the Gmail page picks
 its posture rows by them (#449)."""
 KEY_LINKEDIN_REPLY_POLL: Final = "linkedin_reply_poll"
@@ -618,6 +626,7 @@ def posture(
         _sending_hours(session, user),
         _next_campaign_send(session, user, zone=zone, now=now, settings=settings),
         _campaign_templates(session, user),
+        _send_records(session, user, now=now),
         *_breaker_rows(session, user, account_id, now=now),
         _network_aging(session, user),
     ]
@@ -1562,6 +1571,46 @@ def _campaign_templates(session: Session, user: User) -> Protection:
         status=Status.ON,
         value=f"{len(blocked)} active or paused campaign(s) blocked by a removed merge field",
         warnings=(describe_removed_field_campaigns(blocked),),
+    )
+
+
+def _send_records(session: Session, user: User, *, now: datetime) -> Protection:
+    """Sends whose outcome was never recorded (#627): an email message still claimed
+    :data:`~netkeeper.services.campaign_engine.RECORD_PENDING_AFTER` after its claim, and a
+    LinkedIn message claimed by a run that ended, or was left behind, with no outcome.
+    The protection holds either way, since a claimed step is never sent again, but the
+    record is behind what may have gone out, so each gets a warning."""
+    emails = unrecorded_sends(session, user, now=now)
+    linkedin = unrecorded_prefills(session, user, now=now)
+    if not emails and not linkedin:
+        return Protection(
+            name="send records",
+            key=KEY_SEND_RECORDS,
+            status=Status.ON,
+            value="every claimed send has its outcome recorded",
+        )
+    warnings: list[str] = []
+    if emails:
+        minutes = int(RECORD_PENDING_AFTER.total_seconds() // 60)
+        warnings.append(
+            f"{emails} email send(s) claimed over {minutes} min ago have no recorded"
+            " outcome (a record that failed, a stop mid-send, or no answer from Gmail)."
+            " None is sent again; reconcile settles each by its Message-ID while"
+            " `netkeeper serve` runs"
+        )
+    if linkedin:
+        warnings.append(
+            f"{linkedin} LinkedIn message(s) were claimed by a run that stopped with no"
+            " recorded outcome, and an auto-sent one may have gone out. None is typed"
+            " again: check the conversation in LinkedIn, then discard it from the"
+            " messages waiting for you"
+        )
+    return Protection(
+        name="send records",
+        key=KEY_SEND_RECORDS,
+        status=Status.ON,
+        value=f"{emails} email and {linkedin} LinkedIn send(s) with no recorded outcome",
+        warnings=tuple(warnings),
     )
 
 

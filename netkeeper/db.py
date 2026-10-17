@@ -21,6 +21,7 @@ from pathlib import Path
 from sqlalchemy import Connection, Engine, create_engine, event
 from sqlalchemy.engine import make_url
 from sqlalchemy.engine.interfaces import DBAPIConnection
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import ConnectionPoolEntry
 
@@ -45,6 +46,10 @@ SQLITE_BUSY_TIMEOUT_MS = 5000
 # Execution option on a connection that makes the SQLite ``begin`` listener emit
 # BEGIN IMMEDIATE. Set through mark_for_write, never by hand.
 IMMEDIATE_OPTION = "netkeeper_immediate"
+# How long a send's record waits before each retry when the write lock is still held
+# after SQLITE_BUSY_TIMEOUT_MS (#627). Each try itself waits up to the busy timeout, so
+# the five tries take at most about 40 s: under the campaign engine's 45 s stop wait.
+RECORD_RETRY_WAITS_S: tuple[float, ...] = (1.0, 2.0, 4.0, 8.0)
 
 log = logging.getLogger(__name__)
 
@@ -107,6 +112,22 @@ def _sqlite_on_begin(connection: Connection) -> None:
         connection.exec_driver_sql("BEGIN IMMEDIATE")
     else:
         connection.exec_driver_sql("BEGIN")
+
+
+def is_lock_timeout(error: BaseException) -> bool:
+    """Whether ``error`` is SQLite's "database is locked" (or busy): another writer
+    held the write lock past :data:`SQLITE_BUSY_TIMEOUT_MS`. The transaction that got it
+    was rolled back whole, so running it again is safe (#627)."""
+    if not isinstance(error, OperationalError):
+        return False
+    orig = error.orig
+    if not isinstance(orig, sqlite3.OperationalError):
+        return False
+    code = getattr(orig, "sqlite_errorcode", None)
+    if isinstance(code, int):
+        return code & 0xFF in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+    text = str(orig)
+    return "database is locked" in text or "database is busy" in text
 
 
 @contextmanager

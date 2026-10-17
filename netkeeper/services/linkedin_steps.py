@@ -1629,6 +1629,32 @@ def _waiting_message(
     raise PrefillNotWaiting(f"message {message_id} is {message.status}; nothing waits on it")
 
 
+def unrecorded_prefills(session: Session, user: User, *, now: datetime) -> int:
+    """How many of the user's LinkedIn messages are claimed while their run is over, or left
+    behind by a process that went away (:func:`netkeeper.services.runs` calls it stale),
+    with no outcome recorded: a crash, or a record that failed after the page work
+    (#627). Each holds the one open slot and is never typed again; an auto-sent one may
+    have gone out. Read-only."""
+    rows = session.execute(
+        scoped(user, Message)
+        .outerjoin(SyncRun, and_(SyncRun.id == Message.sync_run_id, SyncRun.user_id == user.id))
+        .with_only_columns(Message.id, SyncRun)
+        .where(
+            Message.channel == TemplateChannel.LINKEDIN,
+            Message.direction == MessageDirection.OUT,
+            Message.status == MessageStatus.SCHEDULED,
+        )
+    ).all()
+    held = runs.browser_held_for(session)
+    return sum(
+        1
+        for _, run in rows
+        if run is None
+        or run.status is not SyncRunStatus.RUNNING
+        or runs._stale(run, now=now, held=held)
+    )
+
+
 def _run_running(session: Session, user: User, run_id: int | None) -> bool:
     if run_id is None:
         return False

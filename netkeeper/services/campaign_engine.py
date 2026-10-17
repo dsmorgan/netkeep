@@ -93,7 +93,8 @@ The tick
    ``next_action_at`` is cleared. At most :data:`BATCH_PER_TICK` are claimed.
 2. **Send**, with no session open: the claimed firing goes to the sender.
 3. **Record**, in a new writer session: the message's outcome, the enrollment's
-   next step, and the mailbox's next send time.
+   next step, and the mailbox's next send time. A record that finds the write lock
+   held past the busy timeout is tried again a few times; the send never is (#627).
 
 **Restart safety** (spec 11.4). Everything the tick knows between minutes is in
 the database: each enrollment's ``next_action_at`` and each mailbox's next send
@@ -140,12 +141,14 @@ import enum
 import logging
 import random
 import threading
+import time
 from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Final, Protocol, runtime_checkable
 
 from sqlalchemy import ColumnElement, Select, and_, func, or_, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from netkeeper.campaigns import schedule
@@ -154,7 +157,7 @@ from netkeeper.campaigns.render import MergeValues, TemplateRenderError, render
 from netkeeper.campaigns.templates import activation_errors, block_reason, contact_fields
 from netkeeper.config import Settings
 from netkeeper.crm.contacts import sendable_email
-from netkeeper.db import is_writer, session_scope
+from netkeeper.db import RECORD_RETRY_WAITS_S, is_lock_timeout, is_writer, session_scope
 from netkeeper.logging_setup import personal, personal_exc
 from netkeeper.models import (
     Campaign,
@@ -2120,6 +2123,34 @@ that did not wait, or a send whose answer never came. Before that it may still b
 the sender's hands, and a message just sent may not be in Gmail's search yet."""
 
 RECONCILE_BATCH: Final = 10
+
+RECORD_PENDING_AFTER: Final = timedelta(minutes=2)
+"""An email message still ``scheduled`` this long after its claim has no recorded
+outcome: the tick's send (under the Gmail client's 30 s timeout) and its record retries
+(:data:`~netkeeper.db.RECORD_RETRY_WAITS_S`) are over by then. It is a leftover for
+reconcile, and posture warns about it (#627)."""
+
+
+def unrecorded_sends(session: Session, user: User, *, now: datetime) -> int:
+    """How many of the user's email messages are claimed and still have no recorded
+    outcome :data:`RECORD_PENDING_AFTER` after the claim: a record that failed, a crash
+    or a stop mid-send, or an answer that never came. Each is never sent again, and
+    reconcile settles it by its Message-ID. Read-only."""
+    return (
+        session.scalar(
+            scoped(user, Message)
+            .with_only_columns(func.count(Message.id))
+            .where(
+                Message.channel == TemplateChannel.EMAIL,
+                Message.direction == MessageDirection.OUT,
+                Message.status == MessageStatus.SCHEDULED,
+                Message.scheduled_at <= now - RECORD_PENDING_AFTER,
+            )
+        )
+        or 0
+    )
+
+
 """At most this many leftovers per mailbox per tick. Per mailbox, so a mailbox that
 cannot be searched (disconnected, waiting for re-authorization) never holds another's
 slots (#273 review)."""
@@ -2768,13 +2799,60 @@ def tick_user(
             break
         claims.append(claim)
         outcome = _send(sender, claim.firing)
-        with session_scope(factory, write=True) as session:
-            user = session.get(User, user_id)
-            if user is None:
-                return result
-            _record(session, user, in_force, claim, outcome, now=clock())
+        if not _record_after_send(factory, user_id, in_force, claim, outcome, clock=clock):
+            return result
         result.fired.append((claim.firing, outcome))
     return result
+
+
+def _record_after_send(
+    factory: sessionmaker[Session],
+    user_id: int,
+    settings: Settings,
+    claim: _Claim,
+    outcome: SendResult,
+    *,
+    clock: Callable[[], datetime],
+) -> bool:
+    """Record ``outcome`` in its own writer session; False when the user is gone.
+
+    The send already happened, so nothing here ever sends again (#627). When another
+    writer holds the write lock past the busy timeout, the record is tried again after
+    each of :data:`~netkeeper.db.RECORD_RETRY_WAITS_S`: the failed transaction was rolled
+    back whole, and the claim it records was committed before the send. If every try
+    fails, the error goes up and the message stays ``scheduled``, the "did it go out?"
+    signal: the claim keeps the step from firing again, posture warns that the record
+    is pending, and reconcile settles it by its Message-ID after :data:`RECONCILE_AFTER`.
+    """
+    waits = iter(RECORD_RETRY_WAITS_S)
+    while True:
+        try:
+            with session_scope(factory, write=True) as session:
+                user = session.get(User, user_id)
+                if user is None:
+                    return False
+                _record(session, user, settings, claim, outcome, now=clock())
+            return True
+        except OperationalError as exc:
+            wait = next(waits, None)
+            if not is_lock_timeout(exc) or wait is None:
+                log.error(
+                    "message %d: its send could not be recorded; it stays scheduled, and"
+                    " reconcile settles it by its Message-ID",
+                    claim.firing.message_id,
+                )
+                raise
+            log.warning(
+                "message %d: the database was locked while recording its send; trying"
+                " again in %.0f s (it is never sent again)",
+                claim.firing.message_id,
+                wait,
+            )
+            _sleep(wait)
+
+
+_sleep: Callable[[float], None] = time.sleep
+"""The record retry's wait; a test replaces it."""
 
 
 def run_tick(

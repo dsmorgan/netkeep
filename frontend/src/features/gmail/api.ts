@@ -79,4 +79,5 @@ export const GMAIL_POSTURE_KEYS: readonly string[] = [
   'sending_hours',
   'next_campaign_send',
   'campaign_templates',
+  'send_records',
 ]
