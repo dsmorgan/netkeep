@@ -14,7 +14,7 @@ Chrome 136 (2025) and later ignore `--remote-debugging-port` and `--remote-debug
 
 Chrome 144 added an opt-in at `chrome://inspect/#remote-debugging` that lets a tool connect to your running browser. Chrome asks you to accept each session and shows a "controlled by automated test software" banner while one is active. Sources: [Let your coding agent debug your browser session](https://developer.chrome.com/blog/chrome-devtools-mcp-debug-your-browser-session) and [Auto-connect](https://developer.chrome.com/docs/devtools/agents/use-cases/auto-connect). netkeeper can't run unattended that way, and #624 refuses such a Chrome.
 
-So "the same profile" in ADR 0012 means netkeeper's dedicated profile. It's a second Chrome window with its own icon in the window list, and it is the one place you look when you operate netkeeper.
+A second profile inside your everyday Chrome's data directory (`--profile-directory`) is still on the default user data directory, so it doesn't work either. So "the same profile" in ADR 0012 means netkeeper's dedicated profile. It's a second Chrome window with its own icon in the window list, and it is the one place you look when you operate netkeeper.
 
 ## How Gmail linkage works today
 
@@ -54,17 +54,18 @@ During the CP8c capture (the setup notes in #520), a netkeeper UI tab (`localhos
 
 With the UI in netkeeper's Chrome:
 
+- **The UI's contact links open LinkedIn here.** A click on a contact's `linkedin.com/in/...` link in the UI opens it in netkeeper's Chrome: the right identity, but your own browsing, outside netkeeper's budgets. Before, it opened in your everyday Chrome.
 - **The UI never talks to LinkedIn.** Its requests go to localhost. LinkedIn's pages can't read the UI's origin, its storage, or the profile's history.
 - **Runs don't see the UI's traffic,** because every network session is on the run's own tab.
 - **The residual risk is a whole-browser capture,** such as a netlog or `chrome://net-export`, taken in netkeeper's Chrome. Close the UI and quit `serve` first, as #520's setup already says.
 - **The profile now holds more:** the UI's origin data, and your Google sign-in after Gmail linkage. #633 keeps netkeeper's own reads to LinkedIn's cookies.
 
-## The launcher (for #549 and #599)
+## The launcher (#636, for #549 and #599)
 
 One function builds one argument list from config and spawns it:
 
-- **Binary.** Run Chrome's binary directly, as an argument list with no shell. On macOS that's `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`; on Linux, `google-chrome`. Don't use `open -a "Google Chrome" --args ...`: with two Chrome processes running, LaunchServices can activate either one, and `--args` reaches only a process the command itself launches.
-- **Arguments.** `--remote-debugging-port=<port>` and `--user-data-dir=<profile>`, exactly as `chrome_launch_command` prints them, then `--app=<the UI's URL>`, then, from the first-run button only, LinkedIn's sign-in or feed URL as a positional argument. Never a headless flag, never a fresh profile, never another flag or URL. A test pins the list to the printed lines plus these two additions, and checks that only the first-run caller passes the LinkedIn URL.
+- **Binary.** Run Chrome's binary directly, as an argument list with no shell. On macOS that's `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`; on Linux, `google-chrome`. Don't go through the printed `open -na "Google Chrome" --args ...`: `-n` does start a new process that receives the arguments, but the launcher needs that process's own exit status and no LaunchServices step in between.
+- **Arguments.** `--remote-debugging-port=<port>` and `--user-data-dir=<profile>`, the same tokens `chrome_launch_command` prints, then `--app=<the UI's URL>`, then, from the first-run button only, LinkedIn's sign-in or feed URL as a positional argument. Never a headless flag, never a fresh profile, never another flag or URL. A test compares parsed arguments, not the printed shell lines with their trailing backslashes: the list equals the printed tokens plus these two additions, and checks that only the first-run caller passes the LinkedIn URL.
 - **Already running.** When netkeeper's Chrome is up, the same command hands its arguments to the running process through the profile's singleton, which opens the UI's app window and exits. So `netkeeper open` works whether or not that Chrome is running. Not verified live: that the running process honors `--app` and the positional URL on a handoff.
 - **Checks before a spawn.** Refuse, and report which case applied, as `scripts/chrome.sh --status` does, when:
   - the port answers but isn't the dedicated profile (#624's check), or
@@ -74,7 +75,7 @@ One function builds one argument list from config and spawns it:
 
 ### Why an `--app` window
 
-An app window has no tab strip. A run's tab never opens among the UI's tabs, and a run that raises its own tab doesn't swap the UI out of view. Links the UI opens in a new tab, such as the Gmail wizard's Console links, open in a normal window of the same Chrome. Not verified live: whether Chrome ever places a run's `background: true` tab into an app window. #632 checks this.
+An app window has no tab strip. A run's tab never opens among the UI's tabs, and the UI's window never switches to another tab. A run that raises its own window (#632) can still cover the UI's window on screen. Links the UI opens in a new tab, such as the Gmail wizard's Console links, open in a normal window of the same Chrome. Not verified live: whether Chrome ever places a run's `background: true` tab into an app window. #632 checks this.
 
 ### No "open in netkeeper's Chrome" hint
 
