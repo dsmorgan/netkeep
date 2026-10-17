@@ -2765,7 +2765,7 @@ def support_bundle_command(
         typer.Option(
             "--level",
             case_sensitive=False,
-            help="standard: no personal data (attach it to an issue). detailed: the same,"
+            help="standard: no personal data. detailed: the same,"
             " with longer logs. full: real names and ids, for a hard bug; send it privately.",
         ),
     ] = support_bundle.Level.STANDARD,
@@ -2842,7 +2842,10 @@ def support_bundle_command(
     if level is support_bundle.Level.FULL:
         typer.echo("it holds real names and ids: send it privately, never to a public issue")
     else:
-        typer.echo("attach it to your GitHub issue, with screenshots of what you saw")
+        typer.echo(
+            "skim logs/netkeeper.log in it, then send it privately to the person helping"
+            " you, with screenshots of what you saw"
+        )
 
 
 def _private_file(path: str, flags: int) -> int:

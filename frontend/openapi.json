@@ -24482,7 +24482,7 @@
             "description": "The support bundle, a .zip file."
           },
           "403": {
-            "description": "Only the local owner account makes a support bundle"
+            "description": "Only the local owner account makes a support bundle, and only from this site's own page or a request with X-Netkeeper-Client"
           },
           "409": {
             "description": "The full level without confirm_full=true"

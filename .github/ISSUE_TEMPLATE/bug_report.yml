@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Attach the **standard support bundle** and screenshots of what you saw. Make the bundle on Settings, under Support, or with `netkeeper support bundle`; see [Reporting a problem](https://github.com/dsmorgan/netkeeper/blob/main/docs/guide/reporting-a-problem.md). The standard bundle holds no personal data and no secrets.
+        Attach screenshots of what you saw, and make the **standard support bundle** (Settings, Support, or `netkeeper support bundle`); see [Reporting a problem](https://github.com/dsmorgan/netkeeper/blob/main/docs/guide/reporting-a-problem.md). The bundle replaces personal values with placeholders and holds no secrets, but skim its `logs/netkeeper.log` before you attach it here, or send it privately and say so below.
 
         Never attach a **full** bundle here: it holds real names. Never paste cookies, OAuth tokens, or other people's names, emails, or phone numbers.
   - type: textarea
@@ -44,10 +44,10 @@ body:
     id: bundle
     attributes:
       label: Support bundle and screenshots
-      description: Drag the standard bundle (netkeeper-support-standard-....zip) and your screenshots here.
+      description: Drag your screenshots and the standard bundle (netkeeper-support-standard-....zip) here, or say that you sent the bundle privately, or why you can't make one (for example, the install fails).
       placeholder: Attach the .zip and screenshots by dragging them into this box.
     validations:
-      required: true
+      required: false
   - type: textarea
     id: logs
     attributes:

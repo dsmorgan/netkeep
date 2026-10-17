@@ -55,6 +55,7 @@ OWNER_EMAIL = "zephyrine.owner@example.test"
 CAMPAIGN = "Zephyr Outreach Plan"
 NOTE = "called Quorbelle about the Imaginaria offer"
 USER_DIR = "quorbelleuser"
+EMAIL_LOCAL = "quorbelle.f"
 
 PERSONAL = (
     FIRST,
@@ -77,6 +78,8 @@ SECRETS = (
     "AQEDinventedLiAtCookie",
     "ajax:8765432109",
     "0inventedAuthCode",
+    "inventedColonToken",
+    "AQEDinventedCookieDict",
     "invented-client-secret-value",
     "inventedKeychainGmailToken",
     "inventedKeychainClientJson",
@@ -118,10 +121,29 @@ def _seed_log() -> None:
         log.error("Cookie: li_at=AQEDinventedLiAtCookie; JSESSIONID=ajax:8765432109")
         log.error("GET /api/v1/mailboxes/oauth/callback?state=s&code=4/0inventedAuthCode")
         log.error('{"client_secret": "invented-client-secret-value"}')
+        log.error("csrf-token: ajax:8765432109 and token: inventedColonToken")
+        log.error("{'name': 'li_at', 'value': 'AQEDinventedCookieDict', 'path': '/'}")
         try:
-            raise ValueError(f"no such contact {FIRST} {LAST}")
+            raise ValueError(f"no such contact {FIRST} {LAST}\nsecond line {EMAIL_LOCAL}")
         except ValueError:
             log.exception("traceback for %s", personal(f"{FIRST} {LAST}"))
+        # An unmarked message with SQLAlchemy's and pydantic's detail lines.
+        try:
+            try:
+                raise KeyError(SLUG)
+            except KeyError as exc:
+                raise RuntimeError(
+                    f"(sqlite3.IntegrityError) UNIQUE\n[SQL: INSERT]\n[parameters: ('{FIRST}',)]"
+                ) from exc
+        except RuntimeError:
+            log.exception("insert failed")
+        try:
+            raise ExceptionGroup("two failed", [ValueError(f"{LAST} bad"), KeyError(SLUG)])
+        except ExceptionGroup:
+            log.exception("group")
+        log.warning(
+            "validation\n  name\n    Input should be short [input_value='%s %s']", FIRST, LAST
+        )
     finally:
         remove_file_handler()
 
@@ -153,7 +175,19 @@ def _seed(session: Session) -> User:
             stop_reason="route_changed",
             counts_json={"completed": 3, "unreadable_visits": [[1, 7, "no_profile"]]},
             notes=NOTE,
-            error=f"no profile at https://www.linkedin.com/in/{SLUG}/ for {EMAIL}",
+            error=f"ValueError: no contact named {FIRST} {LAST}",
+        )
+    )
+    session.add(
+        SyncRun(
+            user_id=user.id,
+            linkedin_account_id=account.id,
+            kind=SyncRunKind.INBOX,
+            status=SyncRunStatus.FAILED,
+            trigger=SyncRunTrigger.MANUAL,
+            started_at=NOW - timedelta(hours=3),
+            completed_at=NOW - timedelta(hours=3),
+            error=f"KeyError: '{SLUG}'",
         )
     )
     flag_session(
@@ -220,7 +254,12 @@ def test_a_redacted_level_holds_no_personal_value_and_no_secret(
     runs = json.loads(files["runs.json"])
     assert runs["runs"][0]["stop_reason"] == "route_changed"
     assert "notes" not in runs["runs"][0]
-    assert "<url-" in runs["runs"][0]["error"]
+    assert [run["error"] for run in runs["runs"]] == [
+        "ValueError: <message left out>",
+        "KeyError: <message left out>",
+    ]
+    assert "ValueError: <message left out>" in log_text
+    assert "sqlite3" not in log_text
     settings = json.loads(files["settings.json"])["values"]
     assert settings["campaigns.mailbox_daily_cap"] == {"value": 40, "source": "config.toml"}
 
@@ -232,7 +271,9 @@ def test_the_full_level_holds_real_values_and_no_secret(
     assert _found(files, SECRETS) == []
     found = {value for _, value in _found(files, PERSONAL)}
     assert {FIRST, EMAIL, SLUG, CAMPAIGN, "Imaginaria"} <= found
-    assert json.loads(files["runs.json"])["runs"][0]["notes"] == NOTE
+    first = json.loads(files["runs.json"])["runs"][0]
+    assert first["notes"] == NOTE
+    assert first["error"] == f"ValueError: no contact named {FIRST} {LAST}"
     assert "WARNING" in files["README.txt"]
 
 
@@ -304,7 +345,7 @@ def test_the_log_excerpt_keeps_whole_records_since_the_cutoff(tmp_path: Path) ->
     (tmp_path / "netkeeper.log.lock").write_text("")
     excerpt = log_excerpt(tmp_path, since_local=start + timedelta(days=1), max_bytes=10_000)
     assert excerpt.files == ("netkeeper.log.2", "netkeeper.log.1", "netkeeper.log")
-    assert excerpt.text.splitlines() == [
+    assert "".join(excerpt.parts).splitlines() == [
         _record(start + timedelta(days=5), "middle").strip(),
         "Traceback line",
         _record(start + timedelta(days=9), "newest").strip(),
@@ -320,7 +361,11 @@ def test_the_log_excerpt_drops_the_oldest_records_past_its_size(tmp_path: Path) 
     size = len(_record(start, "record 0").encode())
     excerpt = log_excerpt(tmp_path, since_local=start, max_bytes=size * 3)
     assert excerpt.truncated
-    assert [line.rsplit(" ", 1)[1] for line in excerpt.text.splitlines()] == ["7", "8", "9"]
+    assert [line.rsplit(" ", 1)[1] for line in "".join(excerpt.parts).splitlines()] == [
+        "7",
+        "8",
+        "9",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -426,7 +471,9 @@ async def test_the_bundle_endpoint_downloads_a_zip(
 ) -> None:
     with session_scope(running_app.state.session_factory, write=True) as session:
         _seed(session)
-    response = await client.get(f"{URL}/bundle", params={"since_days": 3})
+    response = await client.get(
+        f"{URL}/bundle", params={"since_days": 3}, headers={"Sec-Fetch-Site": "same-origin"}
+    )
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/zip"
     assert "attachment;" in response.headers["content-disposition"]
@@ -437,9 +484,11 @@ async def test_the_bundle_endpoint_downloads_a_zip(
 
 
 async def test_the_full_level_needs_confirmation(client: httpx.AsyncClient) -> None:
-    refused = await client.get(f"{URL}/bundle", params={"level": "full"})
+    refused = await client.get(f"{URL}/bundle", params={"level": "full"}, headers=HEADERS)
     assert refused.status_code == 409
-    confirmed = await client.get(f"{URL}/bundle", params={"level": "full", "confirm_full": True})
+    confirmed = await client.get(
+        f"{URL}/bundle", params={"level": "full", "confirm_full": True}, headers=HEADERS
+    )
     assert confirmed.status_code == 200
 
 
@@ -452,3 +501,53 @@ async def test_only_the_owner_makes_a_bundle(
     with acting_as(running_app, other):
         response = await client.get(f"{URL}{path}", headers=HEADERS)
     assert response.status_code == 403
+
+
+@pytest.mark.parametrize("level", ["standard", "detailed", "full"])
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Sec-Fetch-Site": "cross-site", "Origin": "https://evil.example"},
+        {"Sec-Fetch-Site": "same-site"},
+        {"Sec-Fetch-Site": "cross-site", **HEADERS},
+        {},
+    ],
+)
+async def test_a_download_another_site_could_start_is_refused(
+    client: httpx.AsyncClient, level: str, headers: dict[str, str]
+) -> None:
+    response = await client.get(
+        f"{URL}/bundle", params={"level": level, "confirm_full": True}, headers=headers
+    )
+    assert response.status_code == 403
+    assert "Settings page" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("site", ["same-origin", "none", "Same-Origin"])
+async def test_the_pages_own_link_and_the_address_bar_download(
+    client: httpx.AsyncClient, site: str
+) -> None:
+    response = await client.get(f"{URL}/bundle", headers={"Sec-Fetch-Site": site})
+    assert response.status_code == 200
+
+
+def test_the_cdp_url_keeps_only_its_host_and_port(
+    session_factory: sessionmaker[Session], home: Path
+) -> None:
+    from dataclasses import replace
+
+    settings = Settings()
+    settings = replace(
+        settings,
+        linkedin=replace(
+            settings.linkedin, cdp_url="ws://127.0.0.1:9222/devtools/browser/0b1d-invented"
+        ),
+    )
+    with session_scope(session_factory, write=True) as session:
+        _seed(session)
+    with session_scope(session_factory) as session:
+        user = ensure_local_user(session, settings=Settings())
+        for level in Level:
+            files = _contents(build_bundle(session, user, settings=settings, level=level).data)
+            value = json.loads(files["settings.json"])["values"]["linkedin.cdp_url"]["value"]
+            assert value == "ws://127.0.0.1:9222"
