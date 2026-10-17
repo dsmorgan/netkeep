@@ -129,22 +129,36 @@ The answer is small (about 36 KB, ten model rows). One row holds a `div` with a 
 | `contact-your-profile` | `contact_share_profile` | (the profile link heading) | one link to the member's own profile url |
 | `contact-website` | `contact_website` | `Website` | one link per site; the link's url goes through a `linkedin.com` wrapper, `/safety/go?url=<site>&urlhash=...&isSdui=...&mt=...`; its text (in a `strong`) is the site, and a short text follows it |
 | `contact-email` | `contact_email` | `Email` | one link whose url is `mailto:<address>` and whose text is the address |
+| `contact-phone` | (not recorded) | `Phone` | the number as a text run in a `span`, then a `span` holding `" "`, then the type (`(Mobile)`) as a bare run; no `tel:` link (#520) |
+| `contact-birthday` | (not recorded) | `Birthday` | `<Month> <D>` as text, no year (#520) |
 
-After the sections, a `p` with `Connected since` and the date as text.
+After the sections, a `div` holds a `p` with `Connected since` and a text component whose `textProps.children` is the date.
 
-Each value is a link element (`$L<n>`) whose `action` is one `Navigate` → `NavigateToUrl` (`urlValue.url`), with `openInNewTab`, `urlType`, and `presentation` fields, and whose `children` are the text shown. The #149 capture's profile shared a website and an email and no phone, so the section names for the phone, address, birthday, and messaging rows are still unverified; by analogy they are probably `contact-phone` and so on, and the fixtures use `contact-phone` for that reason, marked invented. The CP8c rendering below confirms the phone and birthday rows exist and what they show. The first live enrichment (#203) met a `contact-instant-message` section; the capture holds no instance of it, and the CRM has no field for a messaging handle, so it is recognized and not read.
+The CP8d overlay answer (#520, captured 2026-10-16) showed every section in the same frame. A section's `children` is a `div`, or a reference to a row holding it (the birthday's was):
+
+```
+section {componentKey, viewTrackingSpecs.viewName: "contact-…", children: div | "$L<row>"}
+  div {className, componentkey, children: row component}
+    row component {direction, children: ["$L<icon row>", div]}   <- the icon's reference first
+      div {children: [p, text component]}
+        p {children: ["<Heading>"]}                               "Phone", "Email", "Birthday"
+        text component {textProps: {children: [VALUE]}}
+```
+
+The value sits in the text component's `textProps.children`, never in an element's own `children`. A link's value is a link element (`$L<n>`) in there, whose `action` is one `Navigate` → `NavigateToUrl` (`urlValue.url`), with `openInNewTab`, `urlType`, and `presentation` fields, and whose `children` are the text shown. The phone's value is a fragment: `[null, span ["<number>"], [span " ", "(Mobile)", null]]`. That profile shared no website, address, Twitter, or messaging handle, so those sections' frames are still unverified; the address and Twitter section names (`contact-address`, `contact-twitter`) are guesses by analogy, marked invented in the code. The first live enrichment (#203) met a `contact-instant-message` section; the capture holds no instance of it, and the CRM has no field for a messaging handle, so it is recognized and not read.
 
 ### The overlay as rendered
 
 The CP8c captures (#484, #519) showed the overlay on the page:
 
-- `header#dialog-header` holds an `h2` that reads exactly "Contact info", with no hidden text.
+- The overlay is a modal `dialog` named by `header#dialog-header`, whose `h2` reads exactly "Contact info", with no hidden text. The tab's address becomes `/in/<slug>/overlay/contact-info/`.
 - The profile row is a real `/in/<slug>/` link.
 - Each row pairs an `aria-hidden` icon with a label `p` and a value `p`:
   - The phone is plain text with "(Mobile)", not a `tel:` link.
   - The email is a `mailto:` link.
   - The birthday reads `<Month> <D>`.
   - Connected since reads `<Mon> <D>, <YYYY>`.
+  - Each website (CP8d, #520) is its own value under one `Website` label, however many there are: a link through `https://www.linkedin.com/safety/go/?url=<encoded site>` around a `strong` with the shown url, then a `span`, then the type as bare text (`(Blog)`, `(Portfolio)`). No network answer for a profile with websites was captured, so whether the answer's links are wrapped the same way is not known; the reader unwraps them when they are and keeps them when they are not. The type is not read.
 
 Enrichment doesn't read this DOM. It reads the overlay's network answer (`parse_contact_info`), as the rest of this note describes.
 
@@ -167,11 +181,12 @@ Added by #190, from the structure above and nothing else. **Captured** means the
 | Whose overlay | The `contact-your-profile` section's link must name the profile's slug | Captured | Missing or another slug: unreadable |
 | Email | `contact-email` links, `mailto:<address>` | Captured | Any other link there: unreadable |
 | Websites | `contact-website` links, unwrapped from `linkedin.com/safety/go?url=` (captured) or `/redir/redirect?url=` (the older client's) | Captured | A wrapper without one site: unreadable. A link on LinkedIn's own host that is not a wrapper is a site the person listed (#203): kept, unless it is their own profile (on LinkedIn's host only) or carries a `url` parameter, which are skipped and counted at INFO. A site that is not an absolute `http` or `https` url with a host is skipped and counted too (#206 review) |
-| Phone | `contact-phone` (`tel:` links or number-shaped text; the number must arrive as its own text run; a run that joins it with `(Mobile)` doesn't read, and the phone is left out) | Row as rendered: captured (CP8c, #519). Section name in the network answer: **assumed** | A value that does not read is left out |
-| Birthday | `contact-birthday`, `<Month> <D>` | Row as rendered: captured (CP8c, #519). Section name: **assumed** | A value that does not read is left out. The birthday has no column and is not stored |
+| Phone | `contact-phone`: `tel:` links (assumed), else number-shaped text runs. A `(<type>)` run right after a number is its label: `Mobile`, `Home`, and `Work` are stored as that kind, any other (or none) as `other` | Captured 2026-10-16 (CP8d, #520): the number and `(Mobile)` as separate runs. A run that joins them was not seen; it doesn't read, and the phone is left out | A value that does not read is left out |
+| Birthday | `contact-birthday`, `<Month> <D>` | Captured 2026-10-16 (CP8d, #520) | A value that does not read is left out. The birthday has no column and is not stored |
+| The phone, birthday, and address values | A section's text runs in page order, from elements' `children` and text components' `textProps.children`, through row references, skipping other `$`-strings (the icon) and link text. The heading is the section's first `p`: its text, and any run repeating it, is dropped | Captured for the phone and birthday (#520) | A section with no `p` reads as nothing, since its heading can't be told from its value. A section with only its heading reads as nothing |
 | Twitter, address | `contact-twitter`, `contact-address` | **Assumed**; no capture shared either | A value that does not read is left out. The address has no column and is not stored |
 | Messaging | `contact-instant-message` | Seen live (#203), not captured | Not read: no CRM field. Logged at DEBUG only |
-| Connected since | The text after a `Connected since` run | Captured | An unknown phrasing leaves it unknown; it is not stored either way |
+| Connected since | The run after a `Connected since` run, from elements' `children` or text components' `textProps.children` | Captured (#149; the text component, #520) | An unknown phrasing leaves it unknown; it is not stored either way |
 | The Contact info control | A link whose accessible name is exactly `Contact info`, alone on the page, whose `href` is the profile's `overlay/contact-info/` | The link and its url: captured. That it renders as an `<a>` with that `href`: **assumed** | None, two, or pointing elsewhere: nothing is clicked, and the visit is unreadable |
 
 A lazy card or an overlay answer the page aborted after reading it, which Chrome then has no body for, is read from the body tap's streamed copy when that copy is whole: its stream finished or was cancelled (`net::ERR_ABORTED`), it parses as flight, and it holds row `0`, every row that row reaches, and no other (#203, #207 review, ADR 0006's amendment). In the capture the root row comes after its children. A Contact info read from a copy that holds no email and no phone leaves the contact due: it is visited again after 7 days (`ENRICH_RETRY_AFTER`), not on the stale-day schedule, so a person who shares neither and whose overlay is always aborted is revisited weekly (#196). A lazy card read from a copy is noted on the run, and its positions are applied like any other. Otherwise the card is skipped, or the overlay makes the visit unreadable.

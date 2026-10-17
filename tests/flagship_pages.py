@@ -946,6 +946,23 @@ class Website:
     label: str | None = None  # "(Personal)", "(Company)", ...
 
 
+def _navigate(url: str) -> dict[str, Any]:
+    """A link's action: a ``Navigate`` to a ``NavigateToUrl``, as the overlay's links carry."""
+    return {
+        "actions": [
+            {
+                "$type": "proto.sdui.actions.core.Navigate",
+                "value": {
+                    "content": {
+                        "$case": "url",
+                        "url": {"$type": _TO_URL, "urlValue": {"$case": "url", "url": url}},
+                    }
+                },
+            }
+        ]
+    }
+
+
 def contact_info_payload(
     person: Person,
     *,
@@ -962,77 +979,98 @@ def contact_info_payload(
     website_urls: Sequence[str] | None = None,
     extra_sections: Sequence[str] = (),
     phone_labels: Sequence[str] = (),
+    legacy: bool = False,
 ) -> bytes:
     """The contact-info overlay's answer (``POST .../actions/navigation``), trimmed.
 
     One section per kind, each an element with ``viewTrackingSpecs.viewName`` of
-    ``contact-your-profile``, ``contact-website``, ``contact-email`` (captured) or
-    ``contact-phone``, ``contact-twitter``, ``contact-birthday``, ``contact-address``
-    (**invented** section names: the #149 capture's profile shared none of them, so the
-    names are guesses by analogy; the CP8c overlay as rendered, #519, showed the phone as
-    plain text with a ``(Mobile)`` label and the birthday as ``<Month> <D>``), a ``p``
-    heading, and one link per value whose action is a ``NavigateToUrl`` (or, for the
-    birthday and the address, a text). ``phone_labels`` renders each phone as plain text
-    followed by that label (``(Mobile)``) instead of a ``tel:`` link. Websites point
-    through a ``linkedin.com`` wrapper (``/safety/go``) in the capture, and so do these. Use
-    example.test addresses only. ``profile_slug`` makes the profile link name another
-    slug; ``email_urls``/``website_urls`` replace the links' urls to spoil the shape.
+    ``contact-your-profile``, ``contact-website``, ``contact-email`` (#149),
+    ``contact-phone``, ``contact-birthday`` (#520), or ``contact-twitter``,
+    ``contact-address`` (**invented**, by analogy). Use example.test addresses only.
+
+    By default each section is built in the frame the #520 capture (CP8d) showed: a
+    ``div`` holding a row component whose children are an icon row's reference
+    (``$L<id>``) and a ``div`` of a ``p`` heading and a text component whose
+    ``textProps.children`` holds the value. A link's value is a link component in
+    there (a ``NavigateToUrl`` action); a phone is a fragment of ``[null, span
+    [number], [span " ", "(Mobile)", null]]``, the label part only when
+    ``phone_labels`` gives one; a website is a link around a ``strong`` with its
+    ``(Blog)`` label as a bare run after it, through LinkedIn's ``/safety/go``
+    wrapper, as the CP8d dialog rendered it. The birthday section's frame sits in a row
+    of its own, as captured. ``Connected since`` is a ``p`` and a text component.
+
+    ``legacy`` builds the older, guessed shape instead: a ``div`` of the ``p`` heading,
+    one link per value, and each text value in a ``span``, with phones as ``tel:``
+    links unless ``phone_labels`` renders them as text beside the label.
+
+    ``profile_slug`` makes the profile link name another slug; ``email_urls`` and
+    ``website_urls`` replace the links' urls to spoil the shape.
     """
     rows = _Rows()
     item = rows.module("default")
     link = rows.module("default")
+    line = rows.module("Row")
+    text = rows.module("Text")
+    icon = rows.module("Icon")
+    fragment: list[str] = []  # the fragment row, added once a value uses it
+
+    def link_el(url: str, children: Any) -> list[Any]:
+        return _el(f"$L{link}", {"action": _navigate(url), "children": children})
+
+    def text_el(children: list[Any]) -> list[Any]:
+        return _el(
+            f"$L{text}",
+            {
+                "maxLineCountExpression": {"$case": "fake"},
+                "textColorExpression": {"$case": "fake"},
+                "textProps": {"font": "fake", "children": children},
+            },
+        )
+
+    def labelled(value: Any, label: str | None) -> list[Any]:
+        if not fragment:
+            fragment.append(rows.model("$Sreact.fragment"))
+        tail = [[_el("span", {"children": " "}), label, None]] if label else []
+        return _el(f"${fragment[0]}", {"children": [None, value, *tail]})
 
     def section(
-        view: str,
-        control: str,
-        heading: str,
-        links: Sequence[tuple[str, str]],
-        texts: Sequence[str] = (),
+        view: str, control: str, heading: str, values: Sequence[Any], *, own_row: bool = False
     ) -> Any:
+        if legacy:
+            body: Any = _el("div", {"children": [_el("p", {"children": [heading]}), *values]})
+        else:
+            icon_row = rows.model(_el(f"$L{icon}", {"aria-hidden": True, "aria-label": ""}))
+            inner = _el("div", {"children": [_el("p", {"children": [heading]}), *values]})
+            body = _el(
+                "div",
+                {
+                    "className": "fake",
+                    "componentkey": f"fake-{view}-body",
+                    "children": _el(
+                        f"$L{line}", {"direction": "fake", "children": [f"$L{icon_row}", inner]}
+                    ),
+                },
+            )
+            if own_row:
+                body = f"$L{rows.model(body)}"
         return _el(
             f"$L{item}",
             {
                 "componentKey": f"fake-{view}",
                 "viewTrackingSpecs": {"viewName": view, "legacyControlName": control},
-                "children": _el(
-                    "div",
-                    {
-                        "children": [
-                            _el("p", {"children": [heading]}),
-                            *[
-                                _el(
-                                    f"$L{link}",
-                                    {
-                                        "action": {
-                                            "actions": [
-                                                {
-                                                    "$type": "proto.sdui.actions.core.Navigate",
-                                                    "value": {
-                                                        "content": {
-                                                            "$case": "url",
-                                                            "url": {
-                                                                "$type": _TO_URL,
-                                                                "urlValue": {
-                                                                    "$case": "url",
-                                                                    "url": url,
-                                                                },
-                                                            },
-                                                        }
-                                                    },
-                                                }
-                                            ]
-                                        },
-                                        "children": [shown],
-                                    },
-                                )
-                                for url, shown in links
-                            ],
-                            *[_el("span", {"children": [value]}) for value in texts],
-                        ]
-                    },
-                ),
+                "children": body,
             },
         )
+
+    def links(pairs: Sequence[tuple[str, str]]) -> list[Any]:
+        if legacy:
+            return [link_el(url, [shown]) for url, shown in pairs]
+        return [text_el([link_el(url, [shown])]) for url, shown in pairs]
+
+    def texts(values: Sequence[str]) -> list[Any]:
+        if legacy:
+            return [_el("span", {"children": [value]}) for value in values]
+        return [text_el([value]) for value in values]
 
     slug = person.slug if profile_slug is None else profile_slug
     sections = []
@@ -1042,7 +1080,7 @@ def contact_info_payload(
                 "contact-your-profile",
                 "contact_share_profile",
                 "Your Profile",
-                [(f"https://www.linkedin.com/in/{slug}", f"linkedin.com/in/{slug}")],
+                links([(f"https://www.linkedin.com/in/{slug}", f"linkedin.com/in/{slug}")]),
             )
         )
     if websites or website_urls:
@@ -1051,22 +1089,51 @@ def contact_info_payload(
             if website_urls is not None
             else [_wrapped(site.url) for site in websites]
         )
-        shown = [f"{site.url} {site.label}" if site.label else site.url for site in websites]
-        shown += [""] * (len(urls) - len(shown))
-        sections.append(
-            section(
-                "contact-website",
-                "contact_website",
-                "Website",
-                list(zip(urls, shown, strict=False)),
-            )
-        )
-    if phones and phone_labels:
-        texts = [t for pair in zip(phones, phone_labels, strict=True) for t in pair]
-        sections.append(section("contact-phone", "contact_phone", "Phone", [], texts))
+        sites: list[Website | None] = [*websites]
+        sites += [None] * (len(urls) - len(sites))
+        if legacy:
+            shown = [
+                (f"{site.url} {site.label}" if site.label else site.url) if site else ""
+                for site in sites
+            ]
+            values = links(list(zip(urls, shown, strict=False)))
+        else:
+            values = [
+                text_el(
+                    [
+                        labelled(
+                            _el(
+                                "span",
+                                {
+                                    "children": link_el(
+                                        url,
+                                        _el("strong", {"children": [site.url if site else ""]}),
+                                    )
+                                },
+                            ),
+                            site.label if site else None,
+                        )
+                    ]
+                )
+                for url, site in zip(urls, sites, strict=False)
+            ]
+        sections.append(section("contact-website", "contact_website", "Website", values))
+    if phones and (phone_labels or not legacy):
+        labels: list[str | None] = [*phone_labels] or [None] * len(phones)
+        if legacy:
+            pairs = [t for pair in zip(phones, labels, strict=True) for t in pair if t]
+            values = texts(pairs)
+        else:
+            values = [
+                text_el([labelled(_el("span", {"children": [number]}), label)])
+                for number, label in zip(phones, labels, strict=True)
+            ]
+        sections.append(section("contact-phone", "contact_phone", "Phone", values))
     elif phones:
         sections.append(
-            section("contact-phone", "contact_phone", "Phone", [(f"tel:{p}", p) for p in phones])
+            section(
+                "contact-phone", "contact_phone", "Phone", links([(f"tel:{p}", p) for p in phones])
+            )
         )
     if twitter:
         sections.append(
@@ -1074,25 +1141,34 @@ def contact_info_payload(
                 "contact-twitter",
                 "contact_twitter",
                 "Twitter",
-                [(f"https://twitter.com/{handle}", f"@{handle}") for handle in twitter],
+                links([(f"https://twitter.com/{handle}", f"@{handle}") for handle in twitter]),
             )
         )
     if emails or email_urls:
         urls = list(email_urls) if email_urls is not None else [f"mailto:{e}" for e in emails]
         shown = list(emails) + [""] * (len(urls) - len(emails))
         sections.append(
-            section("contact-email", "contact_email", "Email", list(zip(urls, shown, strict=False)))
+            section(
+                "contact-email",
+                "contact_email",
+                "Email",
+                links(list(zip(urls, shown, strict=False))),
+            )
         )
     if birthday is not None:
-        sections.append(section("contact-birthday", "contact_birthday", "Birthday", [], [birthday]))
+        sections.append(
+            section(
+                "contact-birthday", "contact_birthday", "Birthday", texts([birthday]), own_row=True
+            )
+        )
     if address is not None:
-        sections.append(section("contact-address", "contact_address", "Address", [], [address]))
+        sections.append(section("contact-address", "contact_address", "Address", texts([address])))
     for view in extra_sections:
-        sections.append(section(view, view, "Something new", [], ["a value"]))
+        sections.append(section(view, view, "Something new", texts(["a value"])))
     children: list[Any] = [*sections]
     if connected_since is not None:
-        children.append(_el("p", {"children": ["Connected since"]}))
-        children.append(_el("span", {"children": [connected_since]}))
+        since = [_el("p", {"children": ["Connected since"]}), *texts([connected_since])]
+        children.append(since if legacy else _el("div", {"children": since}))
     body = rows.model(_el("div", {"data-testid": "fake-overlay", "children": children}))
     rows.model([f"$L{body}"], row="0")
     return rows.payload()

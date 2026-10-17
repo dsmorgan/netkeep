@@ -563,13 +563,16 @@ class ContactInfo:
     Every field is optional at the value level: a person may share none of them.
     ``emails`` lists the addresses in the order the overlay shows them. ``birthday``
     and ``address`` are the overlay's own text, unparsed, and have no column to land
-    in (spec 8.1); ``connected_on`` is the overlay's "Connected since" day. The
-    phone, address, birthday, and Twitter sections were not in the #149 capture, so
-    their readers fail soft: a value they cannot read is left out, never guessed.
+    in (spec 8.1); ``connected_on`` is the overlay's "Connected since" day.
+    ``phone_labels`` pairs a number in ``phones`` with the type the overlay showed
+    beside it (``Mobile``), for each number that had one. The phone, address,
+    birthday, and Twitter readers fail soft: a value they cannot read is left out,
+    never guessed.
     """
 
     emails: tuple[str, ...] = ()
     phones: tuple[str, ...] = ()
+    phone_labels: tuple[tuple[str, str], ...] = ()
     websites: tuple[str, ...] = ()
     twitter_handles: tuple[str, ...] = ()
     birthday: str | None = None

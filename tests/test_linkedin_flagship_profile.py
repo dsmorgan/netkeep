@@ -397,7 +397,8 @@ def test_a_website_outside_the_wrapper_is_read_as_it_is() -> None:
     assert info.websites == ("https://priya-fake.example.test/",)
 
 
-def test_a_phone_shown_as_text_with_a_mobile_label_reads_as_the_number() -> None:
+@pytest.mark.parametrize("legacy", [False, True], ids=["captured", "legacy"])
+def test_a_phone_shown_as_text_with_a_mobile_label_reads_as_the_number(legacy: bool) -> None:
     """The CP8c overlay showed the phone as plain text beside ``(Mobile)``, not a ``tel:`` link."""
     body = contact_info_payload(
         PRIYA,
@@ -405,11 +406,100 @@ def test_a_phone_shown_as_text_with_a_mobile_label_reads_as_the_number() -> None
         phone_labels=["(Mobile)"],
         birthday="March 3",
         connected_since="Oct 3, 2023",
+        legacy=legacy,
     )
     info = parse_contact_info(body, slug=PRIYA.slug)
     assert info.phones == ("+1 555 0101",)
+    assert info.phone_labels == (("+1 555 0101", "Mobile"),)
     assert info.birthday == "March 3"
     assert info.connected_on == date(2023, 10, 3)
+
+
+def test_the_captured_overlay_reads_the_values_not_the_headings() -> None:
+    """#553: the CP8d (#520) frame puts an icon reference before the heading and each value
+    in ``textProps.children``. The birthday is the day, not "Birthday"; the phone keeps
+    its label; Connected since is the day."""
+    body = contact_info_payload(
+        PRIYA,
+        phones=["5550100199"],
+        phone_labels=["(Mobile)"],
+        birthday="March 3",
+        address="1 Example Way, Testville",
+        connected_since="Oct 3, 2023",
+    )
+    info = parse_contact_info(body, slug=PRIYA.slug)
+    assert info.phones == ("5550100199",)
+    assert info.phone_labels == (("5550100199", "Mobile"),)
+    assert info.birthday == "March 3"
+    assert info.address == "1 Example Way, Testville"
+    assert info.connected_on == date(2023, 10, 3)
+
+
+def test_several_phones_keep_their_own_labels() -> None:
+    body = contact_info_payload(
+        PRIYA,
+        phones=["5550100101", "5550100102", "5550100103"],
+        phone_labels=["(Home)", "(Pager)", ""],
+    )
+    info = parse_contact_info(body, slug=PRIYA.slug)
+    assert info.phones == ("5550100101", "5550100102", "5550100103")
+    assert info.phone_labels == (("5550100101", "Home"), ("5550100102", "Pager"))
+
+
+@pytest.mark.parametrize("legacy", [False, True], ids=["captured", "legacy"])
+def test_a_section_with_only_its_heading_reads_as_nothing(legacy: bool) -> None:
+    body = contact_info_payload(PRIYA, birthday="", address="  ", legacy=legacy)
+    info = parse_contact_info(body, slug=PRIYA.slug)
+    assert info.birthday is None and info.address is None
+
+
+def test_a_run_that_repeats_the_heading_is_not_read_as_the_value() -> None:
+    body = contact_info_payload(PRIYA, birthday="Birthday", address=" address ")
+    info = parse_contact_info(body, slug=PRIYA.slug)
+    assert info.birthday is None and info.address is None
+
+
+def _section_payload(view: str, children: object) -> bytes:
+    """An overlay of the profile link and one section whose frame is ``children``."""
+    profile = contact_info_payload(PRIYA).decode().splitlines()
+    body = ["$", "div", None, {"children": children}]
+    section = [
+        "$",
+        "$L1",
+        None,
+        {"componentKey": "fake", "viewTrackingSpecs": {"viewName": view}, "children": body},
+    ]
+    rows = [line for line in profile if not line.startswith("0:")]
+    rows.append("ff:" + json.dumps(section))
+    root = next(line for line in profile if line.startswith("0:"))
+    rows.append(root.replace('0:["', '0:["$Lff","', 1))
+    return ("\n".join(rows) + "\n").encode()
+
+
+def test_a_section_with_no_heading_reads_as_nothing() -> None:
+    """Without its ``p``, a section's heading cannot be told from its value: nothing is read."""
+    runs = [["$", "span", None, {"children": ["Birthday"]}]]
+    runs.append(["$", "span", None, {"children": ["March 3"]}])
+    body = _section_payload("contact-birthday", runs)
+    assert parse_contact_info(body, slug=PRIYA.slug).birthday is None
+
+
+def test_the_captured_websites_read_as_their_sites_not_their_labels() -> None:
+    """#553: the CP8d dialog showed three websites, each through ``/safety/go/?url=`` with a
+    ``(Blog)`` or ``(Portfolio)`` label after it."""
+    sites = [
+        Website("https://quorbelle.example/blog", "(Blog)"),
+        Website("https://quorbelle.example/work", "(Portfolio)"),
+        Website("https://fictionary.example/", "(Portfolio)"),
+    ]
+    body = contact_info_payload(PRIYA, websites=sites)
+    assert b"/safety/go/?url=" in body
+    info = parse_contact_info(body, slug=PRIYA.slug)
+    assert info.websites == (
+        "https://quorbelle.example/blog",
+        "https://quorbelle.example/work",
+        "https://fictionary.example/",
+    )
 
 
 def test_the_invented_sections_leave_out_what_does_not_read() -> None:
@@ -436,8 +526,9 @@ def test_a_section_nobody_knows_is_ignored() -> None:
         ("sometime last year", None),
     ],
 )
-def test_connected_since_fails_soft(text: str, expected: date | None) -> None:
-    body = contact_info_payload(PRIYA, connected_since=text)
+@pytest.mark.parametrize("legacy", [False, True], ids=["captured", "legacy"])
+def test_connected_since_fails_soft(text: str, expected: date | None, legacy: bool) -> None:
+    body = contact_info_payload(PRIYA, connected_since=text, legacy=legacy)
     assert parse_contact_info(body, slug=PRIYA.slug).connected_on == expected
 
 
