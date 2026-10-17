@@ -18,14 +18,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
 
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from netkeeper.config import Settings
 from netkeeper.db import session_scope
-from netkeeper.models import User, UserKind
 from netkeeper.services import ui_settings
 from netkeeper.services.backup import create_backup, list_backups, nightly_due, prune_backups
+from netkeeper.services.users import local_owner
 
 log = logging.getLogger(__name__)
 
@@ -106,9 +106,7 @@ class NightlyBackups:
     def _settings(self) -> Settings:
         """The local user's settings in force now, or the file's when there is no user."""
         with session_scope(self._factory) as session:
-            user = session.scalars(
-                select(User).where(User.kind == UserKind.LOCAL).order_by(User.id)
-            ).first()
+            user = local_owner(session)
             if user is None:
                 return self._base
             return ui_settings.resolve(session, user, self._base)
