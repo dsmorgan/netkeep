@@ -1187,6 +1187,8 @@ def delete_campaign(session: Session, user: User, campaign_id: int) -> DeletePla
         raise CampaignConflict(
             f"campaign {campaign_id} changed while it was being deleted; it is kept"
         )
+    # The id may be handed to the next campaign: no stored filter may keep meaning this one.
+    crm_lists.retire_references(session, user, campaign_id=campaign_id)
     session.expire_all()
     log.info(
         "campaign %d deleted with %d steps and %d enrollments; %d Gmail drafts left",

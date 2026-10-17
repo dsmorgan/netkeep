@@ -954,6 +954,33 @@ def list_ids_in(tree: FilterTree) -> dict[int, str]:
     return found
 
 
+def retire_ids(stored: Any, *, campaign_id: int | None = None, list_id: int | None = None) -> Any:
+    """``stored`` (a filter as stored JSON) with a deleted campaign or list id retired (#574).
+
+    SQLite hands a deleted row's id to the next insert, so a stored filter that still
+    named the old id would start meaning the new row. The id becomes its negative
+    instead: no row has one, so the predicate matches nobody for good, and a person
+    reading the filter can still tell which id was meant. Returns a new structure, or
+    ``stored`` itself when it named nothing to retire. Works on the raw JSON, so a
+    filter that no longer parses is still fixed.
+    """
+
+    def walk(node: Any) -> Any:
+        if isinstance(node, list):
+            return [walk(child) for child in node]
+        if not isinstance(node, dict):
+            return node
+        out = {key: walk(value) for key, value in node.items()}
+        if campaign_id is not None and isinstance(out.get("campaign_ids"), list):
+            out["campaign_ids"] = [-i if i == campaign_id else i for i in out["campaign_ids"]]
+        if list_id is not None and out.get("op") == "list_member" and out.get("list_id") == list_id:
+            out["list_id"] = -list_id
+        return out
+
+    walked = walk(stored)
+    return stored if walked == stored else walked
+
+
 # --- the compiler -----------------------------------------------------------
 
 
@@ -1519,6 +1546,8 @@ def _describe(node: FilterNode, *, top: bool = False) -> str:
         case TagNone():
             return f"not tagged {', '.join(node.names)}"
         case ListMember():
+            if node.list_id < 0:
+                return f"in deleted list #{-node.list_id}"
             return f"in list #{node.list_id}"
         case EnrolledIn():
             return f"enrolled in {_campaigns(node.campaign_ids)}"
@@ -1531,7 +1560,7 @@ def _describe(node: FilterNode, *, top: bool = False) -> str:
 
 
 def _campaigns(ids: Sequence[int]) -> str:
-    named = ", ".join(f"#{i}" for i in ids)
+    named = ", ".join(f"#{i}" if i > 0 else f"deleted #{-i}" for i in ids)
     return f"campaign {named}" if len(ids) == 1 else f"any of campaigns {named}"
 
 
