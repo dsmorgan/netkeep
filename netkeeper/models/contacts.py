@@ -282,6 +282,13 @@ class Contact(UserOwned, TimestampMixin, Base):
     # Debounced removal detection (spec 9.8).
     li_missing_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     li_disconnected_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # Which path last wrote ``headline`` ("card" for the connections sync, "profile" for
+    # enrichment; NULL for anything else) and the last card headline the sync saw
+    # (#557). The profile's top card wins over the connection card: the sync writes
+    # over a "profile" headline only when the card's own text changed since it last
+    # looked, so a repeat sync neither flips the headline back nor writes a snapshot.
+    headline_via: Mapped[str | None] = mapped_column(String(16))
+    card_headline_seen: Mapped[str | None] = mapped_column(String(500))
     # Enrichment scheduling (spec 9.6).
     last_enriched_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     enrich_priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

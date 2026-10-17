@@ -329,6 +329,10 @@ class IncomingContact:
     phones: tuple[IncomingPhone, ...] = ()
     links: tuple[IncomingLink, ...] = ()
     positions: tuple[IncomingPosition, ...] = ()
+    # Which path read ``headline``: the connection card ("card") or the profile's top
+    # card ("profile"). Not a provenance field; it only lets the profile's text win
+    # over an unchanged card (#557). None for every other source.
+    headline_via: Literal["card", "profile"] | None = None
 
     def __post_init__(self) -> None:
         if self.observed_at.tzinfo is None or self.observed_at.utcoffset() is None:
@@ -708,6 +712,10 @@ def _create(session: Session, user: User, incoming: IncomingContact) -> Contact:
     for name, value in provided.items():
         setattr(contact, name, value)
         contact.field_sources[name] = incoming.source.value
+    if "headline" in provided and incoming.headline_via is not None:
+        contact.headline_via = incoming.headline_via
+        if incoming.headline_via == "card":
+            contact.card_headline_seen = incoming.headline
     _record_synced(contact, incoming)
     session.add(contact)
     _upsert_children(user, contact, incoming)
@@ -729,6 +737,9 @@ def _update(
     # live value, and an empty field that a lower-ranked row is free to fill would
     # look protected again the moment it held that row's value.
     overwrite = {name: may_overwrite(name, incoming.source, contact) for name in provided}
+    headline_kept = _profile_headline_stands(contact, incoming)
+    if headline_kept:
+        overwrite["headline"] = False
     writable = {
         name: value
         for name, value in provided.items()
@@ -755,6 +766,7 @@ def _update(
                 _retire_slug(session, user, contact, old=old, new=value, incoming=incoming)
         if overwrite[name]:
             _record(contact, name, incoming.source)
+    _track_headline(contact, incoming, written=overwrite.get("headline", False))
     _record_synced(contact, incoming)
     position_changed = incoming.source is ContactSource.SYNC and any(
         enriched_before[name] not in (None, "")
@@ -782,6 +794,34 @@ def _update(
     session.flush()
     log.debug("updated contact %d for user %d from %s", contact.id, user.id, incoming.source)
     return Applied(contact, changed, wrote_snapshot)
+
+
+def _profile_headline_stands(contact: Contact, incoming: IncomingContact) -> bool:
+    """True when a connection card's headline must not replace the profile's (#557).
+
+    The profile's top card is the person's own headline, read on purpose; the
+    card's is a loading-state seed that can differ for the same person. So once
+    enrichment wrote the headline, the sync overwrites it only when the card's
+    text changed since the sync last saw it. A contact whose card text was never
+    recorded counts as unchanged: the first sync after this rule lands does not
+    flip anything.
+    """
+    if incoming.headline is None or incoming.headline_via != "card":
+        return False
+    if contact.headline_via != "profile":
+        return False
+    seen = contact.card_headline_seen
+    return seen is None or seen == incoming.headline
+
+
+def _track_headline(contact: Contact, incoming: IncomingContact, *, written: bool) -> None:
+    """Record which path wrote the headline and the card text the sync last saw."""
+    if incoming.headline is None or incoming.headline_via is None:
+        return
+    if incoming.headline_via == "card":
+        contact.card_headline_seen = incoming.headline
+    if written and contact.headline == incoming.headline:
+        contact.headline_via = incoming.headline_via
 
 
 def _enriched_value(contact: Contact, name: str) -> str | date | None:
@@ -1693,6 +1733,10 @@ def _merge_scalars(survivor: Contact, loser: Contact) -> None:
         if open_to_loser and theirs not in (None, ""):
             setattr(survivor, name, theirs)
             _take_source(survivor, loser, name)
+            if name == "headline":
+                # #557: the markers travel with the headline they describe.
+                survivor.headline_via = loser.headline_via
+                survivor.card_headline_seen = loser.card_headline_seen
     if card_survivor and "headline" not in survivor.field_sources:
         # #186: the loser gave no headline, so the card's is still there; drop it,
         # for the reason above.

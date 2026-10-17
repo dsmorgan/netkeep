@@ -24,6 +24,7 @@ from netkeeper.cli import app as cli
 from netkeeper.config import Settings
 from netkeeper.crm import apply as mapping
 from netkeeper.crm import identity
+from netkeeper.crm.provenance import set_manual_field
 from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
 from netkeeper.linkedin.classify import Outcome
 from netkeeper.linkedin.connections import ConnectionsPage, SyncMode, SyncResult
@@ -282,14 +283,21 @@ def _run(factory: sessionmaker[Session], kind: SyncRunKind, at: datetime, work: 
 
 
 def _flip_flop_runs(factory: sessionmaker[Session]) -> tuple[int, int, int]:
-    """Sync writes "Card text", enrichment "Profile text", a second sync "Card text" again."""
+    """Enrichment reads "Profile text", the card is edited to "Card text", enrichment again.
+
+    A repeat sync of an unchanged card no longer flips the headline (#557); what
+    still flips is a card the person edited, and an enrichment that puts the
+    profile's text back.
+    """
     with session_scope(factory, write=True) as session:
         user = _local(session)
         _stored(session, user, QUORBELLE, "Archive text")
         _stored(session, user, OTTOLINE, "Steady text")
+        # The card as the sync last saw it, before the runs below.
+        _sync_card(session, user, "Old card text", NOW - timedelta(days=1))
 
     def sync(session: Session, user: User, at: datetime) -> None:
-        mapping.apply_page(session, user, _page((QUORBELLE,), "Card text", at=at))
+        _sync_card(session, user, "Card text", at)
 
     def enrich(session: Session, user: User, at: datetime) -> None:
         for profile in (QUORBELLE, OTTOLINE):
@@ -298,9 +306,9 @@ def _flip_flop_runs(factory: sessionmaker[Session]) -> tuple[int, int, int]:
             ).one()
             mapping.apply_harvest(session, user, _harvest(contact, profile, at=at))
 
-    first = _run(factory, SyncRunKind.CONNECTIONS_FULL, NOW, sync)
-    middle = _run(factory, SyncRunKind.ENRICH, NOW + timedelta(hours=1), enrich)
-    last = _run(factory, SyncRunKind.CONNECTIONS_FULL, NOW + timedelta(days=7), sync)
+    first = _run(factory, SyncRunKind.ENRICH, NOW, enrich)
+    middle = _run(factory, SyncRunKind.CONNECTIONS_FULL, NOW + timedelta(hours=1), sync)
+    last = _run(factory, SyncRunKind.ENRICH, NOW + timedelta(days=7), enrich)
     return first, middle, last
 
 
@@ -475,3 +483,133 @@ def test_a_snapshot_another_source_wrote_during_a_run_is_not_the_runs(
 
     assert [item.snapshots for item in report.runs] == [1, 1, 1]
     assert [item.field_changes["headline"] for item in report.runs] == [1, 1, 1]
+
+
+# --- the profile headline wins over an unchanged card (#557) -------------------------------
+
+
+def _sync_card(session: Session, user: User, text: str, at: datetime) -> mapping.PageCounts:
+    return mapping.apply_page(session, user, _page((QUORBELLE,), text, at=at))
+
+
+def _enrich_quorbelle(session: Session, user: User, at: datetime) -> None:
+    contact = session.scalars(scoped(user, Contact).where(Contact.li_urn == QUORBELLE.urn)).one()
+    mapping.apply_harvest(session, user, _harvest(contact, QUORBELLE, at=at))
+
+
+def _quorbelle(session: Session, user: User) -> Contact:
+    return session.scalars(scoped(user, Contact).where(Contact.li_urn == QUORBELLE.urn)).one()
+
+
+def _snapshots(session: Session, contact: Contact) -> int:
+    session.refresh(contact)
+    return len(contact.snapshots)
+
+
+def test_an_unchanged_card_does_not_overwrite_the_profile_headline(
+    writer: Session, user: User
+) -> None:
+    _stored(writer, user, QUORBELLE, "Archive text")
+    _sync_card(writer, user, "Card text", NOW)
+    _enrich_quorbelle(writer, user, NOW + timedelta(hours=1))
+    contact = _quorbelle(writer, user)
+    assert (contact.headline, contact.headline_via) == ("Profile text", "profile")
+    before = _snapshots(writer, contact)
+
+    counts = _sync_card(writer, user, "Card text", NOW + timedelta(days=7))
+
+    assert contact.headline == "Profile text"
+    assert counts.snapshots == 0
+    assert counts.field_changes["headline"] == 0
+    assert _snapshots(writer, contact) == before
+
+
+def test_a_changed_card_wins_over_the_profile_headline(writer: Session, user: User) -> None:
+    _stored(writer, user, QUORBELLE, "Archive text")
+    _sync_card(writer, user, "Card text", NOW)
+    _enrich_quorbelle(writer, user, NOW + timedelta(hours=1))
+    _sync_card(writer, user, "Card text", NOW + timedelta(days=1))
+
+    counts = _sync_card(writer, user, "New card text", NOW + timedelta(days=7))
+
+    contact = _quorbelle(writer, user)
+    assert (contact.headline, contact.headline_via) == ("New card text", "card")
+    assert contact.card_headline_seen == "New card text"
+    assert counts.snapshots == 1
+    # The next enrichment puts the profile back, and the same card then stays beaten.
+    _enrich_quorbelle(writer, user, NOW + timedelta(days=8))
+    _sync_card(writer, user, "New card text", NOW + timedelta(days=9))
+    assert contact.headline == "Profile text"
+
+
+def test_a_contact_never_enriched_takes_every_card_change(writer: Session, user: User) -> None:
+    _stored(writer, user, QUORBELLE, "Archive text")
+    _sync_card(writer, user, "Card text", NOW)
+    counts = _sync_card(writer, user, "Newer card text", NOW + timedelta(days=1))
+
+    contact = _quorbelle(writer, user)
+    assert (contact.headline, contact.headline_via) == ("Newer card text", "card")
+    assert counts.snapshots == 1
+
+
+def test_a_profile_headline_with_no_card_on_record_counts_as_unchanged(
+    writer: Session, user: User
+) -> None:
+    _stored(writer, user, QUORBELLE, "Archive text")
+    _enrich_quorbelle(writer, user, NOW)
+    contact = _quorbelle(writer, user)
+    assert contact.card_headline_seen is None
+
+    counts = _sync_card(writer, user, "Card text", NOW + timedelta(days=1))
+
+    assert contact.headline == "Profile text"
+    assert counts.snapshots == 0
+    assert contact.card_headline_seen == "Card text"
+
+
+def test_a_manual_headline_survives_both_paths(writer: Session, user: User) -> None:
+    _stored(writer, user, QUORBELLE, "Archive text")
+    _sync_card(writer, user, "Card text", NOW)
+    contact = _quorbelle(writer, user)
+    set_manual_field(contact, "headline", "My words")
+
+    _enrich_quorbelle(writer, user, NOW + timedelta(hours=1))
+    _sync_card(writer, user, "Other card text", NOW + timedelta(days=1))
+
+    assert contact.headline == "My words"
+    assert contact.headline_via == "card"  # enrichment did not write it
+
+
+def test_a_merge_carries_the_markers_of_the_surviving_headline(writer: Session, user: User) -> None:
+    _stored(writer, user, QUORBELLE, "Archive text")
+    _sync_card(writer, user, "Card text", NOW)
+    _enrich_quorbelle(writer, user, NOW + timedelta(hours=1))
+    kept = _quorbelle(writer, user)
+    empty = factories.make_contact(writer, user, first_name="Ottoline", headline="")
+
+    identity.merge(writer, user, empty.id, kept.id)
+
+    assert (empty.headline, empty.headline_via) == ("Profile text", "profile")
+    assert empty.card_headline_seen == "Card text"
+
+
+def test_a_repeat_sync_after_enrichment_is_no_flip_flop(cli_db: sessionmaker[Session]) -> None:
+    with session_scope(cli_db, write=True) as session:
+        _stored(session, _local(session), QUORBELLE, "Archive text")
+
+    def sync(session: Session, user: User, at: datetime) -> None:
+        _sync_card(session, user, "Card text", at)
+
+    def enrich(session: Session, user: User, at: datetime) -> None:
+        _enrich_quorbelle(session, user, at)
+
+    runs_ = [
+        _run(cli_db, SyncRunKind.CONNECTIONS_FULL, NOW, sync),
+        _run(cli_db, SyncRunKind.ENRICH, NOW + timedelta(hours=1), enrich),
+        _run(cli_db, SyncRunKind.CONNECTIONS_FULL, NOW + timedelta(days=7), sync),
+    ]
+    with session_scope(cli_db) as session:
+        report = field_changes.field_changes(session, _local(session), runs_)
+
+    assert report.headline_flip_flops == 0
+    assert [item.field_changes["headline"] for item in report.runs] == [1, 1, 0]
