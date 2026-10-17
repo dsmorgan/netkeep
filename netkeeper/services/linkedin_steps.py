@@ -129,7 +129,7 @@ from netkeeper.campaigns.render import MergeValues, Severity, TemplateRenderErro
 from netkeeper.campaigns.templates import block_reason, contact_fields
 from netkeeper.config import Settings
 from netkeeper.linkedin.messaging import MessageOutcome, MessageOutcomeKind
-from netkeeper.logging_setup import personal
+from netkeeper.logging_setup import personal, personal_exc
 from netkeeper.models import (
     Campaign,
     CampaignStatus,
@@ -1004,7 +1004,7 @@ class _Claimer:
             slots = engine.slots_for(self.settings, user)
             hours = sending_hours.read(session, user)
         except schedule.ScheduleError as exc:
-            log.warning("campaign %d prefills nothing: %s", campaign.id, exc)
+            log.warning("campaign %d prefills nothing: %s", campaign.id, personal_exc(exc))
             return self.refuse(enrollment, Skip.BAD_SCHEDULE)
         held = schedule.hold(
             due,

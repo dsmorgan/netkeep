@@ -113,7 +113,7 @@ from netkeeper.crm.importer import (
 from netkeeper.crm.provenance import PROVENANCE_ORDER, may_overwrite
 from netkeeper.crm.tags import ensure_default_rules, run_rules
 from netkeeper.db import is_writer
-from netkeeper.logging_setup import personal
+from netkeeper.logging_setup import personal, personal_exc
 from netkeeper.models import (
     Contact,
     ContactAlias,
@@ -855,7 +855,7 @@ def _process_row(
     except ValueError as exc:
         # apply() checks everything before its first write, so the contact is
         # untouched: this row lands nowhere and the rest of the file still commits.
-        log.warning("import row %d could not be applied: %s", row_number, personal(exc))
+        log.warning("import row %d could not be applied: %s", row_number, personal_exc(exc))
         return _Outcome(
             row_number,
             cells,

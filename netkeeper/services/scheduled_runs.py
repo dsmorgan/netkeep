@@ -59,6 +59,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from netkeeper.config import LinkedInSettings, Settings
 from netkeeper.crm.inbox_apply import has_anything_to_watch, owner_hold
 from netkeeper.db import off_loop, session_scope
+from netkeeper.logging_setup import personal_exc
 from netkeeper.models import SyncRun, SyncRunKind, SyncRunTrigger, User, UserKind
 from netkeeper.models.base import utcnow
 from netkeeper.scoping import scoped
@@ -228,7 +229,7 @@ def _handler(
             )
             return JobOutcome.DISARMED_AFTER_GATE
         except runs.RunAlreadyRunning as exc:
-            log.info("scheduled %s not started: %s", run_kind.value, exc)
+            log.info("scheduled %s not started: %s", run_kind.value, personal_exc(exc))
             return JobOutcome.RETRY_LATER
         task_id, result = submit_run(tasks, executor, run_id, ctx.user_id)
         await tasks.wait(task_id)

@@ -57,7 +57,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from netkeeper.campaigns import gmail_oauth
 from netkeeper.campaigns.gmail import GmailClient
 from netkeeper.db import session_scope
-from netkeeper.logging_setup import personal
+from netkeeper.logging_setup import personal, personal_exc
 from netkeeper.models import Mailbox, MailboxArm, MailboxStatus, TestSend, User, UserKind
 from netkeeper.models.base import utcnow
 from netkeeper.models.mailboxes import MAILBOX_ARMED_BY_MAX_LENGTH
@@ -474,7 +474,7 @@ def check_mailbox(
         else:
             gmail_oauth.refresh_access_token(client, token, endpoints=endpoints)
     except gmail_oauth.OAuthUnavailable as exc:
-        log.info("mailbox %d not checked: %s", mailbox_id, exc)
+        log.info("mailbox %d not checked: %s", mailbox_id, personal_exc(exc))
         return CheckResult(mailbox_id, user_id, MailboxStatus.OK, None, False)
     except gmail_oauth.OAuthError as exc:
         if not gmail_oauth.needs_reauthorization(exc):
@@ -483,7 +483,7 @@ def check_mailbox(
             return CheckResult(mailbox_id, user_id, MailboxStatus.OK, None, False)
         reason = exc.code
     except keychain.KeychainUnavailable as exc:
-        log.warning("mailbox %d not checked: %s", mailbox_id, exc)
+        log.warning("mailbox %d not checked: %s", mailbox_id, personal_exc(exc))
         return CheckResult(mailbox_id, user_id, MailboxStatus.OK, None, False)
 
     return _record(factory, user_id, mailbox_id, generation, reason, clock)

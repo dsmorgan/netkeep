@@ -36,6 +36,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from netkeeper.campaigns import gmail_oauth
 from netkeeper.db import session_scope
+from netkeeper.logging_setup import personal_exc
 from netkeeper.models import Mailbox, MailboxStatus, User
 from netkeeper.models.base import utcnow
 from netkeeper.services import keychain, message_id_check
@@ -232,7 +233,7 @@ def oauth_callback(
         log.info("gmail authorization failed: %s", exc.code)
         return _back("error", exc.code)
     except keychain.KeychainUnavailable as exc:
-        log.warning("gmail authorization failed: %s", exc)
+        log.warning("gmail authorization failed: %s", personal_exc(exc))
         return _back("error", "keychain")
     try:
         with session_scope(factory, write=True) as session:
@@ -249,7 +250,7 @@ def oauth_callback(
     except service.OtherMailboxConnected:
         return _back("error", "other_mailbox_connected")
     except keychain.KeychainUnavailable as exc:
-        log.warning("gmail authorization failed: %s", exc)
+        log.warning("gmail authorization failed: %s", personal_exc(exc))
         return _back("error", "keychain")
     _publish(request, event)
     return _back("connected", None)

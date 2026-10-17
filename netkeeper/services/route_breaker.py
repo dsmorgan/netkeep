@@ -122,6 +122,7 @@ from typing import Any, Final
 from sqlalchemy.orm import Session
 
 from netkeeper.db import is_writer
+from netkeeper.logging_setup import personal_exc
 from netkeeper.models import SyncRunKind, User
 from netkeeper.services.settings_kv import get_setting, set_setting
 
@@ -578,7 +579,9 @@ def _load_streak(session: Session, user: User, account_id: int, streak: _Streak)
         # thing that should crash on a corrupt row -- fail closed instead
         # (BreakerState.tripped reads true when unreadable) and say so in the log;
         # `posture()` turns this into a warning a person actually sees.
-        log.error("%s state for account %d is corrupt: %s", streak.label, account_id, exc)
+        log.error(
+            "%s state for account %d is corrupt: %s", streak.label, account_id, personal_exc(exc)
+        )
         return BreakerState(count=0, since=None, readable=False, threshold=threshold)
 
 

@@ -54,6 +54,7 @@ from netkeeper.linkedin.observe import (
     ResponseMatch,
 )
 from netkeeper.linkedin.pacing import ScrollPlan, TypingPlan, rest_pointer_like_a_person
+from netkeeper.logging_setup import personal, personal_exc
 
 log = logging.getLogger(__name__)
 
@@ -4851,7 +4852,7 @@ class BrowserRun:
         except Exception as exc:
             if not self._lost(page):
                 raise
-            log.warning("lost the tab while navigating: %s", _reason(exc))
+            log.warning("lost the tab while navigating: %s", personal(_reason(exc)))
             page = await self._reopen_for(url)
         self._last_url = url
         return page
@@ -4896,7 +4897,7 @@ class BrowserRun:
             try:
                 await page.close()
             except Exception as exc:
-                log.debug("could not close the run's tab: %s", exc)
+                log.debug("could not close the run's tab: %s", personal_exc(exc))
         await _detach_quietly(self._attachment.detach)
 
     async def _ensure_page(self, *, restore: bool) -> PageLike:
@@ -5030,7 +5031,7 @@ class BrowserRun:
         try:
             await session.send("Target.closeTarget", {"targetId": target_id})
         except Exception as exc:
-            log.warning("could not close the background tab the run opened: %s", exc)
+            log.warning("could not close the background tab the run opened: %s", personal_exc(exc))
 
     async def _target_id(self, page: PageLike) -> str | None:
         """A tab's own CDP target id, or ``None`` when it can't be read (#195).
@@ -5042,13 +5043,13 @@ class BrowserRun:
         try:
             session = cast(_CdpSessionLike, await context.new_cdp_session(page))
         except Exception as exc:
-            log.debug("could not read a new tab's target id: %s", exc)
+            log.debug("could not read a new tab's target id: %s", personal_exc(exc))
             return None
         try:
             info = await session.send("Target.getTargetInfo")
             return str(info["targetInfo"]["targetId"])
         except Exception as exc:
-            log.debug("could not read a new tab's target id: %s", exc)
+            log.debug("could not read a new tab's target id: %s", personal_exc(exc))
             return None
         finally:
             await _detach_quietly(session.detach)
@@ -5161,7 +5162,7 @@ async def _content_box(page: PageLike) -> Mapping[str, float] | None:
     try:
         return await locator.bounding_box(timeout=CONTENT_BOX_TIMEOUT_MS)
     except Exception as exc:
-        log.debug("could not read a content box to rest the pointer over: %s", exc)
+        log.debug("could not read a content box to rest the pointer over: %s", personal_exc(exc))
         return None
 
 
@@ -5203,7 +5204,9 @@ async def _first_visible_box(page: PageLike, selector: str) -> Mapping[str, floa
             if usable(box):
                 return box
     except Exception as exc:
-        log.debug("could not read a box for %r to rest the pointer over: %s", selector, exc)
+        log.debug(
+            "could not read a box for %r to rest the pointer over: %s", selector, personal_exc(exc)
+        )
     return None
 
 
@@ -5287,7 +5290,7 @@ async def _detach_quietly(detach: Callable[[], Awaitable[None]]) -> None:
     try:
         await detach()
     except Exception as exc:
-        log.debug("detaching from Chrome failed: %s", exc)
+        log.debug("detaching from Chrome failed: %s", personal_exc(exc))
 
 
 def is_navigation_timeout(exc: BaseException) -> bool:

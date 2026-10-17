@@ -87,7 +87,7 @@ from netkeeper.linkedin.page_inbox import PageInbox
 from netkeeper.linkedin.page_messaging import MessageCheckResult as MessageCheckResult
 from netkeeper.linkedin.page_messaging import PageBubbleCheck, PageMessageCheck, PagePrefill
 from netkeeper.linkedin.page_profiles import PageProfiles
-from netkeeper.logging_setup import setup_logging
+from netkeeper.logging_setup import personal_exc, setup_logging
 from netkeeper.models import SyncRunKind, SyncRunStatus, SyncRunTrigger, User
 from netkeeper.services import message_check, message_send, route_breaker, runs, ui_settings
 from netkeeper.services.budgets import (
@@ -328,7 +328,7 @@ class BrowserWorker:
                     await self._run_job(run_id, user_id, facts, browser, settings)
         except (BrowserBusy, BrowserUnavailable) as exc:
             reason = "browser_busy" if isinstance(exc, BrowserBusy) else "browser_unavailable"
-            log.warning("run %d could not use the browser: %s", run_id, exc)
+            log.warning("run %d could not use the browser: %s", run_id, personal_exc(exc))
             if prepared is not None:
                 # The runner never ran, so no key was sent: the claim goes back.
                 await self._prefill_not_typed(
@@ -361,7 +361,7 @@ class BrowserWorker:
             )
             raise
         except (runs.HeatSkipped, runs.SessionFlagged) as exc:
-            log.info("run %d refused: %s", run_id, exc)  # recorded by the runner
+            log.info("run %d refused: %s", run_id, personal_exc(exc))  # recorded by the runner
         except Exception as exc:
             # The runner usually recorded it already; this records only what it did
             # not (a failure before the runner started), and stops it from taking the
@@ -808,7 +808,9 @@ async def run_message_check(
             result = await check.run(target.public_id, target.profile_id, cancelled=cancelled)
     except (BrowserBusy, BrowserUnavailable) as exc:
         reason = "browser_busy" if isinstance(exc, BrowserBusy) else "browser_unavailable"
-        log.warning("message check run %d could not use the browser: %s", target.run_id, exc)
+        log.warning(
+            "message check run %d could not use the browser: %s", target.run_id, personal_exc(exc)
+        )
         await end(SyncRunStatus.FAILED, reason, runs.describe_stop_reason(reason))
         return MessageCheckResult(stopped=runs.describe_stop_reason(reason))
     except asyncio.CancelledError:
@@ -915,7 +917,9 @@ async def run_bubble_check(
                 return BubbleCheckResult(check, stopped="cancelled")
     except (BrowserBusy, BrowserUnavailable) as exc:
         reason = "browser_busy" if isinstance(exc, BrowserBusy) else "browser_unavailable"
-        log.warning("bubble check run %d could not use the browser: %s", target.run_id, exc)
+        log.warning(
+            "bubble check run %d could not use the browser: %s", target.run_id, personal_exc(exc)
+        )
         await end(SyncRunStatus.FAILED, reason, runs.describe_stop_reason(reason))
         return BubbleCheckResult(stopped=runs.describe_stop_reason(reason))
     except asyncio.CancelledError:

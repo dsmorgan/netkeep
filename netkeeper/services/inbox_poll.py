@@ -55,6 +55,7 @@ from netkeeper.linkedin.inbox import (
     InboxSource,
 )
 from netkeeper.linkedin.observe import ObservationFailed
+from netkeeper.logging_setup import personal_exc
 from netkeeper.models import JsonValue, SyncRunKind, SyncRunStatus, SyncRunTrigger, User
 from netkeeper.services import budgets, route_breaker, runs
 from netkeeper.services import heat as heat_service
@@ -224,7 +225,7 @@ async def poll_inbox(
                     settings=settings.budget,
                 )
             except BudgetExceeded as exc:
-                log.info("inbox poll: refused by the budget: %s", exc)
+                log.info("inbox poll: refused by the budget: %s", personal_exc(exc))
                 return "budget"
         return None
 
