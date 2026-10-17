@@ -42,7 +42,7 @@ make build-ui               # build the UI into frontend/dist
 .venv/bin/netkeeper serve   # http://127.0.0.1:8000
 ```
 
-Open the address in Google Chrome. `serve` creates the database the first time and migrates it after every update, so you don't need to run `netkeeper db upgrade` yourself. Without `make build-ui`, the page says "The frontend is not built".
+Open the address in Google Chrome. `serve` creates the database the first time and migrates it after every update, so you don't need to run `netkeeper db upgrade` yourself. The wheel and sdist that CI builds ship the UI inside the package, so an install from one needs no Node or pnpm. Without `make build-ui` in a checkout, the page says "The frontend is not built".
 
 `make install` also installs the developer tools (tests, linters). You don't need them to use netkeeper; `uv sync` installs netkeeper alone. After a `git pull`, run `make install` and `make build-ui` again, then restart `serve`.
 

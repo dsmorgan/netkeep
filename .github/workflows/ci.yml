@@ -193,6 +193,32 @@ jobs:
       - run: pnpm build
       - run: pnpm format:check
 
+  # The wheel must carry the built UI (#596): build the UI, build the wheel, install it
+  # in a clean venv and fetch / from a running `serve` (scripts/smoke-wheel.sh).
+  wheel:
+    name: Wheel ships the UI
+    needs: changes
+    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: uv python install
+      - run: make build-ui
+      - run: uv build
+      - run: scripts/smoke-wheel.sh
+
   # The client is generated from the backend's schema, so either side can drift it.
   client-drift:
     name: Generated client is current

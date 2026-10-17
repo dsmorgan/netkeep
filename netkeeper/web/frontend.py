@@ -1,6 +1,8 @@
 """Serving the built frontend (spec section 5: the SPA is served as a static build).
 
-The build is ``frontend/dist`` at the repository root, or ``$NETKEEPER_FRONTEND_DIST``.
+The build is ``$NETKEEPER_FRONTEND_DIST`` if set; otherwise the copy packaged inside the
+wheel (``netkeeper/web/ui``, put there at build time from ``frontend/dist``, #596); otherwise
+``frontend/dist`` at the repository root, which ``make build-ui`` writes in a dev checkout.
 When it exists, ``/assets`` is served as static files and every other GET that is
 not under ``/api/`` and names no file gets ``index.html`` (the SPA routes client
 side). When it does not, ``/`` explains how to build it.
@@ -20,6 +22,7 @@ from starlette.staticfiles import StaticFiles
 log = logging.getLogger(__name__)
 
 FRONTEND_DIST_ENV = "NETKEEPER_FRONTEND_DIST"
+PACKAGED_DIST = Path(__file__).resolve().parent / "ui"
 DEFAULT_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 API_ROOT = "api"
 
@@ -30,7 +33,9 @@ _NOT_BUILT = """<!doctype html>
              line-height: 1.5">
 <h1>netkeeper</h1>
 <p>The frontend is not built: <code>{dist}</code> has no <code>index.html</code>.</p>
-<p>Build it with <code>make build-ui</code> at the repository root, then reload this page.
+<p>A release install ships the UI inside the package, so if you installed netkeeper from a
+wheel, reinstall it. In a source checkout, build it with <code>make build-ui</code> at the
+repository root, then reload this page.
 For development run <code>pnpm dev</code> in <code>frontend/</code> and open
 <a href="http://localhost:5173">http://localhost:5173</a> instead.</p>
 <p>The API is up: <a href="/api/v1/health">/api/v1/health</a>, documented at
@@ -41,9 +46,19 @@ For development run <code>pnpm dev</code> in <code>frontend/</code> and open
 
 
 def frontend_dist() -> Path:
-    """Where the frontend build is expected: ``$NETKEEPER_FRONTEND_DIST`` or ``frontend/dist``."""
+    """The frontend build to serve.
+
+    ``$NETKEEPER_FRONTEND_DIST`` wins, even when it holds no build (so a typo is
+    reported, not papered over). Then the packaged copy, then the dev checkout's
+    ``frontend/dist``. With neither built, the dev path is returned so the not-built page
+    names where ``make build-ui`` puts it.
+    """
     override = os.environ.get(FRONTEND_DIST_ENV)
-    return Path(override).expanduser() if override else DEFAULT_DIST
+    if override:
+        return Path(override).expanduser()
+    if (PACKAGED_DIST / "index.html").is_file():
+        return PACKAGED_DIST
+    return DEFAULT_DIST
 
 
 def mount_frontend(app: FastAPI, dist: Path) -> None:

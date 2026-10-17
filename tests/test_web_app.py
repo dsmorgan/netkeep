@@ -550,3 +550,59 @@ async def test_built_frontend_never_serves_files_outside_dist(
             served_index = response.text == "<!doctype html><title>netkeeper</title>"
             assert response.status_code in (400, 404) or served_index, path
             assert "OUTSIDE-DIST-MARKER" not in response.text, path
+
+
+# --- which frontend build serves (#596) --------------------------------------
+
+
+def _fake_build(path: Path) -> Path:
+    path.mkdir(parents=True)
+    (path / "index.html").write_text("<!doctype html>")
+    return path
+
+
+def test_frontend_dist_prefers_the_override_then_the_packaged_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from netkeeper.web import frontend
+
+    packaged = _fake_build(tmp_path / "ui")
+    monkeypatch.setattr(frontend, "PACKAGED_DIST", packaged)
+    monkeypatch.delenv(frontend.FRONTEND_DIST_ENV, raising=False)
+    assert frontend.frontend_dist() == packaged
+
+    override = tmp_path / "elsewhere"
+    monkeypatch.setenv(frontend.FRONTEND_DIST_ENV, str(override))
+    assert frontend.frontend_dist() == override  # even with no build in it
+
+
+def test_frontend_dist_falls_back_to_the_dev_checkout_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from netkeeper.web import frontend
+
+    monkeypatch.setattr(frontend, "PACKAGED_DIST", tmp_path / "no-ui")
+    monkeypatch.delenv(frontend.FRONTEND_DIST_ENV, raising=False)
+    assert frontend.frontend_dist() == frontend.DEFAULT_DIST
+
+
+async def test_packaged_build_is_served_and_missing_both_says_how_to_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bare_engine: Engine
+) -> None:
+    from netkeeper.web import frontend
+
+    packaged = _fake_build(tmp_path / "ui")
+    monkeypatch.setattr(frontend, "PACKAGED_DIST", packaged)
+    monkeypatch.delenv(frontend.FRONTEND_DIST_ENV, raising=False)
+    async with _static_client(create_app(Settings(), engine=bare_engine)) as client:
+        response = await client.get("/contacts")
+        assert response.status_code == 200
+        assert response.text == "<!doctype html>"
+
+    monkeypatch.setattr(frontend, "PACKAGED_DIST", tmp_path / "no-ui")
+    monkeypatch.setattr(frontend, "DEFAULT_DIST", tmp_path / "no-dev-dist")
+    async with _static_client(create_app(Settings(), engine=bare_engine)) as client:
+        response = await client.get("/")
+        assert "not built" in response.text
+        assert "make build-ui" in response.text
+        assert "no-dev-dist" in response.text
