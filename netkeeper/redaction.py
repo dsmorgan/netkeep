@@ -102,6 +102,15 @@ _SECRET_GATES: Final[tuple[_Gate, ...]] = (
         ("'name'", '"name"'),
         rf"\g<1>\g<2>{SECRET}\g<2>",
     ),
+    # The same, with the value before the name.
+    _Gate(
+        re.compile(
+            rf"(?i)([\"']value[\"']\s*:\s*)([\"'])(?:(?!\2).)*\2"
+            rf"(?=[^{{}}]*?[\"']name[\"']\s*:\s*[\"'](?:{_CREDENTIAL_NAMES})[\"'])"
+        ),
+        ("'name'", '"name"'),
+        rf"\g<1>\g<2>{SECRET}\g<2>",
+    ),
     # An OAuth authorization code in a query string (a credential until it is spent).
     _Gate(re.compile(r"(?i)([?&]code=)[^\s&#'\"<>]+"), ("code=",), rf"\g<1>{SECRET}"),
     # "key": "value" in JSON or a Python repr.
@@ -168,19 +177,26 @@ _SLUG: Final = re.compile(
 )
 """A LinkedIn path's identifying part: a profile's slug, or what follows a checkpoint's
 kind (a challenge id), wherever the path appears without its host."""
+_SEP: Final = r"[ \t.-]"
+"""A separator inside a phone number: never a newline, so a match stays on its line."""
 _PHONE: Final = re.compile(
-    r"(?<![\w.:/+-])"
-    r"(?:\+\d{1,3}[\s.-]?\d{2,4}[\s.-]?\d{3,4}[\s.-]?\d{3,4}"
+    r"(?<![\w.:/+-])(?:"
+    rf"\+\d{{1,3}}{_SEP}?\d{{2,4}}{_SEP}?\d{{3,4}}{_SEP}?\d{{3,4}}"
     r"|\+\d{8,15}"
-    r"|(?:\(\d{2,4}\)\s?|\d{3}[\s.-])\d{3,4}[\s.-]\d{4})"
+    rf"|(?:\(\d{{2,4}}\)[ \t]?|\d{{3}}{_SEP})\d{{3,4}}{_SEP}\d{{4}}"
     # The UK: +44 (0)20 7946 0321, 020 7946 0321, 07946 032100.
-    r"|\+\d{1,3}\s?\(0\)\s?\d{2,4}[\s.-]?\d{3,4}[\s.-]?\d{3,4}"
-    r"|0\d{2,4}[\s.-]\d{3,4}[\s.-]\d{3,4}"
-    r"|0\d{4}\s?\d{6}"
-    # A seven-digit local number: 555-0142.
-    r"|\d{3}-\d{4}"
-    r"(?![\w.:/-])"
+    rf"|\+\d{{1,3}}[ \t]?\(0\)[ \t]?\d{{2,4}}{_SEP}?\d{{3,4}}{_SEP}?\d{{3,4}}"
+    rf"|0\d{{2,4}}{_SEP}\d{{3,4}}{_SEP}\d{{3,4}}"
+    r"|0\d{4}[ \t]?\d{6}"
+    # France: +33 1 23 45 67 89, 01 23 45 67 89.
+    r"|\+\d{1,3}[ \t.]\d(?:[ \t.]\d{2}){4}"
+    r"|0\d(?:[ \t.]\d{2}){4}"
+    r")(?![\w.:/-])"
 )
+_LOCAL_PHONE: Final = re.compile(r"(?<![\w.:/+-])\d{3}-\d{4}(?![\w.:/-])")
+"""A seven-digit local number, 555-0142: the shape of a range (250-1250) too, so it is
+replaced only on a line that says it is a phone number (:data:`_PHONE_WORDS`)."""
+_PHONE_WORDS: Final = ("phone", "tel", "call", "mobile", "cell", "sms", "whatsapp")
 _SLUG_TRIGGERS: Final = ("/in/", "/pub/", "/company/", "/school/", "/checkpoint/")
 _HOME_DIRS: Final = re.compile(r"(?<![\w.-])/(Users|home)/(?!<)[^/\s\"'<>]+")
 _LOOPBACK: Final = frozenset({"127.0.0.1", "localhost", "::1", "[::1]", "0.0.0.0"})  # noqa: S104
@@ -188,7 +204,7 @@ _LOOPBACK: Final = frozenset({"127.0.0.1", "localhost", "::1", "[::1]", "0.0.0.0
 RECORD_START: Final = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) ")
 """The start of a log record: its date and time. Any other line continues the record."""
 
-_PREFIX: Final = re.compile(r"^(\s*(?:\|\s*)*)(.*?)\s*$")
+_PREFIX: Final = re.compile(r"^(\s*(?:[|+]\s*)*)(.*?)\s*$")
 _FRAME: Final = re.compile(r'^File ".*", line \d+(?:, in \S.*)?$')
 _TRACEBACK_HEADS: Final = frozenset(
     {
@@ -198,9 +214,11 @@ _TRACEBACK_HEADS: Final = frozenset(
         "The above exception was the direct cause of the following exception:",
     }
 )
-_DRAWING: Final = re.compile(
-    r"^(?:[\s|+\-~^\d]*|\.\.\. \(\d+ more exceptions?\)"
-    r"|\[Previous line repeated \d+ more times?\])$"
+_RULE: Final = re.compile(r"^\s*\+[-+]*-(?: (?:\d+|\.\.\.) -+)?$")
+"""An exception group's rule between sub-exceptions: ``+-+---- 1 ----``, ``+------``."""
+_CARETS: Final = re.compile(r"^[~^]+$")
+_KEPT_NOTES: Final = re.compile(
+    r"^(?:\[Previous line repeated \d+ more times?\]|and \d+ more exceptions?)$"
 )
 _TYPE_LINE: Final = re.compile(r"^((?:[A-Za-z_]\w*\.)*[A-Za-z_]\w*)(:.*)?$")
 _BUILTIN_TYPE: Final = re.compile(
@@ -222,7 +240,7 @@ def classify(value: str) -> str:
         return "urn"
     if _URL.match(text) or _BARE_LINKEDIN.match(text):
         return "url"
-    if _PHONE.fullmatch(text):
+    if _PHONE.fullmatch(text) or _LOCAL_PHONE.fullmatch(text):
         return "phone"
     if text.startswith(("/", "~", "./", "../")) or re.match(r"^[A-Za-z]:\\", text):
         return "path"
@@ -254,6 +272,7 @@ class Redactor:
             _Gate(_SLUG, _SLUG_TRIGGERS, self._slug),
             # Every log line has a digit and a separator, so this one runs everywhere.
             _Gate(_PHONE, (), self._typed("phone")),
+            _Gate(_LOCAL_PHONE, _PHONE_WORDS, self._typed("phone")),
         )
 
     def placeholder(self, kind: str, value: str) -> str:
@@ -344,42 +363,57 @@ def continuations(text: str) -> str:
     """Log text with every line after a record's first replaced by
     :data:`MESSAGE_LEFT_OUT`, except a traceback's shape.
 
-    Kept: the ``Traceback``, ``During handling`` and ``The above exception`` lines, each
-    frame (``File "...", line N, in f``) with the source line under it, an exception
-    group's drawing, and each exception's type (``ValueError``, or a dotted name such
-    as ``sqlalchemy.exc.IntegrityError``) without its message. Everything else, a
-    message's later lines, SQLAlchemy's ``[parameters: ...]``, pydantic's
-    ``input_value=...``, goes, and a run of left-out lines becomes one.
+    Kept: the ``Traceback``, ``During handling`` and ``The above exception`` lines (an
+    exception group's too), each frame (``File "...", line N, in f``) with its source
+    and caret lines, an exception group's rules, and each exception's type
+    (``ValueError``, or a dotted name such as ``sqlalchemy.exc.IntegrityError``)
+    without its message. After a type, every line is message until the next head or
+    rule, however much it looks like a frame or a type. Everything else, SQLAlchemy's
+    ``[parameters: ...]``, pydantic's ``input_value=...``, goes, and a run of left-out
+    lines becomes one.
     """
     out: list[str] = []
-    in_traceback = False
-    frame_indent: int | None = None  # the frame line's indent, until its source line
+    in_traceback = in_message = False
+    frame_indent: int | None = None  # the last frame's indent, until its source line
+    after_source = False  # caret lines may follow a source line
     for line in text.split("\n"):
-        if RECORD_START.match(line) or not line:
+        if RECORD_START.match(line):
             out.append(line)
-            in_traceback, frame_indent = False, None
+            in_traceback = in_message = after_source = False
+            frame_indent = None
+            continue
+        if not line.strip():
+            out.append(line)
             continue
         found = _PREFIX.match(line)
         prefix, body = (found.group(1), found.group(2)) if found else ("", line)
         kept: str | None = None
+        source = frame_indent
+        frame_indent = None
+        carets = after_source
+        after_source = False
         if body in _TRACEBACK_HEADS:
-            in_traceback, kept = True, line
-        elif in_traceback and _FRAME.match(body):
-            out.append(line)
-            frame_indent = len(prefix)
-            continue
-        elif in_traceback and frame_indent is not None and len(prefix) > frame_indent:
-            kept = line  # the frame's source line: code, not a value
-        elif in_traceback and _DRAWING.match(body):
+            in_traceback, in_message, kept = True, False, line
+        elif in_traceback and _RULE.match(line):
+            in_message, kept = False, line
+        elif not in_traceback or in_message:
+            pass
+        elif _FRAME.match(body):
+            frame_indent, kept = len(prefix), line
+        elif source is not None and len(prefix) > source:
+            after_source, kept = True, line  # the frame's source line: code, not a value
+        elif carets and _CARETS.match(body):
+            after_source, kept = True, line
+        elif _KEPT_NOTES.match(body):
             kept = line
-        elif in_traceback and (typed := _TYPE_LINE.match(body)) is not None:
+        elif (typed := _TYPE_LINE.match(body)) is not None:
             name = typed.group(1)
             if "." in name or _BUILTIN_TYPE.match(name):
                 rest = typed.group(2)
                 kept = f"{prefix}{name}" + (
                     f": {MESSAGE_LEFT_OUT}" if rest and rest[1:].strip() else ""
                 )
-        frame_indent = None
+                in_message = True
         if kept is None:
             # An exception group's bar stays, so the drawing still lines up.
             kept = f"{prefix if '|' in prefix else ''}{MESSAGE_LEFT_OUT}"

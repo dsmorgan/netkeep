@@ -387,19 +387,24 @@ def _jobs(session: Session, user: User, account_id: int) -> dict[str, Any]:
     }
 
 
-_ERROR_TYPE: Final = re.compile(r"^\s*([A-Za-z_][\w.]*)\s*:")
+_ERROR_TYPE: Final = re.compile(r"^\s*([A-Za-z_]\w*)\s*(:.*)?$", re.DOTALL)
 
 
 def error_type(error: str | None) -> str | None:
     """A run's ``error`` below the full level: the exception's type and nothing else.
 
-    ``error`` is ``Type: first line of the message`` (``runs.describe``), and the
-    message is whatever the code put in it, a name or a bare slug as often as not, with
-    nothing to mark it. An error that does not start with a type keeps none of it."""
+    ``error`` is ``Type: first line of the message``, or the bare type when the message
+    is empty (``runs.describe``, which writes ``type(exc).__name__``, never a dotted
+    name). The message is whatever the code put in it, a name or a bare slug as often
+    as not, with nothing to mark it. An error that does not start with a type keeps
+    none of it."""
     if error is None:
         return None
     found = _ERROR_TYPE.match(error)
-    return f"{found.group(1)}: {MESSAGE_LEFT_OUT}" if found else MESSAGE_LEFT_OUT
+    if found is None:
+        return MESSAGE_LEFT_OUT
+    rest = found.group(2)
+    return found.group(1) + (f": {MESSAGE_LEFT_OUT}" if rest and rest[1:].strip() else "")
 
 
 def _run(run: SyncRun, *, redacted: bool) -> dict[str, Any]:
