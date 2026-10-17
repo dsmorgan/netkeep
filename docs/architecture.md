@@ -885,7 +885,7 @@ stateDiagram-v2
 - **Labels.** The campaign's label is created when missing, cached per mailbox, and applied to each sent message, and to a draft once it's seen sent. A label failure never fails a send.
 - **Stopping.** `CampaignEngine.stop()` asks the tick to claim nothing more, then waits up to 45 seconds (`STOP_WAIT_S`) for a tick in flight, so its send is recorded before the database is disposed. A tick that outlasts the wait leaves its message `scheduled`, and the next start's reconcile finds it.
 - **The mailbox is locked** once a campaign leaves `draft`: the caps count a campaign's sends through its current mailbox, and a reconcile searches that mailbox. Changing `mailbox_id` on a stored campaign that isn't a draft raises `CampaignMailboxLocked`.
-- **Never twice across processes.** A second writer is refused only by SQLite's `BEGIN IMMEDIATE`. PostgreSQL, or more than one process sending, needs a database-side guard first (see the amendment to [ADR 0003](adr/0003-gmail-api-over-smtp.md)).
+- **Never twice across processes. netkeeper supports SQLite only** (maintainer's decision, #485). A second writer is refused only by SQLite's `BEGIN IMMEDIATE`; `mark_for_write` does nothing on PostgreSQL. PostgreSQL, or more than one process sending, is unsupported until a database-side guard exists: either a claim key written once at claim time (unique, from the enrollment id and step at the claim), or `SELECT ... FOR UPDATE` on the enrollment row held through the send decision. A plain unique index on (enrollment, step) is not enough, because a merge re-points messages onto one enrollment. Nothing here is urgent; see the amendment to [ADR 0003](adr/0003-gmail-api-over-smtp.md).
 
 ### 11.6 LinkedIn messaging
 

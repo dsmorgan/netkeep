@@ -26,12 +26,15 @@ Every list and thread answer comes from one path. The `queryId` is `<name>.<hash
 | The list, refreshed | same | `messengerConversations` | `mailboxUrn`, `syncToken` | `messengerConversationsBySyncToken` |
 | Older conversations, first page | same | `messengerConversations` | `query:(predicateUnions:List((conversationCategoryPredicate:(category:PRIMARY_INBOX))))`, `count:20`, `mailboxUrn`, `lastUpdatedBefore` (epoch ms) | `messengerConversationsByCategoryQuery` |
 | Older conversations, later pages | same | `messengerConversations` | the same `query`, `count:20`, `mailboxUrn`, `nextCursor` | `messengerConversationsByCategoryQuery` |
+| Older conversations, filtered (InMail) | same | `messengerConversations` | `query:(predicateUnions:List((conversationCategoryPredicate:(category:INMAIL)),(conversationCategoryPredicate:(category:PRIMARY_INBOX))))`, `count:20`, `mailboxUrn`, `lastUpdatedBefore`; later pages `nextCursor` | `messengerConversationsByCategoryQuery` |
 | One conversation by id | same | `messengerConversations` | `conversationIds:List(<msg_conversation urn>)`, `count:1` | `messengerConversationsByIds` |
 | A recipient's conversation | same | `messengerConversations` | `mailboxUrn`, `recipients:List(<fsd_profile urn>)` | `messengerConversationsByRecipients` |
 | A thread, on open | same | `messengerMessages` | `conversationUrn` (later: and `syncToken`) | `messengerMessagesBySyncToken` |
 | A thread, scrolled up | same | `messengerMessages` | `deliveredAt` (epoch ms), `conversationUrn`, `countBefore:20`, `countAfter:0` | `messengerMessagesByAnchorTimestamp` |
 | Several threads | same | `messengerMessages` | `criteria:List((conversationUrn,syncToken))` | `messengerMessagesBySyncTokensInBatch` |
 | Counts, receipts, quick replies | same | `messengerMailboxCounts`, `messengerSeenReceipts`, `messengerQuickReplies` | `mailboxUrn` or `conversationUrn` | not read |
+
+A filtered list carries extra `predicateUnions` entries: the InMail filter puts `INMAIL` before `PRIMARY_INBOX`. netkeeper reads an older page only when its `query` is exactly the single `PRIMARY_INBOX` predicate (#555); any other `query` stops the poll as `route_changed`.
 
 Every captured list and thread request was answered `200` with a whole body; none was aborted. They are `fetch` requests answered `application/graphql`.
 
@@ -110,10 +113,16 @@ The list is ordered by `lastActivityAt`, newest first, in every captured answer.
 - **Sponsored and offers.** `conversationTypeText.text` is `Sponsored` or `LinkedIn Offer` (`InMail` on pending InMail); these are LinkedIn's own labels. A sponsored item also carries a `messageAdRenderContent` render item (`status`, `sponsoredCampaignUrn`, `subContent`, and tracking keys), or a `conversationAdsMessageContent` render item with `contentMetadata.conversationAdContent`. Some had an **organization** participant: `participantType.organization` (`com.linkedin.messenger.OrganizationParticipantInfo`), `hostIdentityUrn` `urn:li:fsd_company:<n>`, `participantType.member: null`.
 - **InMail.** `INMAIL` in `categories`. It stays after the person accepts, so an accepted InMail with a contact sits in `PRIMARY_INBOX` beside ordinary conversations.
 - **An edited message.** `messageBodyRenderFormat` `EDITED`, seen in the capture on list messages; otherwise `DEFAULT`.
-- **A group.** `groupChat: true`, more than two participants, and probably a `title` (one-to-one items can have a `title` too). **No group was in the capture**; the fixture is invented from these key names.
+- **A group.** `groupChat: true` and more than two participants. The CP8d capture (#520) held one group, an unnamed one, from a single-conversation answer (`messengerConversationsById`, a bare `Conversation` object, not `elements`): `title` was **null**, `conversationTypeText`, `headlineText`, `shortHeadlineText`, `descriptionText`, `contentMetadata` and `conversationVerificationLabel` were null, `categories` were `INBOX` and `PRIMARY_INBOX`, `state` was null, and one participant was the owner (`SELF`). **There is no `conversationType` field**: `groupChat` and the participant count are the only markers. A named group would carry a `title`, as a one-to-one item can. The group's *list* item was not captured; the fixtures (`GROUP`, and the untitled variant in `tests/test_cp8d_message_shapes.py`) are invented from these key names.
 - **A system message.** **Not seen.** The nearest thing was the `actor: null` messages.
 
 `disabledFeatures[].disabledFeature` lists features off for a conversation (`ADD_PARTICIPANT`, `CREATE_GROUP_CHAT_LINK`, `REPLY`, and so on); on a one-to-one conversation `ADD_PARTICIPANT` and `REMOVE_PARTICIPANT` were always present.
+
+## The filtered list, and the page's move to the newest thread
+
+Choosing the InMail filter in the inbox (CP8d, #520) sends the same `messengerConversations` request as the older pages, with the filter as an **extra `conversationCategoryPredicate`** in `predicateUnions`: `INMAIL` first, then `PRIMARY_INBOX`. Paging is unchanged (`lastUpdatedBefore`, then `nextCursor`), `count` stays 20, and the answer is `messengerConversationsByCategoryQuery` with the same items. The page's address carries the filter as well: later requests name `/messaging/thread/<id>/?filter=<token>`, where the token is six lowercase letters. netkeeper never chooses a filter and its poll goes to `/messaging/` with no query. A filtered page that arrives during a poll stops it rather than being taken for part of the primary inbox (#555 reads an older page only for the single `PRIMARY_INBOX` predicate; before it, the check read the first predicate, which held only while LinkedIn listed the filter's predicate first).
+
+About 1.1 s after `load`, with no input, the page selects the newest conversation and rewrites the address to `/messaging/thread/<id>/`. The unfiltered inbox does the same. A poll that has to scroll re-checks the address, so on a narrow layout or a long first poll this can end it as route changed. The capture doesn't prove it either way.
 
 ## The list carries only the last message
 
@@ -137,7 +146,7 @@ On a profile, **Message** is an `<a>` with no `aria-label`; its accessible name 
 
 where `recipient` is the same bare id as in `profileUrn`. The server-rendered profile writes the `href` relative; the copy taken from the live page (`message-control-2.html`) had it absolute, `https://www.linkedin.com/messaging/compose/?…`. The `<a>` carries `aria-disabled="false"` and a `componentkey`. A sibling `<button type="button" aria-expanded="false">` whose text is **More** holds the overflow menu.
 
-**There is more than one Message control.** The captured profile document rendered **three** `<a>` elements whose text is exactly `Message`, each with its own `componentkey`, all with the same compose `href` naming the profile's own id. Its flight data and one lazy card (`actions/component`) named the same compose url again, for the same recipient. Which of the three a person sees (the top card, the sticky header that appears on scroll, or a hidden layout variant) is CSS, which the capture can't show. A rule of "exactly one control named Message" would refuse every profile. Under ADR 0007 (#385), every Message control on the page must carry the contact's compose `href`. Since #444 the prefill clicks the top card's control (the first after the profile's `h1`) when it's on screen with nothing over it, else another that is; see ADR 0007, "Choosing the control".
+**There is more than one Message control.** The captured profile document rendered **three** `<a>` elements whose text is exactly `Message`, each with its own `componentkey`, all with the same compose `href` naming the profile's own id. Its flight data and one lazy card (`actions/component`) named the same compose url again, for the same recipient. Which of the three a person sees (the top card, the sticky header that appears on scroll, or a hidden layout variant) is CSS, which the capture can't show. The CP8d capture (#520, `sticky-header-2.html`) shows the sticky copy: a `div[role=toolbar]` with no name, holding a link to the profile (absolute, vanity slug, the name in a `div[aria-label]`; no heading), a **More** button, and an `<a>` named `Message` whose `href` is an absolute compose URL with `profileUrn`, `recipient`, `screenContext` and `interop` once each. That link passes the same check as the top card's, so it is an extra safe candidate, not a refusal. Whether the toolbar is always in the DOM isn't known. A rule of "exactly one control named Message" would refuse every profile. Under ADR 0007 (#385), every Message control on the page must carry the contact's compose `href`. Since #444 the prefill clicks the top card's control (the first after the profile's `h1`) when it's on screen with nothing over it, else another that is; see ADR 0007, "Choosing the control".
 
 Clicking **Message** opens a bubble at the bottom of the profile page; the tab stays on the profile. The click loads two requests.
 
@@ -193,6 +202,14 @@ From `message-never-contacted.html` (the bubble's inside; whether its outer elem
 - The composer is the same `form#msg-form-…` with the same `role="textbox"` and `aria-label="Write a message…"`, empty (`<p><br></p>`).
 - **Send** is `button[type="submit"]` with `disabled`, until there is text.
 
+The CP8d captures (#520, 2026-10-16) of three more New message bubbles, a verified member, one showing pronouns, and a name with a `, <CRED>` suffix, had this structure each time, and add:
+
+- **The chip's text is the whole name.** Its `aria-label` is `Remove ` plus the text, and both hold the full `<NAME>, <CRED>` when the name has a suffix. The ellipsis a long name shows is CSS (`text-overflow`) only; no `title` attribute repeats the name. Pronouns are never in the chip or its label; in the card they sit in a sibling `span` after the name link. A verified badge isn't in the bubble's DOM.
+- **The recipient field** is an `input[role="combobox"]` with `aria-expanded="false"`, and an "Add … recipients for your message" button beside it, whose name doesn't start with `Remove`.
+- **The card** has two relative links, both `/in/<slug>/` with the vanity slug: the photo (`img` `alt` `<NAME> Profile`, plus a presence span) and the name. A `<degree> degree connection` badge and the headline follow.
+- **A second `Messaging` dialog sits beside it.** In all three captures a *minimized sponsored* bubble (`msg-spinmail-thread-presenter` in its body) was on the page: `role="dialog"`, `aria-label="Messaging"`, `data-msg-overlay-conversation-bubble-is-minimized="true"`, a header `h2` with the sender's name as text only (**no link**), a close button `Close your conversation with <A> and <B>`, and **no composer**. Its ember ids are lower than the New message bubble's, so it was most likely there before the click (an inference). The New message bubble is the other dialog: not minimized, with the composer.
+- **The profile's name is in an `h2`**, with no `h1` on the page. A name with a suffix reads `<NAME>, <CRED>` in one text node.
+
 The prefill must check that there is exactly one chip, that its `Remove <name>` names the contact, and that the compose option's `recipientUrns` is the contact's URN.
 
 ## Where focus lands
@@ -231,7 +248,7 @@ Response:
            "deliveredAt": <ms>, "renderContentUnions": []}}
 ```
 
-`value.originToken`, `value.conversationUrn` and `value.body.text` equal the request's. The owner's messages in later list and thread answers carry the same `originToken` key. No `/realtime/` event was captured for the send.
+`value.originToken`, `value.conversationUrn` and `value.body.text` equal the request's. The owner's messages in later list and thread answers carry the same `originToken` key. No `/realtime/` event was captured for the send (see `/realtime/` below).
 
 **Matching a send the person made.** The prefill doesn't send, so netkeeper never sees the `originToken` before the person clicks. The poll can match on what the list and thread answers carry: a message in the prefilled conversation (`conversation.entityUrn`, or the `createMessage` answer's `value.conversationUrn` if the tab observes it), whose `sender.hostIdentityUrn` is the mailbox owner (and whose `originToken` is therefore set), with `deliveredAt` after the prefill's hand-over. `entityUrn` identifies that message from then on. The text can confirm it, within `SNIPPET_MAX`.
 
@@ -255,7 +272,34 @@ The maintainer's notes for step 12: a minimized bubble stays open as you move to
 
 ## `/realtime/`
 
-The inbox page opens `GET /realtime/connect`, subscribes with `PUT /realtime/realtimeFrontendSubscriptions` (the captured subscription named `presenceStatusTopic`), reads `GET /realtime/realtimeFrontendTimestamp`, and posts `realtimeFrontendClientConnectivityTracking?action=sendHeartbeat`. The HAR holds no body for the event stream, so no event body is known.
+The inbox page opens `GET /realtime/connect?rc=<n>` over HTTP/3 and reads it as a streamed `fetch`, not an `EventSource`. The answer is `text/event-stream`: each record is one `data:` line and a blank line, with no `event:`, `id:` or `retry:` line. The `data:` value is a JSON object with **one top-level key, the record's class name**:
+
+- `com.linkedin.realtimefrontend.ClientConnection` comes first: `id` (the `clientConnectionId` the subscriptions name), `personalTopics`, `leftServerAt`, `serverProcessingTime`.
+- `com.linkedin.realtimefrontend.Heartbeat` is `{}`, every 15 seconds.
+- `com.linkedin.realtimefrontend.DecoratedEvent` carries `topic`, `id`, `leftServerAt`, `trackingId`, sometimes `publisherTrackingId`, and `payload`. The class name is the same for every event, so **the `topic` says what it is**: `urn:li-realtime:<topicName>:urn:li-realtime:myself`.
+
+The page subscribes with `PUT /realtime/realtimeFrontendSubscriptions?ids=List(...)`, one id per `(clientConnectionId:<uuid>,topic:<topic urn>)`. The answer is `{results: {<id>: {status}}, errors: {<id>: {message, status}}}`. Topics named in the subscriptions: `messageStreamingUpdatesBroadcastTopic` (for the mailbox) and `presenceStatusTopic` (one per profile). The page also reads `GET /realtime/realtimeFrontendTimestamp` and posts `realtimeFrontendClientConnectivityTracking?action=<a>` (`sendHeartbeat` in the HAR).
+
+A new message arrives on `messagesTopic`, with an example of the shape (invented values):
+
+```
+data: {"com.linkedin.realtimefrontend.DecoratedEvent": {
+  "topic": "urn:li-realtime:messagesTopic:urn:li-realtime:myself",
+  "id": "00000000-0000-0000-0000-000000000000", "leftServerAt": 1767225600000,
+  "trackingId": "...", "publisherTrackingId": "urn:li:messagingMessage:...",
+  "payload": {"$metadata": {}, "data": {"_type": "com.linkedin.<hash>", "_recipeType": "...",
+    "doDecorateMessageMessengerRealtimeDecoration": {
+      "_type": "com.linkedin.restli.common.ActionResponse",
+      "result": {"_type": "com.linkedin.messenger.Message",
+        "entityUrn": "urn:li:msg_message:(urn:li:fsd_profile:ACoAAOwner,2-ZmFrZQ==)",
+        "backendConversationUrn": "urn:li:messagingThread:2-ZmFrZQ==",
+        "deliveredAt": 1767225600000, "originToken": null,
+        "body": {"text": "Hello from Quorbelle", "attributes": []},
+        "sender": {"hostIdentityUrn": "urn:li:fsd_profile:ACoAAQuorbelle", "participantType": {"member": {...}}},
+        "actor": {...}, "conversation": {<a full Conversation>}, "previousMessages": {"elements": [{"entityUrn": "..."}]}}}}}}}
+```
+
+`result` is the same `com.linkedin.messenger.Message` the GraphQL answers carry (see "The envelope"), with the full conversation inline. `_message()` parses it unchanged (`tests/test_cp8d_message_shapes.py` pins that). `replySuggestionTopicV<N>` brings the quick replies for that message just before it (`doDecorateQuickRepliesMessengerRealtimeDecoration`, a list of `com.linkedin.messenger.QuickReply`). `tabBadgeUpdateTopic` events use the Voyager `$type` form (`RealtimeBadgingItemCountsEvent`). **netkeeper doesn't read the stream**: the inbox poll reads by sync token, and no body-tap matcher names `/realtime/`.
 
 The CP8c analysis (#484, #519) added these facts:
 
@@ -263,12 +307,13 @@ The CP8c analysis (#484, #519) added these facts:
 - The page acknowledges a live reply with `deliveryMechanism: REALTIME`. At thread open, the acknowledgement says `SYNC`.
 - After a reply, the page refetches neither the list nor the thread. The list reorders from the event alone.
 - The inbox poll reads by sync token and doesn't need `/realtime/`.
+- The owner's own send over realtime hasn't been captured: the CP8d capture holds only an inbound message, so whether a send also arrives on `messagesTopic` (with `originToken` set) is unknown. Typing indicators, read receipts and reactions didn't occur either.
 
 ## What the capture couldn't show
 
 ### Still to capture
 
-The CP8c captures (#484) settled the live reply's delivery, focus after the click, and Send in an empty composer. These remain: the realtime event body, a group conversation, and the filtered list request (CP8d).
+The CP8c captures (#484) settled the live reply's delivery, focus after the click, and Send in an empty composer. The CP8d captures (#520) settled the realtime event body, a group conversation and the filtered list request. These remain: a group's *list* item (the capture held the group only as a single-conversation answer), the owner's own send over realtime, and the other realtime topics (typing, read receipts, reactions).
 
 ### Not shown by the 2026-10-05 capture
 
@@ -289,7 +334,7 @@ The CP8c captures (#484) settled the live reply's delivery, focus after the clic
 | The mailbox owner | The first part of each conversation URN, the participant with `distance: SELF`, and the request's `mailboxUrn`; all must agree. The `conversationIds` request has no `mailboxUrn`, so for it only the first two | Captured | Disagreement: `RouteChanged` |
 | A conversation | `entityUrn`, `lastActivityAt`, `categories`, `groupChat`, `conversationParticipants`, `messages.elements` | Captured | A missing key (other than `messages`): the whole answer is refused |
 | The counterpart | The one participant whose `hostIdentityUrn` isn't the owner's, and is a `urn:li:fsd_profile:` | Captured | More than one, or a company: skipped as a group or as other |
-| Kind (the rules apply in order; the first that matches decides), rule 1: a group | `groupChat: true`, or more than one counterpart | **Assumed**: no group in the capture | Counted as `skipped_group` |
+| Kind (the rules apply in order; the first that matches decides), rule 1: a group | `groupChat: true`, or more than one counterpart | Captured for a group's single-conversation answer; its list item is **assumed** | Counted as `skipped_group` |
 | Kind, rule 2: sponsored or an offer | Otherwise, any company participant, `contentMetadata.conversationAdContent`, or a `messageAdRenderContent` or `conversationAdsMessageContent` render item, whatever the categories, state or label (captured sponsored items also sit in `INBOX`/`PRIMARY_INBOX`/`INMAIL`, with `state` `null`). A `Sponsored` label alone doesn't trigger this rule; by design, an accepted InMail labelled `Sponsored` with no ad item, no company participant and no `conversationAdContent` falls to rule 3 and is read, since missing a reply is the dangerous direction | Captured | Counted as `skipped_other` |
 | Kind, rule 3: accepted InMail | Otherwise, `INMAIL` in `categories` with `state` `ACCEPTED` and one `fsd_profile` counterpart: **read as one-to-one**, whatever its `conversationTypeText`, `hostUrnData` or `conversationVerificationLabel` (maintainer's decision, #432 review: missing a reply is the dangerous direction). Captured accepted InMail had no label and no `hostUrnData`; some had a `conversationVerificationLabel` | Captured | |
 | Kind, rule 4: other InMail | Otherwise, `INMAIL` in `categories` (`state` `PENDING`, `DECLINED` or `null`) | Captured | Counted as `skipped_other` |
@@ -304,11 +349,12 @@ The CP8c captures (#484) settled the live reply's delivery, focus after the clic
 | Opening a thread | Navigate to `conversationUrl` (`/messaging/thread/<thread id>/`); read `messengerMessagesBySyncToken` whose request names that `conversationUrn` | Captured | No answer for that conversation: the thread unread, the list item still counts |
 | A thread's messages | `elements`, newest first, the list message's shape | Captured | |
 | Older messages | `messengerMessagesByAnchorTimestamp` | Shape **assumed** (the captured answers were empty) | |
-| The Message control | Every `<a>` named `Message` must have the `href` `/messaging/compose/?profileUrn=urn:li:fsd_profile:<id>&recipient=<id>&…`, with both ids the contact's; the prefill clicks the top card's, or another on screen with nothing over it (ADR 0007, #444) | Captured (three identical controls); which is visible, and where the sticky copy sits: **assumed** (#429, item 6) | None, or any control naming someone else: nothing is clicked. None on screen and clear, and no top card to scroll to: nothing is clicked |
+| The Message control | Every `<a>` named `Message` must have the `href` `/messaging/compose/?profileUrn=urn:li:fsd_profile:<id>&recipient=<id>&…`, with both ids the contact's; the prefill clicks the top card's, or another on screen with nothing over it (ADR 0007, #444) | Captured (three identical controls); which is visible: **assumed** (#429, item 6); the sticky copy, a `div[role=toolbar]` link: captured (CP8d) | None, or any control naming someone else: nothing is clicked. None on screen and clear, and no top card to scroll to: nothing is clicked |
 | The bubble opened | The compose option answer's `composeNavigationContext.recipientUrns` is `[contact's urn]` | Captured | Another recipient, or none: no key |
 | Existing or new | `existingConversationUrn` present (`REPLY`) or absent (`CONNECTION_MESSAGE`) | Captured | |
 | The existing bubble | One `role="dialog"` named `Messaging`, whose header `h2` link is `/in/<contact's profile id>/` | Captured | Another id, or two dialogs: no key |
-| The new bubble | `New message`; exactly one chip, `Remove <name>`; every `/in/` link in the scope is the contact's, by slug or member id, and at least one is there (#481) | Captured (root role unknown) | Zero or two chips: no key |
+| A `Contact info` dialog | Not a bubble: a `<dialog>` with no `role` attribute, named `Contact info` through `aria-labelledby` to `header#dialog-header > h2`, modal while open, at `/in/<slug>/overlay/contact-info/`. The checks look for `Messaging` dialogs, so it isn't counted (`tests/test_contact_info_dialog_guard.py`). A tab left on that address fails the prefill's "on the contact's profile" check, which is safe. The dialog's own shape is in `linkedin-flagship-web-shapes.md` | Captured (CP8d) | |
+| The new bubble | `New message`; exactly one chip, `Remove <name>`; every `/in/` link in the scope is the contact's, by slug or member id, and at least one is there (#481) | Captured (root role unknown); a minimized sponsored `Messaging` dialog beside it: captured (CP8d), and today it counts as an open bubble | Zero or two chips: no key |
 | The composer | Exactly one `role="textbox"` named `Write a message…` in that bubble, empty | Captured | None, two, or not empty: no key |
 | Focus | Focus the composer by role and name before typing | Captured (CP8c, #519): focus stays on the Message button after the click | |
 | Newlines | Shift+Enter | Captured: never sends | |
