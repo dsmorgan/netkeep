@@ -40,9 +40,9 @@ This ADR supersedes ADR 0002's "never launches a browser of its own" for rules 2
 
 - ADR 0002 gets a dated amendment.
 - `CLAUDE.md`'s "Browser identity" line and `make chrome` note change.
-- `tests/test_browser_safety.py`'s ban on spawning a process gets one exception: one module and one function, whose two argument lists are built from config and pinned by tests to the lines netkeeper prints. The ban stays everywhere else, and Playwright's launch calls stay banned everywhere.
+- `tests/test_browser_safety.py`'s ban on spawning a process gets one exception: one module, imported only by the CLI and `serve`'s wiring and never by `web/`, with one function whose two argument lists are built from config and pinned by tests to the lines netkeeper prints. Playwright's launch calls stay banned everywhere.
 
-The design doc lists the other text that says netkeeper never starts Chrome.
+The design doc lists the other text that changes.
 
 ## Consequences
 
