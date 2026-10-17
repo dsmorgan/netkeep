@@ -640,6 +640,9 @@ describe('PostureSection: Reset breaker and Forget inbox owner (#583)', () => {
     expect(dialog).toHaveTextContent('Forget the recorded LinkedIn mailbox?')
     expect(dialog).toHaveTextContent('cancel and sign back in to yours instead')
     expect(dialog).toHaveTextContent('the next inbox poll records whichever account the page shows')
+    expect(dialog).toHaveTextContent(
+      'click Check inbox now on the LinkedIn page, or run netkeeper linkedin inbox.',
+    )
     fireEvent.click(within(dialog).getByRole('button', { name: 'Forget inbox owner' }))
 
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())

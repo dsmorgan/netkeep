@@ -172,6 +172,35 @@ async def test_reset_refuses_a_breaker_that_tripped_after_the_person_looked(
     assert _tripped(running_app) == {"route_changed_breaker", "inbox_owner_breaker"}
 
 
+async def test_reset_refuses_a_breaker_that_cleared_after_the_person_looked(
+    client: httpx.AsyncClient, running_app: FastAPI
+) -> None:
+    """The person saw two tripped; one cleared since (a poll completed). Sending the larger
+    set they saw is refused too, so a reset only ever answers exactly what was shown."""
+    _with_local(running_app, _trip_route_changed, _trip_inbox_owner)
+    shown = ["inbox_owner_breaker", "route_changed_breaker"]
+
+    def completed(session: Session, user: User) -> None:
+        route_breaker.record_inbox_owner(
+            session,
+            user,
+            account_id_for(session, user),
+            owner_mismatch=False,
+            completed=True,
+            now=NOW,
+        )
+
+    _with_local(running_app, completed)
+
+    response = await client.post(
+        RESET_URL, json={"confirm": True, "tripped": shown}, headers=HEADERS
+    )
+
+    assert response.status_code == 409
+    assert "reload Posture" in response.json()["detail"]
+    assert _tripped(running_app) == {"route_changed_breaker"}
+
+
 async def test_reset_clears_an_unreadable_breaker(
     client: httpx.AsyncClient, running_app: FastAPI
 ) -> None:

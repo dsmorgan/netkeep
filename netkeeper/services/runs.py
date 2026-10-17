@@ -894,7 +894,8 @@ STOP_REASON_TEXT: Final[Mapping[str, str]] = {
     "no_source": "refused: the LinkedIn inbox poll has no page source yet",
     "owner_mismatch": (
         "the page showed another LinkedIn mailbox than this account's; if Chrome is signed"
-        " in to another LinkedIn account, sign back in to yours; otherwise run"
+        " in to another LinkedIn account, sign back in to yours; otherwise click **Forget"
+        " inbox owner** under Posture on the Settings page, or run"
         " `netkeeper linkedin inbox-forget-owner` (or, if your own contact has a LinkedIn"
         " ID, it does not match this mailbox and netkeeper cannot edit it yet)"
     ),
