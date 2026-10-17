@@ -1398,12 +1398,14 @@ _SENT: Final[ColumnElement[bool]] = (
         Message.enrollment_id == Enrollment.id,
         Message.user_id == Enrollment.user_id,
         Message.direction == MessageDirection.OUT,
-        Message.status.in_((MessageStatus.SENT, MessageStatus.BOUNCED)),
+        Message.status == MessageStatus.SENT,
     )
     .correlate(Enrollment)
     .exists()
 )
-"""An enrollment that was sent at least one message (a bounced one went out too)."""
+"""An enrollment that was sent at least one message that reached them. A bounced one
+did not: a bounce found after the sequence completed must not put someone netkeeper
+never reached under "no reply"."""
 
 _STILL_IN: Final = (EnrollmentStatus.PENDING, EnrollmentStatus.ACTIVE, EnrollmentStatus.PAUSED)
 

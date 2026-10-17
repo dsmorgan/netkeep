@@ -877,8 +877,22 @@ def test_no_reply_needs_a_message_sent(session: Session, user: User) -> None:
     factories.make_message(session, enrollment, status=MessageStatus.DRAFTED, sent_at=None)
     no_reply = {"op": "campaign_outcome", "campaign_ids": [campaign.id], "outcome": "no_reply"}
     assert contact.id not in matching(session, user, no_reply), "a draft is not a send"
-    factories.make_message(session, enrollment, status=MessageStatus.BOUNCED)
+    factories.make_message(session, enrollment, status=MessageStatus.SENT, position=1)
     assert contact.id in matching(session, user, no_reply)
+
+
+def test_a_bounce_after_completion_is_not_no_reply(session: Session, user: User) -> None:
+    """A one-step campaign completes, then its only message bounces: nobody was reached."""
+    campaign = factories.make_campaign(session, user)
+    contact = factories.make_contact(session, user)
+    enrollment = factories.make_enrollment(
+        session, campaign, contact, status=EnrollmentStatus.COMPLETED
+    )
+    factories.make_message(session, enrollment, status=MessageStatus.BOUNCED, bounced_at=NOW)
+    no_reply = {"op": "campaign_outcome", "campaign_ids": [campaign.id], "outcome": "no_reply"}
+    assert matching(session, user, no_reply) == []
+    no_reply["outcome"] = "completed"
+    assert matching(session, user, no_reply) == [contact.id]
 
 
 def test_the_outcomes_but_no_reply_split_the_enrollments_once(session: Session, user: User) -> None:
