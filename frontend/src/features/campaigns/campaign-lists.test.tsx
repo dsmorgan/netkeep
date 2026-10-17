@@ -129,6 +129,38 @@ describe('the builder previews the guards', () => {
     expect(post?.body).toEqual({ list_id: 21, channel: 'email' })
   })
 
+  it('never asks without a list or a complete filter, and never flashes an error', async () => {
+    const calls: Call[] = []
+    mockFetch(backend(calls))
+    await renderApp('/campaigns/new')
+    await screen.findAllByRole('option', { name: 'Catching up (email)' })
+    const first = within(screen.getByRole('listitem', { name: 'Step 1' }))
+    fireEvent.change(first.getByLabelText('Template'), { target: { value: '11' } })
+
+    // A list chosen right after "A list": the debounced copy once held no list at all.
+    fireEvent.change(screen.getByLabelText('Audience from'), { target: { value: 'list' } })
+    await screen.findByRole('option', { name: 'Old colleagues (3)' })
+    fireEvent.change(screen.getByLabelText('List'), { target: { value: '21' } })
+    await screen.findByRole('region', { name: 'Guard preview' })
+
+    // A filter with no condition yet is not a source to ask about.
+    fireEvent.change(screen.getByLabelText('Audience from'), { target: { value: 'filter' } })
+    await new Promise((resolve) => setTimeout(resolve, 500))
+
+    const asked = calls.filter(
+      (c) => c.method === 'POST' && c.path === '/api/v1/campaigns/audience-preview',
+    )
+    expect(asked.length).toBeGreaterThan(0)
+    for (const call of asked) {
+      const body = call.body as { list_id?: number | null; filter?: { where: unknown } | null }
+      const hasList = typeof body.list_id === 'number'
+      const hasFilter =
+        body.filter !== undefined && body.filter !== null && body.filter.where !== null
+      expect(hasList || hasFilter, JSON.stringify(body)).toBe(true)
+    }
+    expect(screen.queryByText('The guard preview is unavailable.')).toBeNull()
+  })
+
   it('says so when no guard would skip anyone', async () => {
     mockFetch(
       backend([], {

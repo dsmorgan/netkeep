@@ -22,11 +22,23 @@ export function AudienceGuardPreview({
   /** The first step's channel, the one the guards check at enrollment; null until picked. */
   channel: AudiencePreviewIn['channel'] | null
 }) {
-  const ready = source.kind !== 'none' && sourceProblem(source) === null && channel !== null
-  const body: AudiencePreviewIn = { ...sourceBody(source), channel: channel ?? 'email' }
-  // Debounced as text: the body is a new object on every render, its text is not.
-  const settled = JSON.parse(useDebounced(JSON.stringify(body))) as AudiencePreviewIn
-  const preview = useQuery({ ...audiencePreviewQuery(settled), enabled: ready })
+  // The source and the channel settle together, and both whether to ask and what to
+  // ask are decided from the settled pair: deciding "ready" from the live source while
+  // sending the settled one asked with a source 300 ms out of date, which the server
+  // refuses (a list not chosen yet), and the refusal flashed as an error.
+  const settled = JSON.parse(useDebounced(JSON.stringify({ source, channel }))) as {
+    source: AudienceSource
+    channel: AudiencePreviewIn['channel'] | null
+  }
+  const ready =
+    settled.source.kind !== 'none' &&
+    sourceProblem(settled.source) === null &&
+    settled.channel !== null
+  const body: AudiencePreviewIn = {
+    ...sourceBody(settled.source),
+    channel: settled.channel ?? 'email',
+  }
+  const preview = useQuery({ ...audiencePreviewQuery(body), enabled: ready })
 
   if (source.kind === 'none' || sourceProblem(source) !== null) return null
   if (channel === null) {

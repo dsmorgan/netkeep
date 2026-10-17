@@ -65,7 +65,9 @@ def _seed(app: FastAPI) -> dict[str, Any]:
                 session, user, emails=[f"{name}@contacts.example"], **fields.pop("contact", {})
             )
             people[name] = contact.id
-            return factories.make_enrollment(session, campaign, contact, **fields)
+            enrollment = factories.make_enrollment(session, campaign, contact, **fields)
+            factories.make_message(session, enrollment, sent_at=NOW)  # "no reply" needs a send
+            return enrollment
 
         enroll("quorbelle", status=EnrollmentStatus.REPLIED, replied_at=NOW)
         by_hand = enroll("fictionary", status=EnrollmentStatus.REPLIED, replied_at=NOW)
@@ -218,6 +220,29 @@ async def test_a_taken_default_name_gets_a_number_and_a_taken_chosen_one_is_409(
     assert chosen.status_code == 201 and chosen.json()["name"] == "Follow up"
 
 
+async def test_a_default_name_is_stripped_before_the_duplicate_check(
+    running_app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    with session_scope(_factory(running_app), write=True) as session:
+        user = _local(session)
+        campaign = factories.make_campaign(session, user, name="  Spring hello ")
+        factories.make_enrollment(
+            session,
+            campaign,
+            factories.make_contact(session, user),
+            status=EnrollmentStatus.BOUNCED,
+        )
+        campaign_id = campaign.id
+    url = f"/api/v1/campaigns/{campaign_id}/lists"
+    first = await client.post(url, json={"outcome": "bounced"}, headers=CSRF)
+    second = await client.post(url, json={"outcome": "bounced"}, headers=CSRF)
+    assert (first.status_code, second.status_code) == (201, 201), second.text
+    assert [first.json()["name"], second.json()["name"]] == [
+        "Spring hello: bounced",
+        "Spring hello: bounced (2)",
+    ]
+
+
 async def test_an_empty_outcome_still_makes_an_empty_list(
     running_app: FastAPI, client: httpx.AsyncClient
 ) -> None:
@@ -278,7 +303,11 @@ def _preview_seed(app: FastAPI) -> dict[str, Any]:
         recent = factories.make_contact(session, user, emails=["recent@contacts.example"])
         busy = factories.make_contact(session, user, emails=["busy@contacts.example"])
         for contact in (fine, dnc, no_email, recent, busy):
-            factories.make_enrollment(session, old, contact, status=EnrollmentStatus.COMPLETED)
+            enrollment = factories.make_enrollment(
+                session, old, contact, status=EnrollmentStatus.COMPLETED
+            )
+            # Long enough ago that the old campaign's own send is not "contacted recently".
+            factories.make_message(session, enrollment, sent_at=datetime(2025, 1, 1, tzinfo=UTC))
         factories.make_enrollment(session, running, busy, status=EnrollmentStatus.ACTIVE)
         add_interaction(
             session,

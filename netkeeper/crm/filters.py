@@ -122,11 +122,13 @@ contact, the way an unknown tag does: the subquery carries ``user_id``.
   :class:`CampaignOutcome`. ``replied``, ``opted_out``, ``bounced``,
   ``removed``, ``completed`` and ``active`` split every enrollment exactly once:
   ``opted_out`` wins over a reply (an opt-out is a reply too, and has its own
-  outcome), and a reply wins over everything else, so ``bounced``,
-  ``removed``, ``completed`` and ``active`` are each "and never replied".
-  ``no_reply`` is ``completed`` plus ``active``: everyone the campaign reached
-  or is still reaching who has not answered, without the people it could not
-  reach or was told to stop at.
+  outcome), even a late one to a completed enrollment, and a reply wins over
+  everything else, so ``bounced``, ``removed``, ``completed`` and ``active``
+  are each "and never replied".
+  ``no_reply`` is the part of ``completed`` plus ``active`` that was sent at
+  least one message: everyone the campaign reached who has not answered,
+  without the people it has not written to yet, could not reach, or was told
+  to stop at. An enrollment not sent anything yet stays under ``active``.
 
 Errors
 ------
@@ -183,6 +185,9 @@ from netkeeper.models import (
     Enrollment,
     EnrollmentStatus,
     ListKind,
+    Message,
+    MessageDirection,
+    MessageStatus,
     MetSource,
     Tag,
     User,
@@ -1371,21 +1376,50 @@ _REPLIED: Final[ColumnElement[bool]] = or_(
 hand goes through too); the status is there for a row that somehow has one without
 the other."""
 
+_OPTED_OUT: Final[ColumnElement[bool]] = or_(
+    Enrollment.status == EnrollmentStatus.OPTED_OUT,
+    select(Message.id)
+    .where(
+        Message.enrollment_id == Enrollment.id,
+        Message.user_id == Enrollment.user_id,
+        Message.direction == MessageDirection.IN,
+        Message.asks_unsubscribe.is_(True),
+    )
+    .correlate(Enrollment)
+    .exists(),
+)
+"""An enrollment that ended ``opted_out``, or one with a reply asking to unsubscribe.
+The second is a reply after the sequence finished: ``_after_reply`` leaves a completed
+enrollment ``completed``, so its status alone does not say it opted out."""
+
+_SENT: Final[ColumnElement[bool]] = (
+    select(Message.id)
+    .where(
+        Message.enrollment_id == Enrollment.id,
+        Message.user_id == Enrollment.user_id,
+        Message.direction == MessageDirection.OUT,
+        Message.status.in_((MessageStatus.SENT, MessageStatus.BOUNCED)),
+    )
+    .correlate(Enrollment)
+    .exists()
+)
+"""An enrollment that was sent at least one message (a bounced one went out too)."""
+
 _STILL_IN: Final = (EnrollmentStatus.PENDING, EnrollmentStatus.ACTIVE, EnrollmentStatus.PAUSED)
 
 
 def _unanswered(*statuses: EnrollmentStatus) -> ColumnElement[bool]:
-    return and_(Enrollment.status.in_(statuses), not_(_REPLIED))
+    return and_(Enrollment.status.in_(statuses), not_(_REPLIED), not_(_OPTED_OUT))
 
 
 _OUTCOME_WHERE: Final[dict[CampaignOutcome, ColumnElement[bool]]] = {
-    CampaignOutcome.REPLIED: and_(_REPLIED, Enrollment.status != EnrollmentStatus.OPTED_OUT),
-    CampaignOutcome.OPTED_OUT: Enrollment.status == EnrollmentStatus.OPTED_OUT,
+    CampaignOutcome.REPLIED: and_(_REPLIED, not_(_OPTED_OUT)),
+    CampaignOutcome.OPTED_OUT: _OPTED_OUT,
     CampaignOutcome.BOUNCED: _unanswered(EnrollmentStatus.BOUNCED),
     CampaignOutcome.REMOVED: _unanswered(EnrollmentStatus.REMOVED),
     CampaignOutcome.COMPLETED: _unanswered(EnrollmentStatus.COMPLETED),
     CampaignOutcome.ACTIVE: _unanswered(*_STILL_IN),
-    CampaignOutcome.NO_REPLY: _unanswered(*_STILL_IN, EnrollmentStatus.COMPLETED),
+    CampaignOutcome.NO_REPLY: and_(_unanswered(*_STILL_IN, EnrollmentStatus.COMPLETED), _SENT),
 }
 """Each outcome as a condition on one ``enrollments`` row. See "Campaigns" above."""
 
