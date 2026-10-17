@@ -9505,6 +9505,97 @@
         "title": "ListPatch",
         "type": "object"
       },
+      "LoginItemIn": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "LoginItemIn",
+        "type": "object"
+      },
+      "LoginItemOut": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "log_path": {
+            "title": "Log Path",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "plist_path": {
+            "title": "Plist Path",
+            "type": "string"
+          },
+          "points_elsewhere": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Points Elsewhere"
+          },
+          "running_under_launchd": {
+            "title": "Running Under Launchd",
+            "type": "boolean"
+          },
+          "supported": {
+            "title": "Supported",
+            "type": "boolean"
+          },
+          "this_server_is_the_login_item": {
+            "title": "This Server Is The Login Item",
+            "type": "boolean"
+          },
+          "unsupported_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unsupported Reason"
+          }
+        },
+        "required": [
+          "supported",
+          "unsupported_reason",
+          "enabled",
+          "running_under_launchd",
+          "this_server_is_the_login_item",
+          "label",
+          "plist_path",
+          "log_path",
+          "points_elsewhere"
+        ],
+        "title": "LoginItemOut",
+        "type": "object"
+      },
       "Lt": {
         "additionalProperties": false,
         "properties": {
@@ -23728,6 +23819,74 @@
         "summary": "Remove List Member",
         "tags": [
           "lists"
+        ]
+      }
+    },
+    "/api/v1/login-item": {
+      "get": {
+        "description": "Whether netkeeper starts at login, from the plist and launchctl.",
+        "operationId": "get_login_item",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginItemOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Login Item",
+        "tags": [
+          "login-item"
+        ]
+      },
+      "put": {
+        "description": "Install or remove the login item.",
+        "operationId": "set_login_item",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginItemIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginItemOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Only the local owner account manages the login item"
+          },
+          "409": {
+            "description": "Not macOS, or launchctl refused: the reason is in detail"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Login Item",
+        "tags": [
+          "login-item"
         ]
       }
     },

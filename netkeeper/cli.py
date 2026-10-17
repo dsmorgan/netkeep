@@ -97,6 +97,7 @@ from netkeeper.services import (
     history_scan,
     keychain,
     linkedin_steps,
+    login_item,
     message_check,
     message_id_check,
     outside_responses,
@@ -241,6 +242,11 @@ support_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(support_app, name="support")
+login_item_app = typer.Typer(
+    help="Start netkeeper when you log in (macOS launchd; the Settings page has the same switch).",
+    no_args_is_help=True,
+)
+app.add_typer(login_item_app, name="login-item")
 dictionary_app = typer.Typer(
     help="Your dictionary: words the template spelling check accepts (#522).",
     no_args_is_help=True,
@@ -2768,6 +2774,62 @@ def restore(
 
 FULL_CONFIRMATION: Final = "full"
 """What `support bundle --level full` asks you to type before it writes real names."""
+
+
+def _login_item_or_exit(action: Callable[[login_item.LoginItem], login_item.Outcome]) -> None:
+    item = login_item.LoginItem()
+    try:
+        outcome = action(item)
+    except login_item.LoginItemError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(outcome.message)
+    typer.echo(f"label: {outcome.status.label}")
+
+
+@login_item_app.command("on")
+def login_item_on(
+    host: Annotated[
+        str | None,
+        typer.Option("--host", help="Interface for serve (default: web.host from the config)."),
+    ] = None,
+    port: Annotated[
+        int | None,
+        typer.Option(
+            "--port", min=1, max=65535, help="Port for serve (default: web.port from the config)."
+        ),
+    ] = None,
+) -> None:
+    """Install the login item for this data directory: it runs netkeeper serve at login
+    and restarts it after a crash. Re-running replaces it. While a serve runs, the item is
+    registered but not started, so the next login starts it. Writes a plist in
+    ~/Library/LaunchAgents."""
+    _login_item_or_exit(lambda item: item.enable(host=host, port=port))
+
+
+@login_item_app.command("off")
+def login_item_off() -> None:
+    """Stop the login item and remove its plist. Data and logs stay."""
+    _login_item_or_exit(lambda item: item.disable())
+
+
+@login_item_app.command("status")
+def login_item_status() -> None:
+    """Whether netkeeper starts at login, read from the plist and launchctl."""
+    status = login_item.LoginItem().status()
+    if not status.supported:
+        typer.echo(f"not available: {status.reason}")
+        raise typer.Exit(code=1)
+    typer.echo(f"starts at login: {'yes' if status.enabled else 'no'}")
+    typer.echo(f"loaded in launchd: {'yes' if status.loaded else 'no'}")
+    typer.echo(f"label: {status.label}")
+    typer.echo(f"plist: {status.plist_path}")
+    typer.echo(f"log: {status.log_path}")
+    if status.stale:
+        typer.echo(
+            f"warning: the plist runs {status.plist_executable}, not this netkeeper;"
+            " run netkeeper login-item on to fix it"
+        )
 
 
 @support_app.command("bundle")

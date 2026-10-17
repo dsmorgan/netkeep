@@ -19,7 +19,6 @@ backend under the data volume (spec 15). Tests install an in-memory backend
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
 from typing import Final
@@ -33,7 +32,6 @@ log = logging.getLogger(__name__)
 
 DEFAULT_SERVICE: Final = "netkeeper"
 SERVICE_ENV: Final = "NETKEEPER_KEYCHAIN_SERVICE"
-_HASH_CHARS: Final = 12
 
 
 class KeychainUnavailable(RuntimeError):
@@ -54,9 +52,7 @@ def service_name() -> str:
     directory = paths.data_dir()
     if paths.is_default_data_dir(directory):
         return DEFAULT_SERVICE
-    resolved = str(directory.expanduser().resolve())
-    digest = hashlib.sha256(resolved.encode()).hexdigest()[:_HASH_CHARS]
-    return f"{DEFAULT_SERVICE}@{digest}"
+    return f"{DEFAULT_SERVICE}@{paths.data_dir_digest(directory)}"
 
 
 def entry_name(user_id: int, name: str) -> str:

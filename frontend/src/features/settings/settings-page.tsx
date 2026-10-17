@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 
 import { AboutYouSection } from './about-you-section'
 import { BackupsSection } from './backups-section'
+import { LoginItemSection } from './login-item-section'
 import { ConfigSections } from './config-section'
 import { DoNotSendSection } from './do-not-send-section'
 import { type GmailOutcome, GmailSection } from './gmail-section'
@@ -41,6 +42,8 @@ export function SettingsPage({ gmail = {} }: { gmail?: GmailOutcome }) {
       <ConfigSections />
 
       <BackupsSection />
+
+      <LoginItemSection />
 
       <DoNotSendSection />
 
