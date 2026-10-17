@@ -70,7 +70,6 @@ from netkeeper.linkedin.messaging_shapes import (
     BY_SYNC_TOKEN,
     CONVERSATIONS_QUERY,
     GRAPHQL_PATH,
-    LIST_CATEGORY,
     MESSAGES_BY_SYNC_TOKEN,
     MESSAGES_QUERY,
     MESSAGING_PAGE_PATH,
@@ -82,9 +81,9 @@ from netkeeper.linkedin.messaging_shapes import (
     parse_conversation_list,
     parse_thread,
     query_name,
-    request_category,
     request_conversation,
     request_has_sync_token,
+    request_is_primary_inbox,
     request_last_updated_before,
     request_mailbox,
     request_next_cursor,
@@ -453,7 +452,7 @@ class PageInbox:
             return
         if not seen.first:
             raise RouteChanged("inbox", "an older page of the list arrived before the list")
-        if request_category(response.url) != LIST_CATEGORY:
+        if not request_is_primary_inbox(response.url):
             raise RouteChanged("inbox", "an older page of the list is not of the primary inbox")
         cursor = request_next_cursor(response.url)
         if cursor is None:

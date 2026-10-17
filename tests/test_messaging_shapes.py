@@ -196,11 +196,57 @@ def test_two_participants_marked_self_are_refused() -> None:
         shapes.parse_conversation_list(json.dumps(doc))
 
 
-def test_the_older_page_category_is_read_from_the_request() -> None:
-    assert shapes.request_category(mp.conversations_category_url(last_updated_before=1)) == (
-        "PRIMARY_INBOX"
-    )
-    assert shapes.request_category(mp.conversations_sync_url()) is None
+_PRIMARY = mp.category_predicate(mp.PRIMARY_INBOX)
+_INMAIL = mp.category_predicate(mp.INMAIL)
+#: An invented predicate of another kind, as an Unread filter might add.
+_UNREAD = "(readStatePredicate:(read:false))"
+
+
+@pytest.mark.parametrize("next_cursor", [None, "invented-cursor-1"])
+def test_only_the_primary_inbox_alone_is_the_plain_inbox(next_cursor: str | None) -> None:
+    url = mp.conversations_category_url(last_updated_before=1, next_cursor=next_cursor)
+    assert shapes.request_is_primary_inbox(url)
+
+
+@pytest.mark.parametrize(
+    "predicates",
+    [
+        pytest.param((_INMAIL, _PRIMARY), id="inmail-then-primary"),
+        pytest.param((_PRIMARY, _INMAIL), id="primary-then-inmail"),
+        pytest.param((_PRIMARY, _UNREAD), id="primary-then-another-kind"),
+        pytest.param((_UNREAD, _PRIMARY), id="another-kind-then-primary"),
+        pytest.param((_PRIMARY, _PRIMARY), id="primary-twice"),
+        pytest.param((_INMAIL,), id="inmail-alone"),
+        pytest.param((), id="no-predicates"),
+    ],
+)
+def test_any_other_list_request_is_filtered(predicates: tuple[str, ...]) -> None:
+    """A filter is a subset of the inbox, whatever the order or kind of its predicates
+    (#555); read as the whole list, it would miss replies."""
+    url = mp.conversations_category_url(predicates=predicates, last_updated_before=1)
+    assert not shapes.request_is_primary_inbox(url)
+
+
+@pytest.mark.parametrize(
+    "variables",
+    [
+        "",  # no variables at all
+        "(mailboxUrn:x,lastUpdatedBefore:1)",  # no query
+        f"(query:(predicateUnions:List({_PRIMARY}),another:(x)),lastUpdatedBefore:1)",
+        f"(query:(predicateUnions:List({_PRIMARY})),query:(x),lastUpdatedBefore:1)",
+        f"(query:(predicateUnions:List({_PRIMARY}))",  # unbalanced
+        f"(query:(predicateUnions:List({_PRIMARY}))))",  # unbalanced
+        f"(outer:(query:(predicateUnions:List({_PRIMARY})))",  # not at the top level
+    ],
+)
+def test_a_query_that_is_not_exactly_the_primary_inbox_is_filtered(variables: str) -> None:
+    url = mp.conversations_category_url(last_updated_before=1)
+    head, _, _ = url.partition("&variables=")
+    assert not shapes.request_is_primary_inbox(f"{head}&variables={variables}")
+
+
+def test_a_list_request_without_a_query_is_not_the_primary_inbox() -> None:
+    assert not shapes.request_is_primary_inbox(mp.conversations_sync_url())
 
 
 def test_hostUrnData_outside_inmail_is_skipped() -> None:

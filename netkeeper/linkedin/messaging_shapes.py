@@ -184,15 +184,49 @@ def request_next_cursor(url: str) -> str | None:
     return unquote(found.group(1)) if found else None
 
 
-_CATEGORY_FIELD: Final = re.compile(r"conversationCategoryPredicate:\(category:([A-Z_]+)\)")
 #: The category the older pages of the inbox list are read from (captured 2026-10-05).
 LIST_CATEGORY: Final = "PRIMARY_INBOX"
+#: The whole ``query`` of an unfiltered older page: one predicate, the primary inbox. A
+#: filter adds predicates (CP8d, #520: InMail adds ``INMAIL`` before ``PRIMARY_INBOX``).
+_PLAIN_INBOX_QUERY: Final = (
+    f"(predicateUnions:List((conversationCategoryPredicate:(category:{LIST_CATEGORY}))))"
+)
 
 
-def request_category(url: str) -> str | None:
-    """The category an older-page request names, or ``None``."""
-    found = _CATEGORY_FIELD.search(variables(url))
-    return found.group(1) if found else None
+def _record_fields(record: str) -> dict[str, str] | None:
+    """The top-level ``key:value`` fields of a Rest.li record ``(k:v,...)``, values kept
+    verbatim; ``None`` when it is not one record, its parentheses do not balance, or a
+    key repeats."""
+    if not (record.startswith("(") and record.endswith(")")):
+        return None
+    fields: dict[str, str] = {}
+    depth = 0
+    start = 1
+    for index, char in enumerate(record):
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth < 0 or (depth == 0 and index != len(record) - 1):
+                return None
+        if (char == "," and depth == 1) or (depth == 0 and char == ")"):
+            key, colon, value = record[start:index].partition(":")
+            if not colon or key in fields:
+                return None
+            fields[key] = value
+            start = index + 1
+    return fields if depth == 0 else None
+
+
+def request_is_primary_inbox(url: str) -> bool:
+    """Whether an older-page request is the plain primary inbox: its ``query`` is exactly
+    one ``conversationCategoryPredicate`` of :data:`LIST_CATEGORY` and nothing else.
+
+    Any other query is a filter, whatever the order of its predicates or their kinds: a
+    filtered page is a subset of the inbox, and reading it as the whole list would miss
+    replies (#555)."""
+    fields = _record_fields(variables(url))
+    return fields is not None and fields.get("query") == _PLAIN_INBOX_QUERY
 
 
 def request_last_updated_before(url: str) -> int | None:
