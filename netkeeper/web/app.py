@@ -44,6 +44,7 @@ from netkeeper.crm.lists import ensure_validated_list
 from netkeeper.crm.self_contact import ensure_self_contact
 from netkeeper.crm.tags import ensure_default_rules
 from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
+from netkeeper.logging_setup import set_log_rotation
 from netkeeper.models import User
 from netkeeper.models.base import utcnow
 from netkeeper.paths import data_dir
@@ -233,6 +234,7 @@ def _start(app: FastAPI, engine: Engine, settings: Settings) -> TaskRunner:
         # process (a `netkeeper linkedin sync` in a terminal) and is left alone.
         fail_interrupted_runs(session, now=utcnow())
         started = ui_settings.resolve(session, user, settings)
+        set_log_rotation(max_mb=started.logs.max_mb, keep=started.logs.keep)
         _log_settings_page_risks(settings, started)
         log.info(
             "database at revision %s, local user %d", migrations.current_revision(engine), user.id

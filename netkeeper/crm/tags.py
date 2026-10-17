@@ -76,6 +76,7 @@ from sqlalchemy import ColumnElement, and_, func
 from sqlalchemy.orm import Session
 
 from netkeeper.db import is_writer
+from netkeeper.logging_setup import personal
 from netkeeper.models import (
     TAG_NAME_MAX_LENGTH,
     AutotagRule,
@@ -879,7 +880,7 @@ def create_tag(
     )
     session.add(tag)
     session.flush()
-    log.debug("created tag %d %r for user %d", tag.id, tag.name, user.id)
+    log.debug("created tag %d %r for user %d", tag.id, personal(tag.name), user.id)
     return tag
 
 

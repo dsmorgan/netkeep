@@ -21,6 +21,7 @@ from dataclasses import dataclass, field, fields, is_dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Union, get_args, get_origin, get_type_hints
 
+from netkeeper.logging_setup import DEFAULT_KEEP, DEFAULT_MAX_MB
 from netkeeper.paths import config_candidates
 
 if TYPE_CHECKING:
@@ -154,6 +155,15 @@ class BackupSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class LogSettings:
+    """``[logs]``: when ``<data>/logs/netkeeper.log`` rotates, and how many old files stay
+    (:mod:`netkeeper.logging_setup`, #602)."""
+
+    max_mb: int = DEFAULT_MAX_MB
+    keep: int = DEFAULT_KEEP
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     """Every section of ``config.toml``. ``source_path`` is None when defaults were used."""
 
@@ -162,6 +172,7 @@ class Settings:
     campaigns: CampaignSettings = field(default_factory=CampaignSettings)
     llm: LlmSettings = field(default_factory=LlmSettings)
     backup: BackupSettings = field(default_factory=BackupSettings)
+    logs: LogSettings = field(default_factory=LogSettings)
     source_path: Path | None = field(default=None, metadata=_SKIP)
     # A deprecated [me] section's values, when the file had one (see LegacyMe).
     legacy_me: LegacyMe | None = field(default=None, metadata=_SKIP)

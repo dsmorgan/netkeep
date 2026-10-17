@@ -77,7 +77,11 @@ const POLL = field({
 
 function renderSections(fields: ConfigField[] = [PREFILLS, VISITS, AUTO_SEND, POLL]) {
   const puts: Record<string, unknown>[] = []
-  let current: ConfigSettings = { config_path: '/etc/nk.toml', fields }
+  let current: ConfigSettings = {
+    config_path: '/etc/nk.toml',
+    log_file: '/data/nk/logs/netkeeper.log',
+    fields,
+  }
   mockFetch(async (request) => {
     const { pathname } = new URL(request.url)
     if (pathname === '/api/v1/posture') return jsonResponse({}, 500)
@@ -124,6 +128,25 @@ describe('ConfigSections', () => {
     expect(visits.getByText('config.toml')).toBeVisible()
     expect(visits.getByRole('spinbutton')).toBeDisabled()
     expect(visits.getByText(/Set in \/etc\/nk.toml, which wins/)).toBeVisible()
+  })
+
+  it('says where the log file is in the Logs card, and saves its limits', async () => {
+    const size = field({
+      key: 'logs.max_mb',
+      group: 'logs',
+      label: 'Log file size (MB)',
+      maximum: 1000,
+      warn_above: null,
+      value: 10,
+      default: 10,
+    })
+    const { puts } = renderSections([PREFILLS, size])
+    const logs = within(await screen.findByRole('form', { name: 'Logs' }))
+    expect(screen.getByText('/data/nk/logs/netkeeper.log')).toBeVisible()
+    expect(screen.getAllByText('/data/nk/logs/netkeeper.log')).toHaveLength(1)
+    fireEvent.change(logs.getByRole('spinbutton'), { target: { value: '25' } })
+    fireEvent.click(logs.getByRole('button', { name: 'Save logs' }))
+    await waitFor(() => expect(puts).toEqual([{ 'logs.max_mb': 25 }]))
   })
 
   it('never offers auto-send as a switch it can turn on', async () => {

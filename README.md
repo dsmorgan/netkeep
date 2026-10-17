@@ -73,11 +73,11 @@ scripts/install-launchd.sh                     # install or replace the agent
 scripts/install-launchd.sh --port 8080         # --host and --port pass through to serve
 scripts/install-launchd.sh --data-dir ~/nk     # another data directory (sets NETKEEPER_DATA)
 launchctl print gui/$UID/fun.tnkr.netkeeper    # status, including the PID
-tail -f "$HOME/Library/Application Support/netkeeper/logs/serve.err.log"   # application log
+tail -f "$HOME/Library/Application Support/netkeeper/logs/netkeeper.log"   # application log
 scripts/install-launchd.sh --uninstall         # stop the agent and remove the plist
 ```
 
-Logs live under `<data_dir>/logs/`: `serve.log` for stdout and `serve.err.log` for stderr, which is where the application logs. Each data directory keeps its Gmail secrets under its own Keychain service: `netkeeper` for the default directory, and `netkeeper@<hash of the path>` for any other, so a second data directory never reads or replaces the first one's Gmail sign-in. Set `NETKEEPER_KEYCHAIN_SERVICE` to choose the service yourself; `netkeeper config show` prints the one in use. Add `--dry-run` to any invocation to see the plist and the `launchctl` commands without changing anything. Chrome is not managed by launchd; the dashboard tells you when it is not reachable.
+Logs live under `<data_dir>/logs/`: `netkeeper.log` is the application log, rotated by size (Settings, Logs), and the agent's `serve.log` and `serve.err.log` hold stdout and stderr's warnings, errors and crashes, each moved to `.1` at the agent's next start once it is over 5 MB. Each data directory keeps its Gmail secrets under its own Keychain service: `netkeeper` for the default directory, and `netkeeper@<hash of the path>` for any other, so a second data directory never reads or replaces the first one's Gmail sign-in. Set `NETKEEPER_KEYCHAIN_SERVICE` to choose the service yourself; `netkeeper config show` prints the one in use. Add `--dry-run` to any invocation to see the plist and the `launchctl` commands without changing anything. Chrome is not managed by launchd; the dashboard tells you when it is not reachable.
 
 ## A plain note about LinkedIn's terms
 

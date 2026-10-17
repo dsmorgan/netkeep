@@ -57,6 +57,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from netkeeper.campaigns import gmail_oauth
 from netkeeper.campaigns.gmail import GmailClient
 from netkeeper.db import session_scope
+from netkeeper.logging_setup import personal
 from netkeeper.models import Mailbox, MailboxArm, MailboxStatus, TestSend, User, UserKind
 from netkeeper.models.base import utcnow
 from netkeeper.models.mailboxes import MAILBOX_ARMED_BY_MAX_LENGTH
@@ -328,7 +329,7 @@ def arm(
             mailbox.send_armed_at = now
             mailbox.armed_by = by[:MAILBOX_ARMED_BY_MAX_LENGTH]
     session.flush()
-    log.info("mailbox %d armed for %s by %s", mailbox.id, mailbox.arm, mailbox.armed_by)
+    log.info("mailbox %d armed for %s by %s", mailbox.id, mailbox.arm, personal(mailbox.armed_by))
     return mailbox
 
 

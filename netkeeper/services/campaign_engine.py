@@ -155,6 +155,7 @@ from netkeeper.campaigns.templates import activation_errors, block_reason, conta
 from netkeeper.config import Settings
 from netkeeper.crm.contacts import sendable_email
 from netkeeper.db import is_writer, session_scope
+from netkeeper.logging_setup import personal
 from netkeeper.models import (
     Campaign,
     CampaignStatus,
@@ -1784,7 +1785,10 @@ class _Chooser:
             )
         except TemplateRenderError as exc:
             log.warning(
-                "enrollment %d step %d did not render: %s", enrollment.id, step.position, exc
+                "enrollment %d step %d did not render: %s",
+                enrollment.id,
+                step.position,
+                personal(exc),
             )
             self.park(enrollment, Skip.RENDER_FAILED)
             return None

@@ -81,7 +81,11 @@ def test_dry_run_renders_the_agent_plist(tmp_path: Path) -> None:
     assert plist["Label"] == LABEL
     assert plist["ProgramArguments"] == [str(WRAPPER), "--host", "127.0.0.1", "--port", "8791"]
     assert plist["WorkingDirectory"] == str(ROOT)
-    assert plist["EnvironmentVariables"] == {"NETKEEPER_DATA": str(data)}
+    assert plist["EnvironmentVariables"] == {
+        "NETKEEPER_DATA": str(data),
+        "NETKEEPER_LOG_STDERR_LEVEL": "WARNING",
+        "NETKEEPER_LAUNCHD_LOG_DIR": str(data / "logs"),
+    }
     assert plist["RunAtLoad"] is True
     assert plist["KeepAlive"] == {"SuccessfulExit": False}
     assert plist["ThrottleInterval"] == 10
@@ -101,8 +105,11 @@ def test_dry_run_without_data_dir_leaves_the_platform_default(tmp_path: Path) ->
     assert proc.returncode == 0, proc.stderr
     plist = plist_in(proc.stdout)
     assert plist["ProgramArguments"] == [str(WRAPPER)]
-    assert "EnvironmentVariables" not in plist
     logs = tmp_path / "Library" / "Application Support" / "netkeeper" / "logs"
+    assert plist["EnvironmentVariables"] == {
+        "NETKEEPER_LOG_STDERR_LEVEL": "WARNING",
+        "NETKEEPER_LAUNCHD_LOG_DIR": str(logs),
+    }
     assert plist["StandardOutPath"] == str(logs / "serve.log")
     assert plist["StandardErrorPath"] == str(logs / "serve.err.log")
 
@@ -127,7 +134,7 @@ def test_relative_data_dir_is_made_absolute(tmp_path: Path) -> None:
     proc = run_installer("--dry-run", "--data-dir", "nk-data", home=tmp_path, cwd=tmp_path)
     assert proc.returncode == 0, proc.stderr
     plist = plist_in(proc.stdout)
-    assert plist["EnvironmentVariables"] == {"NETKEEPER_DATA": str(tmp_path / "nk-data")}
+    assert plist["EnvironmentVariables"]["NETKEEPER_DATA"] == str(tmp_path / "nk-data")
 
 
 @pytest.mark.parametrize("name", ["nk data", "nk & <data>"])
@@ -136,7 +143,11 @@ def test_data_dir_with_spaces_and_xml_characters_round_trips(tmp_path: Path, nam
     proc = run_installer("--dry-run", "--data-dir", str(data), home=tmp_path)
     assert proc.returncode == 0, proc.stderr
     plist = plist_in(proc.stdout)
-    assert plist["EnvironmentVariables"] == {"NETKEEPER_DATA": str(data)}
+    assert plist["EnvironmentVariables"] == {
+        "NETKEEPER_DATA": str(data),
+        "NETKEEPER_LOG_STDERR_LEVEL": "WARNING",
+        "NETKEEPER_LAUNCHD_LOG_DIR": str(data / "logs"),
+    }
     assert plist["StandardOutPath"] == str(data / "logs" / "serve.log")
     assert plist["StandardErrorPath"] == str(data / "logs" / "serve.err.log")
 
@@ -148,7 +159,11 @@ def test_equals_forms_are_accepted(tmp_path: Path) -> None:
     )
     assert proc.returncode == 0, proc.stderr
     plist = plist_in(proc.stdout)
-    assert plist["EnvironmentVariables"] == {"NETKEEPER_DATA": str(data)}
+    assert plist["EnvironmentVariables"] == {
+        "NETKEEPER_DATA": str(data),
+        "NETKEEPER_LOG_STDERR_LEVEL": "WARNING",
+        "NETKEEPER_LAUNCHD_LOG_DIR": str(data / "logs"),
+    }
     assert plist["ProgramArguments"] == [str(WRAPPER), "--host", "0.0.0.0", "--port", "65535"]
 
 
@@ -225,6 +240,42 @@ def test_wrapper_migrates_then_execs_serve(tmp_path: Path) -> None:
     assert calls.read_text().splitlines() == ["db upgrade", "serve --host 127.0.0.1 --port 8791"]
     assert "applying migrations" in proc.stdout
     assert "starting netkeeper serve --host 127.0.0.1 --port 8791" in proc.stdout
+
+
+def test_wrapper_under_the_agent_writes_its_own_log_files(tmp_path: Path) -> None:
+    """With NETKEEPER_LAUNCHD_LOG_DIR set, stdout and stderr go to serve.log and
+    serve.err.log there (#602), not to the handles launchd opened."""
+    fake = tmp_path / "netkeeper"
+    fake.write_text('#!/bin/sh\necho "out $1"\necho "err $1" >&2\n')
+    fake.chmod(0o755)
+    logs = tmp_path / "logs"
+    proc = run_sh(WRAPPER, env={"NETKEEPER_BIN": str(fake), "NETKEEPER_LAUNCHD_LOG_DIR": str(logs)})
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout == proc.stderr == ""
+    out = (logs / "serve.log").read_text()
+    assert "applying migrations" in out
+    assert "out db" in out
+    assert "out serve" in out
+    assert (logs / "serve.err.log").read_text().splitlines() == ["err db", "err serve"]
+
+
+def test_wrapper_rotates_a_log_file_over_five_megabytes(tmp_path: Path) -> None:
+    fake = tmp_path / "netkeeper"
+    fake.write_text('#!/bin/sh\necho "err $1" >&2\n')
+    fake.chmod(0o755)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    big = b"x" * (5 * 1024 * 1024 + 1)
+    (logs / "serve.err.log").write_bytes(big)
+    (logs / "serve.err.log.1").write_bytes(b"older")
+    (logs / "serve.log").write_bytes(b"small\n")
+    env = {"NETKEEPER_BIN": str(fake), "NETKEEPER_LAUNCHD_LOG_DIR": str(logs)}
+    proc = run_sh(WRAPPER, env=env)
+    assert proc.returncode == 0, proc.stderr
+    assert (logs / "serve.err.log.1").read_bytes() == big  # one older copy, replaced
+    assert (logs / "serve.err.log").read_text().splitlines() == ["err db", "err serve"]
+    assert (logs / "serve.log").read_text().startswith("small\n")  # under the limit: kept
+    assert not (logs / "serve.log.1").exists()
 
 
 def test_wrapper_fails_clearly_without_the_venv(tmp_path: Path) -> None:

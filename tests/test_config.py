@@ -390,13 +390,15 @@ def test_config_show_prints_settings_and_paths(isolated: Path) -> None:
         "data_dir": str(data_dir()),
         "config": str(path),
         "keychain_service": service_name(),
+        "log_file": str(data_dir() / "logs" / "netkeeper.log"),
     }
     assert service_name().startswith("netkeeper@")  # conftest's scratch data directory
     assert result.stdout.rstrip().endswith(
         "[paths]\n"
         + f'data_dir = "{data_dir()}"\n'
         + f'config = "{path}"\n'
-        + f'keychain_service = "{service_name()}"'
+        + f'keychain_service = "{service_name()}"\n'
+        + f'log_file = "{data_dir() / "logs" / "netkeeper.log"}"'
     )
 
 

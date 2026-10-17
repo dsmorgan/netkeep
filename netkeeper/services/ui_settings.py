@@ -73,7 +73,7 @@ KEY_PREFIX: Final = "config."
 
 Kind = Literal["int", "optional_int", "float", "bool", "window", "dates"]
 Applies = Literal["now", "restart"]
-Group = Literal["linkedin_budgets", "linkedin_hours", "campaigns", "backup"]
+Group = Literal["linkedin_budgets", "linkedin_hours", "campaigns", "backup", "logs"]
 Source = Literal["default", "ui", "file"]
 
 SPACING_FLOOR_MIN_S: Final = 90
@@ -116,6 +116,13 @@ _BUDGET_NOTE = (
     "Applies from the next LinkedIn run and the next prefill. A run already going keeps"
     " the limit it started with."
 )
+
+MAX_LOG_MB: Final = 1000
+"""The largest log file the page accepts, in megabytes."""
+MAX_LOG_FILES: Final = 100
+"""The most old log files the page keeps."""
+
+_LOGS_NOTE = "Applies to netkeeper serve as soon as you save, and to each command as it starts."
 
 FIELDS: Final[tuple[FieldSpec, ...]] = (
     FieldSpec(
@@ -341,6 +348,28 @@ FIELDS: Final[tuple[FieldSpec, ...]] = (
         applies_note="Applies to the next backup.",
         minimum=1,
         maximum=365,
+    ),
+    FieldSpec(
+        key="logs.max_mb",
+        group="logs",
+        label="Log file size (MB)",
+        help="netkeeper.log starts a new file once it reaches this size.",
+        kind="int",
+        applies="now",
+        applies_note=_LOGS_NOTE,
+        minimum=1,
+        maximum=MAX_LOG_MB,
+    ),
+    FieldSpec(
+        key="logs.keep",
+        group="logs",
+        label="Old log files to keep",
+        help="How many earlier log files stay beside the current one; the oldest goes first.",
+        kind="int",
+        applies="now",
+        applies_note=_LOGS_NOTE,
+        minimum=1,
+        maximum=MAX_LOG_FILES,
     ),
 )
 

@@ -33,6 +33,12 @@ export const GROUPS: { id: ConfigField['group']; title: string; description: str
     title: 'Backups',
     description: 'Whether netkeeper serve backs up the database each night, and how many to keep.',
   },
+  {
+    id: 'logs',
+    title: 'Logs',
+    description:
+      'netkeeper serve and every command write one log file, which starts over at a set size and keeps a few old files.',
+  },
 ]
 
 /** The draft a field's value in force starts as. */

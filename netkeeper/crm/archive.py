@@ -117,6 +117,7 @@ from netkeeper.linkedin.archive import (
     PositionRow,
 )
 from netkeeper.linkedin.conversations import Owner, group
+from netkeeper.logging_setup import personal
 from netkeeper.models import (
     ContactSource,
     EmailKind,
@@ -447,7 +448,7 @@ def import_archive(
         "archive %s imported for user %d as import run %d: %d connections (%d created, %d updated, "
         "%d for review), %d positions (%d created, %d updated), %d message interactions, "
         "%d invitation interactions",
-        archive.name,
+        personal(archive.name),
         user.id,
         run.id,
         report.connections.rows,

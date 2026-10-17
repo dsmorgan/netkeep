@@ -4722,7 +4722,7 @@ export interface components {
              * Group
              * @enum {string}
              */
-            group: "linkedin_budgets" | "linkedin_hours" | "campaigns" | "backup";
+            group: "linkedin_budgets" | "linkedin_hours" | "campaigns" | "backup" | "logs";
             /** Help */
             help: string;
             /** Key */
@@ -4773,6 +4773,8 @@ export interface components {
             config_path: string | null;
             /** Fields */
             fields: components["schemas"]["ConfigFieldOut"][];
+            /** Log File */
+            log_file: string;
         };
         /**
          * ConfirmationRejected

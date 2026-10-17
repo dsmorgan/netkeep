@@ -2543,7 +2543,8 @@
               "linkedin_budgets",
               "linkedin_hours",
               "campaigns",
-              "backup"
+              "backup",
+              "logs"
             ],
             "title": "Group",
             "type": "string"
@@ -2714,10 +2715,15 @@
             },
             "title": "Fields",
             "type": "array"
+          },
+          "log_file": {
+            "title": "Log File",
+            "type": "string"
           }
         },
         "required": [
           "config_path",
+          "log_file",
           "fields"
         ],
         "title": "ConfigOut",

@@ -19,6 +19,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from netkeeper.logging_setup import log_file, set_log_rotation
 from netkeeper.models import User
 from netkeeper.services import ui_settings
 from netkeeper.web.deps import CurrentUser, SessionDep, file_settings
@@ -29,7 +30,7 @@ router = APIRouter(tags=["settings"])
 class ConfigFieldOut(BaseModel):
     key: str
     """The dotted config key, as ``config.toml`` spells it: ``linkedin.active_hours``."""
-    group: Literal["linkedin_budgets", "linkedin_hours", "campaigns", "backup"]
+    group: Literal["linkedin_budgets", "linkedin_hours", "campaigns", "backup", "logs"]
     label: str
     help: str
     kind: Literal["int", "optional_int", "float", "bool", "window", "dates"]
@@ -67,6 +68,8 @@ class ConfigFieldOut(BaseModel):
 class ConfigOut(BaseModel):
     config_path: str | None
     """The config file in use, or null when there is none."""
+    log_file: str
+    """Where ``serve`` and each command write their log (#602); rotated as ``logs.*`` say."""
     fields: list[ConfigFieldOut]
 
 
@@ -81,6 +84,7 @@ def _out(request: Request, session: SessionDep, user: User) -> ConfigOut:
     views = ui_settings.describe(base, ui_settings.stored(session, user))
     return ConfigOut(
         config_path=None if base.source_path is None else str(base.source_path),
+        log_file=str(log_file()),
         fields=[
             ConfigFieldOut(
                 key=view.spec.key,
@@ -125,8 +129,12 @@ def set_config_settings(
     body: ConfigIn, request: Request, session: SessionDep, user: CurrentUser
 ) -> ConfigOut:
     """Store new values, all or none. Each applies as its ``applies_note`` says."""
+    base = file_settings(request)
     try:
-        ui_settings.write(session, user, file_settings(request), body.values)
+        ui_settings.write(session, user, base, body.values)
     except ui_settings.SettingsRefused as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # The log file is this process's: new rotation limits apply from the next record.
+    logs = ui_settings.resolve(session, user, base).logs
+    set_log_rotation(max_mb=logs.max_mb, keep=logs.keep)
     return _out(request, session, user)
