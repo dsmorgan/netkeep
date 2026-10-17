@@ -119,6 +119,7 @@ def test_the_read_only_routes_are_the_ones_that_only_read() -> None:
         "create_backup",  # writes a file with its own read-only connection, never a row
         "restart_serve",  # starts the restart gate, in memory; its wait holds no lock (#597)
         "cancel_restart",  # waits out the quiesce, whose send records its own row (#597)
+        "inspect_import_file",  # parses a CSV and stores nothing (#627)
     }
 
 
