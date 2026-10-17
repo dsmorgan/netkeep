@@ -8,13 +8,17 @@ none: an import adds nothing twice, so running it again is the way to correct it
 
 The Gmail scan is read-only (ADR 0009): it searches and reads headers, and the only
 Gmail calls it makes are the reads in :func:`netkeeper.services.history_scan.read_gmail`.
-It reads Gmail with no database session open, then applies the result in one writer
-transaction, like the CLI. Tests set ``app.state.gmail_opener`` to a fake.
+It reads Gmail while holding only the request's reader session (the user lookup), then
+applies the result in one writer transaction, like the CLI. One scan runs at a time: a
+second request gets 409. The scan runs to the end if the page is closed, because a
+disconnected client does not cancel it; an apply still commits.
+Tests set ``app.state.gmail_opener`` to a fake.
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable
 from datetime import UTC, date, datetime
 from typing import Annotated, Any, Final
@@ -27,7 +31,7 @@ from netkeeper.campaigns.gmail import Gmail, GmailError
 from netkeeper.crm.history import ImportReport, import_workbook
 from netkeeper.crm.history_workbook import WorkbookError, read_workbook
 from netkeeper.db import session_scope
-from netkeeper.models import HistoryReplyKind
+from netkeeper.models import HistoryReplyKind, User
 from netkeeper.services import history_scan
 from netkeeper.services import mailboxes as mailbox_service
 from netkeeper.web.deps import CurrentUser, SessionDep, read_only
@@ -39,12 +43,15 @@ router = APIRouter(tags=["history"])
 MAX_UPLOAD_BYTES: Final = 50 * 1024 * 1024
 """A workbook of one tab per campaign is far smaller; this refuses a wrong file early."""
 
+_scanning = threading.Lock()
+"""Held for the length of a scan, so two tabs cannot run two at once."""
+
 GmailOpener = Callable[[int, int], Gmail]
 
 Responses = dict[int | str, dict[str, Any]]
 INVALID: Responses = {422: {"description": "A file that is not an .xlsx workbook"}}
 GMAIL: Responses = {
-    409: {"description": "No such mailbox, or none is connected"},
+    409: {"description": "No such mailbox, none is connected, or a scan is already running"},
     502: {"description": "Gmail refused the first call"},
 }
 
@@ -285,6 +292,15 @@ def scan_history_gmail(body: HistoryScanIn, request: Request, user: CurrentUser)
     """Search Gmail, read-only, for what the imported recipients sent back, as
     ``netkeeper history scan-gmail`` does. A scan Gmail stops saves what it finished and
     answers with ``stopped``; run it again to continue."""
+    if not _scanning.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="a history scan is already running")
+    try:
+        return _scan(request, user, body)
+    finally:
+        _scanning.release()
+
+
+def _scan(request: Request, user: User, body: HistoryScanIn) -> HistoryScanOut:
     factory: sessionmaker[Session] = request.app.state.session_factory
     with session_scope(factory) as session:
         wanted = None if body.mailbox is None else body.mailbox.strip().lower()
