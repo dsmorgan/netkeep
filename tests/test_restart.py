@@ -621,3 +621,37 @@ def test_a_paused_nightly_backup_starts_no_new_write(
     assert job.back_up_if_due() is None and written == []
     job.resume()
     assert job.back_up_if_due() == tmp_path / "b" and len(written) == 1
+
+
+async def test_a_restart_asked_for_during_a_cancel_is_refused_until_it_finishes(
+    running_app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    """#597 review nit: a second **Restart when idle** that lands while a Cancel is still
+    resuming must not stop serve while the Cancel restarts the engine in it."""
+    stops: list[None] = []
+    running_app.state.restarter = restart.Restarter(stop=lambda: stops.append(None), mode="exec")
+    running_app.state.restart_gate = None
+    engine = _SlowEngine()
+    running_app.state.campaign_engine = engine
+    try:
+        assert (await client.post(URL, headers=CSRF)).status_code == 202
+        await _until(lambda: engine.stopping)  # mid-quiesce
+        cancelling = asyncio.create_task(client.delete(URL, headers=CSRF))
+        await _until(lambda: running_app.state.restart_gate.cancelling)
+        second = await client.post(URL, headers=CSRF, json={"when_idle": True})
+        assert second.status_code == 409
+        assert "a cancel is in progress" in second.json()["detail"]
+        engine.sent.set()
+        assert (await cancelling).json() == {"cancelled": True}
+        assert engine.started == 1
+        await asyncio.sleep(0.05)
+        assert stops == []  # nothing restarted under the resumed engine
+        # Once the Cancel is done, a new restart is taken as usual.
+        engine.stopping = False
+        again = await client.post(URL, headers=CSRF)
+        assert again.status_code == 202
+        await _until(lambda: engine.stopping)
+        engine.sent.set()
+        await _until(lambda: len(stops) == 1)
+    finally:
+        running_app.state.campaign_engine = None

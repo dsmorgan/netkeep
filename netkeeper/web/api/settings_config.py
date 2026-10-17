@@ -32,7 +32,7 @@ from netkeeper.models import User
 from netkeeper.services import restart_gate, ui_settings
 from netkeeper.services.restart_gate import RestartHook
 from netkeeper.web.api.health import BOOT_ID
-from netkeeper.web.deps import CurrentUser, SessionDep, file_settings
+from netkeeper.web.deps import CurrentUser, SessionDep, file_settings, read_only
 
 router = APIRouter(tags=["settings"])
 
@@ -283,6 +283,7 @@ def _gate(request: Request, hook: RestartHook) -> restart_gate.RestartGate:
         }
     },
 )
+@read_only  # nothing here writes; the gate's wait must never hold the write lock
 async def restart_serve(
     request: Request, user: CurrentUser, body: RestartIn | None = None
 ) -> RestartOut:
@@ -312,8 +313,11 @@ async def restart_serve(
             status_code=409,
             detail=f"netkeeper is busy: {'; '.join(reasons)}. Restart when it is idle, or wait",
         )
+    try:
+        gate.start()
+    except restart_gate.CancelInProgress as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     gate.waiting_on = reasons
-    gate.start()
     return RestartOut(mode=hook.mode, boot_id=BOOT_ID, waiting_on=reasons)
 
 
@@ -327,6 +331,7 @@ class RestartCancelOut(BaseModel):
     operation_id="cancel_restart",
     responses={409: {"description": "The restart has already begun"}},
 )
+@read_only  # waits out the quiesce, which a send records in: never hold the write lock
 async def cancel_restart(request: Request, user: CurrentUser) -> RestartCancelOut:
     """Cancel a restart that waits for idle (**Cancel** on the banner). ``user`` is
     unused; every route resolves the current user."""
