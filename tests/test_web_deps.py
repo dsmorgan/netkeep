@@ -115,6 +115,7 @@ def test_the_read_only_routes_are_the_ones_that_only_read() -> None:
         "test_send",  # sends with no session open, then opens its own writer
         "preview_campaign_audience",
         "check_gmail_replies_now",  # sets a flag in the running sender, in memory
+        "create_backup",  # writes a file with its own read-only connection, never a row
     }
 
 

@@ -154,7 +154,12 @@ def try_claim(account: str, directory: Path | None = None) -> Claim | None:
     after locking, the claim checks that its descriptor is still the file at
     ``path``, and starts over on the file that is there now when it is not.
     """
-    path = lock_path(account, directory)
+    return try_claim_at(lock_path(account, directory), account)
+
+
+def try_claim_at(path: Path, account: str) -> Claim | None:
+    """:func:`try_claim` on the lock file at ``path``, for a lock that is not an account's
+    (``netkeeper serve``'s, :mod:`netkeeper.services.serve_lock`). ``account`` names it."""
     for _ in range(_REOPEN_ATTEMPTS):
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
@@ -196,7 +201,11 @@ def inspect(account: str, directory: Path | None = None) -> LockState:
     :class:`~netkeeper.linkedin.browser.ActivityLocks` tries such a claim once more
     before calling the account busy.
     """
-    path = lock_path(account, directory)
+    return inspect_at(lock_path(account, directory), account)
+
+
+def inspect_at(path: Path, account: str) -> LockState:
+    """:func:`inspect` on the lock file at ``path`` (see :func:`try_claim_at`)."""
     try:
         fd = os.open(path, os.O_RDONLY)
     except FileNotFoundError:

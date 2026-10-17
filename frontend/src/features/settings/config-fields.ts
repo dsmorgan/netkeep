@@ -28,8 +28,11 @@ export const GROUPS: { id: ConfigField['group']; title: string; description: str
     title: 'Campaign defaults',
     description: 'Caps and spacing for campaign email, and what new campaigns start with.',
   },
-  { id: 'llm', title: 'LLM', description: 'Whether netkeeper may call the LLM.' },
-  { id: 'backup', title: 'Backups', description: 'How many database backups to keep.' },
+  {
+    id: 'backup',
+    title: 'Backups',
+    description: 'Whether netkeeper serve backs up the database each night, and how many to keep.',
+  },
 ]
 
 /** The draft a field's value in force starts as. */

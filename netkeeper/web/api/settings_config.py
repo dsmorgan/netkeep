@@ -29,7 +29,7 @@ router = APIRouter(tags=["settings"])
 class ConfigFieldOut(BaseModel):
     key: str
     """The dotted config key, as ``config.toml`` spells it: ``linkedin.active_hours``."""
-    group: Literal["linkedin_budgets", "linkedin_hours", "campaigns", "llm", "backup"]
+    group: Literal["linkedin_budgets", "linkedin_hours", "campaigns", "backup"]
     label: str
     help: str
     kind: Literal["int", "optional_int", "float", "bool", "window", "dates"]

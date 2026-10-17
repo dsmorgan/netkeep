@@ -1339,6 +1339,61 @@
         "title": "AutotagRuleRunOut",
         "type": "object"
       },
+      "BackupOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "restore_command": {
+            "title": "Restore Command",
+            "type": "string"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "created_at",
+          "size",
+          "restore_command"
+        ],
+        "title": "BackupOut",
+        "type": "object"
+      },
+      "BackupsOut": {
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "backups": {
+            "items": {
+              "$ref": "#/components/schemas/BackupOut"
+            },
+            "title": "Backups",
+            "type": "array"
+          },
+          "directory": {
+            "title": "Directory",
+            "type": "string"
+          }
+        },
+        "required": [
+          "directory",
+          "available",
+          "backups"
+        ],
+        "title": "BackupsOut",
+        "type": "object"
+      },
       "Between": {
         "additionalProperties": false,
         "description": "``low <= field <= high``, both ends included.",
@@ -2424,7 +2479,6 @@
               "linkedin_budgets",
               "linkedin_hours",
               "campaigns",
-              "llm",
               "backup"
             ],
             "title": "Group",
@@ -15992,6 +16046,51 @@
         "summary": "Run Autotag Rule",
         "tags": [
           "autotag-rules"
+        ]
+      }
+    },
+    "/api/v1/backups": {
+      "get": {
+        "description": "The backups, newest first.",
+        "operationId": "list_backups",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Backups",
+        "tags": [
+          "backups"
+        ]
+      },
+      "post": {
+        "description": "Back up the database now, then delete the oldest past ``backup.keep``.",
+        "operationId": "create_backup",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "No backup could be made: the reason is in detail"
+          }
+        },
+        "summary": "Post Backup",
+        "tags": [
+          "backups"
         ]
       }
     },

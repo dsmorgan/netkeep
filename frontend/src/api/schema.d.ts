@@ -157,6 +157,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/backups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Backups
+         * @description The backups, newest first.
+         */
+        get: operations["list_backups"];
+        put?: never;
+        /**
+         * Post Backup
+         * @description Back up the database now, then delete the oldest past ``backup.keep``.
+         */
+        post: operations["create_backup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/campaigns": {
         parameters: {
             query?: never;
@@ -4108,6 +4132,29 @@ export interface components {
             /** Updated */
             updated: number;
         };
+        /** BackupOut */
+        BackupOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Name */
+            name: string;
+            /** Restore Command */
+            restore_command: string;
+            /** Size */
+            size: number;
+        };
+        /** BackupsOut */
+        BackupsOut: {
+            /** Available */
+            available: boolean;
+            /** Backups */
+            backups: components["schemas"]["BackupOut"][];
+            /** Directory */
+            directory: string;
+        };
         /**
          * Between
          * @description ``low <= field <= high``, both ends included.
@@ -4549,7 +4596,7 @@ export interface components {
              * Group
              * @enum {string}
              */
-            group: "linkedin_budgets" | "linkedin_hours" | "campaigns" | "llm" | "backup";
+            group: "linkedin_budgets" | "linkedin_hours" | "campaigns" | "backup";
             /** Help */
             help: string;
             /** Key */
@@ -9496,6 +9543,53 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    list_backups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupsOut"];
+                };
+            };
+        };
+    };
+    create_backup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupsOut"];
+                };
+            };
+            /** @description No backup could be made: the reason is in detail */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

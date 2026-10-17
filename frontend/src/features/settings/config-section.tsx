@@ -27,7 +27,7 @@ import {
 
 /**
  * Settings you change here instead of in config.toml (#343): LinkedIn budgets, active
- * hours, campaign defaults, the LLM switch and backups. config.toml is optional; a key
+ * hours, campaign defaults and backups. config.toml is optional; a key
  * it sets wins and shows here locked, with the file's path.
  */
 function message(error: unknown): string {

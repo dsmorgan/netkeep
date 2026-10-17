@@ -10,7 +10,9 @@ serve``), it also starts the scheduler (P2-10), whose scheduled LinkedIn runs
 fire only on an account a person armed, and the mailbox poll (P3-01), which
 refreshes each Gmail token every ``[campaigns] reply_poll_minutes``, and the
 campaign engine's minute tick (P3-06), which fires through the Gmail sender
-(P3-07) only on a mailbox a person armed (#277). API
+(P3-07) only on a mailbox a person armed (#277). With an extractor it also holds
+the serve lock for as long as it runs, so ``netkeeper restore`` refuses to run under it,
+and takes the nightly backup (P6-04). API
 modules under :mod:`netkeeper.web.api` are discovered, so adding an endpoint
 never edits this file.
 """
@@ -44,8 +46,11 @@ from netkeeper.crm.tags import ensure_default_rules
 from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
 from netkeeper.models import User
 from netkeeper.models.base import utcnow
+from netkeeper.paths import data_dir
 from netkeeper.scoping import install_scope_guard
-from netkeeper.services import ui_settings
+from netkeeper.services import serve_lock, ui_settings
+from netkeeper.services.backup import BACKUPS_DIRNAME
+from netkeeper.services.backup_job import NightlyBackups, backs_up
 from netkeeper.services.budgets import (
     ActionClass,
     li_message_risk_warning,
@@ -119,6 +124,17 @@ def create_app(
         # one raises or is cancelled (the campaign engine can wait 45 s for a
         # send, long enough for a cancel to land there), then re-raises.
         async with AsyncExitStack() as teardown:
+            if extractor is not None:
+                # Before anything touches the database: a `netkeeper restore` may be
+                # replacing it, and a second serve would run every job twice.
+                try:
+                    held = serve_lock.claim()
+                except serve_lock.ServeRunning as exc:
+                    raise RuntimeError(
+                        f"netkeeper serve cannot start: {exc}. Stop it, or wait for the"
+                        " restore to finish."
+                    ) from exc
+                teardown.callback(held.release)
             if engine is None:
                 teardown.callback(active.dispose)
             tasks = _start(app, active, resolved)
@@ -169,6 +185,15 @@ def create_app(
                 teardown.push_async_callback(campaigns.stop)
                 campaigns.start()
                 app.state.campaign_engine = campaigns
+                if backs_up(active):
+                    nightly = NightlyBackups(
+                        active,
+                        app.state.session_factory,
+                        resolved,
+                        data_dir() / BACKUPS_DIRNAME,
+                    )
+                    teardown.push_async_callback(nightly.stop)
+                    nightly.start()
             yield
 
     app = FastAPI(

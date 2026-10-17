@@ -144,3 +144,23 @@ export async function saveConfigSettings(values: Record<string, unknown>): Promi
   if (data === undefined) throw failure(error, response, 'PUT /settings/config')
   return data
 }
+
+export type Backups = components['schemas']['BackupsOut']
+export type Backup = components['schemas']['BackupOut']
+
+/** The database's backups (P6-04), newest first. */
+export const backupsQuery = queryOptions({
+  queryKey: ['backups'] as const,
+  queryFn: async ({ signal }): Promise<Backups> => {
+    const { data, error, response } = await api.GET('/api/v1/backups', { signal })
+    if (data === undefined) throw failure(error, response, 'GET /backups')
+    return data
+  },
+})
+
+/** Back up the database now; older backups past `backup.keep` are deleted. */
+export async function createBackup(): Promise<Backups> {
+  const { data, error, response } = await api.POST('/api/v1/backups')
+  if (data === undefined) throw failure(error, response, 'POST /backups')
+  return data
+}

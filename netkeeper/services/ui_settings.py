@@ -73,7 +73,7 @@ KEY_PREFIX: Final = "config."
 
 Kind = Literal["int", "optional_int", "float", "bool", "window", "dates"]
 Applies = Literal["now", "restart"]
-Group = Literal["linkedin_budgets", "linkedin_hours", "campaigns", "llm", "backup"]
+Group = Literal["linkedin_budgets", "linkedin_hours", "campaigns", "backup"]
 Source = Literal["default", "ui", "file"]
 
 SPACING_FLOOR_MIN_S: Final = 90
@@ -316,34 +316,25 @@ FIELDS: Final[tuple[FieldSpec, ...]] = (
         ),
     ),
     FieldSpec(
-        key="llm.enabled",
-        group="llm",
-        label="Use the LLM",
-        help=(
-            "Lets netkeeper call the Anthropic API for drafting. No feature calls it yet;"
-            " this is saved for when one does. The API key stays in the Keychain."
-        ),
-        kind="bool",
-        applies="now",
-        applies_note="Saved now. Nothing reads it yet.",
-    ),
-    FieldSpec(
         key="backup.nightly",
         group="backup",
         label="Nightly backups",
         help=(
-            "Nightly backups are not scheduled yet; this is saved for when they are. Run"
-            " netkeeper backup create to make one now."
+            "netkeeper serve backs up the database once a night, from 03:00 in your LinkedIn"
+            " timezone, or at its first check after that when the computer was asleep."
         ),
         kind="bool",
         applies="now",
-        applies_note="Saved now. Nothing reads it yet.",
+        applies_note="Applies at serve's next check, within 10 minutes.",
     ),
     FieldSpec(
         key="backup.keep",
         group="backup",
         label="Backups to keep",
-        help="netkeeper backup create deletes older backups past this many.",
+        help=(
+            "Each backup, nightly or made by hand, deletes the oldest past this many. A"
+            " restore deletes none."
+        ),
         kind="int",
         applies="now",
         applies_note="Applies to the next backup.",
@@ -743,7 +734,10 @@ def checks(key: str, settings: Settings) -> tuple[tuple[str, ...], tuple[str, ..
         if settings.campaigns.reply_poll_minutes < 1:
             warnings.append("reply_poll_minutes is below 1, so netkeeper checks every minute.")
     elif key == "backup.keep" and settings.backup.keep < 1:
-        warnings.append("backup.keep is below 1, so netkeeper backup create refuses to run.")
+        warnings.append(
+            "backup.keep is below 1, so neither netkeeper backup create nor the nightly"
+            " backup runs."
+        )
     return tuple(warnings), tuple(notes)
 
 
