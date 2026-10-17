@@ -24,6 +24,8 @@ from netkeeper.cli import app as cli
 from netkeeper.config import Settings
 from netkeeper.crm import apply as mapping
 from netkeeper.crm import identity
+from netkeeper.crm.contacts import revert_field
+from netkeeper.crm.identity import IncomingContact
 from netkeeper.crm.provenance import set_manual_field
 from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
 from netkeeper.linkedin.classify import Outcome
@@ -613,3 +615,50 @@ def test_a_repeat_sync_after_enrichment_is_no_flip_flop(cli_db: sessionmaker[Ses
 
     assert report.headline_flip_flops == 0
     assert [item.field_changes["headline"] for item in report.runs] == [1, 1, 0]
+
+
+def test_a_revert_after_a_kept_profile_headline_brings_the_profile_back(
+    writer: Session, user: User
+) -> None:
+    _stored(writer, user, QUORBELLE, "Archive text")
+    _sync_card(writer, user, "Card text", NOW)
+    _enrich_quorbelle(writer, user, NOW + timedelta(hours=1))
+    _sync_card(writer, user, "Card text", NOW + timedelta(days=1))
+    contact = _quorbelle(writer, user)
+    assert contact.synced_values["headline"]["value"] == "Profile text"
+    set_manual_field(contact, "headline", "My words")
+
+    revert_field(writer, user, contact.id, "headline")
+
+    assert contact.headline == "Profile text"
+
+
+def test_a_manual_headline_equal_to_the_incoming_text_leaves_the_markers(
+    writer: Session, user: User
+) -> None:
+    _stored(writer, user, QUORBELLE, "Archive text")
+    _sync_card(writer, user, "Card text", NOW)
+    contact = _quorbelle(writer, user)
+    set_manual_field(contact, "headline", "Profile text")
+
+    # Enrichment reads the same words but may not write them over a person's edit.
+    _enrich_quorbelle(writer, user, NOW + timedelta(hours=1))
+
+    assert contact.headline_via == "card"
+
+
+def test_a_new_contact_starts_with_the_markers_of_its_path(writer: Session, user: User) -> None:
+    mapping.apply_page(writer, user, _page((QUORBELLE,), "Card text", at=NOW))
+    card = _quorbelle(writer, user)
+    assert (card.headline_via, card.card_headline_seen) == ("card", "Card text")
+
+    other = IncomingContact(
+        source=ContactSource.SYNC,
+        li_urn=OTTOLINE.urn,
+        first_name="Ottoline",
+        headline="Steady text",
+        headline_via="profile",
+        observed_at=NOW,
+    )
+    created = identity.apply(writer, user, other, identity.New())
+    assert (created.headline_via, created.card_headline_seen) == ("profile", None)

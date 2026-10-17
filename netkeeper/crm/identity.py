@@ -767,7 +767,11 @@ def _update(
         if overwrite[name]:
             _record(contact, name, incoming.source)
     _track_headline(contact, incoming, written=overwrite.get("headline", False))
-    _record_synced(contact, incoming)
+    # A card headline the profile's outranks stays out of the ledger: a revert would
+    # put the card's text back over the profile's. ``card_headline_seen`` holds it.
+    _record_synced(
+        contact, incoming, skip=frozenset({"headline"}) if headline_kept else frozenset()
+    )
     position_changed = incoming.source is ContactSource.SYNC and any(
         enriched_before[name] not in (None, "")
         and name in provided
@@ -853,11 +857,18 @@ def _record(contact: Contact, name: str, source: ContactSource) -> None:
         contact.field_sources[name] = source.value
 
 
-def _record_synced(contact: Contact, incoming: IncomingContact) -> None:
-    """Note every provided field in the ledger, whether or not the column took it."""
+def _record_synced(
+    contact: Contact, incoming: IncomingContact, skip: frozenset[str] = frozenset()
+) -> None:
+    """Note every provided field in the ledger, whether or not the column took it.
+
+    ``skip`` names fields left out (a card headline the profile's outranks, #557).
+    """
     if incoming.source is ContactSource.MANUAL:
         return
     for name, value in incoming.provided_fields().items():
+        if name in skip:
+            continue
         record_synced_value(
             contact, name, value, source=incoming.source, observed_at=incoming.observed_at
         )
