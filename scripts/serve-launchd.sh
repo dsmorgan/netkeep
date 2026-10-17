@@ -38,7 +38,11 @@ fi
 # the moved file and nothing writes to them after this.
 ROTATE_BYTES=5242880
 if [ -n "${NETKEEPER_LAUNCHD_LOG_DIR:-}" ]; then
+  # The files can hold warning text: private, as netkeeper.log is (0600 in a 0700 dir).
+  previous_umask=$(umask)
+  umask 077
   mkdir -p "$NETKEEPER_LAUNCHD_LOG_DIR"
+  chmod 700 "$NETKEEPER_LAUNCHD_LOG_DIR"
   for name in serve.log serve.err.log; do
     file="$NETKEEPER_LAUNCHD_LOG_DIR/$name"
     if [ -f "$file" ] && [ "$(wc -c <"$file" | tr -d " ")" -gt "$ROTATE_BYTES" ]; then
@@ -46,6 +50,8 @@ if [ -n "${NETKEEPER_LAUNCHD_LOG_DIR:-}" ]; then
     fi
   done
   exec >>"$NETKEEPER_LAUNCHD_LOG_DIR/serve.log" 2>>"$NETKEEPER_LAUNCHD_LOG_DIR/serve.err.log"
+  chmod 600 "$NETKEEPER_LAUNCHD_LOG_DIR/serve.log" "$NETKEEPER_LAUNCHD_LOG_DIR/serve.err.log"
+  umask "$previous_umask"  # serve's own files keep the mode they always had
 fi
 
 echo "serve-launchd.sh: $(date -u +%Y-%m-%dT%H:%M:%SZ) applying migrations"

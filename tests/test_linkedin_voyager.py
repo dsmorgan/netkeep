@@ -319,7 +319,10 @@ class TestParseConnectionsPage:
             )
 
     def test_element_references_an_entity_not_in_included(self) -> None:
-        with pytest.raises(RouteChanged, match="urn:li:fsd_profile:MISSING"):
+        # The URN's type, never its id: the id names a person (#602).
+        with pytest.raises(
+            RouteChanged, match="no 'included' entity for 'urn:li:fsd_profile:…'"
+        ) as raised:
             parse_connections_page(
                 json.dumps(
                     {
@@ -333,6 +336,7 @@ class TestParseConnectionsPage:
                     }
                 )
             )
+        assert "MISSING" not in str(raised.value)
 
     def test_included_entity_missing_public_identifier(self) -> None:
         with pytest.raises(RouteChanged, match="publicIdentifier"):

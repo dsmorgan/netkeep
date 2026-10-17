@@ -51,6 +51,7 @@ from netkeeper.linkedin.archive import (
     ArchiveRefusalCode,
     open_archive,
 )
+from netkeeper.logging_setup import personal
 
 log = logging.getLogger(__name__)
 
@@ -110,7 +111,9 @@ def check_zip_directory(handle: IO[bytes], name: str) -> None:
         return
     declared, read = found.declared, found.read
     if read != declared:
-        log.warning("%s: zip directory declares %d entries, found %d", name, declared, read)
+        log.warning(
+            "%s: zip directory declares %d entries, found %d", personal(name), declared, read
+        )
         found_text = f"only {read} could be read" if read < declared else "more are listed"
         raise ArchiveFormatError(
             f"{name}: the zip's directory is damaged: it declares {declared} files, but "

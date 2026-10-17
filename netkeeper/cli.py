@@ -258,6 +258,11 @@ class _PathsBlock:
     log_file: str
 
 
+_NO_LOG_FILE: Final = frozenset({"openapi", "version"})
+"""Commands that read no data and write no log file (#602): ``make gen-client`` runs
+``openapi export`` wherever the repository is, never against a data directory."""
+
+
 @app.callback()
 def main(
     ctx: typer.Context,
@@ -272,7 +277,7 @@ def main(
 ) -> None:
     """netkeeper command group."""
     ctx.obj = CliState(config=config)
-    setup_logging()
+    setup_logging(log_to_file=ctx.invoked_subcommand not in _NO_LOG_FILE)
 
 
 def _file_settings_or_exit(state: CliState) -> Settings:

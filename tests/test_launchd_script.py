@@ -257,6 +257,22 @@ def test_wrapper_under_the_agent_writes_its_own_log_files(tmp_path: Path) -> Non
     assert "out db" in out
     assert "out serve" in out
     assert (logs / "serve.err.log").read_text().splitlines() == ["err db", "err serve"]
+    assert logs.stat().st_mode & 0o777 == 0o700
+    for name in ("serve.log", "serve.err.log"):
+        assert (logs / name).stat().st_mode & 0o777 == 0o600
+
+
+def test_wrapper_leaves_serves_own_umask_alone(tmp_path: Path) -> None:
+    """Only the two log files are made private; what serve writes keeps its usual mode."""
+    fake = tmp_path / "netkeeper"
+    fake.write_text("#!/bin/sh\numask\n")
+    fake.chmod(0o755)
+    logs = tmp_path / "logs"
+    env = {"NETKEEPER_BIN": str(fake), "NETKEEPER_LAUNCHD_LOG_DIR": str(logs)}
+    proc = run_sh(WRAPPER, env=env)
+    assert proc.returncode == 0, proc.stderr
+    umasks = [line for line in (logs / "serve.log").read_text().splitlines() if line.isdigit()]
+    assert umasks and all(u.lstrip("0") != "77" for u in umasks)
 
 
 def test_wrapper_rotates_a_log_file_over_five_megabytes(tmp_path: Path) -> None:

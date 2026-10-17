@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import ConnectionPoolEntry
 
 from netkeeper import paths
+from netkeeper.logging_setup import personal
 
 DATABASE_URL_ENV = "NETKEEPER_DATABASE_URL"
 DATABASE_FILENAME = "netkeeper.sqlite3"
@@ -64,14 +65,16 @@ def database_url(data_dir: Path | None = None) -> str:
 def make_engine(url: str) -> Engine:
     """Create an engine for ``url``.
 
-    For SQLite this also creates the database file's parent directory, turns on WAL,
-    foreign-key enforcement, and a busy timeout on every connection, and takes over
-    transaction control from pysqlite so that DDL is transactional and savepoints
-    work.
+    Errors from it never quote bound parameters (``hide_parameters``). For SQLite this
+    also creates the database file's parent directory, turns on WAL, foreign-key
+    enforcement, and a busy timeout on every connection, and takes over transaction
+    control from pysqlite so that DDL is transactional and savepoints work.
     """
     parsed = make_url(url)
-    log.debug("creating engine for %s", parsed.render_as_string(hide_password=True))
-    engine = create_engine(parsed)
+    log.debug("creating engine for %s", personal(parsed.render_as_string(hide_password=True)))
+    # Bound values never reach an error's text: they can be a message body (#517), and
+    # an error is logged (#602).
+    engine = create_engine(parsed, hide_parameters=True)
     if parsed.get_backend_name() == "sqlite":
         _ensure_sqlite_parent(parsed.database)
         event.listen(engine, "connect", _sqlite_on_connect)

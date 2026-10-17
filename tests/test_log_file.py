@@ -10,17 +10,24 @@ import csv
 import io
 import logging
 import re
+import shutil
+import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
 import httpx
 import pytest
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
 
 from netkeeper import migrations
+from netkeeper.campaigns.templates import RemovedFieldCampaign, log_removed_field_campaigns
 from netkeeper.cli import app as cli
 from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
+from netkeeper.linkedin.voyager import RouteChanged, _resolve_included
 from netkeeper.logging_setup import (
     FILE_HANDLER_NAME,
     PERSONAL_CLOSE,
@@ -30,9 +37,11 @@ from netkeeper.logging_setup import (
     RotatingLogFile,
     log_file,
     personal,
+    remove_file_handler,
     set_log_rotation,
     setup_logging,
 )
+from netkeeper.models import CampaignStatus
 from netkeeper.scoping import install_scope_guard
 from netkeeper.services.users import ensure_local_user
 
@@ -140,7 +149,7 @@ def test_the_file_rotates_by_size_and_keeps_the_count_set() -> None:
         log.info("%s", line)
     _flush()
     path = log_file()
-    files = sorted(p.name for p in path.parent.iterdir())
+    files = sorted(p.name for p in path.parent.iterdir() if p.name.startswith("netkeeper"))
     assert files == ["netkeeper.log", "netkeeper.log.1", "netkeeper.log.2"]
     for name in files:
         assert (path.parent / name).stat().st_size <= 1024 * 1024
@@ -306,3 +315,172 @@ async def test_the_settings_page_reports_the_log_file_and_applies_new_limits(
         "/api/v1/settings/config", json={"values": {"logs.keep": 0}}, headers=CSRF
     )
     assert refused.status_code == 422
+
+
+# --- review of #622: processes, modes, and what else is personal ---------------------
+
+_WRITER = """
+import logging, sys
+from netkeeper.logging_setup import set_log_rotation, setup_logging
+setup_logging("INFO")
+set_log_rotation(max_mb=1, keep=100)
+log = logging.getLogger("netkeeper.writer")
+tag, count = sys.argv[1], int(sys.argv[2])
+pad = "y" * 250
+for i in range(count):
+    log.info("line %s-%d %s", tag, i, pad)
+"""
+
+
+def test_processes_sharing_the_file_lose_no_line_through_rotation(tmp_path: Path) -> None:
+    """Four writers at once under a 1 MB limit: every line lands exactly once, no
+    process prints a logging error, and none turns its file logging off."""
+    data = tmp_path / "netkeeper-data"
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "NETKEEPER_DATA": str(data),
+        "NETKEEPER_LOG_STDERR_LEVEL": "WARNING",
+    }
+    count, tags = 3000, ["a", "b", "c", "d"]
+    procs = [
+        subprocess.Popen(
+            [sys.executable, "-c", _WRITER, tag, str(count)],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for tag in tags
+    ]
+    errors = [proc.communicate(timeout=120)[1] for proc in procs]
+    assert [proc.returncode for proc in procs] == [0] * len(tags)
+    for err in errors:
+        assert "Logging error" not in err
+        assert "cannot write the log file" not in err
+    logs = data / "logs"
+    seen: dict[str, int] = {}
+    files = [f for f in logs.iterdir() if f.name.startswith("netkeeper.log")]
+    assert len(files) >= 4  # about 4 MB in 1 MB files: it rotated, more than once
+    for file in files:
+        assert file.stat().st_mode & 0o777 == 0o600
+        for line in file.read_text().splitlines():
+            assert _LINE.fullmatch(line), line[:80]
+            key = line.split(" line ", 1)[1].split(" ", 1)[0]
+            seen[key] = seen.get(key, 0) + 1
+    assert len(seen) == count * len(tags)
+    assert set(seen.values()) == {1}
+
+
+def test_a_removed_log_directory_is_made_again_at_the_next_record() -> None:
+    setup_logging("INFO")
+    log = logging.getLogger("netkeeper.example")
+    log.info("first")
+    shutil.rmtree(log_file().parent)
+    log.info("second")
+    _flush()
+    assert not _handler().failed
+    assert log_file().read_text().rstrip().endswith("second")
+
+
+def test_the_log_directory_is_private_and_an_old_file_is_made_private(tmp_path: Path) -> None:
+    logs = tmp_path / "netkeeper-data" / "logs"
+    setup_logging("INFO")
+    logging.getLogger("netkeeper.example").info("one")
+    _flush()
+    assert logs.stat().st_mode & 0o777 == 0o700
+    assert (logs / ".netkeeper.log.lock").stat().st_mode & 0o777 == 0o600
+    remove_file_handler()
+    log_file().chmod(0o644)  # a file from before, or another tool's
+    setup_logging("INFO")
+    logging.getLogger("netkeeper.example").info("two")
+    _flush()
+    assert log_file().stat().st_mode & 0o777 == 0o600
+
+
+def test_a_handler_after_the_file_still_sees_plain_values() -> None:
+    """The file's formatter marks a copy of the record, never the record itself."""
+    setup_logging("INFO")
+    seen: list[str] = []
+
+    class After(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            seen.append(record.getMessage())
+
+    after = After()
+    logging.getLogger().addHandler(after)  # the restore fixture removes it
+    logging.getLogger("netkeeper.example").info("hi %s", personal("Quorbelle"))
+    assert seen == ["hi Quorbelle"]
+
+
+def test_a_cut_short_span_is_redacted_to_the_end_of_its_line() -> None:
+    setup_logging("INFO")
+    logging.getLogger("netkeeper.example").info("name %.4s", personal("Quorbelle"))
+    logging.getLogger("netkeeper.example").info("next line")
+    _flush()
+    redacted = PERSONAL_PATTERN.sub("<personal>", log_file().read_text())
+    assert "Quor" not in redacted
+    assert "next line" in redacted
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/api/v1/templates/dictionary/Quorbelle", "/api/v1/imports/presets/Quorbelle"],
+)
+def test_a_typed_word_in_an_access_log_path_is_personal(
+    path: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    setup_logging("INFO")
+    logging.getLogger("uvicorn.access").info(
+        '%s - "%s %s HTTP/%s" %d', "127.0.0.1:5", "DELETE", path, "1.1", 204
+    )
+    _flush()
+    assert f"{path} HTTP/1.1" in capsys.readouterr().err
+    text_ = log_file().read_text()
+    prefix = path.removesuffix("Quorbelle")
+    assert f"{prefix}{PERSONAL_OPEN}Quorbelle{PERSONAL_CLOSE} HTTP/1.1" in text_
+
+
+def test_campaign_names_are_personal_in_the_removed_field_warning(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    setup_logging("INFO")
+    blocked = [RemovedFieldCampaign(3, "Quorbelle reunion", CampaignStatus.ACTIVE, (1, 2))]
+    log_removed_field_campaigns(logging.getLogger("netkeeper.web.app"), blocked)
+    _flush()
+    assert "'Quorbelle reunion' (campaign 3, active, steps 1, 2)" in capsys.readouterr().err
+    assert f"{PERSONAL_OPEN}'Quorbelle reunion'{PERSONAL_CLOSE}" in log_file().read_text()
+
+
+def test_a_route_change_never_names_the_urn_it_could_not_resolve(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with pytest.raises(RouteChanged) as raised:
+        _resolve_included("connections", {}, "elements[0]", "urn:li:fsd_profile:ACoAQuorbelle")
+    assert "ACoAQuorbelle" not in str(raised.value)
+    assert "urn:li:fsd_profile:…" in str(raised.value)
+    assert "ACoAQuorbelle" not in caplog.text
+
+
+def test_a_failed_write_never_quotes_its_bound_body(tmp_path: Path) -> None:
+    """``hide_parameters``: a database error's text, logged anywhere, carries no body."""
+    engine = make_engine(f"sqlite:///{tmp_path / 'scratch.sqlite3'}")
+    body = "Hi Quorbelle, lovely to catch up"
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("CREATE TABLE m (id INTEGER PRIMARY KEY, body TEXT)"))
+            connection.execute(text("INSERT INTO m (id, body) VALUES (1, 'x')"))
+        with pytest.raises(IntegrityError) as raised, engine.begin() as connection:
+            connection.execute(text("INSERT INTO m (id, body) VALUES (1, :b)"), {"b": body})
+    finally:
+        engine.dispose()
+    assert "UNIQUE" in str(raised.value)
+    assert body not in str(raised.value)
+
+
+def test_openapi_export_writes_no_log_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NETKEEPER_LOG_LEVEL", "DEBUG")
+    out = tmp_path / "openapi.json"
+    result = CliRunner().invoke(cli, ["openapi", "export", "--out", str(out)])
+    assert result.exit_code == 0, result.output
+    assert out.is_file()
+    assert not log_file().parent.exists()
