@@ -23,7 +23,7 @@ For Gmail, see the reason codes in [Gmail setup](../gmail-setup.md#troubleshooti
 | Chrome ignores the debug port | Chrome 136 and later refuse it on your default profile. Use the command netkeeper prints, which has its own `--user-data-dir`. |
 | Chrome won't start on the profile after a crash | `make chrome` clears the profile lock a crashed Chrome left behind. |
 | "the browser was busy with another run" | One netkeeper process uses the browser at a time. `netkeeper preflight` names the process that holds it. Wait for that run, or stop it. |
-| Posture: the activity lock "is probably stuck", or is held by something netkeeper can't name | Stop the process the warning names. The lock is released when its holder exits. |
+| Posture: the activity lock "is probably stuck", or is held by something netkeeper can't name | Stop the process the warning names. netkeeper releases the lock when its holder exits. |
 
 ## Why a LinkedIn run stopped
 
@@ -44,26 +44,32 @@ netkeeper classifies every answer LinkedIn gives (spec [9.7](../architecture.md#
 | refused: the first LinkedIn inbox poll is run by hand | Scheduled inbox polls wait for one you start. | **Check inbox now** on the **LinkedIn** page, or `netkeeper linkedin inbox`. |
 | refused: the route-changed breaker, the answer-lost limit, the Contact info breaker, the inbox breaker, or the inbox owner breaker is tripped | Repeated failures of one kind stopped scheduled runs of that kind. Runs you start by hand still go. | Start one run of that kind by hand. One that reaches its end clears the breaker. Or clear every breaker with `netkeeper linkedin schedule reset-breaker`. |
 | the page showed another LinkedIn mailbox than this account's | The LinkedIn Chrome is signed in to a different LinkedIn account. | Sign back in to yours. If you changed accounts on purpose, run `netkeeper linkedin inbox-forget-owner`. |
+| the first poll could not read back to the earliest outreach | The first LinkedIn inbox poll couldn't reach your oldest watched outreach, so some older replies may be missed. | Check older LinkedIn replies by hand, then choose **Acknowledge** on **Settings**, under **Posture**, or run `netkeeper linkedin inbox-acknowledge`. |
+| an error stopped it | Something unexpected went wrong. | Check `serve`'s log (`<data dir>/logs/serve.err.log` under launchd, or its terminal), then run once by hand. If it repeats, open an issue with the log lines. |
 | the netkeeper process running it stopped | `serve` stopped or restarted mid-run. | Start the run again. An enrichment can **Resume** its plan once, from the run's detail. |
 
 ## Posture warnings
 
-| Warning | What to do |
+Each warning starts with the protection it belongs to. These are the ones you're most likely to see, quoted from the report:
+
+| The warning says | What to do |
 |---|---|
-| nothing has checked the LinkedIn session yet | Run `netkeeper preflight`. |
-| the last check found no LinkedIn session, or the session was last confirmed more than 24 hours ago | Log in to LinkedIn in the LinkedIn Chrome, then run `netkeeper preflight`. |
-| LinkedIn answered with a checkpoint or logged out | The session flag is up. Clear it as in the table above. |
-| scheduled jobs: nothing fires on its own | Expected until `serve` has run with scheduled runs armed. |
-| `linkedin_auto_send` is on | You turned on LinkedIn auto-send in `config.toml`. Turn it off there and restart `serve` unless you mean it. |
-| a `linkedin.pacing` value, or `linkedin.cdp_url` not on this machine | A value in `config.toml` weakens a protection. Remove it to get the default back. |
-| a complete full sync refused to age anyone | A sync would have marked too many connections gone at once, so it marked none. It clears after a later complete full sync. |
+| "nothing has checked the LinkedIn session yet" | Run `netkeeper preflight`. |
+| "the last check (…) found no LinkedIn session in this Chrome profile, so no job can run" | Log in to LinkedIn in the LinkedIn Chrome, then run `netkeeper preflight`. |
+| "the session was last confirmed …, more than 24 h ago, so it may have expired since" | Run `netkeeper preflight` again. |
+| "LinkedIn answered with a checkpoint on …" or "LinkedIn answered with a logged out on …" | The session flag is up. Clear it as in the table above. |
+| "scheduled jobs: no job kind has a due time for this account, so nothing fires on its own" | Expected until `serve` has run with scheduled runs armed. |
+| "the first LinkedIn inbox poll couldn't read back to …" | Check older LinkedIn replies by hand, then choose **Acknowledge** under **Posture**. |
+| "linkedin_auto_send is on in the [campaigns] section of config.toml" | You turned on LinkedIn auto-send. Turn it off there and restart `serve`, unless you mean it. |
+| "linkedin.pacing.… is …", or "linkedin.cdp_url points at …, not this machine's loopback" | A value in `config.toml` weakens a protection. Remove it to get the default back. |
+| "the last complete full sync (run …) refused to age anyone" | A sync would have marked too many connections gone at once, so it marked none. Check the run it names. The warning clears after a later complete full sync. |
 
 ## Gmail
 
 | What you see | What to do |
 |---|---|
 | "Gmail needs you to sign in again" | Choose **Re-authorize** on the banner, or run `netkeeper gmail login`. Email steps wait until you do. |
-| **Arm to send** says no netkeeper test draft was found | Make a test draft from a campaign's review (**Send a test of step 1**) while the mailbox is armed for drafts, then **Check now**. |
+| **Arm to send** says "no netkeeper test draft was found in the Drafts of … at the last check" | Make a test draft from a campaign's review (**Send a test of step 1**) while the mailbox is armed for drafts, then **Check now**. The arm steps say "netkeeper found its own draft." when it's found. |
 | A step's email went out as a draft | The mailbox is armed for drafts only. Send the draft yourself, or **Arm to send**. |
 
 ## Actions that stay on the command line
@@ -77,6 +83,6 @@ Everything else is in the UI. These remain in a terminal or a file, most of them
 | Check the LinkedIn Chrome (optional) | `netkeeper preflight`. |
 | Turn on LinkedIn auto-send | `config.toml`: `[campaigns] linkedin_auto_send = true`, then restart `serve`. Read [ADR 0008](../adr/0008-auto-send.md) first. |
 | Import the old mailing tool's history (optional) | `netkeeper history import` and `netkeeper history scan-gmail`. See [the guide](../history-import.md). |
-| Restore a backup | `netkeeper restore <backup>`, with `serve` stopped. See [Backups and restore](backups.md). |
+| Restore a backup | `netkeeper restore <name or path>`, with `serve` stopped. The **Backup files** card in Settings shows each backup's command. See [Backups and restore](backups.md). |
 | Clear a tripped breaker without a manual run | `netkeeper linkedin schedule reset-breaker`. |
 | Forget the recorded LinkedIn inbox owner after you change accounts | `netkeeper linkedin inbox-forget-owner`. |
