@@ -1338,14 +1338,15 @@ async def test_hidden_places_count_when_a_quiet_last_answer_is_rescued(
 async def test_hidden_places_do_not_rescue_a_quiet_last_answer_short_of_the_total(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """#554, #208 review L1: under a stated total of 50, 43 read plus 3 hidden is 46.
-    Counting hidden places adds no slack, so the copy is refused, its own log line says
-    how many places it accounts for, and the run stops answer_lost at 40."""
+    """#554, #208 review L1: under a stated total of 47, 43 read plus 3 hidden is 46,
+    one place short. Counting hidden places adds no slack, not even one place, so the
+    copy is refused, its own log line says how many places it accounts for, and the run
+    stops answer_lost at 40."""
     caplog.set_level(logging.INFO, logger="netkeeper")
     site = FlagshipSite(
         many(46),
         end="short",
-        total=50,
+        total=47,
         tap=True,
         hide={10: 1, 20: 1, 30: 1},
         lost={40: Lost("silent", streamed="whole")},
@@ -1354,10 +1355,35 @@ async def test_hidden_places_do_not_rescue_a_quiet_last_answer_short_of_the_tota
     assert out.result.reason is StopReason.ANSWER_LOST and not out.result.complete
     assert out.result.lost is not None and out.result.lost.start == 40
     assert (
-        "the streamed copy of the last answer for start 40 accounts for 46 of the 50"
+        "the streamed copy of the last answer for start 40 accounts for 46 of the 47"
         " places the total names (3 hidden, 0 lost); not used" in caplog.text
     )
     assert "asked for next" not in caplog.text
+
+
+async def test_a_quiet_last_answer_copy_that_asks_for_a_next_page_is_not_used(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#554: the copy of the last answer (40) parses and, with the 3 hidden places,
+    accounts for all 46 places, but it asks for a next start: it does not prove the
+    end, so it is refused on its own log line and the run stops answer_lost at 40."""
+    caplog.set_level(logging.INFO, logger="netkeeper")
+    people = many(46)
+    copy = pagination_payload(people[40:46], start=40, next_start=50)
+    site = FlagshipSite(
+        people,
+        end="short",
+        tap=True,
+        hide={10: 1, 20: 1, 30: 1},
+        lost={40: Lost("silent", streamed=copy)},
+    )
+    out = await sync(site)
+    assert out.result.reason is StopReason.ANSWER_LOST and not out.result.complete
+    assert out.result.lost is not None and out.result.lost.start == 40
+    assert (
+        "the streamed copy of the last answer for start 40 asks for a next page,"
+        " so it does not prove the end; not used" in caplog.text
+    )
 
 
 async def test_a_quiet_last_answer_copy_cut_short_is_not_used_with_hidden_places() -> None:
