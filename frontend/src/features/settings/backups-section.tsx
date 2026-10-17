@@ -72,7 +72,11 @@ export function BackupsSection() {
                   <li key={backup.name} className="space-y-1 py-2">
                     <p>
                       {new Date(backup.created_at).toLocaleString()}{' '}
-                      <span className="text-muted-foreground">· {humanSize(backup.size)}</span>
+                      <span className="text-muted-foreground">
+                        · {humanSize(backup.size)}
+                        {backup.pre_restore &&
+                          ' · taken before a restore: restoring it undoes that one'}
+                      </span>
                     </p>
                     <CopyValue label="Restore with" value={backup.restore_command} />
                   </li>

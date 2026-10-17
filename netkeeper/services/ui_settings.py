@@ -321,7 +321,7 @@ FIELDS: Final[tuple[FieldSpec, ...]] = (
         label="Nightly backups",
         help=(
             "netkeeper serve backs up the database once a night, from 03:00 in your LinkedIn"
-            " timezone, or at its first check after that when the computer was asleep."
+            " timezone, or within 10 minutes of waking when the computer was asleep then."
         ),
         kind="bool",
         applies="now",
@@ -333,7 +333,8 @@ FIELDS: Final[tuple[FieldSpec, ...]] = (
         label="Backups to keep",
         help=(
             "Each backup, nightly or made by hand, deletes the oldest past this many. A"
-            " restore deletes none."
+            " restore deletes none, and the backup it takes first is kept for 30 days on top"
+            " of these."
         ),
         kind="int",
         applies="now",

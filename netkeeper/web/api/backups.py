@@ -11,6 +11,8 @@ Backups belong to the database, not to a user, so the list is the same for every
 
 from __future__ import annotations
 
+import os
+import shlex
 from datetime import datetime
 from pathlib import Path
 
@@ -18,7 +20,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import Engine
 
-from netkeeper.paths import data_dir
+from netkeeper.paths import DATA_ENV, data_dir
 from netkeeper.services.backup import (
     BACKUPS_DIRNAME,
     BackupError,
@@ -40,7 +42,11 @@ class BackupOut(BaseModel):
     size: int
     """Bytes."""
     restore_command: str
-    """What to run in a terminal, with ``serve`` stopped, to restore this backup."""
+    """What to run in a terminal, with ``serve`` stopped, to restore this backup: its
+    full path, after ``NETKEEPER_DATA=<dir>`` when serve runs on a data directory set
+    that way."""
+    pre_restore: bool
+    """A restore's backup of the database it replaced: restoring it undoes that restore."""
 
 
 class BackupsOut(BaseModel):
@@ -55,12 +61,23 @@ def _directory() -> Path:
     return data_dir() / BACKUPS_DIRNAME
 
 
+def restore_command(backup: Path) -> str:
+    """The command that restores ``backup``, by its full path. It names the data
+    directory too when ``serve`` was given one (``NETKEEPER_DATA``), since a terminal
+    without it would restore over the default data directory's database."""
+    command = f"netkeeper restore {shlex.quote(str(backup))}"
+    if os.environ.get(DATA_ENV):
+        return f"{DATA_ENV}={shlex.quote(str(data_dir()))} {command}"
+    return command
+
+
 def _backup_out(info: BackupInfo) -> BackupOut:
     return BackupOut(
         name=info.path.name,
         created_at=info.created_at,
         size=info.size,
-        restore_command=f"netkeeper restore {info.path.name}",
+        pre_restore=info.pre_restore,
+        restore_command=restore_command(info.path),
     )
 
 

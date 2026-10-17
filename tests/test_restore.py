@@ -33,17 +33,20 @@ from netkeeper.scoping import install_scope_guard
 from netkeeper.services import backup as backup_service
 from netkeeper.services import serve_lock, ui_settings
 from netkeeper.services.backup import (
+    DatabaseInUse,
     RestoreError,
     backup_name,
     create_backup,
     find_backup,
     list_backups,
     nightly_due,
+    prune_backups,
     restore_backup,
 )
 from netkeeper.services.backup_job import NightlyBackups, backs_up
 from netkeeper.services.scheduled_runs import ServeExtractor
 from netkeeper.services.users import ensure_local_user
+from netkeeper.web.api.backups import restore_command
 from netkeeper.web.app import create_app
 
 CSRF = {"X-Netkeeper-Client": "1"}
@@ -105,8 +108,9 @@ def _backup_now(data: Path, when: datetime) -> Path:
     return create_backup(database_url(data), data / "backups", now=when)
 
 
-def _leftovers(directory: Path) -> list[str]:
-    return sorted(p.name for p in directory.iterdir() if ".restore-" in p.name)
+def _rows(database: Path) -> list[Any]:
+    with closing(sqlite3.connect(database)) as connection:
+        return connection.execute("SELECT * FROM settings_kv ORDER BY id").fetchall()
 
 
 # --- restore_backup -----------------------------------------------------------------
@@ -161,7 +165,8 @@ def test_restore_backs_up_the_database_in_place_first(data: Path) -> None:
 
     result = restore_backup(saved, database_url(data), data / "backups", now=when)
 
-    assert result.previous == data / "backups" / backup_name(when)
+    assert result.previous == data / "backups" / backup_name(when, pre_restore=True)
+    assert result.previous.name == "netkeeper-20261002T090000Z-pre-restore.sqlite3"
     assert _marker(result.previous) == "work since the backup"
     assert _marker(data / DATABASE_FILENAME) == "original"
     # Nothing was pruned: both backups are still there.
@@ -179,47 +184,96 @@ def test_restore_into_an_empty_data_directory_backs_nothing_up(data: Path, tmp_p
     assert _marker(fresh / DATABASE_FILENAME) == "original"
 
 
-def test_a_failed_copy_leaves_the_database_as_it_was(
+def test_a_failed_write_leaves_the_database_as_it_was(
     data: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     saved = _backup_now(data, datetime(2026, 10, 1, tzinfo=UTC))
     _mark(data, "keep me")
     database = data / DATABASE_FILENAME
-    before = database.read_bytes()
+    rows_before = _rows(database)
 
-    def half_written(source: Path, destination: Path) -> None:
-        destination.write_bytes(source.read_bytes()[:4096])
+    def half_written(connection: sqlite3.Connection, source: Path) -> None:
+        connection.execute("BEGIN")
+        connection.execute("DELETE FROM settings_kv")
         raise sqlite3.OperationalError("disk I/O error")
 
-    monkeypatch.setattr(backup_service, "_copy_database", half_written)
-    with pytest.raises(RestoreError, match="is unchanged: disk I/O error"):
+    monkeypatch.setattr(backup_service, "_write_over", half_written)
+    with pytest.raises(RestoreError, match="holds what it held before: disk I/O error"):
         restore_backup(saved, database_url(data), data / "backups")
 
-    assert database.read_bytes() == before
+    assert _rows(database) == rows_before
     assert _marker(database) == "keep me"
-    assert _leftovers(data) == []
+    with closing(sqlite3.connect(database)) as check:
+        assert check.execute("PRAGMA integrity_check").fetchone() == ("ok",)
 
 
-def test_a_failed_rename_leaves_the_database_as_it_was(
-    data: Path, monkeypatch: pytest.MonkeyPatch
+def _files(directory: Path) -> dict[str, bytes]:
+    """Every file beside the database, by name: the database, its -wal and -shm."""
+    return {p.name: p.read_bytes() for p in directory.iterdir() if p.is_file()}
+
+
+@pytest.mark.parametrize(
+    "hold",
+    [
+        pytest.param(lambda c: c.execute("SELECT 1 FROM users").fetchall(), id="idle"),
+        pytest.param(
+            lambda c: (c.execute("BEGIN"), c.execute("SELECT * FROM users").fetchall()),
+            id="reader",
+        ),
+        pytest.param(
+            lambda c: (
+                c.execute("BEGIN IMMEDIATE"),
+                c.execute("UPDATE settings_kv SET value = '\"open writer\"'"),
+            ),
+            id="writer",
+        ),
+    ],
+)
+def test_another_open_connection_refuses_the_restore_and_changes_nothing(
+    data: Path, hold: Any
 ) -> None:
+    """The review's case: a CLI process, a sqlite3 shell, or a launchd db upgrade can
+    have the database open while serve is stopped. Restore must refuse before writing."""
     saved = _backup_now(data, datetime(2026, 10, 1, tzinfo=UTC))
-    _mark(data, "keep me")
+    _mark(data, "in use")
+    database = data / DATABASE_FILENAME
+    other = sqlite3.connect(database, isolation_level=None)
+    try:
+        other.execute("PRAGMA journal_mode=WAL")
+        other.execute("PRAGMA wal_autocheckpoint=0")
+        other.execute("UPDATE settings_kv SET value = '\"in the wal\"' WHERE key = 'marker'")
+        hold(other)
+        before = _files(data)
+        assert f"{DATABASE_FILENAME}-wal" in before
 
-    def refuse(self: Path, target: Path) -> Path:
-        raise OSError("read-only file system")
+        with pytest.raises(DatabaseInUse, match="another netkeeper process has the database"):
+            restore_backup(saved, database_url(data), data / "backups")
 
-    monkeypatch.setattr(Path, "replace", refuse)
-    with pytest.raises(RestoreError, match="read-only file system"):
-        restore_backup(saved, database_url(data), data / "backups")
+        assert _files(data) == before  # byte for byte, the WAL and the shm included
+        assert len(list_backups(data / "backups")) == 1  # no pre-restore backup either
+    finally:
+        other.close()
+    assert _marker(database) == "in the wal"
 
-    assert _marker(data / DATABASE_FILENAME) == "keep me"
-    assert _leftovers(data) == []
+
+def test_a_symlinked_database_stays_a_symlink(data: Path, tmp_path: Path) -> None:
+    saved = _backup_now(data, datetime(2026, 10, 1, tzinfo=UTC))
+    real = tmp_path / "elsewhere" / "real.sqlite3"
+    real.parent.mkdir()
+    database = data / DATABASE_FILENAME
+    database.replace(real)
+    database.symlink_to(real)
+    _mark(data, "through the link")
+
+    restore_backup(saved, database_url(data), data / "backups")
+
+    assert database.is_symlink() and database.resolve() == real
+    assert _marker(real) == "original"
 
 
 def test_a_write_ahead_log_left_by_the_old_database_is_not_replayed(data: Path) -> None:
-    """A crash can leave the old database's -wal behind. Renamed over, the restored file
-    would pick it up on next open and replay the old database's pages into it."""
+    """A crash can leave the old database's -wal behind. It must never be replayed into
+    the restored database."""
     saved = _backup_now(data, datetime(2026, 10, 1, tzinfo=UTC))
     database = data / DATABASE_FILENAME
     wal = Path(f"{database}-wal")
@@ -513,7 +567,11 @@ async def test_get_backups_lists_them_with_the_restore_command(
     made = await client.post("/api/v1/backups", headers=CSRF)
     assert made.status_code == 201, made.text
     (listed,) = made.json()["backups"]
-    assert listed["restore_command"] == f"netkeeper restore {listed['name']}"
+    data_dir = tmp_path / "netkeeper-data"
+    assert listed["restore_command"] == (
+        f"NETKEEPER_DATA={data_dir} netkeeper restore {data_dir / 'backups' / listed['name']}"
+    )
+    assert listed["pre_restore"] is False
     assert listed["size"] > 0
     assert (await client.get("/api/v1/backups")).json()["backups"] == [listed]
 
@@ -561,3 +619,111 @@ def test_serve_command_refuses_cleanly_while_the_lock_is_held(data: Path) -> Non
         held.release()
     assert result.exit_code == 1
     assert "netkeeper serve is already running" in result.stderr
+
+
+def test_the_restore_command_names_the_data_directory_only_when_one_was_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backup = Path("/Volumes/My Disk/backups/netkeeper-20261016T031000Z.sqlite3")
+    monkeypatch.delenv("NETKEEPER_DATA", raising=False)
+    assert restore_command(backup) == (
+        "netkeeper restore '/Volumes/My Disk/backups/netkeeper-20261016T031000Z.sqlite3'"
+    )
+    monkeypatch.setenv("NETKEEPER_DATA", "/Volumes/My Disk")
+    assert restore_command(backup).startswith("NETKEEPER_DATA='/Volumes/My Disk' netkeeper ")
+
+
+def test_a_corrupt_backup_is_refused_by_the_integrity_check(data: Path) -> None:
+    """Valid SQLite that SQLite's integrity check fails: two indexes with their root
+    pages swapped, so every row is missing from each."""
+    saved = _backup_now(data, datetime(2026, 10, 1, tzinfo=UTC))
+    with closing(sqlite3.connect(saved, isolation_level=None)) as connection:
+        connection.execute("CREATE TABLE probe(a, b)")
+        connection.execute("CREATE INDEX probe_a ON probe(a)")
+        connection.execute("CREATE INDEX probe_b ON probe(b)")
+        connection.executemany(
+            "INSERT INTO probe VALUES (?, ?)", [(i, 1000 - i) for i in range(200)]
+        )
+        pages = dict(
+            connection.execute(
+                "SELECT name, rootpage FROM sqlite_master WHERE name IN ('probe_a', 'probe_b')"
+            ).fetchall()
+        )
+        connection.execute("PRAGMA writable_schema=ON")
+        for name, other in (("probe_a", "probe_b"), ("probe_b", "probe_a")):
+            connection.execute(
+                "UPDATE sqlite_master SET rootpage = ? WHERE name = ?", (pages[other], name)
+            )
+    before = (data / DATABASE_FILENAME).read_bytes()
+
+    with pytest.raises(RestoreError, match="failed SQLite's integrity check"):
+        restore_backup(saved, database_url(data), data / "backups")
+
+    assert (data / DATABASE_FILENAME).read_bytes() == before
+    assert len(list_backups(data / "backups")) == 1
+
+
+# --- pre-restore backups and retention ----------------------------------------------
+
+
+def _seed(directory: Path, names: list[str]) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (directory / name).write_bytes(b"x")
+
+
+def _names(directory: Path) -> list[str]:
+    return [info.path.name for info in list_backups(directory)]
+
+
+def test_the_newest_pre_restore_backup_is_neither_pruned_nor_counted(tmp_path: Path) -> None:
+    directory = tmp_path / "backups"
+    undo = backup_name(datetime(2026, 10, 10, tzinfo=UTC), pre_restore=True)
+    nightly = [backup_name(datetime(2026, 10, d, 7, tzinfo=UTC)) for d in (11, 12, 13)]
+    _seed(directory, [undo, *nightly])
+
+    removed = prune_backups(directory, 1, now=datetime(2026, 10, 13, 8, tzinfo=UTC))
+
+    assert [p.name for p in removed] == [nightly[0], nightly[1]]
+    assert _names(directory) == [nightly[2], undo]
+
+
+def test_the_undo_is_pruned_after_thirty_days(tmp_path: Path) -> None:
+    directory = tmp_path / "backups"
+    undo = backup_name(datetime(2026, 9, 1, tzinfo=UTC), pre_restore=True)
+    nightly = backup_name(datetime(2026, 10, 13, 7, tzinfo=UTC))
+    _seed(directory, [undo, nightly])
+    prune_backups(directory, 1, now=datetime(2026, 9, 30, 23, tzinfo=UTC))
+    assert _names(directory) == [nightly, undo]  # 29 days: kept
+    prune_backups(directory, 1, now=datetime(2026, 10, 1, 1, tzinfo=UTC))
+    assert _names(directory) == [nightly]
+
+
+def test_a_later_restore_ends_the_older_undos_exemption(tmp_path: Path) -> None:
+    directory = tmp_path / "backups"
+    older = backup_name(datetime(2026, 10, 10, tzinfo=UTC), pre_restore=True)
+    newer = backup_name(datetime(2026, 10, 12, tzinfo=UTC), pre_restore=True)
+    nightly = backup_name(datetime(2026, 10, 13, 7, tzinfo=UTC))
+    _seed(directory, [older, newer, nightly])
+
+    prune_backups(directory, 1, now=datetime(2026, 10, 13, 8, tzinfo=UTC))
+
+    assert _names(directory) == [nightly, newer]
+
+
+def test_a_pre_restore_backup_does_not_count_as_the_nightly(data: Path) -> None:
+    _backup_now(data, datetime(2026, 10, 15, 7, 10, tzinfo=UTC))  # last night's
+    (data / "backups" / backup_name(AFTER_THREE, pre_restore=True)).write_bytes(b"x")
+    written = _job(data, AFTER_THREE.replace(minute=40)).back_up_if_due()
+    assert written is not None and not written.name.endswith("-pre-restore.sqlite3")
+
+
+def test_db_upgrade_refuses_while_the_serve_lock_is_held(data: Path) -> None:
+    held = serve_lock.claim()  # a running serve, or a restore in progress
+    try:
+        result = CliRunner().invoke(cli, ["db", "upgrade"])
+    finally:
+        held.release()
+    assert result.exit_code == 1
+    assert "netkeeper serve or netkeeper restore is running" in result.stderr
+    assert CliRunner().invoke(cli, ["db", "upgrade"]).exit_code == 0

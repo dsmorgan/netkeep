@@ -508,9 +508,23 @@ def _with_derived_week(rendered: str, settings: Settings) -> str:
 
 @db_app.command("upgrade")
 def db_upgrade(ctx: typer.Context) -> None:
-    """Apply pending migrations, then make sure the local user and its self contact exist."""
+    """Apply pending migrations, then make sure the local user and its self contact exist.
+
+    Refuses while netkeeper serve or netkeeper restore runs (the serve lock): serve
+    migrates at startup itself, and a restore must not have its database migrated
+    underneath it.
+    """
     state = ctx.ensure_object(CliState)
     settings = _file_settings_or_exit(state)
+    try:
+        held = serve_lock.claim()
+    except serve_lock.ServeRunning as exc:
+        typer.echo(
+            f"error: {exc}: netkeeper serve or netkeeper restore is running. serve applies"
+            " migrations when it starts; otherwise wait for the restore to finish.",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
     url = database_url()
     engine = make_engine(url)
     try:
@@ -521,6 +535,7 @@ def db_upgrade(ctx: typer.Context) -> None:
         revision = migrations.current_revision(engine)
     finally:
         engine.dispose()
+        held.release()
     typer.echo(f"{_display_url(url)}: at revision {revision}, local user id {user.id}")
 
 
@@ -2672,10 +2687,10 @@ def restore(
 ) -> None:
     """Put a backup in place of the database. Stop netkeeper serve first.
 
-    Refuses while serve runs. Backs up the database in place into backups/ first, so a
-    restore can be undone by restoring that backup. Then copies the backup to a
-    temporary file beside the database, renames it over the database (the database is
-    always either the old file or the whole restored one), and runs db upgrade.
+    Refuses while serve runs, or while any other process has the database open. Backs
+    up the database in place into backups/ first (a pre-restore backup, kept 30 days),
+    so restoring that backup undoes this. Then writes the backup over the database in
+    one transaction (a failure leaves what was there) and runs db upgrade.
     """
     directory = data_dir() / BACKUPS_DIRNAME
     try:
