@@ -671,10 +671,39 @@ describe('a campaign with a LinkedIn step (#383)', () => {
 
       expect(await screen.findByText('Recent-contact guard')).toBeVisible()
       const notice = screen.queryByText('Email replies aren’t watched')
-      if (shown) expect(notice).toBeVisible()
-      else expect(notice).toBeNull()
+      if (shown) {
+        expect(notice).toBeVisible()
+        expect(screen.getByText(/No mailbox is armed.*Arm a mailbox/)).toBeVisible()
+      } else expect(notice).toBeNull()
     },
   )
+
+  it('says to arm the campaign’s own mailbox when that one is disarmed (#571)', async () => {
+    mockFetch(
+      campaignBackend(
+        {
+          campaign: campaign({
+            status: 'active',
+            steps: [LINKEDIN_STEP],
+            email_replies_watched: false,
+          }),
+          review: review(),
+        },
+        {
+          'GET /api/v1/campaigns/linkedin/ready': () =>
+            jsonResponse({ items: [], total: 0, by_step: {} }),
+          'GET /api/v1/campaigns/linkedin/waiting': () => jsonResponse({ items: [], total: 0 }),
+          'GET /api/v1/campaigns/linkedin/options': () => jsonResponse({ auto_send: false }),
+        },
+      ),
+    )
+    await renderApp('/campaigns/5')
+
+    expect(
+      await screen.findByText(/This campaign’s mailbox, me@sender\.example, isn’t armed/),
+    ).toBeVisible()
+    expect(screen.getByText(/Arm that mailbox in Settings → Gmail/)).toBeVisible()
+  })
 
   it('never says so for an email-only campaign', async () => {
     mockFetch(

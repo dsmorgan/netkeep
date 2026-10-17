@@ -16,14 +16,16 @@ enrollment of an ended (``completed`` or ``archived``) campaign is watched like 
 completed one, for the same window after its latest send (#345). A disarmed mailbox gets no
 Gmail call, as in reconcile (#277).
 
-An enrollment that has sent only on LinkedIn is watched too (#571), on the same terms
-and from its first LinkedIn send, so a contact who answers by email stops it. It is
-watched by its campaign's mailbox, or, for a campaign with none (LinkedIn only), by
-the user's armed mailbox (:func:`watching_mailbox`); with none armed, its email replies
-are not watched, and the campaign page says so. It has no thread, so only mail from
-one of the contact's addresses counts, and it needs at least one address to be
-watched. Its reply is recorded like any other, but not labelled: nothing in Gmail
-changes for a campaign that sends no email.
+An enrollment that has sent only on LinkedIn is watched too (#571), on the same terms,
+so a contact who answers by email stops it. Every watch counts from the enrollment's
+first send on any channel, and its latest send on any channel starts the completed
+window, as :func:`linkedin_watches` does. A LinkedIn-only enrollment is watched by its
+campaign's mailbox, or, for a campaign with none (LinkedIn only), by the user's armed
+mailbox (:func:`watching_mailbox`); with none armed, its email replies are not
+watched, and the campaign page says so. It has no thread, so only mail from one of
+the contact's addresses counts, and it needs at least one address to be watched. Its
+reply is recorded like any other, but not labelled: nothing in Gmail changes for an
+enrollment that sent no email.
 
 How it reads Gmail
 ------------------
@@ -36,9 +38,10 @@ How it reads Gmail
   first message it did not read, and the next tick polls again.
 - **Scan.** With no ``history_id`` yet, or one Gmail no longer keeps (a 404),
   the poll takes ``profile().history_id`` first, reads every watched thread, and
-  searches ``from:<address> after:<first send>`` for each watched address (spec
-  11.7, step 3), then stores that id as the new baseline. Taking it first means
-  nothing that arrives during the scan is missed: the next history read covers it.
+  searches ``from:<address> after:<first send>`` once for each watched address, from
+  the earliest first send among its watches (spec 11.7, step 3), then stores that id
+  as the new baseline. Taking it first means nothing that arrives during the scan is
+  missed: the next history read covers it.
 - A failure of the history call or the scan leaves ``history_id`` as it was.
   Recording is idempotent. ``replies_polled_at`` is set only by a poll that read
   everything up to then; the sender holds a new conversation while it is old.
@@ -293,7 +296,7 @@ class Watch:
     enrollment_id: int
     addresses: frozenset[str]
     first_sent_at: datetime
-    """The first send on any channel when ``sent`` is empty (LinkedIn only, #571)."""
+    """The enrollment's first send on any channel (#571)."""
     sent: tuple[Sent, ...]  # oldest first; empty for an enrollment sent only on LinkedIn
     label: str | None
     """The campaign's Gmail label for a reply; None for a LinkedIn-only watch, whose
@@ -370,7 +373,8 @@ def reply_work(session: Session, user: User, *, now: datetime) -> list[MailboxWa
         sent.setdefault(row.enrollment_id, []).append(
             Sent(row.id, row.gmail_message_id, row.gmail_thread_id, row.sent_at)
         )
-    # The first and latest send on any channel, for an enrollment with no sent email (#571).
+    # The first and latest send on any channel (#571): a watch counts from the first, so
+    # an email reply to a LinkedIn step read only after the first email went out counts.
     any_sent: dict[int, tuple[datetime, datetime]] = {}
     for enrollment_id, first, latest in session.execute(
         scoped(user, MessageRow)
@@ -378,7 +382,7 @@ def reply_work(session: Session, user: User, *, now: datetime) -> list[MailboxWa
             MessageRow.enrollment_id, func.min(MessageRow.sent_at), func.max(MessageRow.sent_at)
         )
         .where(
-            MessageRow.enrollment_id.in_({e.id for e in enrollments} - set(sent)),
+            MessageRow.enrollment_id.in_({e.id for e in enrollments}),
             MessageRow.direction == MessageDirection.OUT,
             MessageRow.sent_at.is_not(None),
         )
@@ -398,12 +402,9 @@ def reply_work(session: Session, user: User, *, now: datetime) -> list[MailboxWa
         mailbox = watching_mailbox(campaign, mailboxes)
         messages = sent.get(enrollment.id, [])
         watched = frozenset(addresses.get(enrollment.contact_id, ()))
-        if messages:
-            first, latest = messages[0].sent_at, messages[-1].sent_at
-        elif enrollment.id in any_sent and watched:
-            first, latest = any_sent[enrollment.id]  # sent only on LinkedIn (#571)
-        else:
-            continue  # nothing sent yet, or no address an email reply could come from
+        if enrollment.id not in any_sent or not (messages or watched):
+            continue  # nothing sent yet, or LinkedIn only with no address to match (#571)
+        first, latest = any_sent[enrollment.id]
         if mailbox is None:
             continue
         # A live enrollment of an ended or archived campaign (#345) sends nothing more,
@@ -545,16 +546,20 @@ class _Poll:
                 if message.id not in self.seen:
                     self.seen.add(message.id)
                     found.append(message)
+        # Each address once, from the earliest first send among the watches that hold it.
+        since: dict[str, datetime] = {}
         for watch in self.work.watches:
-            after = int(watch.first_sent_at.timestamp())
-            for address in sorted(watch.addresses):
-                if not _SEARCHABLE.fullmatch(address):
-                    log.info("a watched address cannot be searched for; skipped")
-                    continue
-                refs = self.gmail.search(
-                    f"from:{address} after:{after}", max_results=SEARCH_MAX, purpose=self.purpose
-                )
-                found.extend(self.read(r.id for r in refs))
+            for address in watch.addresses:
+                since[address] = min(since.get(address, watch.first_sent_at), watch.first_sent_at)
+        for address in sorted(since):
+            if not _SEARCHABLE.fullmatch(address):
+                log.info("a watched address cannot be searched for; skipped")
+                continue
+            after = int(since[address].timestamp())
+            refs = self.gmail.search(
+                f"from:{address} after:{after}", max_results=SEARCH_MAX, purpose=self.purpose
+            )
+            found.extend(self.read(r.id for r in refs))
         return found
 
     def classify(self, messages: Iterable[Message]) -> list[Reply | Bounce]:
