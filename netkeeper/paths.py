@@ -6,6 +6,7 @@ directory to exist call :func:`ensure_data_dir`.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 from pathlib import Path
@@ -48,6 +49,14 @@ def is_default_data_dir(path: Path) -> bool:
         return candidate.samefile(default)
     except OSError:  # one of them does not exist yet
         return False
+
+
+def data_dir_digest(directory: Path) -> str:
+    """A short hash of ``directory``'s resolved path: what tells two data directories
+    apart in a name shared with the rest of the machine (the Keychain service, #580;
+    the login item's label, #600)."""
+    resolved = str(directory.expanduser().resolve())
+    return hashlib.sha256(resolved.encode()).hexdigest()[:12]
 
 
 def _is_macos() -> bool:

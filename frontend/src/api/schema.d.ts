@@ -2796,6 +2796,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/login-item": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Login Item
+         * @description Whether netkeeper starts at login, from the plist and launchctl.
+         */
+        get: operations["get_login_item"];
+        /**
+         * Put Login Item
+         * @description Install or remove the login item.
+         */
+        put: operations["set_login_item"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/mailboxes": {
         parameters: {
             query?: never;
@@ -6991,6 +7015,34 @@ export interface components {
             filter?: components["schemas"]["FilterTree-Input"] | null;
             /** Name */
             name?: string | null;
+        };
+        /** LoginItemIn */
+        LoginItemIn: {
+            /** Enabled */
+            enabled: boolean;
+        };
+        /** LoginItemOut */
+        LoginItemOut: {
+            /** Enabled */
+            enabled: boolean;
+            /** Label */
+            label: string;
+            /** Log Path */
+            log_path: string;
+            /** Message */
+            message?: string | null;
+            /** Plist Path */
+            plist_path: string;
+            /** Points Elsewhere */
+            points_elsewhere: string | null;
+            /** Running Under Launchd */
+            running_under_launchd: boolean;
+            /** Supported */
+            supported: boolean;
+            /** This Server Is The Login Item */
+            this_server_is_the_login_item: boolean;
+            /** Unsupported Reason */
+            unsupported_reason: string | null;
         };
         /** Lt */
         Lt: {
@@ -15441,6 +15493,73 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_login_item: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginItemOut"];
+                };
+            };
+        };
+    };
+    set_login_item: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginItemIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginItemOut"];
+                };
+            };
+            /** @description Only the local owner account manages the login item */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not macOS, or launchctl refused: the reason is in detail */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

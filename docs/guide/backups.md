@@ -23,7 +23,7 @@ You restore only from a terminal, because `serve` must be stopped first. On the 
 
 1. Stop `serve`.
    - If you started it in a terminal, press Ctrl+C there.
-   - If it runs at login, stop the LaunchAgent: `launchctl bootout gui/$UID/fun.tnkr.netkeeper`. Stopping the process alone isn't enough, because launchd restarts it.
+   - If it runs at login, stop the LaunchAgent: `launchctl bootout gui/$UID/fun.tnkr.netkeeper` (`netkeeper login-item status` prints the label for a non-default data directory). Stopping the process alone isn't enough, because launchd restarts it.
 2. Pick a backup from the **Backup files** card or from `netkeeper backup list`.
 3. Restore it. Paste the card's command, or give the backup's name as `backup list` prints it:
 
@@ -40,7 +40,7 @@ You restore only from a terminal, because `serve` must be stopped first. On the 
 4. Check it. `netkeeper db current` prints `current:` and `head:`, and the two revisions match.
 5. Start `serve` again.
    - In a terminal, run `.venv/bin/netkeeper serve`.
-   - For the LaunchAgent, run `launchctl bootstrap gui/$UID ~/Library/LaunchAgents/fun.tnkr.netkeeper.plist`, or run `scripts/install-launchd.sh` again with the options you used before.
+   - For the LaunchAgent, run `launchctl bootstrap gui/$UID ~/Library/LaunchAgents/fun.tnkr.netkeeper.plist`, or run `netkeeper login-item on` again.
 
 `db upgrade` also refuses while `serve` runs, so a restore and an upgrade never overlap.
 

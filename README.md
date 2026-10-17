@@ -66,18 +66,20 @@ cookie names and a few `navigator` properties on a blank tab; it visits no websi
 
 ### Run at login (macOS)
 
-`scripts/install-launchd.sh` installs a user LaunchAgent, `fun.tnkr.netkeeper`, that starts `netkeeper serve` when you log in and restarts it if it crashes. It runs the copy in this repository's `.venv`, so run `make install` first. Re-running the script replaces the agent.
+Settings, **Run at login**, has a switch, "Start netkeeper when I log in". It installs a user LaunchAgent that starts `netkeeper serve` when you log in and restarts it if it crashes, and it shows the state it reads from the plist and `launchctl`. The command line does the same:
 
 ```sh
-scripts/install-launchd.sh                     # install or replace the agent
-scripts/install-launchd.sh --port 8080         # --host and --port pass through to serve
-scripts/install-launchd.sh --data-dir ~/nk     # another data directory (sets NETKEEPER_DATA)
-launchctl print gui/$UID/fun.tnkr.netkeeper    # status, including the PID
-tail -f "$HOME/Library/Application Support/netkeeper/logs/netkeeper.log"   # application log
-scripts/install-launchd.sh --uninstall         # stop the agent and remove the plist
+netkeeper login-item on                  # install or replace the agent (--host and --port pass through to serve)
+netkeeper login-item status              # starts at login? loaded in launchd? which plist and log?
+netkeeper login-item off                 # stop the agent and remove the plist; data and logs stay
+NETKEEPER_DATA=~/nk netkeeper login-item on   # another data directory gets its own agent
 ```
 
-Logs live under `<data_dir>/logs/`: `netkeeper.log` is the application log, rotated by size (Settings, Logs), and the agent's `serve.log` and `serve.err.log` hold stdout and stderr's warnings, errors and crashes, each moved to `.1` at the agent's next start once it is over 5 MB. Each data directory keeps its Gmail secrets under its own Keychain service: `netkeeper` for the default directory, and `netkeeper@<hash of the path>` for any other, so a second data directory never reads or replaces the first one's Gmail sign-in. Set `NETKEEPER_KEYCHAIN_SERVICE` to choose the service yourself; `netkeeper config show` prints the one in use. Add `--dry-run` to any invocation to see the plist and the `launchctl` commands without changing anything. Chrome is not managed by launchd; the dashboard tells you when it is not reachable.
+The agent runs the `netkeeper` you ran this from (the one beside the active Python, so a checkout's `.venv/bin/netkeeper` after `make install`), with `NETKEEPER_DATA` set to the data directory in use. The default data directory's agent is `fun.tnkr.netkeeper`; any other gets `fun.tnkr.netkeeper.<hash of its path>`, so two data directories never replace each other's agent. The plist is `~/Library/LaunchAgents/<label>.plist`, outside the data directory: it is the one thing the switch writes there, and turning it off removes it.
+
+If a `netkeeper serve` is already running (the switch is always used from one), turning the item on registers it without starting it, so launchd starts it at your next login rather than racing the running copy for the serve lock. From a terminal with nothing running, `login-item on` starts it now. The agent that is serving you stops a moment after you turn the switch off.
+
+Logs live under `<data_dir>/logs/`: `netkeeper.log` is the application log, rotated by size (Settings, Logs), and the agent's `serve.log` and `serve.err.log` hold stdout and stderr's warnings, errors and crashes. Status: `launchctl print gui/$UID/<label>`. Each data directory keeps its Gmail secrets under its own Keychain service: `netkeeper` for the default directory, and `netkeeper@<hash of the path>` for any other, so a second data directory never reads or replaces the first one's Gmail sign-in. Set `NETKEEPER_KEYCHAIN_SERVICE` to choose the service yourself; `netkeeper config show` prints the one in use. Chrome is not managed by launchd; the dashboard tells you when it is not reachable.
 
 ## A plain note about LinkedIn's terms
 

@@ -19,6 +19,7 @@ from netkeeper.db import DATABASE_FILENAME, database_url, make_engine, make_sess
 from netkeeper.logging_setup import remove_file_handler
 from netkeeper.models import Base
 from netkeeper.scoping import install_scope_guard
+from netkeeper.services import login_item
 from netkeeper.web.app import create_app
 
 # The per-test time limit (#210), a small heap for short collections (#478), and pytester
@@ -51,6 +52,18 @@ def _clean_netkeeper_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("NETKEEPER_DATA", str(tmp_path / "netkeeper-data"))
+
+
+@pytest.fixture(autouse=True)
+def _no_real_launchd(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test runs the real ``launchctl`` or writes to the real ``~/Library/LaunchAgents``
+    (#600): a test of the login item hands ``LoginItem`` its own runner and directory."""
+
+    def blocked(*_args: object) -> object:
+        raise AssertionError("a test must give LoginItem a fake runner and agents_dir")
+
+    monkeypatch.setattr(login_item, "run_launchctl", blocked)
+    monkeypatch.setattr(login_item, "default_agents_dir", blocked)
 
 
 @pytest.fixture(autouse=True)

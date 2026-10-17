@@ -244,6 +244,25 @@ export async function createBackup(): Promise<Backups> {
   return data
 }
 
+export type LoginItem = components['schemas']['LoginItemOut']
+
+/** Whether netkeeper starts at login (#600), read from the launchd plist and launchctl. */
+export const loginItemQuery = queryOptions({
+  queryKey: ['login-item'] as const,
+  queryFn: async ({ signal }): Promise<LoginItem> => {
+    const { data, error, response } = await api.GET('/api/v1/login-item', { signal })
+    if (data === undefined) throw failure(error, response, 'GET /login-item')
+    return data
+  },
+})
+
+/** Install or remove the login item. The answer says what happened, such as "next login". */
+export async function setLoginItem(enabled: boolean): Promise<LoginItem> {
+  const { data, error, response } = await api.PUT('/api/v1/login-item', { body: { enabled } })
+  if (data === undefined) throw failure(error, response, 'PUT /login-item')
+  return data
+}
+
 export type SupportLevels = components['schemas']['SupportLevelsOut']
 export type SupportLevel = components['schemas']['SupportLevelOut']
 export type SupportLevelName = SupportLevel['level']

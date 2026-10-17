@@ -298,7 +298,6 @@ netkeeper/
 │   ├── fixtures/archive/     # sample Connections.csv, messages.csv
 │   └── ...
 ├── scripts/
-│   ├── install-launchd.sh
 │   └── launch-chrome.sh
 └── docs/
     ├── architecture.md       # this document
@@ -1097,7 +1096,7 @@ cd frontend && pnpm install && pnpm build && cd ..
 .venv/bin/netkeeper serve                # http://127.0.0.1:8000
 ```
 
-`scripts/install-launchd.sh` installs `~/Library/LaunchAgents/fun.tnkr.netkeeper.plist` so `serve` starts at login and restarts on failure. Chrome is not managed by launchd; the dashboard tells you when it is not reachable.
+The Settings switch "Start netkeeper when I log in" and `netkeeper login-item on|off|status` (`netkeeper/services/login_item.py`, #600) install `~/Library/LaunchAgents/fun.tnkr.netkeeper.plist` (another data directory gets `fun.tnkr.netkeeper.<hash>`) so `serve` starts at login and restarts on failure. Chrome is not managed by launchd; the dashboard tells you when it is not reachable.
 
 ### Linux (container)
 

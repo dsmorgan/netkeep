@@ -36,6 +36,7 @@ PACKAGE = Path(__file__).resolve().parents[1] / "netkeeper"
 REPO_ROOT = PACKAGE.parent
 LINKEDIN = PACKAGE / "linkedin"
 WEB = PACKAGE / "web"
+LOGIN_ITEM = PACKAGE / "services" / "login_item.py"
 
 #: Stands in for a file when a scanner is being shown a snippet.
 MEMORY = Path("<memory>")
@@ -878,9 +879,14 @@ def test_no_code_path_launches_a_browser() -> None:
 ALLOWED_PROCESS_STARTS = {PACKAGE / "services" / "restart.py": 1}
 
 
+def is_launchctl_import(finding: Finding) -> bool:
+    """The login item's ``import subprocess``, pinned by the launchctl test below."""
+    return finding.path == LOGIN_ITEM and finding.detail.startswith("imports subprocess")
+
+
 def test_no_code_path_starts_a_process() -> None:
     """`netkeeper browser launch` prints a command. Nothing runs one."""
-    findings = scan([PACKAGE], process_starts)
+    findings = [f for f in scan([PACKAGE], process_starts) if not is_launchctl_import(f)]
     for path, count in ALLOWED_PROCESS_STARTS.items():
         hits = [f for f in findings if f.path == path and f.detail == "execv() starts a process"]
         assert len(hits) == count, (
@@ -893,6 +899,19 @@ def test_no_code_path_starts_a_process() -> None:
         if not (f.path in ALLOWED_PROCESS_STARTS and f.detail == "execv() starts a process")
     ]
     assert not others, complain(others, "netkeeper starts no processes:")
+
+
+def test_the_one_process_netkeeper_runs_is_launchctl() -> None:
+    """The login item (#600) is the one module that imports ``subprocess``, to run
+    ``/bin/launchctl`` for the user's own launchd agent. It may import nothing else that
+    starts a process, and it has exactly one call, whose program is the ``LAUNCHCTL``
+    constant (a fixed path), never a browser or a string built from input."""
+    source = LOGIN_ITEM.read_text()
+    assert source.count("subprocess.run(") == 1
+    assert 'LAUNCHCTL: Final = "/bin/launchctl"' in source
+    assert "[LAUNCHCTL, *args]" in source
+    findings = [f for f in process_starts(source, LOGIN_ITEM) if not is_launchctl_import(f)]
+    assert not findings, complain(findings, "login_item.py may only import subprocess:")
 
 
 def test_the_users_browser_context_is_never_mutated() -> None:
