@@ -34,7 +34,7 @@ netkeeper publishes to PyPI and installs as a uv tool. For 1.0, a one-line insta
 7. **Install and update never change the default data directory,** so the #580 Keychain service and secrets survive.
 8. **An update stops `serve`, backs up, and rolls back only when that's safe.** `netkeeper update` refuses while a manual `serve` runs, stops the login item and confirms the serve lock is free, backs up, and upgrades; then it re-executes the newly installed `netkeeper update --finish`, which starts the login item and runs a health check, so no step runs on code it just replaced. Each install keeps its constraints file in the data directory. If the upgrade or the health check fails, it reinstalls the old pinned version, restores the pre-update backup with the login item off, starts it, and checks again. It does that automatically only if the new version failed before its scheduler ran; otherwise it stops and tells the user, because a restore would forget what the new version sent and risk sending it twice.
 9. **netkeeper never updates itself silently.** The UI may check PyPI at most daily, with a setting to turn it off. It shows the command and installs nothing.
-10. **No installer installs or configures Chrome.** How netkeeper's LinkedIn Chrome starts is #595's decision, with #599, and ADR 0002 stands unless that ADR changes it.
+10. **No installer installs or configures Chrome.** How netkeeper's LinkedIn Chrome starts is [ADR 0012](0012-chrome-profiles.md)'s decision (#595, #599), and ADR 0002 stands unless that ADR changes it.
 11. **Uninstalling keeps data and secrets.** `netkeeper setup --remove`, then the package manager's uninstall. Removing a program shouldn't remove a network's history.
 
 ### Phases
