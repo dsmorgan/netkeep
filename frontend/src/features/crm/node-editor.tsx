@@ -14,16 +14,16 @@ import { ChevronRight, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
+import { archivedCampaignsQuery, campaignsQuery } from '@/features/campaigns/api'
 import { cn } from '@/lib/utils'
 
 import { listsQuery } from './api'
-import { Callout } from './controls'
 import { FIELDS, OPS_BY_KIND, fieldSpec } from './fields'
 import type { FieldKind } from './fields'
-import { predicateOrThrow } from './predicates'
+import { OUTCOME_CHOICES, predicateOrThrow } from './predicates'
 import type { FilterPath } from './tree'
 import { listsLeadingTo, pathKey, valueFits } from './tree'
-import type { FilterField, FilterNode, TagOut } from './types'
+import type { CampaignOutcome, FilterField, FilterNode, TagOut } from './types'
 
 /** The ops that compare a column, all of which carry a `field`. */
 const COMPARISON_OPS = [
@@ -335,6 +335,80 @@ function TagPicker({
           title="No tag by this name — it matches nobody until you make one."
         >
           {name} (unknown)
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// --- campaign chips ----------------------------------------------------------
+
+/**
+ * Which campaigns a campaign predicate names; it matches when any of them does.
+ * Archived campaigns are offered too, since a finished campaign is the usual
+ * source of a follow-up's audience. An id no campaign has (deleted since) is
+ * kept and marked, as a missing list is: it matches nobody, but dropping it
+ * would quietly change what a saved filter means.
+ */
+function CampaignPicker({
+  ids,
+  onChange,
+}: {
+  ids: readonly number[]
+  onChange: (next: number[]) => void
+}) {
+  const current = useQuery(campaignsQuery)
+  const archived = useQuery(archivedCampaignsQuery)
+  const known = [...(current.data ?? []), ...(archived.data ?? [])]
+  const orphans = ids.filter((id) => !known.some((campaign) => campaign.id === id))
+  const toggle = (id: number) =>
+    onChange(ids.includes(id) ? ids.filter((other) => other !== id) : [...ids, id])
+
+  if (current.isError || archived.isError) {
+    return (
+      <span className="text-sm text-muted-foreground">
+        The campaigns could not be read
+        {ids.length > 0 ? `, so this row still names ${ids.map((id) => `#${id}`).join(', ')}` : ''}.
+      </span>
+    )
+  }
+  if (current.isPending || archived.isPending) {
+    return <span className="text-sm text-muted-foreground">Loading the campaigns…</span>
+  }
+  if (known.length === 0 && orphans.length === 0) {
+    return <span className="text-sm text-muted-foreground">No campaigns yet.</span>
+  }
+  return (
+    <div className="flex flex-wrap gap-1" role="group" aria-label="Campaigns">
+      {known.map((campaign) => {
+        const chosen = ids.includes(campaign.id)
+        return (
+          <button
+            key={campaign.id}
+            type="button"
+            aria-pressed={chosen}
+            onClick={() => toggle(campaign.id)}
+            className={cn(
+              'rounded-4xl border px-2 py-0.5 text-xs transition-colors',
+              chosen
+                ? 'border-primary bg-primary text-primary-foreground'
+                : 'border-border text-muted-foreground hover:bg-muted',
+            )}
+          >
+            {campaign.name}
+          </button>
+        )
+      })}
+      {orphans.map((id) => (
+        <button
+          key={`orphan-${id}`}
+          type="button"
+          aria-pressed
+          onClick={() => toggle(id)}
+          className="rounded-4xl border border-dashed border-amber-500/60 px-2 py-0.5 text-xs"
+          title="No campaign has this id any more — it matches nobody."
+        >
+          campaign #{id} (no longer there)
         </button>
       ))}
     </div>
@@ -686,35 +760,38 @@ function LeafControls({ node, path, tags, editingListId, onChange }: LeafProps) 
     case 'enrolled_in':
     case 'replied_in':
       return (
-        <UnavailableLeaf
-          label={spec.label}
-          reason={spec.unavailable ?? ''}
-          detail={`campaign #${node.campaign_id}`}
-        />
+        <>
+          {label}
+          <CampaignPicker
+            ids={node.campaign_ids}
+            onChange={(campaign_ids) => onChange(path, { ...node, campaign_ids })}
+          />
+        </>
+      )
+    case 'campaign_outcome':
+      return (
+        <>
+          {label}
+          <Select
+            aria-label="Outcome"
+            value={node.outcome}
+            onChange={(event) =>
+              onChange(path, { ...node, outcome: event.target.value as CampaignOutcome })
+            }
+          >
+            {OUTCOME_CHOICES.map((choice) => (
+              <option key={choice.value} value={choice.value}>
+                {choice.label}
+              </option>
+            ))}
+          </Select>
+          <CampaignPicker
+            ids={node.campaign_ids}
+            onChange={(campaign_ids) => onChange(path, { ...node, campaign_ids })}
+          />
+        </>
       )
     default:
       return label
   }
-}
-
-function UnavailableLeaf({
-  label,
-  reason,
-  detail,
-}: {
-  label: string
-  reason: string
-  detail: string
-}) {
-  return (
-    <div className="min-w-0 flex-1 space-y-1">
-      <span className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-        {label} {detail}
-        <Badge variant="outline">Unavailable</Badge>
-      </span>
-      <Callout tone="warning">
-        <p>{reason}</p>
-      </Callout>
-    </div>
-  )
 }

@@ -202,16 +202,20 @@ async def test_invalid_sort_is_422(client: httpx.AsyncClient) -> None:
     assert response.status_code == 422
 
 
-async def test_a_predicate_the_compiler_refuses_is_422_not_a_500(client: httpx.AsyncClient) -> None:
+async def test_a_filter_the_compiler_refuses_is_422_not_a_500(
+    client: httpx.AsyncClient, running_app: FastAPI
+) -> None:
     """#95: compiling happened inside the generator, so this escaped the handler entirely.
 
-    ``enrolled_in`` is the placeholder that is still a placeholder (campaigns,
-    P3-04). ``list_member`` was the one this was found with; it compiles now.
+    No predicate is a placeholder since #513, so the refusal is a list defined in
+    terms of itself.
     """
-    tree = {"where": {"op": "enrolled_in", "campaign_id": 1}}
+    with session_scope(_factory(running_app), write=True) as session:
+        list_id = factories.make_self_naming_list(session, _local_user(session)).id
+    tree = {"where": {"op": "list_member", "list_id": list_id}}
     response = await client.get("/api/v1/exports", params={"filter": json.dumps(tree)})
     assert response.status_code == 422
-    assert "enrolled_in is not available yet" in response.text
+    assert f"list {list_id} is defined in terms of itself" in response.text
 
 
 async def test_a_refused_filter_never_starts_a_body(
@@ -227,10 +231,11 @@ async def test_a_refused_filter_never_starts_a_body(
     with session_scope(_factory(running_app), write=True) as session:
         for _ in range(3):
             factories.make_contact(session, _local_user(session))
+        list_id = factories.make_self_naming_list(session, _local_user(session)).id
     tree = {
         "where": {
             "op": "and",
-            "children": [{"op": "has_li_url"}, {"op": "replied_in", "campaign_id": 1}],
+            "children": [{"op": "has_li_url"}, {"op": "list_member", "list_id": list_id}],
         }
     }
     response = await client.get("/api/v1/exports", params={"filter": json.dumps(tree)})

@@ -22,6 +22,7 @@ export type SortKey = Schemas['SortKey']
 export type FilterField = SortKey['field']
 
 export type TagOut = Schemas['TagOut']
+export type CampaignOutcome = Schemas['CampaignOutcome']
 export type TagKind = Schemas['TagKind']
 export type AutotagRuleOut = Schemas['AutotagRuleOut']
 export type AutotagRulePreviewOut = Schemas['AutotagRulePreviewOut']

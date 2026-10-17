@@ -49,6 +49,12 @@ export type OutsideResponseIn = Schemas['OutsideResponseIn']
 export type OutsideResponse = Schemas['OutsideResponseOut']
 export type ResponseVia = Schemas['ResponseVia']
 export type ResponseOutcome = Schemas['ResponseOutcome']
+export type CampaignOutcomes = Schemas['CampaignOutcomesOut']
+export type OutcomeCount = Schemas['OutcomeCountOut']
+export type OutcomeListIn = Schemas['OutcomeListIn']
+export type OutcomeList = Schemas['OutcomeListOut']
+export type AudiencePreviewIn = Schemas['AudiencePreviewIn']
+export type AudiencePreview = Schemas['AudiencePreviewOut']
 
 /** A request the backend refused: its status, its sentence, and `missing` when it sent one. */
 export class CampaignApiError extends Error {
@@ -102,6 +108,9 @@ export const campaignKeys = {
   startOptions: (id: number, at: string | null) =>
     [...campaignKeys.all, 'start-options', id, at] as const,
   results: (id: number) => [...campaignKeys.all, 'results', id] as const,
+  outcomes: (id: number) => [...campaignKeys.all, 'outcomes', id] as const,
+  audiencePreview: (body: AudiencePreviewIn) =>
+    [...campaignKeys.all, 'audience-preview', JSON.stringify(body)] as const,
   deletePlan: (id: number) => [...campaignKeys.all, 'delete-plan', id] as const,
   contactEnrollments: (contactId: number) =>
     [...campaignKeys.all, 'contact-enrollments', contactId] as const,
@@ -298,6 +307,56 @@ export async function createCampaign(body: CampaignCreate): Promise<Campaign> {
   const { data, error, response } = await api.POST('/api/v1/campaigns', { body })
   if (data === undefined) fail(response.status, error, 'could not create the campaign')
   return data
+}
+
+/**
+ * How many contacts each outcome's list would hold now (#513): one button each on the
+ * campaign's page.
+ */
+export function outcomesQuery(id: number) {
+  return queryOptions({
+    queryKey: campaignKeys.outcomes(id),
+    queryFn: async ({ signal }): Promise<CampaignOutcomes> => {
+      const { data, error, response } = await api.GET('/api/v1/campaigns/{campaign_id}/outcomes', {
+        params: { path: { campaign_id: id } },
+        signal,
+      })
+      if (data === undefined) fail(response.status, error, 'could not count the outcomes')
+      return data
+    },
+  })
+}
+
+/** A new list of one outcome's people (#513): static by default, or smart. Sends nothing. */
+export async function createListFromCampaign(
+  id: number,
+  body: OutcomeListIn,
+): Promise<OutcomeList> {
+  const { data, error, response } = await api.POST('/api/v1/campaigns/{campaign_id}/lists', {
+    params: { path: { campaign_id: id } },
+    body,
+  })
+  if (data === undefined) fail(response.status, error, 'could not make the list')
+  return data
+}
+
+/**
+ * How many of a source's contacts each guard would skip, before the campaign is saved
+ * (#513). Reads only; the guards decide again at enrollment and at every send.
+ */
+export function audiencePreviewQuery(body: AudiencePreviewIn) {
+  return queryOptions({
+    queryKey: campaignKeys.audiencePreview(body),
+    queryFn: async ({ signal }): Promise<AudiencePreview> => {
+      const { data, error, response } = await api.POST('/api/v1/campaigns/audience-preview', {
+        body,
+        signal,
+      })
+      if (data === undefined) fail(response.status, error, 'could not preview the guards')
+      return data
+    },
+    placeholderData: keepPreviousData,
+  })
 }
 
 /** Enroll through the guards. A `list_id` or `filter` replaces the source first (a draft only). */

@@ -260,16 +260,18 @@ async def test_an_unknown_field_is_a_readable_422(client: httpx.AsyncClient) -> 
     assert "favourite_colour" in response.text
 
 
-async def test_a_predicate_that_is_not_built_yet_says_which_item_delivers_it(
-    client: httpx.AsyncClient,
+async def test_a_filter_that_does_not_compile_says_why(
+    client: httpx.AsyncClient, factory: sessionmaker[Session], owner: User
 ) -> None:
+    with session_scope(factory, write=True) as session:
+        list_id = factories.make_self_naming_list(session, owner).id
     response = await client.post(
         "/api/v1/contacts/query",
-        json={"filter": {"where": {"op": "enrolled_in", "campaign_id": 1}}},
+        json={"filter": {"where": {"op": "list_member", "list_id": list_id}}},
         headers=CSRF,
     )
     assert response.status_code == 422
-    assert "enrolled_in is not available yet" in response.text
+    assert f"list {list_id} is defined in terms of itself" in response.text
 
 
 async def test_the_search_lists_by_substring(client: httpx.AsyncClient, people: list[int]) -> None:

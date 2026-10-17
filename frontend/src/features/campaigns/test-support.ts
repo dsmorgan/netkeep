@@ -351,6 +351,42 @@ export function startOptions(overrides: Partial<StartOptions> = {}): StartOption
  * A stand-in backend for one campaign. `state` is read on every call, so a
  * handler a test passes can change what the next fetch sees.
  */
+/** Each outcome's count on a campaign's page (#513): 2 replied, 3 with no reply. */
+export function outcomes(campaignId = 5, counts: Partial<Record<string, number>> = {}) {
+  const rows: [string, string, number][] = [
+    ['replied', 'replied', 2],
+    ['no_reply', 'no reply', 3],
+    ['active', 'still active', 1],
+    ['completed', 'completed without reply', 2],
+    ['bounced', 'bounced', 1],
+    ['opted_out', 'opted out', 0],
+    ['removed', 'removed', 0],
+  ]
+  return {
+    campaign_id: campaignId,
+    outcomes: rows.map(([outcome, label, count]) => ({
+      outcome,
+      label,
+      count: counts[outcome] ?? count,
+    })),
+  }
+}
+
+/** The builder's guard preview (#513): 5 contacts, 2 would start. */
+export function audiencePreview(overrides: Record<string, unknown> = {}) {
+  return {
+    audience: 5,
+    will_start: 2,
+    skipped: [
+      { reason: 'in_another_campaign', label: 'in another campaign', count: 2 },
+      { reason: 'do_not_contact', label: 'do-not-contact', count: 1 },
+    ],
+    summary: '2 will start, 3 skipped (2 in another campaign, 1 do-not-contact)',
+    contacted_within_days: 30,
+    ...overrides,
+  }
+}
+
 export function campaignBackend(
   state: { campaign: Campaign; review: Review },
   overrides: Record<string, Handler> = {},
@@ -375,6 +411,8 @@ export function campaignBackend(
         ),
       [`GET /api/v1/campaigns/${id}/enrollments`]: () => jsonResponse(ENROLLMENTS),
       [`GET /api/v1/campaigns/${id}/results`]: () => jsonResponse(results({ campaign_id: id })),
+      [`GET /api/v1/campaigns/${id}/outcomes`]: () => jsonResponse(outcomes(id)),
+      'POST /api/v1/campaigns/audience-preview': () => jsonResponse(audiencePreview()),
       'GET /api/v1/settings/sending-hours': () => jsonResponse(SENDING_HOURS),
       [`GET /api/v1/campaigns/${id}/start-options`]: (call) =>
         jsonResponse(startOptions({ at: call.query.get('at') })),

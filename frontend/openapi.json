@@ -819,6 +819,76 @@
         "title": "AttentionOut",
         "type": "object"
       },
+      "AudiencePreviewIn": {
+        "description": "The audience source the builder holds, and the first step's channel.",
+        "properties": {
+          "channel": {
+            "$ref": "#/components/schemas/TemplateChannel"
+          },
+          "filter": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FilterTree-Input"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "list_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "List Id"
+          }
+        },
+        "required": [
+          "channel"
+        ],
+        "title": "AudiencePreviewIn",
+        "type": "object"
+      },
+      "AudiencePreviewOut": {
+        "properties": {
+          "audience": {
+            "title": "Audience",
+            "type": "integer"
+          },
+          "contacted_within_days": {
+            "title": "Contacted Within Days",
+            "type": "integer"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/GuardSkipsOut"
+            },
+            "title": "Skipped",
+            "type": "array"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "will_start": {
+            "title": "Will Start",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "audience",
+          "will_start",
+          "skipped",
+          "summary",
+          "contacted_within_days"
+        ],
+        "title": "AudiencePreviewOut",
+        "type": "object"
+      },
       "AutoSendHoldOut": {
         "description": "An auto-send hold (ADR 0008): fixed words, never page text.",
         "properties": {
@@ -1988,6 +2058,71 @@
           "missing"
         ],
         "title": "CampaignOut",
+        "type": "object"
+      },
+      "CampaignOutcome": {
+        "description": "How one contact's enrollment in a campaign ended up (#513). See \"Campaigns\" above.",
+        "enum": [
+          "replied",
+          "no_reply",
+          "active",
+          "completed",
+          "bounced",
+          "opted_out",
+          "removed"
+        ],
+        "title": "CampaignOutcome",
+        "type": "string"
+      },
+      "CampaignOutcomeIs": {
+        "additionalProperties": false,
+        "description": "An enrollment in any of the campaigns ended up as ``outcome``.",
+        "properties": {
+          "campaign_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Campaign Ids",
+            "type": "array"
+          },
+          "op": {
+            "const": "campaign_outcome",
+            "title": "Op",
+            "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/CampaignOutcome"
+          }
+        },
+        "required": [
+          "op",
+          "campaign_ids",
+          "outcome"
+        ],
+        "title": "CampaignOutcomeIs",
+        "type": "object"
+      },
+      "CampaignOutcomesOut": {
+        "properties": {
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "integer"
+          },
+          "outcomes": {
+            "items": {
+              "$ref": "#/components/schemas/OutcomeCountOut"
+            },
+            "title": "Outcomes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "outcomes"
+        ],
+        "title": "CampaignOutcomesOut",
         "type": "object"
       },
       "CampaignResultsOut": {
@@ -4955,10 +5090,16 @@
       },
       "EnrolledIn": {
         "additionalProperties": false,
+        "description": "Enrolled, in any status, in any of the campaigns.",
         "properties": {
-          "campaign_id": {
-            "title": "Campaign Id",
-            "type": "integer"
+          "campaign_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Campaign Ids",
+            "type": "array"
           },
           "op": {
             "const": "enrolled_in",
@@ -4968,7 +5109,7 @@
         },
         "required": [
           "op",
-          "campaign_id"
+          "campaign_ids"
         ],
         "title": "EnrolledIn",
         "type": "object"
@@ -5247,6 +5388,7 @@
           "mapping": {
             "and": "#/components/schemas/And-Input",
             "between": "#/components/schemas/Between",
+            "campaign_outcome": "#/components/schemas/CampaignOutcomeIs",
             "changed_jobs_within_days": "#/components/schemas/ChangedJobsWithinDays",
             "connected_within_days": "#/components/schemas/ConnectedWithinDays",
             "contains": "#/components/schemas/Contains",
@@ -5356,6 +5498,9 @@
           },
           {
             "$ref": "#/components/schemas/RepliedIn"
+          },
+          {
+            "$ref": "#/components/schemas/CampaignOutcomeIs"
           }
         ]
       },
@@ -5364,6 +5509,7 @@
           "mapping": {
             "and": "#/components/schemas/And-Output",
             "between": "#/components/schemas/Between",
+            "campaign_outcome": "#/components/schemas/CampaignOutcomeIs",
             "changed_jobs_within_days": "#/components/schemas/ChangedJobsWithinDays",
             "connected_within_days": "#/components/schemas/ConnectedWithinDays",
             "contains": "#/components/schemas/Contains",
@@ -5473,6 +5619,9 @@
           },
           {
             "$ref": "#/components/schemas/RepliedIn"
+          },
+          {
+            "$ref": "#/components/schemas/CampaignOutcomeIs"
           }
         ]
       },
@@ -6461,6 +6610,29 @@
           "value"
         ],
         "title": "Gte",
+        "type": "object"
+      },
+      "GuardSkipsOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "label",
+          "count"
+        ],
+        "title": "GuardSkipsOut",
         "type": "object"
       },
       "GuardsOut": {
@@ -10258,6 +10430,94 @@
         "title": "Or",
         "type": "object"
       },
+      "OutcomeCountOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/CampaignOutcome"
+          }
+        },
+        "required": [
+          "outcome",
+          "label",
+          "count"
+        ],
+        "title": "OutcomeCountOut",
+        "type": "object"
+      },
+      "OutcomeListIn": {
+        "properties": {
+          "kind": {
+            "default": "static",
+            "enum": [
+              "static",
+              "smart"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/CampaignOutcome"
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "title": "OutcomeListIn",
+        "type": "object"
+      },
+      "OutcomeListOut": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "static",
+              "smart"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "list_id": {
+            "title": "List Id",
+            "type": "integer"
+          },
+          "members": {
+            "title": "Members",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "list_id",
+          "name",
+          "kind",
+          "members"
+        ],
+        "title": "OutcomeListOut",
+        "type": "object"
+      },
       "OutsideResponseIn": {
         "description": "A response outside netkeeper. ``at`` must carry a timezone, and be neither in the\nfuture nor before the first message of an enrollment it ends went out. ``outcome``\nis optional; ``do_not_contact`` goes with ``opt_out`` only. Without\n``enrollment_id``, every enrollment of the contact that could still send ends; with\nit, that one only (a ``completed`` one may be picked too, and stays ``completed``).",
         "properties": {
@@ -11218,10 +11478,16 @@
       },
       "RepliedIn": {
         "additionalProperties": false,
+        "description": "Responded to any of the campaigns, including a response recorded by hand (#512).",
         "properties": {
-          "campaign_id": {
-            "title": "Campaign Id",
-            "type": "integer"
+          "campaign_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Campaign Ids",
+            "type": "array"
           },
           "op": {
             "const": "replied_in",
@@ -11231,7 +11497,7 @@
         },
         "required": [
           "op",
-          "campaign_id"
+          "campaign_ids"
         ],
         "title": "RepliedIn",
         "type": "object"
@@ -15813,6 +16079,44 @@
         ]
       }
     },
+    "/api/v1/campaigns/audience-preview": {
+      "post": {
+        "description": "How many of the source's contacts each guard would skip, before the campaign is\nsaved (#513). Gates nothing: the guards decide again at enrollment and every send.",
+        "operationId": "preview_campaign_audience",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AudiencePreviewIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudiencePreviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such campaign or list for this user"
+          },
+          "422": {
+            "description": "A value the list or the preview cannot be made from"
+          }
+        },
+        "summary": "Preview Campaign Audience",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
     "/api/v1/campaigns/linkedin/auto-send/resume": {
       "post": {
         "description": "You closed the message bubbles in Chrome: auto-send may go again (ADR 0008). It\nchanges nothing in LinkedIn. Needs ``{\"confirm\": true}``; idempotent.",
@@ -16637,6 +16941,58 @@
         ]
       }
     },
+    "/api/v1/campaigns/{campaign_id}/lists": {
+      "post": {
+        "description": "A new list of the people one outcome selects in the campaign (#513). Sends nothing,\nenrolls nobody: a campaign built from it goes through the guards like any other.",
+        "operationId": "create_list_from_campaign",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OutcomeListIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutcomeListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such campaign or list for this user"
+          },
+          "409": {
+            "description": "A list already has the name given"
+          },
+          "422": {
+            "description": "A value the list or the preview cannot be made from"
+          }
+        },
+        "summary": "Create List From Campaign",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
     "/api/v1/campaigns/{campaign_id}/mode-changes": {
       "get": {
         "description": "The campaign's step mode switches, newest first (at most 200).",
@@ -16682,6 +17038,52 @@
           }
         },
         "summary": "List Mode Changes",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/outcomes": {
+      "get": {
+        "description": "How many contacts each outcome's list would hold (#513).",
+        "operationId": "get_campaign_outcomes",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignOutcomesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such campaign or list for this user"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Campaign Outcomes",
         "tags": [
           "campaigns"
         ]

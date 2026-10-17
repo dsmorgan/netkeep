@@ -33,6 +33,7 @@ import {
   type StepMode,
 } from './api'
 import { sourceBody, sourceProblem, type AudienceSource } from './audience'
+import { AudienceGuardPreview } from './audience-guard-preview'
 import { AudiencePicker } from './audience-picker'
 import { AUTO_SEND_RISK, CONDITION_LABELS, MODE_HINTS, MODE_LABELS } from './format'
 
@@ -106,7 +107,12 @@ function newStep(index: number): StepDraft {
   }
 }
 
-export function CampaignBuilderPage() {
+export function CampaignBuilderPage({
+  initialListId = null,
+}: {
+  /** A list to start the audience from: a campaign page's "Start a campaign from it" (#513). */
+  initialListId?: number | null
+} = {}) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const templates = useQuery(templatesQuery)
@@ -116,7 +122,9 @@ export function CampaignBuilderPage() {
   const [name, setName] = useState('')
   const [mailboxId, setMailboxId] = useState<number | null>(null)
   const [steps, setSteps] = useState<StepDraft[]>(() => [newStep(0)])
-  const [source, setSource] = useState<AudienceSource>({ kind: 'none' })
+  const [source, setSource] = useState<AudienceSource>(() =>
+    initialListId === null ? { kind: 'none' } : { kind: 'list', listId: initialListId },
+  )
 
   const templateRows = (templates.data ?? []).filter((t) => t.current)
   const connected = mailboxes.data ?? []
@@ -419,8 +427,12 @@ export function CampaignBuilderPage() {
             decide who joins and say who they left out and why.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex flex-col gap-3">
           <AudiencePicker value={source} onChange={setSource} />
+          <AudienceGuardPreview
+            source={source}
+            channel={steps[0] === undefined ? null : channelOf(steps[0], templateRows)}
+          />
         </CardContent>
       </Card>
 

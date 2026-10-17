@@ -177,8 +177,8 @@ export function valueFits(field: string, value: string | number | boolean): bool
  *
  * These are the constraints the Pydantic models carry — a non-empty group, a
  * value of at least one character, a value of the field's own kind, exactly one
- * `last_contacted` option, an ordered `between` — plus the three predicates the
- * compiler refuses. Showing them here means the save button can say why it is
+ * `last_contacted` option, an ordered `between`, at least one campaign — plus any
+ * predicate the compiler refuses. Showing them here means the save button can say why it is
  * off instead of the server answering 422 after the click, which for an export
  * arrives as a blank tab the browser has already navigated to.
  */
@@ -210,6 +210,17 @@ export function validate(node: FilterNode, path: FilterPath = []): FilterIssue[]
         issues.push({
           path,
           message: `“${spec.label}” needs something to look for.`,
+          kind: 'incomplete',
+        })
+      }
+      break
+    case 'enrolled_in':
+    case 'replied_in':
+    case 'campaign_outcome':
+      if (node.campaign_ids.length === 0) {
+        issues.push({
+          path,
+          message: `“${spec.label}” needs at least one campaign.`,
           kind: 'incomplete',
         })
       }

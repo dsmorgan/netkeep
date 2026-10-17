@@ -148,6 +148,9 @@ API_PATHS = {
     "/api/v1/campaigns/{campaign_id}/steps/{step_id}/adoption",
     "/api/v1/campaigns/{campaign_id}/steps/{step_id}/adopt",
     "/api/v1/campaigns/{campaign_id}/unarchive",
+    "/api/v1/campaigns/{campaign_id}/outcomes",
+    "/api/v1/campaigns/{campaign_id}/lists",
+    "/api/v1/campaigns/audience-preview",
     "/api/v1/campaigns/linkedin/ready",
     "/api/v1/campaigns/linkedin/waiting",
     "/api/v1/campaigns/linkedin/options",
@@ -350,6 +353,7 @@ def test_known_api_modules_are_discovered() -> None:
     assert [name for name, _ in discover_routers()] == [
         "attention",
         "autotag_rules",
+        "campaign_lists",
         "campaign_review",
         "campaigns",
         "contacts",
