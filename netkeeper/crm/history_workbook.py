@@ -31,14 +31,17 @@ import enum
 import hashlib
 import logging
 import re
+import zipfile
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from io import BytesIO
-from typing import Final
+from typing import Any, Final
 
 from openpyxl import load_workbook
 from openpyxl.utils.datetime import from_excel
+
+from netkeeper.linkedin.archive import ArchiveFormatError, _guard_zip_members
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +54,14 @@ _LINK: Final = re.compile(
 )
 _LEADING_INT: Final = re.compile(r"\s*(\d+)")
 _SPACES: Final = re.compile(r"\s+")
+
+
+#: A sheet declaring more rows or columns than this, or yielding more while it is
+#: read, is refused. A real campaign report is a few thousand rows by a few dozen
+#: columns; the cell cap bounds a sheet that is only wide-and-tall in its declared size.
+MAX_SHEET_ROWS: Final = 100_000
+MAX_SHEET_COLUMNS: Final = 256
+MAX_SHEET_CELLS: Final = 2_000_000
 
 
 class WorkbookError(ValueError):
@@ -157,6 +168,7 @@ def read_workbook(data: bytes) -> Workbook:
     """Every campaign tab of the workbook in ``data``. :class:`WorkbookError` when it is
     not an xlsx file. A tab with no campaign header is skipped, with a reason."""
     digest = hashlib.sha256(data).hexdigest()
+    _guard_zip(data)
     try:
         book = load_workbook(BytesIO(data), read_only=True, data_only=True)
     except Exception as exc:  # openpyxl raises a zoo of types for a file it cannot read
@@ -166,7 +178,10 @@ def read_workbook(data: bytes) -> Workbook:
     skipped: list[SkippedTab] = []
     try:
         for index, sheet in enumerate(book.worksheets):
-            rows = [list(row) for row in sheet.iter_rows(values_only=True)]
+            try:
+                rows = _read_rows(sheet)
+            except WorkbookError as exc:
+                raise WorkbookError(f"tab {index + 1}: {exc}") from exc
             try:
                 campaigns.append(
                     read_tab(
@@ -184,6 +199,41 @@ def read_workbook(data: bytes) -> Workbook:
     return Workbook(sha256=digest, campaigns=tuple(campaigns), skipped=tuple(skipped))
 
 
+def _guard_zip(data: bytes) -> None:
+    """Refuse a zip bomb on its declared member sizes, before openpyxl opens it. The
+    limits are the LinkedIn archive importer's. A file that is not a zip is left for
+    ``load_workbook`` to refuse."""
+    try:
+        with zipfile.ZipFile(BytesIO(data)) as zf:
+            infos = zf.infolist()
+    except zipfile.BadZipFile:
+        return
+    try:
+        _guard_zip_members(infos, "workbook")
+    except ArchiveFormatError as exc:
+        raise WorkbookError(f"refused: {exc}") from exc
+
+
+def _check_dimension(sheet: Any) -> None:
+    rows, cols = sheet.max_row or 0, sheet.max_column or 0
+    if rows > MAX_SHEET_ROWS or cols > MAX_SHEET_COLUMNS or rows * cols > MAX_SHEET_CELLS:
+        raise WorkbookError(
+            f"refused: the sheet declares {rows} rows by {cols} columns, over the"
+            f" {MAX_SHEET_ROWS} row, {MAX_SHEET_COLUMNS} column and {MAX_SHEET_CELLS} cell limits"
+        )
+
+
+def _read_rows(sheet: Any) -> list[list[object]]:
+    """A sheet's rows as lists, refusing one whose declared or actual size is over the caps."""
+    _check_dimension(sheet)
+    rows: list[list[object]] = []
+    for row in sheet.iter_rows(values_only=True):
+        if len(rows) >= MAX_SHEET_ROWS or len(row) > MAX_SHEET_COLUMNS:
+            raise WorkbookError("refused: the sheet is larger than this reader accepts")
+        rows.append(list(row))
+    return rows
+
+
 def _uncached_formulas(data: bytes) -> dict[int, int]:
     """Per tab, how many formula cells carry no saved value. Read with ``data_only``, such
     a cell is empty, which would silently drop a row; the tab reports it instead."""
@@ -194,6 +244,7 @@ def _uncached_formulas(data: bytes) -> dict[int, int]:
         for index, (formulas, values) in enumerate(
             zip(book.worksheets, cached.worksheets, strict=True)
         ):
+            _check_dimension(formulas)
             count = 0
             for formula_row, value_row in zip(
                 formulas.iter_rows(values_only=True),
