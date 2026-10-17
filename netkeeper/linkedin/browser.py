@@ -4935,7 +4935,7 @@ class BrowserRun:
                 "the attached browser went away twice in one run; aborting the run"
             ) from cause
         self._reattached = True
-        log.warning("lost the browser (%s); reattaching once", cause)
+        log.warning("lost the browser (%s); reattaching once", personal_exc(cause))
         await _detach_quietly(self._attachment.detach)
         self._attachment = await self._provider._attach()
         try:
