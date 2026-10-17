@@ -980,12 +980,16 @@ def _section_texts(payload: FlightPayload, node: object, *, endpoint: str) -> li
         if visited > MAX_NODES:
             raise RouteChanged(endpoint, f"a walk passed {MAX_NODES} nodes")
         if isinstance(current, str):
+            # A run that starts with a literal ``$`` arrives escaped (``$$``) and is
+            # dropped with the markers: such a value is left out, never misread.
             if current.startswith("$"):
                 target = payload.resolve(current)
                 if target is not None and current not in entered:
                     entered.add(current)
                     stack.append((target, in_heading))
-            elif current.strip():
+            elif current.strip() and seen_heading:
+                # Only runs after the heading are values: a run before the first ``p``
+                # may be a label in another frame, never read as the value.
                 (heading if in_heading else texts).append(current)
         elif (props := element_props(current)) is not None:
             if "action" in props:
@@ -1030,6 +1034,8 @@ def _soft_phones(
                 if not _PHONE.fullmatch(number):
                     continue
                 found.append(number)
+                # A label pairs with the number before it, as captured; a label that
+                # came first would go to the next number (not seen; #564 review).
                 label = _PHONE_LABEL.fullmatch(runs[index + 1]) if index + 1 < len(runs) else None
                 if label is not None:
                     labels.setdefault(number, label.group(1))

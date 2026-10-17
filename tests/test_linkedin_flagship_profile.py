@@ -484,6 +484,40 @@ def test_a_section_with_no_heading_reads_as_nothing() -> None:
     assert parse_contact_info(body, slug=PRIYA.slug).birthday is None
 
 
+def test_a_label_before_a_p_value_is_never_read_as_the_value() -> None:
+    """#564 review: in an inverted frame (a label run, then the value in a ``p``), the ``p``
+    is taken as the heading and the run before it is not a value: nothing is read."""
+    label = ["$", "$L1", None, {"textProps": {"children": ["Birthday"]}}]
+    body = _section_payload(
+        "contact-birthday", [label, ["$", "p", None, {"children": ["March 3"]}]]
+    )
+    assert parse_contact_info(body, slug=PRIYA.slug).birthday is None
+
+
+def test_a_links_text_in_a_value_section_is_not_part_of_the_value() -> None:
+    link = [
+        "$",
+        "$L2",
+        None,
+        {
+            "action": {"actions": []},
+            "children": ["Map"],
+        },
+    ]
+    value = ["$", "$L1", None, {"textProps": {"children": ["1 Example Way, Testville", link]}}]
+    heading = ["$", "p", None, {"children": ["Address"]}]
+    body = _section_payload("contact-address", [heading, value])
+    assert parse_contact_info(body, slug=PRIYA.slug).address == "1 Example Way, Testville"
+
+
+def test_a_phone_label_pairs_with_the_number_before_it() -> None:
+    body = contact_info_payload(
+        PRIYA, phones=["5550100101", "5550100102"], phone_labels=["(Work)", ""]
+    )
+    info = parse_contact_info(body, slug=PRIYA.slug)
+    assert info.phone_labels == (("5550100101", "Work"),)
+
+
 def test_the_captured_websites_read_as_their_sites_not_their_labels() -> None:
     """#553: the CP8d dialog showed three websites, each through ``/safety/go/?url=`` with a
     ``(Blog)`` or ``(Portfolio)`` label after it."""
