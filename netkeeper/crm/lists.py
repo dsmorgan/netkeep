@@ -88,11 +88,13 @@ from netkeeper.crm.filters import (
     compile_where,
     list_ids_in,
     parse_filter,
+    retire_ids,
 )
 from netkeeper.db import is_writer
 from netkeeper.models import (
     LIST_NAME_MAX_LENGTH,
     VIEW_NAME_MAX_LENGTH,
+    Campaign,
     Contact,
     ContactList,
     ContactMet,
@@ -444,6 +446,7 @@ def delete_list(session: Session, user: User, list_id: int) -> None:
     naming = _lists_naming(session, user, row.id)
     session.execute(scoped_delete(user, ContactList).where(ContactList.id == row.id))
     session.expunge(row)
+    retire_references(session, user, list_id=list_id)
     if naming:
         log.warning(
             "deleted list %d for user %d; %s now names a list that is gone and matches nobody",
@@ -452,6 +455,34 @@ def delete_list(session: Session, user: User, list_id: int) -> None:
             ", ".join(f"list {other}" for other in naming),
         )
     log.debug("deleted list %d for user %d", list_id, user.id)
+
+
+def retire_references(
+    session: Session, user: User, *, campaign_id: int | None = None, list_id: int | None = None
+) -> int:
+    """Rewrite every stored filter of ``user`` that names a just-deleted campaign or list.
+
+    SQLite reuses a deleted row's id (nothing here is ``AUTOINCREMENT``, and PostgreSQL
+    has no such construct to match), so a filter that kept the id would silently mean
+    the next campaign or list created. :func:`netkeeper.crm.filters.retire_ids` turns the
+    id into its negative, which matches nobody and is never issued (#574). Covers smart
+    lists, saved views and the audience filter of a campaign. Returns how many rows
+    changed.
+    """
+    changed = 0
+    models: tuple[type[ContactList] | type[SavedView] | type[Campaign], ...] = (
+        ContactList,
+        SavedView,
+        Campaign,
+    )
+    for model in models:
+        for row in session.scalars(scoped(user, model).where(model.filter_json.is_not(None))):
+            retired = retire_ids(row.filter_json, campaign_id=campaign_id, list_id=list_id)
+            if retired is not row.filter_json:
+                row.filter_json = retired
+                changed += 1
+    session.flush()
+    return changed
 
 
 def _lists_naming(session: Session, user: User, list_id: int) -> list[int]:

@@ -354,10 +354,11 @@ async def test_a_new_list_may_not_take_over_a_dangling_reference_and_close_a_cyc
     """The same route with a real dangling reference, and no id prediction at all.
 
     A filter that named a list when it was written outlives that list, and
-    SQLite hands the id of the highest deleted row to the next insert. So the
-    new list can *become* the list an existing filter names — and if it names
-    that filter's list back, the ring closes with ordinary requests. Only
-    walking up from the write catches this one.
+    SQLite hands the id of the highest deleted row to the next insert. Before #574
+    the new list could *become* the list an existing filter names, and naming that
+    filter's list back closed a ring with ordinary requests (only walking up from
+    the write caught it). Deleting a list now retires its id in the filters that
+    named it, so the ring cannot close.
     """
     holder = await _create_list(client, "Holder", **_smart({"op": "has_email"}))
     holder_id = holder.json()["id"]
@@ -372,20 +373,21 @@ async def test_a_new_list_may_not_take_over_a_dangling_reference_and_close_a_cyc
     assert patched.status_code == 200, patched.text
     assert (await client.delete(f"/api/v1/lists/{target_id}", headers=CSRF)).status_code == 204
 
-    # Holder's reference now dangles and matches nobody; the page still works.
+    # Holder's reference was retired with the list (#574): it matches nobody, the page works.
     lists = await _lists_by_name(client)
     assert lists["Holder"]["member_count"] == 0
     assert lists["Holder"]["broken"] is None
 
-    # A new list naming Holder, handed Target's id back, would close Holder -> it -> Holder.
+    # A new list naming Holder is handed Target's id back. Holder no longer names that id,
+    # so the ring does not close, and Holder still matches nobody.
     closing = await _create_list(
         client, "Closing", **_smart({"op": "list_member", "list_id": holder_id})
     )
-    assert closing.status_code == 422, closing.text
-    assert "would leave list" in closing.text and "defined in terms of itself" in closing.text
-    page = await client.get("/api/v1/lists")
-    assert page.status_code == 200
-    assert "Closing" not in {row["name"] for row in page.json()}
+    assert closing.status_code == 201, closing.text
+    assert closing.json()["id"] == target_id
+    lists = await _lists_by_name(client)
+    assert lists["Holder"]["member_count"] == 0
+    assert lists["Holder"]["broken"] is None
 
 
 async def test_an_edit_below_the_expansion_cap_may_not_break_a_list_above_it(
