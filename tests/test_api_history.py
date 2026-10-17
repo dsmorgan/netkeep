@@ -30,6 +30,7 @@ from netkeeper.models import (
 )
 from netkeeper.scoping import scoped_count
 from netkeeper.services import history_scan
+from netkeeper.web.api import history as history_api
 
 CSRF = {"X-Netkeeper-Client": "1"}
 ME = "me@example.test"
@@ -171,3 +172,57 @@ async def test_scan_names_a_missing_mailbox(client: httpx.AsyncClient, gmail: Fa
 async def test_scan_without_any_mailbox_is_409(client: httpx.AsyncClient) -> None:
     response = await _scan(client)
     assert response.status_code == 409
+
+
+async def test_create_missing_reports_and_rolls_back_in_a_dry_run_then_creates(
+    running_app: FastAPI, client: httpx.AsyncClient, gmail: FakeGmail
+) -> None:
+    before = _counts(running_app)
+
+    dry = (await _import(client, create_missing=True)).json()
+
+    assert dry["campaigns"][0]["created"] == 3
+    assert dry["unmatched"] == []
+    assert _counts(running_app) == before
+    plain = (await _import(client)).json()
+    assert plain["campaigns"][0]["created"] == 0
+    assert len(plain["unmatched"]) == 3
+
+    await _import(client, apply=True, create_missing=True)
+
+    assert _counts(running_app)["Contact"] == before["Contact"] + 3
+
+
+async def test_an_oversized_upload_is_refused(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(history_api, "MAX_UPLOAD_BYTES", 100)
+    response = await _import(client)
+    assert response.status_code == 422
+    assert "50 MB" in response.json()["detail"]
+
+
+async def test_limit_scans_few_recipients_and_skips_the_subject_search(
+    running_app: FastAPI, client: httpx.AsyncClient, gmail: FakeGmail
+) -> None:
+    await _import(client, apply=True)
+
+    full = (await _scan(client)).json()
+    limited = (await _scan(client, limit=1)).json()
+
+    assert full["scanned"] == 4
+    assert full["subject_search_skipped"] is False
+    assert limited["scanned"] == 1
+    assert limited["subject_search_skipped"] is True
+
+
+async def test_a_second_scan_while_one_runs_is_refused(
+    client: httpx.AsyncClient, gmail: FakeGmail
+) -> None:
+    assert history_api._scanning.acquire(blocking=False)
+    try:
+        response = await _scan(client)
+    finally:
+        history_api._scanning.release()
+    assert response.status_code == 409
+    assert "already running" in response.json()["detail"]

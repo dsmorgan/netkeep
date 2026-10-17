@@ -97,6 +97,9 @@ describe('old-tool history import page', () => {
     expect(await screen.findByText('Preview only: nothing was written.')).toBeInTheDocument()
     expect(screen.getByText('Quorbelle Fictionary spring')).toBeInTheDocument()
     expect(screen.getByText('nobody@example.test')).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Created' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Last batch' })).toBeInTheDocument()
+    expect(screen.getByText(/0 contacts created/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Apply the import' }))
 

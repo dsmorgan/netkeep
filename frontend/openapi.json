@@ -21338,7 +21338,7 @@
             "description": "Successful Response"
           },
           "409": {
-            "description": "No such mailbox, or none is connected"
+            "description": "No such mailbox, none is connected, or a scan is already running"
           },
           "422": {
             "content": {

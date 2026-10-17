@@ -138,10 +138,15 @@ function ImportResult({ report }: { report: HistoryImport }) {
                 {[
                   'Campaign',
                   'Started',
+                  'Last batch',
                   'Listed',
                   'Matched',
                   'Unmatched',
                   'Ambiguous',
+                  'Created',
+                  'Clicks',
+                  'Opens',
+                  'Bounces',
                   'Sent to',
                   'Unlisted',
                 ].map((heading) => (
@@ -158,10 +163,15 @@ function ImportResult({ report }: { report: HistoryImport }) {
                     {c.name}
                   </th>
                   <td className="py-2 pr-3">{c.started_on}</td>
+                  <td className="py-2 pr-3">{c.last_batch_on ?? '-'}</td>
                   <td className="py-2 pr-3 tabular-nums">{c.listed}</td>
                   <td className="py-2 pr-3 tabular-nums">{c.matched}</td>
                   <td className="py-2 pr-3 tabular-nums">{c.unmatched}</td>
                   <td className="py-2 pr-3 tabular-nums">{c.ambiguous}</td>
+                  <td className="py-2 pr-3 tabular-nums">{c.created}</td>
+                  <td className="py-2 pr-3 tabular-nums">{c.clicks}</td>
+                  <td className="py-2 pr-3 tabular-nums">{c.opens ?? '-'}</td>
+                  <td className="py-2 pr-3 tabular-nums">{c.bounces ?? '-'}</td>
                   <td className="py-2 pr-3 tabular-nums">{c.sent_to ?? '-'}</td>
                   <td className="py-2 tabular-nums">{c.unlisted ?? '-'}</td>
                 </tr>
@@ -178,7 +188,11 @@ function ImportResult({ report }: { report: HistoryImport }) {
         )),
       )}
       <p>
-        {plural(report.new_campaigns, 'new campaign')},{' '}
+        {plural(
+          report.campaigns.reduce((n, c) => n + c.created, 0),
+          'contact',
+        )}{' '}
+        created, {plural(report.new_campaigns, 'new campaign')},{' '}
         {plural(report.new_rows, 'new recipient row')},{' '}
         {plural(report.new_interactions, 'new timeline entry', 'new timeline entries')}.
       </p>
@@ -355,7 +369,7 @@ function ScanResult({ report }: { report: HistoryScan }) {
           reached.
           {report.applied
             ? ' What it finished is saved. Run the scan again to continue.'
-            : ' Apply it to save what it finished, then run it again to continue.'}
+            : ' Apply runs the scan again and saves what it finishes.'}
         </ErrorNote>
       )}
       {report.campaigns.length > 0 && (

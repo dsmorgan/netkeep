@@ -25,6 +25,8 @@ from netkeeper.worker import dev_app, serve_app
 REPO_ROOT = Path(__file__).resolve().parents[1]
 API_PATHS = {
     "/api/v1/health",
+    "/api/v1/history/import",
+    "/api/v1/history/scan-gmail",
     "/api/v1/gmail-setup",
     "/api/v1/gmail/activity",
     "/api/v1/gmail/leftover-drafts",
@@ -368,6 +370,7 @@ def test_known_api_modules_are_discovered() -> None:
         "gmail",
         "gmail_setup",
         "health",
+        "history",
         "imports",
         "inbox",
         "interactions",

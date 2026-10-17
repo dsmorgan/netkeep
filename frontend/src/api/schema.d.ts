@@ -13530,7 +13530,7 @@ export interface operations {
                     "application/json": components["schemas"]["HistoryScanOut"];
                 };
             };
-            /** @description No such mailbox, or none is connected */
+            /** @description No such mailbox, none is connected, or a scan is already running */
             409: {
                 headers: {
                     [name: string]: unknown;
