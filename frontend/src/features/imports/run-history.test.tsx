@@ -461,9 +461,24 @@ describe('one import run', () => {
     mockFetch(detailBackend(COMMITTED_RUN, calls))
     await renderApp('/imports/runs/abc')
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('“abc” is not an import run')
+    expect(await screen.findByRole('alert')).toHaveTextContent('There is no import run “abc”')
     expect(screen.queryByText(/valid integer/)).toBeNull()
     expect(calls.some((call) => call.path.startsWith('/api/v1/imports/'))).toBe(false)
+  })
+
+  it('says an unknown run is not found, with a way back', async () => {
+    mockFetch(
+      backend({ 'GET /api/v1/imports/999': () => jsonResponse({ detail: 'no such run' }, 404) }),
+    )
+    await renderApp('/imports/runs/999')
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('There is no import run “999”')
+    expect(alert).not.toHaveTextContent('no such run')
+    expect(within(alert).getByRole('link', { name: /See every import/ })).toHaveAttribute(
+      'href',
+      '/imports/runs',
+    )
   })
 
   it('warns beforehand that a merge can make a rollback impossible', async () => {

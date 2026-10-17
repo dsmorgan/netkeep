@@ -61,6 +61,7 @@ import {
 } from './api'
 import { sourceBody, sourceProblem, type AudienceSource } from './audience'
 import { AudiencePicker } from './audience-picker'
+import { currentSource } from './audience-source'
 import { CampaignStatusBadge, EnrollmentStatusBadge } from './badges'
 import { CampaignListsCard } from './campaign-lists-card'
 import {
@@ -974,14 +975,6 @@ function toLocalValue(iso: string): string {
   return toLocalInput(iso)
 }
 
-function currentSource(campaign: Campaign, listName: string | undefined): string {
-  if (campaign.source_list_id !== null) {
-    return `the list ${listName ?? `#${campaign.source_list_id}`}`
-  }
-  if (campaign.filter !== null) return 'a filter'
-  return 'nothing yet'
-}
-
 function AudienceCard({ campaign }: { campaign: Campaign }) {
   const queryClient = useQueryClient()
   const lists = useQuery(listsQuery)
@@ -1008,8 +1001,8 @@ function AudienceCard({ campaign }: { campaign: Campaign }) {
       <CardHeader>
         <CardTitle level={2}>Audience</CardTitle>
         <CardDescription>
-          From {currentSource(campaign, listName)}. Enrolling runs every contact through the guards;
-          only those they pass join, as pending.
+          From {currentSource(campaign, listName, lists.isPending)}. Enrolling runs every contact
+          through the guards; only those they pass join, as pending.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3 text-sm">

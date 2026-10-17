@@ -854,6 +854,10 @@ describe('the prefill notes (#383, ADR 0007)', () => {
     expect(within(note).getByText('netkeeper linkedin inbox').tagName).toBe('CODE')
     expect(note).not.toHaveTextContent('`')
     expect(note).toHaveTextContent(FIRST_POLL_NOTE)
+    expect(within(note).getByRole('link', { name: 'Check inbox now' })).toHaveAttribute(
+      'href',
+      '/linkedin',
+    )
   })
 
   it('shows no first-poll note once a poll has completed', async () => {

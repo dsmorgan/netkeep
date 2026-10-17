@@ -149,10 +149,12 @@ const API_OFF = new Set(['gmail_api_refused', 'accessNotConfigured'])
 /**
  * Each step and its state. A connected mailbox proves every required step. One
  * that needs re-authorizing proves the console steps but fails the connect step.
- * A saved client proves the console steps a client can't exist without.
+ * A saved client proves the console steps a client can't exist without, except
+ * the project: a client counts for step 1 only when a project ID is saved too (or
+ * a mailbox is connected), so the later steps always have an ID to link with.
  */
 export function wizardSteps(
-  setup: Pick<GmailSetup, 'done'>,
+  setup: Pick<GmailSetup, 'done'> & Partial<Pick<GmailSetup, 'project_id'>>,
   status: MailboxStatus,
   outcomeReason: string | undefined,
 ): WizardStep[] {
@@ -180,7 +182,7 @@ export function wizardSteps(
   if (apiOff) Object.assign(gmailApi, { state: 'failing', source: 'checked' })
 
   return [
-    manual('project', client || live),
+    manual('project', (client && (setup.project_id ?? '') !== '') || live),
     gmailApi,
     manual('branding', client || live),
     manual('test_user', live),

@@ -1,5 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 
+import { NotFound } from '@/components/not-found'
 import { ContactDetailPage } from '@/features/contacts/contact-detail-page'
 
 export const Route = createFileRoute('/contacts/$contactId')({
@@ -10,7 +11,11 @@ function ContactDetailRoute() {
   const { contactId } = Route.useParams()
   const id = Number(contactId)
   if (!Number.isInteger(id) || id <= 0) {
-    return <p className="text-muted-foreground">That is not a contact id.</p>
+    return (
+      <NotFound to="/contacts" backLabel="Back to contacts">
+        There is no contact at this address.
+      </NotFound>
+    )
   }
   return <ContactDetailPage contactId={id} />
 }

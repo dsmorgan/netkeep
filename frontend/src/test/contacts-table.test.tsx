@@ -232,6 +232,14 @@ describe('contacts table', () => {
     expect(screen.getByText('contacts matching “nobody”')).toBeInTheDocument()
   })
 
+  it('tells a new install to import, not that a filter matched nothing', async () => {
+    serveTable(contactPage([], 0, 'all contacts'))
+    await renderApp('/contacts')
+    expect(await screen.findByText('No contacts yet.')).toBeInTheDocument()
+    expect(screen.queryByText('No contacts match this filter.')).toBeNull()
+    expect(screen.getByRole('link', { name: 'Import a CSV' })).toHaveAttribute('href', '/imports')
+  })
+
   it('shows each active filter as a chip, with how many of how many (#402)', async () => {
     const seen = serveTable({ ...page(3), unfiltered_total: 87 })
     const { router } = await renderApp('/contacts?q=ferry&met=met&tags=vip&tags=alumni')

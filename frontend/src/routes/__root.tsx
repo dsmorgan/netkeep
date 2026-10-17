@@ -1,5 +1,6 @@
 import { Outlet, createRootRoute } from '@tanstack/react-router'
 
+import { NotFound as NotFoundPage } from '@/components/not-found'
 import { AppShell } from '@/components/layout/app-shell'
 import { EventStreamProvider } from '@/features/events/event-stream-provider'
 
@@ -19,5 +20,9 @@ function RootLayout() {
 }
 
 function NotFound() {
-  return <p className="text-muted-foreground">No such page.</p>
+  return (
+    <NotFoundPage to="/" backLabel="Back to the dashboard">
+      There is no page at this address.
+    </NotFoundPage>
+  )
 }

@@ -88,6 +88,7 @@ describe('inbox', () => {
     await renderApp('/inbox')
 
     expect(await screen.findByText('Nothing to handle')).toBeVisible()
+    expect(screen.getByText(/New ones appear after the next mailbox sync/)).toBeVisible()
     const listed = calls.find((c) => c.path === '/api/v1/inbox')
     expect(listed?.query.get('handled')).toBe('false')
     expect(listed?.query.get('limit')).toBe('25')

@@ -53,6 +53,14 @@ describe('the triage screen', () => {
     expect(screen.queryByTestId('triage-card')).not.toBeInTheDocument()
   })
 
+  it('tells a new install what to do first, not that everything is done', async () => {
+    renderTriage({ contacts: 0 })
+
+    expect(await screen.findByText('Nothing to triage yet.')).toBeInTheDocument()
+    expect(screen.getByText(/Import a CSV or sync LinkedIn/)).toBeInTheDocument()
+    expect(screen.queryByText('Nothing left to triage.')).not.toBeInTheDocument()
+  })
+
   it('points at the skipped from the empty state, and switches to them', async () => {
     const { backend } = renderTriage({ contacts: 2 })
     await currentName()
