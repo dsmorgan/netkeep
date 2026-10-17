@@ -631,20 +631,26 @@ def conversations_sync_url(sync_token: str | None = None, owner: Member = OWNER)
     return _graphql_url(CONVERSATIONS_QUERY, f"(mailboxUrn:{_q(owner.urn)}{tail})")
 
 
+def category_predicate(category: str) -> str:
+    """One ``predicateUnions`` entry naming a conversation category."""
+    return f"(conversationCategoryPredicate:(category:{category}))"
+
+
 def conversations_category_url(
     *,
-    category: str = PRIMARY_INBOX,
+    predicates: Sequence[str] = (category_predicate(PRIMARY_INBOX),),
     last_updated_before: int | None = None,
     next_cursor: str | None = None,
     owner: Member = OWNER,
 ) -> str:
-    """The first older page names ``lastUpdatedBefore``; later ones ``nextCursor``."""
+    """The first older page names ``lastUpdatedBefore``; later ones ``nextCursor``. A
+    filter adds ``predicates`` (CP8d: InMail is ``INMAIL`` then ``PRIMARY_INBOX``)."""
     anchor = (
         f"lastUpdatedBefore:{last_updated_before}"
         if next_cursor is None
         else f"nextCursor:{quote(next_cursor, safe='')}"
     )
-    query = f"(predicateUnions:List((conversationCategoryPredicate:(category:{category}))))"
+    query = f"(predicateUnions:List({','.join(predicates)}))"
     return _graphql_url(
         CONVERSATIONS_QUERY,
         f"(query:{query},count:{CONVERSATIONS_PAGE_SIZE},mailboxUrn:{_q(owner.urn)},{anchor})",

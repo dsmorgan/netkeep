@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from netkeeper.config import LinkedInSettings
 from netkeeper.db import session_scope
-from netkeeper.linkedin import page_connections, page_inbox
+from netkeeper.linkedin import messaging_shapes, page_connections, page_inbox
 from netkeeper.linkedin.classify import Outcome
 from netkeeper.linkedin.inbox import (
     MAX_THREADS_OPENED,
@@ -189,6 +189,30 @@ async def test_a_gap_before_an_older_page_is_a_stop_not_a_skipped_page() -> None
         return url
 
     site = InboxSite(descending(9), behavior=Behavior(first=3, page_size=3, older_url=skip))
+    assert (await stopped(site, spec(since=at(0)))).outcome is Outcome.ROUTE_CHANGED
+
+
+@pytest.mark.parametrize(
+    "predicates",
+    [
+        pytest.param((mp.INMAIL, mp.PRIMARY_INBOX), id="inmail-then-primary"),
+        pytest.param((mp.PRIMARY_INBOX, mp.INMAIL), id="primary-then-inmail"),
+    ],
+)
+async def test_a_filtered_older_page_is_a_stop_whatever_the_predicate_order(
+    predicates: tuple[str, ...],
+) -> None:
+    """An InMail-filtered page is a subset of the inbox, not a run of it (#555)."""
+    filtered = tuple(mp.category_predicate(p) for p in predicates)
+
+    def refilter(index: int, url: str) -> str:
+        cursor = messaging_shapes.request_next_cursor(url)
+        before = messaging_shapes.request_last_updated_before(url)
+        return mp.conversations_category_url(
+            predicates=filtered, last_updated_before=before, next_cursor=cursor
+        )
+
+    site = InboxSite(descending(9), behavior=Behavior(first=3, page_size=3, older_url=refilter))
     assert (await stopped(site, spec(since=at(0)))).outcome is Outcome.ROUTE_CHANGED
 
 
