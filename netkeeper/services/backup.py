@@ -122,11 +122,69 @@ def create_backup(
     uri = f"{source.resolve().as_uri()}?mode=ro"
     try:
         with closing(sqlite3.connect(uri, uri=True, isolation_level=None)) as connection:
-            connection.execute("VACUUM INTO ?", (str(target),))
-    except sqlite3.Error as exc:
-        target.unlink(missing_ok=True)
+            _vacuum_into(connection, target)
+    except (sqlite3.Error, OSError) as exc:
         raise BackupError(f"{source}: VACUUM INTO {target} failed: {exc}") from exc
     return target
+
+
+PARTIAL_SUFFIX = ".partial"
+STALE_PARTIAL_AGE = timedelta(hours=1)
+"""A partial backup this old is from a process that died mid-write, never one running."""
+
+
+def partial_path(target: Path) -> Path:
+    """Where the backup bound for ``target`` is written first: ``.netkeeper-<stamp>.partial``
+    beside it. The leading dot and the suffix keep it out of :func:`list_backups`."""
+    return target.with_name(f".{target.stem}{PARTIAL_SUFFIX}")
+
+
+def _vacuum_into(connection: sqlite3.Connection, target: Path) -> None:
+    """``VACUUM INTO`` a temporary name, synced, then renamed to ``target``, so a backup
+    killed mid-write never appears under a backup's name. On an error the temporary file
+    is removed; after a kill, :func:`remove_stale_partials` removes it later."""
+    partial = partial_path(target)
+    _unlink_with_journal(partial)  # a leftover from an earlier death at this same second
+    try:
+        connection.execute("VACUUM INTO ?", (str(partial),))
+        fd = os.open(partial, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        partial.replace(target)
+    except BaseException:
+        _unlink_with_journal(partial)
+        raise
+
+
+def _unlink_with_journal(path: Path) -> None:
+    path.unlink(missing_ok=True)
+    Path(f"{path}-journal").unlink(missing_ok=True)
+
+
+def remove_stale_partials(backups_dir: Path, *, now: datetime | None = None) -> list[Path]:
+    """Delete the partial backups (and their ``-journal`` files) a process killed
+    mid-write left in ``backups_dir`` more than :data:`STALE_PARTIAL_AGE` ago, and any
+    ``-journal`` beside a backup that old. Returns what was removed."""
+    if not backups_dir.is_dir():
+        return []
+    cutoff = (datetime.now(UTC) if now is None else _utc(now)) - STALE_PARTIAL_AGE
+    removed: list[Path] = []
+    for path in backups_dir.iterdir():
+        name = path.name
+        partial = name.startswith(".netkeeper-") and (
+            name.endswith(PARTIAL_SUFFIX) or name.endswith(f"{PARTIAL_SUFFIX}-journal")
+        )
+        journal = name.endswith(".sqlite3-journal") and _NAME.match(name[: -len("-journal")])
+        if not (partial or journal) or not path.is_file():
+            continue
+        if datetime.fromtimestamp(path.stat().st_mtime, UTC) >= cutoff:
+            continue
+        path.unlink(missing_ok=True)
+        log.info("removed a partial backup left by an interrupted write: %s", path)
+        removed.append(path)
+    return removed
 
 
 def prune_backups(backups_dir: Path, keep: int, *, now: datetime | None = None) -> list[Path]:
@@ -137,13 +195,15 @@ def prune_backups(backups_dir: Path, keep: int, *, now: datetime | None = None) 
     someone wants to keep, notes, a restore in progress) is left alone. The newest
     pre-restore backup, the last restore's undo, is neither pruned nor counted until
     it is :data:`PRE_RESTORE_KEEP_DAYS` days old (at ``now``) or a later restore takes
-    its place. Removed paths come back oldest first.
+    its place. Removed paths come back oldest first. Partial backups older than an hour
+    go too (:func:`remove_stale_partials`), and are not in the list returned.
     """
     if keep < 1:
         raise ValueError(f"keep must be at least 1, got {keep}")
+    at = datetime.now(UTC) if now is None else _utc(now)
+    remove_stale_partials(backups_dir, now=at)
     found = list_backups(backups_dir)
     undo = next((info for info in found if info.pre_restore), None)
-    at = datetime.now(UTC) if now is None else _utc(now)
     if undo is not None and at - undo.created_at < timedelta(days=PRE_RESTORE_KEEP_DAYS):
         found.remove(undo)
     removed: list[Path] = []
@@ -226,6 +286,10 @@ def restore_backup(
     4. The migrations run to head (``db upgrade``).
 
     Nothing is pruned: the backup of the database replaced must outlive the restore.
+    Between the exclusive connection closing and the migrations, a process that was
+    waiting can read the restored database at its own, older revision; only a backup
+    from an older netkeeper has one, and ``serve`` and ``db upgrade`` cannot get in then
+    (the serve lock).
     """
     try:
         target = _sqlite_path(database_url)
@@ -334,9 +398,8 @@ def _pre_restore_backup(
         raise RestoreError(f"could not back up {database} first: {target} already exists")
     log.info("backing up %s to %s before the restore", database, target)
     try:
-        connection.execute("VACUUM INTO ?", (str(target),))
-    except sqlite3.Error as exc:
-        target.unlink(missing_ok=True)
+        _vacuum_into(connection, target)
+    except (sqlite3.Error, OSError) as exc:
         raise RestoreError(
             f"could not back up {database} first, and it holds what it held before: {exc}"
         ) from exc

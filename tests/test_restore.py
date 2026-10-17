@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import sqlite3
 from contextlib import closing
@@ -33,6 +34,7 @@ from netkeeper.scoping import install_scope_guard
 from netkeeper.services import backup as backup_service
 from netkeeper.services import serve_lock, ui_settings
 from netkeeper.services.backup import (
+    BackupError,
     DatabaseInUse,
     RestoreError,
     backup_name,
@@ -54,6 +56,7 @@ NY = "America/New_York"
 # 2026-10-16 02:30 in New York (EDT, UTC-4): before that night's 03:00.
 BEFORE_THREE = datetime(2026, 10, 16, 6, 30, tzinfo=UTC)
 AFTER_THREE = datetime(2026, 10, 16, 7, 30, tzinfo=UTC)  # 03:30 EDT
+STAMP_10_02 = datetime(2026, 10, 2, 9, 0, tzinfo=UTC)
 
 
 # --- fixtures and helpers -----------------------------------------------------------
@@ -727,3 +730,135 @@ def test_db_upgrade_refuses_while_the_serve_lock_is_held(data: Path) -> None:
     assert result.exit_code == 1
     assert "netkeeper serve or netkeeper restore is running" in result.stderr
     assert CliRunner().invoke(cli, ["db", "upgrade"]).exit_code == 0
+
+
+# --- a backup interrupted mid-write -------------------------------------------------
+
+
+def _abort_after(connection: sqlite3.Connection, steps: int) -> sqlite3.Connection:
+    """Make ``connection``'s next long statement fail partway, as a kill would stop it."""
+    calls = iter(range(steps))
+    connection.set_progress_handler(lambda: 0 if next(calls, None) is not None else 1, 100)
+    return connection
+
+
+def _backup_like_files(directory: Path) -> list[str]:
+    return sorted(p.name for p in directory.iterdir() if p.name.startswith("netkeeper-"))
+
+
+def test_a_backup_failing_mid_write_leaves_no_backup_file(
+    data: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_connect = sqlite3.connect
+    started: list[sqlite3.Connection] = []
+
+    def connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        connection: sqlite3.Connection = real_connect(*args, **kwargs)
+        if kwargs.get("uri"):  # create_backup's read-only source connection
+            started.append(_abort_after(connection, 20))
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", connect)
+    with pytest.raises(BackupError, match="interrupted"):
+        create_backup(database_url(data), data / "backups", now=STAMP_10_02)
+
+    assert started
+    assert _backup_like_files(data / "backups") == []
+    assert list(data.joinpath("backups").iterdir()) == []  # the partial went too
+    assert list_backups(data / "backups") == []
+
+
+def test_a_pre_restore_backup_failing_mid_write_leaves_no_undo(
+    data: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    saved = _backup_now(data, datetime(2026, 10, 1, tzinfo=UTC))
+    _mark(data, "keep me")
+    real_lock = backup_service._lock_exclusively
+    monkeypatch.setattr(
+        backup_service, "_lock_exclusively", lambda path: _abort_after(real_lock(path), 20)
+    )
+
+    with pytest.raises(RestoreError, match="holds what it held before: interrupted"):
+        restore_backup(saved, database_url(data), data / "backups", now=STAMP_10_02)
+
+    assert _backup_like_files(data / "backups") == [saved.name]
+    assert [info.path for info in list_backups(data / "backups")] == [saved]
+    assert _marker(data / DATABASE_FILENAME) == "keep me"
+
+
+def test_a_partial_left_by_a_kill_is_never_listed_and_is_cleaned_up_after_an_hour(
+    data: Path,
+) -> None:
+    """What a SIGKILL mid-VACUUM leaves (the review's crash2.py): the temporary file
+    and its journal. Settings never lists them, and pruning removes them once stale."""
+    directory = data / "backups"
+    directory.mkdir()
+    old = backup_service.partial_path(directory / backup_name(STAMP_10_02, pre_restore=True))
+    fresh = backup_service.partial_path(directory / backup_name(AFTER_THREE))
+    stray_journal = directory / f"{backup_name(STAMP_10_02)}-journal"
+    for path in (old, Path(f"{old}-journal"), fresh, stray_journal):
+        path.write_bytes(b"half a database")
+    hour_ago = (AFTER_THREE.timestamp() - 3601,) * 2
+    for path in (old, Path(f"{old}-journal"), stray_journal):
+        os.utime(path, hour_ago)
+    os.utime(fresh, (AFTER_THREE.timestamp(),) * 2)
+
+    assert list_backups(directory) == []
+    assert _backup_like_files(directory) == [stray_journal.name]  # never a .sqlite3
+
+    prune_backups(directory, 1, now=AFTER_THREE)
+
+    assert sorted(p.name for p in directory.iterdir()) == [fresh.name]
+
+
+async def test_back_up_now_failing_mid_write_lists_nothing_on_settings(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    real_connect = sqlite3.connect
+
+    def connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        connection: sqlite3.Connection = real_connect(*args, **kwargs)
+        return _abort_after(connection, 20) if kwargs.get("uri") else connection
+
+    monkeypatch.setattr(sqlite3, "connect", connect)
+    failed = await client.post("/api/v1/backups", headers=CSRF)
+    monkeypatch.setattr(sqlite3, "connect", real_connect)
+
+    assert failed.status_code == 409
+    assert (await client.get("/api/v1/backups")).json()["backups"] == []
+    directory = tmp_path / "netkeeper-data" / "backups"
+    assert not directory.exists() or _backup_like_files(directory) == []
+
+
+@pytest.mark.parametrize("pre_restore", [False, True], ids=["backup", "pre-restore"])
+def test_a_backup_killed_mid_write_leaves_only_a_hidden_partial(
+    data: Path, monkeypatch: pytest.MonkeyPatch, pre_restore: bool
+) -> None:
+    """A kill runs no cleanup: stand in for one by failing mid-VACUUM with cleanup off.
+    What is left must not be named, listed or kept like a backup."""
+    saved = _backup_now(data, datetime(2026, 10, 1, tzinfo=UTC))
+    monkeypatch.setattr(backup_service, "_unlink_with_journal", lambda path: None)
+    if pre_restore:
+        real_lock = backup_service._lock_exclusively
+        monkeypatch.setattr(
+            backup_service, "_lock_exclusively", lambda path: _abort_after(real_lock(path), 20)
+        )
+        with pytest.raises(RestoreError):
+            restore_backup(saved, database_url(data), data / "backups", now=STAMP_10_02)
+    else:
+        real_connect = sqlite3.connect
+
+        def connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+            connection: sqlite3.Connection = real_connect(*args, **kwargs)
+            return _abort_after(connection, 20) if kwargs.get("uri") else connection
+
+        monkeypatch.setattr(sqlite3, "connect", connect)
+        with pytest.raises(BackupError):
+            create_backup(database_url(data), data / "backups", now=STAMP_10_02)
+        monkeypatch.setattr(sqlite3, "connect", real_connect)
+
+    directory = data / "backups"
+    assert _backup_like_files(directory) == [saved.name]
+    (left,) = [p for p in directory.iterdir() if p.name.endswith(".partial")]
+    assert left.name.startswith(".netkeeper-20261002T090000Z")
+    assert [info.path for info in list_backups(directory)] == [saved]
