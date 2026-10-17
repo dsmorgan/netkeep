@@ -5,7 +5,7 @@ netkeeper sends campaign email through your own Gmail account, using the Gmail A
 You need:
 
 - The Gmail account you want campaigns to send from.
-- netkeeper installed and its database set up (`netkeeper db upgrade`).
+- netkeeper installed and `netkeeper serve` running ([Setup](guide/setup.md)). `serve` creates the database itself.
 - Google Chrome, where you can sign in to that Gmail account. netkeeper's UI requires Chrome; other browsers may work, but they aren't tested or supported.
 - Optionally, the [Google Cloud CLI](https://cloud.google.com/sdk/docs/install) (`gcloud`), which can do steps 1 and 2 for you.
 

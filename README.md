@@ -6,7 +6,7 @@ Keep your professional network warm.
 
 netkeeper pulls your 1st-degree LinkedIn connections and their contact info into a local database, helps you sort out who you actually know, and runs reconnect-and-follow-up sequences over Gmail and LinkedIn messaging. It replaces the manual workflow of exporting from LinkedIn, sorting a spreadsheet, scraping profiles with a separate tool, and mailing through a bulk-mail tool, with one application that runs on your Mac.
 
-**Status: pre-alpha.** The [architecture spec](docs/architecture.md) and the [implementation guide](docs/implementation-guide.md) are complete. Phase 0 (scaffold, API, frontend shell, CI, launchd) is done; phase 1 (import, CRM, triage) is in progress. See the changelog. Watch the repository or check the [changelog](CHANGELOG.md) for progress.
+**Status: working toward 1.0.** Import, the CRM and triage, the LinkedIn extractor, email campaigns over Gmail, and LinkedIn messaging all work. Phase 6 (polish, backups, and these docs) ends with the 1.0 release. The [changelog](CHANGELOG.md) lists what has changed.
 
 ## What it does
 
@@ -24,19 +24,29 @@ The workflow is a five-stage reconnect method: validate your network, enrich it,
 
 ## Requirements
 
-- macOS 14 or later. Linux works through the container image, but the LinkedIn steps need Chrome on the same host as the backend, so a Mac runs netkeeper natively.
-- Google Chrome. The UI requires it: other browsers may work, but they aren't tested or supported, and the UI shows a dismissible banner when you open it elsewhere. The LinkedIn steps drive their own, separate Chrome (any Chromium build works there); Firefox and Safari have no DevTools protocol and cannot be used for them.
+- macOS 14 or later.
+- Xcode command-line tools, for `git`: `xcode-select --install`.
+- [uv](https://docs.astral.sh/uv/). It installs Python 3.12 for you if you don't have it.
+- Node.js 22.12 or later, and pnpm 10, to build the UI once. With Node installed, `corepack enable` gives you the pnpm version the project pins.
+- Google Chrome. The UI requires it: other browsers may work, but they aren't tested or supported, and the UI shows a dismissible banner when you open it elsewhere. The LinkedIn steps drive their own, separate Chrome window, with its own profile (any Chromium build works there); Firefox and Safari have no DevTools protocol and can't be used for them.
 - A Gmail account and your own Google Cloud OAuth client for the email steps. [docs/gmail-setup.md](docs/gmail-setup.md) walks through the setup.
 - Optional, after 1.0: an Anthropic API key for the LLM features, which are deferred until after the 1.0 release. They will stay off unless you configure one.
 
 ## Running
 
 ```sh
-make install                # create .venv and install the package with dev extras
+git clone https://github.com/dsmorgan/netkeeper.git
+cd netkeeper
+make install                # create .venv and install netkeeper
+make build-ui               # build the UI into frontend/dist
 .venv/bin/netkeeper serve   # http://127.0.0.1:8000
 ```
 
-Open the address in Google Chrome. The UI requires it.
+Open the address in Google Chrome. `serve` creates the database the first time and migrates it after every update, so you don't need to run `netkeeper db upgrade` yourself. Without `make build-ui`, the page says "The frontend is not built".
+
+`make install` also installs the developer tools (tests, linters). You don't need them to use netkeeper; `uv sync` installs netkeeper alone. After a `git pull`, run `make install` and `make build-ui` again, then restart `serve`.
+
+The [setup guide](docs/guide/setup.md) takes you from here to your first import and sync.
 
 ### The browser sidecar
 
@@ -87,7 +97,7 @@ Enrichment opens each contact's LinkedIn profile from your account, so they may 
 | 3 | Email campaigns over Gmail: templates, sequences, review gate, reply detection |
 | 4 | LinkedIn messaging: prefill by default, auto-send opt-in |
 | 5 | Optional LLM module (after 1.0) |
-| 6 | Google Contacts push, container image, polish, a template-drafting guide for your own AI subscription. Ends with the 1.0 release |
+| 6 | Backups and restore, polish, user guides, a template-drafting guide for your own AI subscription. Ends with the 1.0 release |
 | 7 | Backlog after 1.0 |
 
 The work runs in this order: phases 3, 4, then 6, which ends with the 1.0 release. Phase 5 and phase 7 come after 1.0.
@@ -96,10 +106,23 @@ Details and exit criteria are in [the spec](docs/architecture.md#19-delivery-pha
 
 ## Documentation
 
+User guides:
+
+- [Setup](docs/guide/setup.md): install, the two Chrome windows, Gmail, your first import, triage, and your first LinkedIn sync.
+- [Your first campaign](docs/guide/first-campaign.md): templates, an email campaign, and a LinkedIn step.
+- [Backups and restore](docs/guide/backups.md).
+- [Troubleshooting](docs/guide/troubleshooting.md): what a run's stop reason or a posture warning means, and the actions that stay on the command line.
+- [Gmail setup](docs/gmail-setup.md): your own Google Cloud OAuth client, step by step.
+- [Import the old mailing tool's history](docs/history-import.md) (optional).
+- [Importing into macOS Contacts](docs/macos-contacts.md).
+- [Gmail drafts netkeeper leaves behind](docs/gmail-deletes.md).
+- [Draft templates with your AI assistant](docs/ai-drafting.md): use an AI chat subscription you already have to draft templates, without sending it your contacts' data.
+
+Design and project:
+
 - [Architecture spec](docs/architecture.md): design, data model, safety rules, phases.
 - [Implementation guide](docs/implementation-guide.md): the backlog, what runs in parallel, and the human checkpoints.
 - [Reconnect workflow](docs/networking-workflow.md): the method the tool automates.
-- [Draft templates with your AI assistant](docs/ai-drafting.md): use an AI chat subscription you already have to draft templates, without sending it your contacts' data.
 - [Architecture decision records](docs/adr/): why the contested parts are the way they are.
 
 ## Contributing
