@@ -21,9 +21,9 @@ export function SettingsPage({ gmail = {} }: { gmail?: GmailOutcome }) {
         <CardHeader>
           <CardTitle level={2}>Settings</CardTitle>
           <CardDescription>
-            Gmail auth, sending hours, about you, LinkedIn budgets and hours, campaign defaults,
-            backups, and a support bundle to send when something goes wrong. You change them here;
-            config.toml is optional, and a value it sets wins.
+            Gmail auth, sending hours, about you, LinkedIn budgets, hours and runs, campaign
+            defaults, backups, and a support bundle to send when something goes wrong. You change
+            them here; config.toml is optional, and a value it sets wins.
           </CardDescription>
           <p className="text-sm text-muted-foreground">
             netkeeper’s UI requires Google Chrome. Other browsers may work, but they are not tested
