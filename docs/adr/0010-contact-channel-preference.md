@@ -14,23 +14,23 @@ Each campaign step sends on one channel, and a campaign can already mix channels
 
 - The guards (`netkeeper/services/campaign_guards.py`) run at enrollment and at every fire. The address guard checks only the step's channel. `not_disconnected` excludes a former LinkedIn connection on every channel, as the maintainer kept in #485 (answer 3). A contact who fails a guard at enrollment isn't enrolled at all. "In another campaign" and "contacted recently" already ignore channel: the second reads any outbound interaction or sent campaign message. You can override "contacted recently" for a contact (#446).
 - `check_channel` covers a mailbox's cap and reauth state and the browser's heat and budgets (`netkeeper/services/budgets.py`, `netkeeper/services/heat.py`).
-- Reply detection (`netkeeper/services/campaign_replies.py`): a reply on either channel after an enrollment's first send on any channel ends it. The Gmail poll watches email replies only while a mailbox is armed (#571); otherwise a campaign with a LinkedIn step shows "Email replies aren't watched" (#572).
+- Reply detection (`netkeeper/services/campaign_replies.py`): a reply on either channel after an enrollment's first send on any channel ends it. The Gmail poll watches email replies only through an armed mailbox: the campaign's own, or any for a campaign without one (#571); otherwise a campaign with a LinkedIn step shows "Email replies aren't watched" (#572).
 
 ## Decision
 
-Each contact gets a preferred channel: **Email**, **LinkedIn**, or **No preference** (the default). You set it; netkeeper only suggests it. For now, a single-channel campaign skips a contact who prefers the other channel, and you can override that skip per contact, as you can for "contacted recently". Per-contact routing ("Preferred channel" steps) is later work, tracked in #585 (Phase 7). Design detail goes in spec 11 with the implementation issues.
+Each contact gets a preferred channel: **Email**, **LinkedIn**, or **No preference** (the default). You set it; netkeeper only suggests it. For now, a single-channel campaign skips a contact who prefers the other channel, and you can override that skip per contact, as you can for "contacted recently". Per-contact routing is later work, tracked in #585 (Phase 7). Design detail goes in spec 11 with the implementation issues.
 
 ### Now: the preference, suggestions, and skip with override
 
 1. **You set the preference; evidence only suggests.** By hand on the contact page, in bulk from the list, through the CLI, and in CSV import. A reply on the other channel produces a suggestion you accept or dismiss. netkeeper never sets a preference automatically: a silent change is the mistake you can't see coming.
 2. **The preference records who set it, when, and how** (by hand, by import, or by accepting a suggestion, with the suggestion's evidence). That answers "why LinkedIn?"
 3. **A single-channel campaign skips a mismatch by default, and you can override it.** An email campaign excludes a contact who prefers LinkedIn, and a LinkedIn campaign one who prefers email, with its own reason in the review summary, like the existing exclusions. A contact with no preference is never skipped for it. A message on a channel the contact avoids is worse than none.
-4. **The skip is checked at enrollment.** A preference changed after a contact is enrolled doesn't remove them; rule 7 covers what routing does then.
-5. **No armed mailbox is required.** Using only LinkedIn, with no email at all, is an accepted mode of operation. While a mailbox is armed, an email reply ends a LinkedIn-only enrollment (#571); while none is, the campaign says "Email replies aren't watched" (#572). The preference changes neither.
+4. **The skip is checked at enrollment and at every fire,** like the existing guards. A contact whose preference changes to the other channel is skipped at the next step unless you've overridden it for them.
+5. **No armed mailbox is required.** Using only LinkedIn, with no email, is an accepted mode. While a mailbox that watches the campaign is armed, an email reply ends a LinkedIn-only enrollment (#571); otherwise the campaign says "Email replies aren't watched" (#572). The preference changes neither.
 
 ### Later (#585): routing, and the rules it must meet
 
-#585 adds a step choice of **Preferred channel**, with a template for each channel and a campaign default for contacts with no preference. It must define the handling for both preferences and the default, address the complexity of multi-step campaigns with routing, and add checks that no contact gets lost on the first message or on a follow-up. Whatever it designs must meet these rules:
+#585 adds routing by preference and decides its shape: a step choice or a campaign-level switch. It must define the handling for both preferences and a default, handle multi-step routing, and check that no contact gets lost on a first message or follow-up. It must also meet these rules:
 
 6. **The channel is resolved at enrollment and fixed at the first send.** The review screen shows the split ("12 by email, 5 by LinkedIn, 3 held") from the resolution the engine uses, so what you approve is what sends.
 7. **Follow-ups stay on the first message's channel.** A preference changed after the first send doesn't move the enrollment. One changed before it holds the enrollment for your review, because you approved a different split; netkeeper doesn't quietly re-resolve it.
