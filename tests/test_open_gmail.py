@@ -250,7 +250,9 @@ def test_a_re_authorization_is_seen_without_the_keychain(
     and the Keychain is locked when the refusal is recorded.
     """
     user, mailbox = connected
-    old_token = memory_keyring.entries[("netkeeper", f"{user.id}/{mailbox.keychain_ref}")]
+    old_token = memory_keyring.entries[
+        (keychain.service_name(), f"{user.id}/{mailbox.keychain_ref}")
+    ]
     client = service.open_gmail(session_factory, user.id, mailbox.id, http=RecordingHttp())
     with session_scope(session_factory, write=True) as session:
         reloaded = session.get(User, user.id)

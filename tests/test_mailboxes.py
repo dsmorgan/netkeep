@@ -75,7 +75,7 @@ def test_connecting_stores_the_token_in_the_keychain_and_never_in_the_database(
     assert mailbox.label_prefix == "netkeeper"
     assert mailbox.keychain_ref == f"gmail/mailbox/{mailbox.id}"
     assert memory_keyring.entries == {
-        ("netkeeper", f"{user.id}/gmail/mailbox/{mailbox.id}"): "rt-secret-value"
+        (keychain.service_name(), f"{user.id}/gmail/mailbox/{mailbox.id}"): "rt-secret-value"
     }
     row = _row(session_factory, mailbox.id)
     columns = [attr.key for attr in inspect(Mailbox).column_attrs]
@@ -100,7 +100,10 @@ def test_authorizing_the_same_address_again_heals_it_and_replaces_the_token(
     assert again.id == first.id
     assert again.status is MailboxStatus.OK
     assert again.status_reason is None
-    assert memory_keyring.entries[("netkeeper", f"{user.id}/{first.keychain_ref}")] == "rt-new"
+    assert (
+        memory_keyring.entries[(keychain.service_name(), f"{user.id}/{first.keychain_ref}")]
+        == "rt-new"
+    )
 
 
 def test_a_second_address_is_refused_while_the_first_is_live(
@@ -265,7 +268,7 @@ def test_a_token_missing_from_the_keychain_needs_reauth(
     memory_keyring: MemoryKeyring,
 ) -> None:
     user, mailbox = connected
-    del memory_keyring.entries[("netkeeper", f"{user.id}/{mailbox.keychain_ref}")]
+    del memory_keyring.entries[(keychain.service_name(), f"{user.id}/{mailbox.keychain_ref}")]
     result = service.check_mailbox(session_factory, user.id, mailbox.id)
     assert result is not None
     assert (result.status, result.reason) == (MailboxStatus.REAUTH_REQUIRED, "token_missing")
@@ -277,7 +280,7 @@ def test_a_missing_client_needs_reauth(
     memory_keyring: MemoryKeyring,
 ) -> None:
     user, mailbox = connected
-    del memory_keyring.entries[("netkeeper", f"{user.id}/gmail/oauth_client")]
+    del memory_keyring.entries[(keychain.service_name(), f"{user.id}/gmail/oauth_client")]
     result = service.check_mailbox(session_factory, user.id, mailbox.id)
     assert result is not None
     assert (result.status, result.reason) == (MailboxStatus.REAUTH_REQUIRED, "client_missing")

@@ -16,6 +16,7 @@ from netkeeper.config import (
     render_toml,
 )
 from netkeeper.paths import data_dir
+from netkeeper.services.keychain import service_name
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -385,9 +386,17 @@ def test_config_show_prints_settings_and_paths(isolated: Path) -> None:
     shown = tomllib.loads(result.stdout)
     assert shown["web"]["port"] == 9999
     assert shown["linkedin"]["budget"]["warmup_start"] == 20
-    assert shown["paths"] == {"data_dir": str(data_dir()), "config": str(path)}
+    assert shown["paths"] == {
+        "data_dir": str(data_dir()),
+        "config": str(path),
+        "keychain_service": service_name(),
+    }
+    assert service_name().startswith("netkeeper@")  # conftest's scratch data directory
     assert result.stdout.rstrip().endswith(
-        "[paths]\n" + f'data_dir = "{data_dir()}"\n' + f'config = "{path}"'
+        "[paths]\n"
+        + f'data_dir = "{data_dir()}"\n'
+        + f'config = "{path}"\n'
+        + f'keychain_service = "{service_name()}"'
     )
 
 

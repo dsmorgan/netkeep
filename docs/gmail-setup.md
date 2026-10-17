@@ -28,7 +28,7 @@ To read this guide next to the console, use Chrome's split view. Right-click a l
 
 One scope: `https://www.googleapis.com/auth/gmail.modify`. It lets netkeeper read mail (to see replies and bounces), write drafts, send, and add labels. It doesn't allow permanent deletion, and netkeeper never deletes mail.
 
-The refresh token goes into your macOS Keychain, under the service `netkeeper`, as `<user id>/gmail/mailbox/<mailbox id>`. The OAuth client's ID and secret are stored next to it as `<user id>/gmail/oauth_client`. Neither is ever written to the database or a log. The setup guide's progress (the project ID, your address, and the steps you marked done) is stored in the database, since none of it is secret.
+The refresh token goes into your macOS Keychain, under the service `netkeeper` (for a data directory other than the default, `netkeeper@<hash of the path>`; `netkeeper config show` prints it), as `<user id>/gmail/mailbox/<mailbox id>`. The OAuth client's ID and secret are stored next to it as `<user id>/gmail/oauth_client`. Neither is ever written to the database or a log. The setup guide's progress (the project ID, your address, and the steps you marked done) is stored in the database, since none of it is secret.
 
 ## What `gcloud` can and can't do
 
