@@ -492,6 +492,17 @@ describe('the running favicon', () => {
 })
 
 describe('campaign send batches (#547)', () => {
+  it('keeps the chip off the LinkedIn schedule card', async () => {
+    serve(() => activity('paused', 'The LinkedIn schedule is paused.'))
+    await renderApp('/linkedin')
+    await waitFor(() => expect(screen.getAllByTestId('activity-indicator')).toHaveLength(2))
+
+    act(() => FakeEventSource.instances.at(-1)?.emit('campaign.tick', { sent: 1 }))
+
+    // Only the top bar's indicator shows it, not the card's.
+    expect(await screen.findAllByTestId('campaign-activity')).toHaveLength(1)
+  })
+
   it('shows "Campaigns: sending" beside the LinkedIn state, then clears it', async () => {
     serve(() => activity('idle', 'Scheduled LinkedIn runs are off.'))
     await renderApp('/exports')
@@ -539,7 +550,7 @@ describe('campaign send batches (#547)', () => {
     }
   })
 
-  it('leaves the LinkedIn-only favicon rule alone', () => {
+  it('runs the favicon for a LinkedIn run or a campaign batch', () => {
     expect(faviconFor(activity('idle', 'x'), true)).toBe(FAVICON_RUNNING)
     expect(faviconFor(activity('idle', 'x'))).toBe(FAVICON)
   })

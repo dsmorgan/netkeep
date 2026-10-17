@@ -1773,14 +1773,52 @@ async def test_a_tick_that_only_drafted_announces_nothing(world: World) -> None:
     assert [event async for event in subscription] == []
 
 
-async def test_announcing_never_changes_what_the_tick_sends(world: World) -> None:
-    """The same world sends the same with and without a bus."""
+async def test_announcing_returns_exactly_what_the_tick_returned(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The wrapper adds an event and nothing else: it hands back the tick's own results."""
     world.enroll_new()
     engine = CampaignEngine(
         world.factory, SETTINGS, world.sender, clock=lambda: NOW, bus=EventBus()
     )
-    [result] = [r for r in await engine.tick_and_announce() if r.user_id == world.user.id]
-    assert len(result.fired) == 1
+    ticked = await engine.tick_once()
+    world.enroll_new()
+
+    async def same() -> list[TickResult]:
+        return ticked
+
+    monkeypatch.setattr(engine, "tick_once", same)
+    assert await engine.tick_and_announce() is ticked
+
+
+async def test_a_failing_publish_still_returns_the_tick(world: World) -> None:
+    """#547: a display event is never worth a failed tick."""
+
+    class Broken(EventBus):
+        def publish(self, event: Any) -> None:
+            raise RuntimeError("the bus is broken")
+
+    world.enroll_new()
+    engine = CampaignEngine(world.factory, SETTINGS, world.sender, clock=lambda: NOW, bus=Broken())
+    results = await engine.tick_and_announce()
+    assert sum(len(r.fired) for r in results) == 1
+
+
+async def test_the_minute_loop_announces(world: World) -> None:
+    """A started engine emits ``campaign.tick`` from its own loop (not only when called)."""
+    bus = EventBus()
+    subscription = bus.subscribe()
+    world.enroll_new()
+    engine = CampaignEngine(
+        world.factory, SETTINGS, world.sender, clock=lambda: NOW, interval_s=0.01, bus=bus
+    )
+    engine.start()
+    try:
+        event = await asyncio.wait_for(anext(aiter(subscription)), timeout=5)
+    finally:
+        await engine.stop()
+        bus.unsubscribe(subscription)
+    assert (event.type, event.user_id) == ("campaign.tick", world.user.id)
 
 
 def test_the_engine_refuses_no_interval(world: World) -> None:

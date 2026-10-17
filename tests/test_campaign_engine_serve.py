@@ -56,6 +56,7 @@ async def test_serve_starts_and_stops_the_engine_with_its_sender(
         assert isinstance(campaigns, CampaignEngine)
         assert campaigns.sender is sender
         assert campaigns._interval_s == 60.0
+        assert campaigns._bus is served.state.bus  # #547: the indicator's event reaches the UI
         assert campaigns._task is not None and not campaigns._task.done()
     assert campaigns._task is None
 

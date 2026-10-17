@@ -54,8 +54,9 @@ function ActivityIcon({ state }: { state: ActivityState }) {
 /**
  * What LinkedIn is doing (#347), from `GET /attention`: an icon and a short text, the
  * full sentence on hover. A campaign send batch shows beside it as its own "Campaigns:
- * sending" (#547) and never changes the LinkedIn state; the Gmail poll does not show. `compact` (the top bar) keeps only the icon below `sm`,
- * with the text still there for screen readers.
+ * sending" (#547) and never changes the LinkedIn state; the Gmail poll does not show.
+ * `compact` (the top bar) keeps only the icon below `sm`, with the text still there for
+ * screen readers.
  *
  * `announce` mounts the one polite live region: it speaks only when the state
  * changes, never on the first answer or on a refetch that changes nothing. Only the
