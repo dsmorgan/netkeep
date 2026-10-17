@@ -25,7 +25,7 @@ uv tool install --python 3.12 --managed-python -c constraints.txt netkeeper==X.Y
 netkeeper setup
 ```
 
-The constraints file is `uv export --no-dev --no-hashes` from the release's `uv.lock`, attached to the same GitHub release, so the dependency set a user gets is the one CI tested. `--python 3.12 --managed-python` keeps the interpreter to uv's own 3.12, the one CI runs. Nobody types this by hand: the installer (option B) and `netkeeper update` run it.
+The constraints file is `uv export --no-dev --no-hashes` from the release's `uv.lock`, attached to the same GitHub release, so the dependency set a user gets is the one CI tested. Each install also copies it into the data directory (for example `<data_dir>/install/constraints-X.Y.Z.txt`, beside a record of the installed version), so a rollback can reinstall the old version without the network. The export leaves out hashes because `uv tool install -c` doesn't check them: on 2026-10-17, uv 0.12.23 installed a package whose constraint carried a wrong `--hash`, with `UV_REQUIRE_HASHES` and `UV_VERIFY_HASHES` set too, and `uv tool install --help` lists no hash option. What protects a pinned version is PyPI itself: a file once uploaded can't be replaced under the same name. A new file added to an old release (another wheel tag) is the gap the `==` pin doesn't close; re-test hash support when uv adds it, and export with hashes then. `--python 3.12 --managed-python` keeps the interpreter to uv's own 3.12, the one CI runs. Nobody types this by hand: the installer (option B) and `netkeeper update` run it.
 
 - **User needs:** macOS, Chrome, a terminal. uv installs to `~/.local/bin` with no admin password, and downloads its own managed CPython when none fits. No Xcode CLT, Homebrew, or Node.
 - **Updates:** `uv tool upgrade` keeps the original install's constraints, so it can't move to a new release's constraints file. `netkeeper update` runs the pinned `uv tool install` above for the new version instead, inside the steps netkeeper needs (below).
@@ -89,7 +89,7 @@ A `.app` in a `.dmg`, built with Briefcase, py2app, or PyInstaller (one-director
 | Updates | `netkeeper update` (uv) | Same as A | `brew upgrade` | In-app updater (Sparkle) |
 | Gatekeeper | Not assessed | Not assessed | Not assessed (formula) | Must be notarized |
 | Our cost | PyPI + release workflow + constraints file + Intel CI job | A + one tested script | A + a tap repo + formula bumps | A's build + $99/yr + signing, notarization, per-arch builds |
-| Apple silicon and Intel | Apple silicon from wheels; Intel only with `cryptography<49` | Same as A | Same as A | universal2 or two builds |
+| Apple silicon and Intel | Apple silicon from wheels; Intel only with the `cryptography` marker pair | Same as A | Same as A | universal2 or two builds |
 | Interpreter moves | On a 3.12 patch change at update | Same as A | On Homebrew's Python upgrade | Never (bundled) |
 | Fits #596 prebuilt UI | Needs it | Needs it | Needs it | Needs it |
 | Fits #600 login item | `netkeeper setup` | `netkeeper setup` | `netkeeper setup`, no `brew services` | The app owns it |
@@ -104,9 +104,19 @@ A `.app` in a `.dmg`, built with Briefcase, py2app, or PyInstaller (one-director
 2. Otherwise stop the login item (`launchctl bootout`) and confirm the serve lock is free. The plist's `KeepAlive` relaunches a crashed `serve`, so an upgrade under a running job could start a half-installed copy, and that copy would migrate the database. Replacing files under a running process can also break its lazy imports.
 3. Take a backup while nothing has the database open, because the new version's `serve` migrates at start.
 4. Upgrade: the pinned `uv tool install` of the new version (option A).
-5. Start the login item again (`launchctl bootstrap`). `serve` migrates as it starts, as `serve-launchd.sh` does today.
+5. Re-execute the newly installed `netkeeper update --finish` (a hidden subcommand), which starts the login item again (`launchctl bootstrap`); `serve` migrates as it starts, as `serve-launchd.sh` does today.
+6. Health check, in `--finish`: the serve lock is held, the database revision equals the new version's head, and `/health` answers, within a time limit.
 
-If step 4 fails, keep the backup, reinstall the previous version with the same pinned `uv tool install` at the old `==` version and its constraints file, and start the old login item. The backup stays the recovery point for a failure after the migration ran; restoring it is `netkeeper restore`, by hand.
+**Replacing its own code.** A successful `uv tool install` syncs the same environment in place, so after step 4 the running `update` process sits on files that may be the new version's or a mix. So the old process does nothing after step 4 but run `uv` and `exec` a fresh binary: the new `netkeeper update --finish` on success, or, on failure, the rollback's reinstall and then the old version's `netkeeper update --rollback` (also hidden). A health check that fails in `--finish` does the same: reinstall the old version, then `exec` its `--rollback`, which runs rollback steps 2 to 4 on code that matches what's installed. Steps 1 to 4 import everything they need before step 4 starts. The alternative, a small script copied out of the environment that runs steps 4 to 6, is equivalent but harder to test; re-executing is the choice.
+
+**Rollback.** When step 4 or step 6 fails:
+
+1. Reinstall the old pinned version: `uv tool install` at the old `==` version with the constraints file the data directory kept for it.
+2. With the login item still off, `netkeeper restore` the pre-update backup. The old version can't start against a database the new one migrated: its `serve` stops on a revision it doesn't know, and `KeepAlive` restarts it in a loop. There's no `db downgrade`, and some migrations' `downgrade()` is empty, so the backup is the only way back. `restore` takes the serve lock and accepts a revision the old migrations know.
+3. Start the login item.
+4. Run the health check again, against the old head.
+
+**When the rollback may run on its own.** Only when the new version failed before its scheduler ran: step 4 failed, the migration failed, or the health check failed at startup. The backup was taken with `serve` stopped, so nothing is lost. If the new version's scheduler ran (it failed later, or the health check passed and the user asks for a rollback afterward), `update` stops, leaves the login item off, and tells the user what happened and what to run. A restore then would forget messages the new version sent, and the old version could send them again. `serve` has to record that its scheduler started for this to be decidable; the implementation issue adds that marker.
 
 An in-UI check can show that a newer version exists: one request to PyPI's JSON API, at most daily, sending nothing but the request itself, with a setting to turn it off. It shows the command to run; it never installs on its own. Under Homebrew it says `brew upgrade`.
 
@@ -114,7 +124,14 @@ An in-UI check can show that a newer version exists: one request to PyPI's JSON 
 
 cryptography 49.0.0 removed macOS x86_64 support, and 48.0.1 is the last release with Intel wheels. On an Intel Mac a fresh resolve picks 50.x, finds only an sdist, and tries to build it, which needs Rust and the Command Line Tools: a stock Mac fails. The choices:
 
-- **Constrain cryptography on Intel.** `cryptography<49; sys_platform == 'darwin' and platform_machine == 'x86_64'` in the release constraints (or in `pyproject.toml`). Intel keeps working with no toolchain. The cost: a frozen major version gets no security fixes, and a future google-auth that needs cryptography 49 or later ends it.
+- **Constrain cryptography on Intel.** A complementary pair in `pyproject.toml`'s dependencies:
+
+  ```toml
+  "cryptography<49; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+  "cryptography>=49; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+  ```
+
+  `uv lock` then forks, and `uv export` emits one pin per side (48.0.1 for macOS x86_64, 50.x for the rest), each with its marker. The pair also protects an install that skips the constraints file. Two placements that look simpler don't work (re-review of #615, uv 0.12.23): the marker appended to the exported constraints is unsatisfiable on Intel, because the export already pins `cryptography==50.0.1` with no marker; and the single marker in `pyproject.toml` doesn't fork the lock, so every platform drops to 48.x. Intel keeps working with no toolchain. The cost: a frozen major version gets no security fixes, and a future google-auth that needs cryptography 49 or later ends it.
 - **`--no-build`.** The resolver then picks only versions that have a wheel for the machine, which lands on the same 48.x for Intel without naming it. It's less explicit, and it can fail to resolve where the constraint would have said why.
 - **Apple silicon only.** The simplest, and Intel Macs are a shrinking share; but it drops users we may have.
 
