@@ -112,6 +112,10 @@ def live_busy(
     return reasons
 
 
+class CancelInProgress(RuntimeError):
+    """A restart was asked for while a Cancel was still resuming what it paused."""
+
+
 class RestartGate:
     """A restart that waits for idle, at most one per process (see the module)."""
 
@@ -130,6 +134,7 @@ class RestartGate:
         self._resume = resume
         self._quiesced = False
         self._quiescing: asyncio.Task[None] | None = None
+        self._cancelling = False
         self._poll_s = poll_s
         self._task: asyncio.Task[None] | None = None
         self.waiting_on: list[str] = []
@@ -139,8 +144,16 @@ class RestartGate:
         """A restart was asked for and has not stopped serve yet."""
         return self._task is not None and not self._task.done()
 
+    @property
+    def cancelling(self) -> bool:
+        """A Cancel is undoing the quiesce; nothing may start until it has."""
+        return self._cancelling
+
     def start(self) -> None:
-        """Begin waiting for idle, then restart. Idempotent while it waits."""
+        """Begin waiting for idle, then restart. Idempotent while it waits.
+        :class:`CancelInProgress` while a Cancel is still resuming what it paused."""
+        if self._cancelling:
+            raise CancelInProgress("a cancel is in progress; try again in a moment")
         if not self.waiting and not self._hook.requested:
             self._task = asyncio.get_running_loop().create_task(self._run(), name="restart-gate")
 
@@ -149,22 +162,28 @@ class RestartGate:
         campaign sends go out again. False when there was nothing to cancel (no wait,
         or the restart already began)."""
         task = self._task
-        if task is None or task.done() or self._hook.requested:
+        if task is None or task.done() or self._hook.requested or self._cancelling:
             return False
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
-        self._task = None
-        self.waiting_on = []
-        quiescing = self._quiescing
-        if quiescing is not None and not quiescing.done():
-            # Never cut the quiesce off part way (the engine may be waiting out a send):
-            # let it finish, then undo all of it.
-            with contextlib.suppress(Exception):
-                await quiescing
-        if self._quiesced:
-            self._resume()
-            self._quiesced = False
+        # Until everything is resumed, a second restart is refused (start), so it can
+        # never stop serve while this resumes the engine in it.
+        self._cancelling = True
+        try:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            self.waiting_on = []
+            quiescing = self._quiescing
+            if quiescing is not None and not quiescing.done():
+                # Never cut the quiesce off part way (the engine may be waiting out a
+                # send): let it finish, then undo all of it.
+                with contextlib.suppress(Exception):
+                    await quiescing
+            if self._quiesced:
+                self._resume()
+                self._quiesced = False
+        finally:
+            self._task = None
+            self._cancelling = False
         log.info("the restart waiting for idle was cancelled")
         return True
 

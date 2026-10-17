@@ -117,6 +117,8 @@ def test_the_read_only_routes_are_the_ones_that_only_read() -> None:
         "preview_campaign_audience",
         "check_gmail_replies_now",  # sets a flag in the running sender, in memory
         "create_backup",  # writes a file with its own read-only connection, never a row
+        "restart_serve",  # starts the restart gate, in memory; its wait holds no lock (#597)
+        "cancel_restart",  # waits out the quiesce, whose send records its own row (#597)
     }
 
 
