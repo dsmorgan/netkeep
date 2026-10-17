@@ -481,13 +481,14 @@ describe('contact detail', () => {
   it('shows a plain message when the contact cannot be loaded', async () => {
     mockApi((request) => {
       const { pathname } = new URL(request.url)
-      if (pathname === '/api/v1/contacts/9') return jsonResponse({ detail: 'no contact 9' }, 404)
+      if (pathname === '/api/v1/contacts/9') return jsonResponse({ detail: 'no contact 9' }, 500)
       return undefined
     })
     await renderApp('/contacts/9')
     const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent(/This contact does not exist/)
-
+    expect(alert).toHaveTextContent(/This contact could not be loaded/)
+    expect(alert).toHaveTextContent(/no contact 9/)
+    expect(alert).not.toHaveTextContent(/does not exist/)
     expect(within(alert).getByRole('link', { name: /Back to contacts/ })).toBeInTheDocument()
   })
 
@@ -508,6 +509,17 @@ describe('contact detail', () => {
       '/contacts',
     )
   })
+
+  it.each(['abc', '1e20', '0'])(
+    'says /contacts/%s is not a contact, without asking',
+    async (id) => {
+      const seen = mockApi(() => undefined)
+      await renderApp(`/contacts/${id}`)
+      const alert = await screen.findByRole('alert')
+      expect(alert).toHaveTextContent('There is no contact at this address.')
+      expect(seen.some((call) => call.path.startsWith('/api/v1/contacts/'))).toBe(false)
+    },
+  )
 
   it('links home from a page that does not exist', async () => {
     mockApi(() => undefined)

@@ -383,6 +383,7 @@ export function TriagePage() {
                 filter={filter}
                 skipped={skipped}
                 seen={queue.seen}
+                total={total}
                 onRevisitSkipped={() => setFilter('skip')}
                 canUndo={queue.undoable.length > 0}
                 onUndo={() => void queue.undo().then(previewAgain)}
@@ -596,6 +597,7 @@ function EmptyQueue({
   filter,
   skipped,
   seen,
+  total,
   onRevisitSkipped,
   canUndo,
   onUndo,
@@ -604,14 +606,15 @@ function EmptyQueue({
   filter: QueueFilter
   skipped: number
   seen: number
+  total: number
   onRevisitSkipped: () => void
   canUndo: boolean
   onUndo: () => void
   onBack: () => void
 }) {
-  // Nothing handled this run and nothing skipped: a queue that was never filled,
-  // not one you emptied.
-  const fresh = seen === 0 && !canUndo && skipped === 0
+  // No contacts at all: a queue that was never filled, not one you emptied. The
+  // Skipped and Automatic queues keep their own wording.
+  const fresh = (filter === 'unknown' || filter === 'both') && total === 0
   return (
     <div
       role="status"

@@ -10,7 +10,7 @@ export const Route = createFileRoute('/contacts/$contactId')({
 function ContactDetailRoute() {
   const { contactId } = Route.useParams()
   const id = Number(contactId)
-  if (!Number.isInteger(id) || id <= 0) {
+  if (!Number.isSafeInteger(id) || id <= 0) {
     return (
       <NotFound to="/contacts" backLabel="Back to contacts">
         There is no contact at this address.

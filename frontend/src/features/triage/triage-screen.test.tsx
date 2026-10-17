@@ -50,7 +50,37 @@ describe('the triage screen', () => {
     await waitFor(() => expect(backend.byId(2).met).toBe('met'))
 
     expect(await screen.findByText('Nothing left to triage.')).toBeInTheDocument()
+    expect(screen.queryByText('Nothing to triage yet.')).not.toBeInTheDocument()
     expect(screen.queryByTestId('triage-card')).not.toBeInTheDocument()
+  })
+
+  it('shows a returning user an empty queue as done, even in a new session', async () => {
+    // Everyone already has an answer when the page opens: nothing was handled this session.
+    const backend = createFakeBackend({ contacts: 2 })
+    backend.byId(1).met = 'met'
+    backend.byId(2).met = 'met'
+    renderTriage({ backend })
+
+    expect(await screen.findByText('Nothing left to triage.')).toBeInTheDocument()
+    expect(screen.queryByText('Nothing to triage yet.')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['Skipped', 'Nothing skipped is left.'],
+    ['Reviewing', 'Nothing left to review.'],
+  ])('keeps the %s queue its own empty message with no contacts at all', async (label, text) => {
+    renderTriage({ contacts: 0 })
+    await screen.findByText('Nothing to triage yet.')
+
+    fireEvent.click(screen.getByRole('button', { name: label }))
+    expect(await screen.findByText(text)).toBeInTheDocument()
+    expect(screen.queryByText('Nothing to triage yet.')).not.toBeInTheDocument()
+  })
+
+  it('treats the Both queue with no contacts as a new install', async () => {
+    renderTriage({ contacts: 0 })
+    fireEvent.click(await screen.findByRole('button', { name: 'Both' }))
+    expect(await screen.findByText('Nothing to triage yet.')).toBeInTheDocument()
   })
 
   it('tells a new install what to do first, not that everything is done', async () => {

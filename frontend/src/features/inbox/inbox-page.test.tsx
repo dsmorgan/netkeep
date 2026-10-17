@@ -82,13 +82,29 @@ describe('inbox', () => {
     expect(await screen.findByText('Loading the inbox…')).toBeVisible()
   })
 
+  it('tells a new install with no mailbox to connect Gmail, with a link', async () => {
+    mockFetch(
+      inbox({ total: 0, unhandled: 0, items: [] }, [], {
+        'GET /api/v1/mailboxes': () => jsonResponse([]),
+      }),
+    )
+    await renderApp('/inbox')
+
+    expect(await screen.findByText(/No mailbox is connected/)).toBeVisible()
+    expect(screen.getByRole('link', { name: 'Gmail page' })).toHaveAttribute('href', '/gmail')
+    expect(screen.queryByText(/has been handled/)).toBeNull()
+  })
+
   it('says so when nothing is left to handle, and asks for the unhandled only', async () => {
     const calls: Call[] = []
     mockFetch(inbox({ total: 0, unhandled: 0, items: [] }, calls))
     await renderApp('/inbox')
 
     expect(await screen.findByText('Nothing to handle')).toBeVisible()
-    expect(screen.getByText(/New ones appear after the next mailbox sync/)).toBeVisible()
+    expect(
+      screen.getByText(/New replies, unsubscribes and bounces appear after the next/),
+    ).toBeVisible()
+    expect(screen.queryByText(/has been handled/)).toBeNull()
     const listed = calls.find((c) => c.path === '/api/v1/inbox')
     expect(listed?.query.get('handled')).toBe('false')
     expect(listed?.query.get('limit')).toBe('25')
