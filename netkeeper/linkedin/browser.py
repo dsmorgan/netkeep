@@ -2586,18 +2586,9 @@ class ContextLike(Protocol):
         this, scoped to its own loopback fixture, against the developer's
         real Chrome profile (spec 9.1).
 
-        ``netkeeper.linkedin.preflight``'s own read stays unscoped for now
-        (#176 review, L8): its two cookie names (``li_at``, ``JSESSIONID``)
-        are already filtered to a ``linkedin.com`` domain suffix in Python,
-        so scoping the call itself with ``urls=["https://www.linkedin.com/"]``
-        looks safe in principle, but this codebase has no way to verify,
-        without reaching the site, that LinkedIn never sets either cookie on
-        a narrower host a ``www.linkedin.com`` url would not see -- and a
-        false "no session" reading there is a worse failure than the small
-        amount of extra jar this read pulls in. The CDP call itself loads
-        every cookie value into process memory; only what preflight copies
-        out (name, domain, expiry) is narrow. Left alone rather than guessed
-        at.
+        ``netkeeper.linkedin.preflight`` scopes its read to LinkedIn's URLs
+        (#633, ADR 0012). Every ``cookies(`` call in the package must pass ``urls``;
+        ``tests/test_cookie_read_scope.py`` enforces it.
         """
         ...
 

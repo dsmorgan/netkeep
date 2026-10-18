@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from typing import Any
+from urllib.parse import urlparse
 
 from netkeeper.linkedin.browser import Connection, ContextLike, PageLike
 
@@ -153,6 +154,11 @@ class FakePage:
         self._closed = True
 
 
+def _covers(domain: str, host: str) -> bool:
+    domain = domain.lstrip(".")
+    return host == domain or host.endswith("." + domain)
+
+
 class FakeContext:
     """The context the user's browsing already lives in. Hands out tabs and a cookie jar."""
 
@@ -177,6 +183,8 @@ class FakeContext:
         #: The ``urls`` argument the most recent ``cookies()`` call passed, for a
         #: test that wants to assert a caller scoped its read (#174 item 7).
         self.last_cookies_urls: str | Sequence[str] | None = None
+        #: Names of the cookies the most recent ``cookies()`` call handed back.
+        self.last_cookies_returned: list[str] = []
 
     async def new_page(self) -> PageLike:
         self.new_page_calls += 1
@@ -193,7 +201,14 @@ class FakeContext:
         self.last_cookies_urls = urls
         if self.cookie_error is not None:
             raise self.cookie_error
-        return list(self.cookie_jar)
+        jar = list(self.cookie_jar)
+        if urls is not None:
+            # Like the browser: a cookie is visible to a URL when its domain covers the host.
+            wanted = [urls] if isinstance(urls, str) else list(urls)
+            hosts = [urlparse(url).hostname or "" for url in wanted]
+            jar = [c for c in jar if any(_covers(str(c.get("domain", "")), h) for h in hosts)]
+        self.last_cookies_returned = [str(c.get("name", "")) for c in jar]
+        return jar
 
     @property
     def open_pages(self) -> list[FakePage]:
