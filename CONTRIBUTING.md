@@ -53,7 +53,10 @@ Run it against Chrome stable in a window, not a headless one, and say which Chro
 version you used in the pull request. Run it against an isolated Chrome (its own
 `--user-data-dir`, not signed in to LinkedIn) on a debug port other than 9222, and point
 `NETKEEPER_CDP_URL` at it: the suite refuses every port-9222 address, the default
-included, because that is where your own netkeeper Chrome listens. Outside
+included, because that is where your own netkeeper Chrome listens. Point
+`NETKEEPER_SMOKE_PROFILE` at that Chrome's `--user-data-dir` too: every attach checks
+that the Chrome on the port holds netkeeper's profile (#624), and the suite links each
+test's profile to that directory. Outside
 `tests/smoke/`, every test is refused a real Chrome altogether (`tests/conftest.py`,
 `_no_real_browser`); a test that genuinely needs one opts out with
 `@pytest.mark.real_cdp`.

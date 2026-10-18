@@ -11,7 +11,8 @@ traffic. ADR 0002 has the incident that decided this.
 The :class:`BrowserProvider` seam stays so a future ADR can add a mode without every
 caller learning about modes, and ``attach`` is its only member. There is nothing to
 fall back to: when Chrome is unreachable the run raises :class:`BrowserUnavailable`
-and the scheduler tries again later.
+and the scheduler tries again later. A Chrome on the port that isn't serving
+netkeeper's dedicated profile is refused the same way (:class:`ProfileRefused`, #624).
 
 Nothing here imports the ORM or opens a session (spec 9.10, ADR 0005).
 """
@@ -34,6 +35,11 @@ from pathlib import Path
 from typing import Any, Final, Protocol, cast, runtime_checkable
 from urllib.parse import parse_qsl, unquote, urljoin, urlsplit
 
+from netkeeper.chrome_profile import (
+    ProfileCheck,
+    browser_pid_from_process_info,
+    check_dedicated_profile,
+)
 from netkeeper.linkedin import activity_lock
 from netkeeper.linkedin.activity_lock import LEGACY_SHARED_KEY
 from netkeeper.linkedin.activity_lock import SINGLE_ACCOUNT_KEY as SINGLE_ACCOUNT_KEY
@@ -55,6 +61,7 @@ from netkeeper.linkedin.observe import (
 )
 from netkeeper.linkedin.pacing import ScrollPlan, TypingPlan, rest_pointer_like_a_person
 from netkeeper.logging_setup import personal, personal_exc
+from netkeeper.paths import data_dir
 
 log = logging.getLogger(__name__)
 
@@ -182,11 +189,13 @@ class _TapContext(Protocol):
 
 
 class _TargetBrowser(Protocol):
-    """``new_browser_cdp_session``, borrowed by :meth:`BrowserRun._open_tab` alone (#195).
+    """``new_browser_cdp_session``, borrowed by :meth:`BrowserRun._open_tab` (#195) and
+    :func:`read_browser_pid` (#624) alone.
 
     :class:`BrowserLike` leaves it out for the reason :class:`_TapContext` exists: a
     browser-level session reaches every target. :meth:`BrowserRun._open_tab` sends it
-    ``Target.createTarget`` and ``Target.closeTarget`` and nothing else.
+    ``Target.createTarget`` and ``Target.closeTarget``, and :func:`read_browser_pid`
+    sends ``SystemInfo.getProcessInfo``, and nothing else.
     """
 
     async def new_browser_cdp_session(self) -> Any: ...
@@ -2616,19 +2625,43 @@ class BrowserLike(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class Connection:
-    """A live CDP connection to the user's browser, and the call that lets go of it."""
+    """A live CDP connection to the user's browser, and the call that lets go of it.
+
+    ``browser_pid`` is the browser process the Chrome on the port named for itself
+    (:func:`read_browser_pid`), or ``None`` when it named none. The attach compares it
+    with the dedicated profile's lock (#624), so ``None`` refuses the attach.
+    """
 
     browser: BrowserLike
     detach: Callable[[], Awaitable[None]]
+    browser_pid: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class Attachment:
-    """A connection plus the context we reuse: ``browser.contexts[0]``, never a new one."""
+    """A connection plus the context we reuse: ``browser.contexts[0]``, never a new one.
+
+    ``profile`` is the dedicated-profile check this connection passed (#624), made once
+    per connection: a reattach is a new connection and checks again.
+    """
 
     browser: BrowserLike
     context: ContextLike
     detach: Callable[[], Awaitable[None]]
+    profile: ProfileCheck
+
+
+class ProfileRefused(BrowserUnavailable):
+    """The Chrome on the port isn't netkeeper's dedicated profile, or can't be shown to be.
+
+    ADR 0012, rule 6 (#624). A :class:`BrowserUnavailable`, so every caller treats it as
+    a Chrome it can't use: the run aborts and the scheduler tries later. It says
+    what was found (``profile_check``), for preflight and the posture report.
+    """
+
+    def __init__(self, check: ProfileCheck, cdp_url: str) -> None:
+        super().__init__(check.refusal(cdp_url))
+        self.profile_check = check
 
 
 class CdpConnector(Protocol):
@@ -2660,6 +2693,13 @@ class PlaywrightCdpConnector:
                 f"cannot attach to Chrome at {cdp_url}: {_reason(exc)}; "
                 "start it with the command `netkeeper browser launch` prints"
             ) from exc
+        try:
+            # On this same connection, so the pid belongs to the browser the run will
+            # drive, not to whatever answered the port a moment earlier (#624).
+            browser_pid = await read_browser_pid(browser)
+        except BaseException:
+            await playwright.stop()
+            raise
 
         async def detach() -> None:
             # Stopping the driver closes our CDP socket and nothing else. We never
@@ -2667,7 +2707,30 @@ class PlaywrightCdpConnector:
             # and netkeeper neither starts nor stops it (spec 9.1).
             await playwright.stop()
 
-        return Connection(browser=browser, detach=detach)
+        return Connection(browser=browser, detach=detach, browser_pid=browser_pid)
+
+
+async def read_browser_pid(browser: object) -> int | None:
+    """The pid of the browser process on this connection, or ``None`` (#624).
+
+    One ``SystemInfo.getProcessInfo`` on a browser-level session, then the session
+    detaches. It lists Chrome's processes by type and pid, and nothing else: it opens no
+    tab, navigates nothing, and reads no page or cookie. Any failure is ``None``, which
+    the attach refuses (:func:`netkeeper.chrome_profile.check_dedicated_profile`).
+    """
+    session: _CdpSessionLike | None = None
+    try:
+        session = cast(
+            _CdpSessionLike, await cast(_TargetBrowser, browser).new_browser_cdp_session()
+        )
+        answer = await session.send("SystemInfo.getProcessInfo")
+    except Exception as exc:
+        log.warning("could not read which process the attached Chrome is: %s", personal_exc(exc))
+        return None
+    finally:
+        if session is not None:
+            await _detach_quietly(session.detach)
+    return browser_pid_from_process_info(answer) if isinstance(answer, Mapping) else None
 
 
 class ActivityLocks:
@@ -2879,6 +2942,11 @@ class BrowserRun:
         self._close_attempted = False
         self._bubble_closed = False
         self._tab_closed = False
+
+    @property
+    def profile_check(self) -> ProfileCheck:
+        """The dedicated-profile check this run's connection passed (#624)."""
+        return self._attachment.profile
 
     @property
     def keys_sent(self) -> int:
@@ -5102,10 +5170,14 @@ class AttachBrowserProvider:
         *,
         connector: CdpConnector | None = None,
         locks: ActivityLocks | None = None,
+        profile: Path | None = None,
     ) -> None:
         self.cdp_url = cdp_url
         self._connector = PlaywrightCdpConnector() if connector is None else connector
         self.locks = ActivityLocks() if locks is None else locks
+        #: The dedicated profile every attach must find on the port (ADR 0012, #624):
+        #: the directory `netkeeper browser launch` points ``--user-data-dir`` at.
+        self.profile = data_dir() / CHROME_PROFILE_DIRNAME if profile is None else profile
 
     async def _attach(self) -> Attachment:
         """Connect to the user's Chrome and reuse the context that is already open.
@@ -5116,7 +5188,9 @@ class AttachBrowserProvider:
         A public ``attach`` would be a route around the activity lock.
 
         Raises :class:`BrowserUnavailable` when Chrome is unreachable or has no
-        context to reuse. It never answers the failure by starting a browser.
+        context to reuse, and :class:`ProfileRefused` when the Chrome on the port isn't
+        serving :attr:`profile`, or that can't be told (#624). It never answers the
+        failure by starting a browser, and never attaches anyway.
         """
         try:
             connection = await self._connector.connect(self.cdp_url)
@@ -5127,6 +5201,12 @@ class AttachBrowserProvider:
                 f"cannot attach to Chrome at {self.cdp_url}: {_reason(exc)}; "
                 "start it with the command `netkeeper browser launch` prints"
             ) from exc
+        # Before anything reads the browser's contexts or opens a tab (ADR 0012, rule 6).
+        check = check_dedicated_profile(self.profile, connection.browser_pid)
+        if not check.dedicated:
+            await _detach_quietly(connection.detach)
+            log.warning("refused the Chrome at %s: %s", self.cdp_url, check.reason)
+            raise ProfileRefused(check, self.cdp_url)
         contexts = connection.browser.contexts
         if not contexts:
             await _detach_quietly(connection.detach)
@@ -5139,7 +5219,12 @@ class AttachBrowserProvider:
             # driving this Chrome; we still take the first and touch nothing else.
             log.warning("the attached Chrome has %d contexts; reusing the first", len(contexts))
         log.debug("attached to Chrome %s at %s", connection.browser.version, self.cdp_url)
-        return Attachment(browser=connection.browser, context=contexts[0], detach=connection.detach)
+        return Attachment(
+            browser=connection.browser,
+            context=contexts[0],
+            detach=connection.detach,
+            profile=check,
+        )
 
     @asynccontextmanager
     async def run(

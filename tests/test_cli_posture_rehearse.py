@@ -288,6 +288,9 @@ def test_a_preflight_report_becomes_a_probe_with_no_place_for_a_secret(
         "browser_version",
         "cookie_names",
         "problems",
+        # #624: the dedicated-profile check, a profile path, two pids, and a reason
+        # netkeeper writes itself. Nothing the browser or a page sends ends up in it.
+        "profile",
     }
 
 

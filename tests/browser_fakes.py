@@ -13,11 +13,27 @@ review three weeks later.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from netkeeper.linkedin.browser import Connection, ContextLike, PageLike
+from netkeeper.chrome_profile import SINGLETON_LOCK
+from netkeeper.linkedin.browser import CHROME_PROFILE_DIRNAME, Connection, ContextLike, PageLike
+from netkeeper.paths import data_dir
+
+#: The pid every fake Chrome names as its browser process, unless a test says otherwise.
+FAKE_CHROME_PID = 4242
+
+
+def hold_profile(profile: Path, pid: int = FAKE_CHROME_PID) -> None:
+    """Make ``profile`` look held by browser process ``pid``, as Chrome's lock does."""
+    profile.mkdir(parents=True, exist_ok=True)
+    lock = profile / SINGLETON_LOCK
+    if lock.is_symlink() or lock.exists():
+        lock.unlink()
+    os.symlink(f"quorbelle-host-{pid}", lock)
 
 
 class FakeMouse:
@@ -328,13 +344,29 @@ class FakeConnector:
 
     Pass several browsers to describe a browser that goes away mid-run: the first
     attach gets the first, the reattach gets the next.
+
+    The fake Chrome runs on ``profile``, by default the test's dedicated profile
+    (``<data dir>/chrome-profile``), and holds it the way Chrome does: each connect
+    writes the profile's ``SingletonLock`` for ``browser_pid``, the browser process the
+    connection names (#624). So an ordinary fake attach passes the dedicated-profile
+    check by making it. A fake on another profile leaves the dedicated one unheld; a
+    ``browser_pid`` of ``None`` is a Chrome that didn't name its process. A sequence of
+    pids gives each attach its own, the way ``browsers`` does.
     """
 
     def __init__(
-        self, browsers: Sequence[FakeBrowser] | None = None, error: Exception | None = None
+        self,
+        browsers: Sequence[FakeBrowser] | None = None,
+        error: Exception | None = None,
+        browser_pid: int | Sequence[int | None] | None = FAKE_CHROME_PID,
+        profile: Path | None = None,
     ) -> None:
+        self.profile = profile
         self.browsers = [FakeBrowser()] if browsers is None else list(browsers)
         self.error = error
+        self.browser_pids = (
+            list(browser_pid) if isinstance(browser_pid, Sequence) else [browser_pid]
+        )
         self.connect_calls: list[str] = []
         self.detaches = 0
 
@@ -347,8 +379,13 @@ class FakeConnector:
         if self.error is not None:
             raise self.error
         browser = self.browsers[min(self.attaches - 1, len(self.browsers) - 1)]
+        pid = self.browser_pids[min(self.attaches - 1, len(self.browser_pids) - 1)]
+        if pid is not None:
+            hold_profile(
+                data_dir() / CHROME_PROFILE_DIRNAME if self.profile is None else self.profile, pid
+            )
 
         async def detach() -> None:
             self.detaches += 1
 
-        return Connection(browser=browser, detach=detach)
+        return Connection(browser=browser, detach=detach, browser_pid=pid)
