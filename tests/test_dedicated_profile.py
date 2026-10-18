@@ -9,6 +9,7 @@ move the fake to another profile, or change the pid, to describe each case.
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -99,7 +100,19 @@ def test_a_profile_no_chrome_holds_is_undetermined(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "target", ["quorbelle-host", "quorbelle-host-", "quorbelle-host-12a", "quorbelle-host-0", ""]
+    "target",
+    [
+        "quorbelle-host",
+        "quorbelle-host-",
+        "quorbelle-host-12a",
+        "quorbelle-host-0",
+        pytest.param(
+            "",
+            marks=pytest.mark.skipif(
+                sys.platform != "darwin", reason="Linux refuses a symlink with an empty target"
+            ),
+        ),
+    ],
 )
 def test_a_lock_without_a_pid_is_unreadable(tmp_path: Path, target: str) -> None:
     os.symlink(target, tmp_path / chrome_profile.SINGLETON_LOCK)
