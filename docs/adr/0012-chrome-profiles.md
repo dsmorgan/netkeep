@@ -4,7 +4,7 @@ Date: 2026-10-17
 
 ## Status
 
-Proposed (#595).
+Accepted (2026-10-17)
 
 Revised 2026-10-17 after maintainer review (#595).
 

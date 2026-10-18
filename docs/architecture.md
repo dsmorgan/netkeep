@@ -68,7 +68,7 @@ The table shows each manual step in [networking-workflow.md](networking-workflow
 
 **Extractor**
 
-- F1. Attach to a running Chrome over the Chrome DevTools Protocol (CDP) and use the LinkedIn session already there. Never launch a second browser identity.
+- F1. Attach to a running Chrome over the Chrome DevTools Protocol (CDP) and use the LinkedIn session already there. Never launch a second browser identity. Only you start netkeeper's Chrome, never a run (ADR 0012).
 - F2. Enumerate all 1st-degree connections with name, public profile URL, stable profile URN, headline, and connected-on date. Support a full sync and a cheap incremental sync (newest first, stop at first known).
 - F3. For a prioritized subset of contacts, visit the profile and harvest contact info (emails, phones, websites, social handles), location, and current positions in a single visit.
 - F4. Pace every action with lognormal delays, human-like scrolling, active-hours windows, a warm-up ramp for new installs, and per-day and per-week budgets by action class.
@@ -107,7 +107,7 @@ The table shows each manual step in [networking-workflow.md](networking-workflow
 ### 4.2 Non-functional
 
 - N1. macOS 14+ is the primary platform. Linux via container is supported for everything; the LinkedIn steps need Chrome on the same host as the backend.
-- N2. Chrome is the only supported browser for the UI. The LinkedIn steps drive a Chrome you start yourself over CDP, separate from the browser that shows the UI and with its own profile; they work with Chrome or another Chromium build. Firefox and Safari have no CDP.
+- N2. Chrome is the only supported browser for the UI. The LinkedIn steps drive netkeeper's Chrome over CDP: a Chrome you start yourself, with its own profile, which also holds the UI and setup tabs (ADR 0012). The UI works in any browser. Firefox and Safari have no CDP.
 - N3. All data lives in one SQLite file plus a secrets store in the macOS Keychain. Backups are one command.
 - N4. The web UI binds `127.0.0.1` only and needs no login in local mode, but state-changing API calls are protected against cross-site requests from other local pages.
 - N8. Every user-owned row carries `user_id`, every query is scoped through one helper, and a two-user isolation test covers every list endpoint. Nothing in v1 needs this; retrofitting it is what would be expensive.
@@ -447,6 +447,8 @@ open -na "Google Chrome" --args \
 ```
 
 Chrome 136 and later refuse `--remote-debugging-port` on the default profile directory, so a dedicated profile is mandatory. You log in to LinkedIn in that profile once. LinkedIn sees one new device at setup and then a stable one. Use that profile for your own LinkedIn browsing too, so organic activity and sidecar activity share a session.
+
+This Chrome is netkeeper's one Chrome (ADR 0012): the UI opens as an app window in it, and setup tabs such as Gmail linkage open there too. Only you start it (a button, `netkeeper open`, or a start-at-login setting you turn on); a run never spawns anything, and attaches only to the configured port serving this profile. One launcher is the only spawn, with the flags above plus the UI's `--app` URL (#636).
 
 Invariants inherited from igtracker: reuse `browser.contexts[0]`; open one tab per run and close only that tab; never `add_init_script` or `route` on the shared context; never write cookies; never override the UA or timezone. [ADR 0006](adr/0006-observe-dont-request.md) adds two: never intercept, alter, or answer a request, and never send one of netkeeper's own; netkeeper reads the responses its tab's page loads (9.3). [ADR 0007](adr/0007-prefill-inputs.md) (#375) adds the prefill's inputs: one click on **Message**, at most one focus on the verified composer, typing into that one verified, empty composer for the contact, never Enter and never a Send click, and a prefill run that hands its tab to you instead of closing it (11.6). `netkeeper preflight` verifies the attach, that the profile still holds a LinkedIn session, and that its fingerprint looks like a normal Chrome. It answers all three locally and navigates nowhere: the session state comes from the names and expiry of the profile's own cookies, read over CDP, and the fingerprint from `navigator` properties on the blank tab the run opens. Whether a session is not merely present but still accepted is something only a job can learn, from the classification in 9.7. Cookie values are never read, reported, or logged.
 

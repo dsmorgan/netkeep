@@ -18,7 +18,7 @@ make fmt              # ruff format + autofix
 make serve | make dev # backend; `pnpm dev` in frontend/ alongside for the UI
 make gen-client       # export OpenAPI → frontend/src/api/schema.d.ts
 make changelog-draft  # preview changelog.d/ fragments
-make chrome           # start the netkeeper Chrome profile with its debug port (a person runs this; netkeeper never does)
+make chrome           # start the netkeeper Chrome profile with its debug port (by hand; a run never starts Chrome, ADR 0012)
 make reset            # archive the database, then remove it (never against a live serve)
 ```
 
@@ -28,7 +28,7 @@ Frontend: `cd frontend && pnpm install && pnpm dev | build | lint | test`.
 
 - **User scoping.** Every user-owned table has `user_id` (use the `UserOwned` mixin). Every query against one goes through the scoping helper; a runtime guard fails unscoped statements. Every list endpoint registers with the two-user isolation test. See spec section 5, "Multi-user readiness", and ADR 0005.
 - **Extractor boundary.** Nothing under `netkeeper/linkedin/` imports `netkeeper.models` or opens a session. Job specs in, result dataclasses out. The module that maps results onto rows lives under `netkeeper/crm/`, not under `linkedin/` — a module at `linkedin/apply.py` opening a session would break the rule in the same sentence. P1-03's archive importer is `crm/archive.py`; the extractor's is `crm/apply.py`. ADR 0005, spec 9.10.
-- **Browser identity.** Attach mode only, never launch a browser, never retry a checkpoint, budgets enforced between units of work, never `await` browser work inside a request handler, one activity lock per LinkedIn account. ADR 0002, spec section 9.
+- **Browser identity.** Attach mode only, a run never launches a browser (one launcher, started only by you, ADR 0012), never retry a checkpoint, budgets enforced between units of work, never `await` browser work inside a request handler, one activity lock per LinkedIn account. ADR 0002, spec section 9.
 - **Datetimes** are stored naive UTC and returned timezone-aware through `UTCDateTime`. Never store a naive local time.
 - **Writer sessions.** Any session that reads and then writes must be marked for write (`session_scope(factory, write=True)`, or the request dependency, which marks non-GET requests). On SQLite that emits `BEGIN IMMEDIATE`; an unmarked read-then-write can fail instantly with "database is locked" and `busy_timeout` does not help. Scheduler jobs and CLI commands are writers too. A `POST` that only reads — a query whose input does not fit a query string — opts back out with `@read_only` under its route decorator, so it never takes the write lock.
 - **Streaming sessions.** A handler that returns a `StreamingResponse` must take `StreamingSessionDep`, not `SessionDep`: it reads from the database while the response is sending, after `SessionDep`'s session would already have closed. `Session.close()` does not invalidate the session — the next statement silently opens a fresh transaction nobody is left to close, leaking one pooled connection per request. `StreamingSessionDep` (`scope="request"`) instead stays open for the life of the response, which also makes an offset-paginated stream snapshot-consistent. See `netkeeper/web/deps.py`.

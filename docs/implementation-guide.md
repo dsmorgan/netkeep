@@ -142,7 +142,7 @@ Drift signals to watch for at every checkpoint:
 ### CP3: extractor safety review, before the first live run
 
 - **Demo:** `netkeeper preflight` against your Chrome; `netkeeper rehearse` against the neutral site with the request log; `netkeeper simulate --days 14 --throttles 2` showing budgets, warm-up, heat; `netkeeper posture` with every protection on (the Settings page that shows the same report arrives with P2-12); the browser smoke suite passing on your Chrome (`NETKEEPER_BROWSER_TESTS=1`).
-- **Questions:** Are the defaults in Appendix C what the code does? Is there any path that launches a browser? Does a checkpoint response stop the run with no retry? Does the budget stop between profiles, never mid-profile? Does `linkedin/` import nothing from `models/`?
+- **Questions:** Are the defaults in Appendix C what the code does? Is there any path that launches a browser other than the one launcher you start (ADR 0012)? Does a checkpoint response stop the run with no retry? Does the budget stop between profiles, never mid-profile? Does `linkedin/` import nothing from `models/`?
 - **Re-read:** ADR 0002, spec sections 9.5 to 9.7, 9.10.
 - **Outcome:** a safety review only. Nothing here contacts LinkedIn beyond logging in to the netkeeper Chrome profile. The first supervised live run moved to CP4 (CP3 decision), because it needs connections sync (P2-06), which is not one of this checkpoint's items.
 
@@ -404,7 +404,7 @@ Done when: the first thing a person sees after an import is the work already don
 **P2-01 Browser attach provider** · lane extractor · L · `safety`
 Goal: `BrowserProvider` with only `attach`; connect over CDP, reuse `contexts[0]`, one tab per run, `_ensure_page`, one reattach per run, `BrowserUnavailable`; the activity lock keyed by `linkedin_account`; `netkeeper browser launch` and `netkeeper preflight`.
 Depends on: P0-04, P0-09.
-Done when: the smoke suite verifies attach, headers, tab recovery, and that no code path launches a browser; preflight reports login state and fingerprint.
+Done when: the smoke suite verifies attach, headers, tab recovery, and that no code path launches a browser except the one launcher (ADR 0012); preflight reports login state and fingerprint.
 
 **P2-02 Voyager module and fixtures** · lane extractor · L
 Goal: header builder, in-page fetch helper, endpoint constants with capture dates, parsers for connections pages, contact info, profile details, and conversations; a documented procedure for capturing and sanitizing fixtures.
