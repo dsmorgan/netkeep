@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 import pytest
@@ -160,10 +161,38 @@ async def test_session_detection_still_finds_both_cookies() -> None:
 async def test_session_detection_accepts_cookies_set_on_the_apex_domain() -> None:
     jar = [
         cookie("li_at", FAKE_SESSION_VALUE, domain=".linkedin.com"),
-        cookie("JSESSIONID", FAKE_CSRF_VALUE, domain="linkedin.com"),
+        cookie("JSESSIONID", FAKE_CSRF_VALUE, domain=".linkedin.com"),
     ]
     report = await preflight(make_provider(cookies=jar))
     assert report.login is LoginState.LOGGED_IN
+
+
+async def test_a_host_only_apex_cookie_is_not_seen_from_www() -> None:
+    """Chrome takes a dotless domain as an exact host, so ``linkedin.com`` is not
+    ``www.linkedin.com``'s (the fake matches it; Playwright's looser rule does not)."""
+    jar = [cookie("li_at", FAKE_SESSION_VALUE, domain="linkedin.com")]
+    report = await preflight(make_provider(cookies=jar))
+    assert report.login is LoginState.NO_SESSION
+
+
+async def test_chrome_scopes_an_empty_urls_to_the_blank_page() -> None:
+    context = FakeContext(cookies=google_jar())
+    (session,) = [await context.new_cdp_session(None)]
+    params: dict[str, Any]
+    for params in ({}, {"urls": []}):
+        assert (await session.send("Network.getCookies", params))["cookies"] == []
+    # Playwright's own read keeps its looser rule: an empty urls is the whole jar.
+    assert await context.cookies([])
+
+
+@pytest.mark.parametrize("reply", [{"cookies": None}, {"cookies": "nope"}, {"cookies": [1]}, {}])
+async def test_a_malformed_reply_reads_as_unknown(reply: object) -> None:
+    from test_preflight import make_context, provider_for
+
+    context = make_context(google_jar())
+    context.cookie_reply = reply
+    report = await preflight(provider_for(context))
+    assert report.login is LoginState.UNKNOWN
 
 
 async def test_a_google_only_jar_reads_as_no_session() -> None:

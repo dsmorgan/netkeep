@@ -210,7 +210,11 @@ async def _read_session_cookies(
         return None
     try:
         reply = await session.send("Network.getCookies", {"urls": list(COOKIE_URLS)})
-        jar: Sequence[Mapping[str, Any]] = reply["cookies"]
+        jar = reply["cookies"]
+        if not isinstance(jar, list) or not all(isinstance(item, Mapping) for item in jar):
+            raise TypeError(
+                f"Network.getCookies answered with {type(jar).__name__}, not a cookie list"
+            )
     except Exception as exc:
         log.warning("could not read the browser's cookie jar: %s", personal_exc(exc))
         return None
