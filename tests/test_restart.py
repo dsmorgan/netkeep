@@ -4,6 +4,7 @@ back under launchd and standalone, and the serve lock (#590) across it."""
 from __future__ import annotations
 
 import asyncio
+import plistlib
 import time
 from collections.abc import Callable
 from datetime import timedelta
@@ -25,7 +26,7 @@ from netkeeper.db import session_scope
 from netkeeper.linkedin import activity_lock
 from netkeeper.models import SyncRunKind, SyncRunTrigger, User
 from netkeeper.models.base import utcnow
-from netkeeper.services import restart, restart_gate, runs, serve_lock
+from netkeeper.services import login_item, restart, restart_gate, runs, serve_lock
 from netkeeper.services.events import EventBus
 from netkeeper.services.linkedin_accounts import local_account_id
 from netkeeper.services.scheduled_runs import ServeExtractor
@@ -40,20 +41,32 @@ URL = "/api/v1/settings/restart"
 
 
 def test_the_launchd_constants_match_the_agent() -> None:
-    """The label install-launchd.sh writes, and a status launchd restarts after."""
-    assert restart.LAUNCHD_LABEL == "fun.tnkr.netkeeper"
+    """The label the login item writes, and a status launchd restarts after."""
+    assert restart.LAUNCHD_LABEL == login_item.LABEL_BASE == "fun.tnkr.netkeeper"
     assert restart.LAUNCHD_RESTART_EXIT == 75
-    script = Path(__file__).parents[1] / "scripts" / "install-launchd.sh"
-    text = script.read_text()
-    assert 'LABEL="fun.tnkr.netkeeper"' in text
     # KeepAlive restarts only a job that did not exit successfully.
-    assert "<key>SuccessfulExit</key>\n    <false/>" in text
+    item = login_item.LoginItem(
+        data=Path("/nk"),
+        agents_dir=Path("/nowhere"),
+        runner=lambda _args: login_item.RunResult(0),
+        executable=Path("/bin/netkeeper"),
+        macos=True,
+    )
+    assert plistlib.loads(item.render_plist())["KeepAlive"] == {"SuccessfulExit": False}
+    assert restart.OLD_AGENT_MARK == "NETKEEPER_LAUNCHD_LOG_DIR"
 
 
 @pytest.mark.parametrize(
     ("environ", "expected"),
     [
         ({"XPC_SERVICE_NAME": "fun.tnkr.netkeeper"}, "launchd"),
+        ({"XPC_SERVICE_NAME": "fun.tnkr.netkeeper.6f70bec19518"}, "launchd"),
+        ({"XPC_SERVICE_NAME": "fun.tnkr.netkeeperx"}, "exec"),
+        # started by the removed script's agent: launchd would run a script that is gone
+        (
+            {"XPC_SERVICE_NAME": "fun.tnkr.netkeeper", "NETKEEPER_LAUNCHD_LOG_DIR": "/d/logs"},
+            "exec",
+        ),
         ({"XPC_SERVICE_NAME": "0"}, "exec"),
         ({"XPC_SERVICE_NAME": "application.com.apple.Terminal.1234"}, "exec"),
         ({}, "exec"),

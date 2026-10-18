@@ -10,11 +10,15 @@ anything config.toml sets). **Restart netkeeper** applies them without a termina
    releases the serve lock (#590) before :func:`netkeeper.cli.serve` gets control
    back.
 2. ``serve`` then calls :func:`relaunch`. Under the login item (launchd runs it with
-   ``XPC_SERVICE_NAME`` set to its label) it exits with :data:`LAUNCHD_RESTART_EXIT`:
-   the agent's ``KeepAlive`` restarts a job that did not exit successfully, after its
-   ``ThrottleInterval``, through ``serve-launchd.sh`` and its ``db upgrade``. Anywhere
-   else it re-execs itself with the same interpreter and arguments, so the process
-   keeps its pid, its terminal and its environment (``NETKEEPER_DATA`` included).
+   ``XPC_SERVICE_NAME`` set to its label, ``fun.tnkr.netkeeper`` or
+   ``fun.tnkr.netkeeper.<hash>``) it exits with :data:`LAUNCHD_RESTART_EXIT`: the agent's
+   ``KeepAlive`` restarts a job that did not exit successfully, after its
+   ``ThrottleInterval``, running ``netkeeper serve`` again (it migrates as it starts).
+   Anywhere else it re-execs itself with the same interpreter and arguments, so the
+   process keeps its pid, its terminal and its environment (``NETKEEPER_DATA``
+   included). So does a job started by the removed install script's agent
+   (:data:`OLD_AGENT_MARK`): launchd still holds that definition, which runs a script
+   that no longer exists, so an exit would leave netkeeper down until the next login.
 3. The new process claims the serve lock again as it starts. Nothing holds it in
    between, so a ``netkeeper restore`` started in that moment wins, and the new
    ``serve`` refuses to start and says so, as it would from a terminal.
@@ -32,8 +36,13 @@ from typing import Final, Literal, NoReturn
 log = logging.getLogger(__name__)
 
 LAUNCHD_LABEL: Final = "fun.tnkr.netkeeper"
-"""The login item's label (``scripts/install-launchd.sh``). launchd puts it in the
-job's ``XPC_SERVICE_NAME``."""
+"""The login item's label for the default data directory
+(:data:`netkeeper.services.login_item.LABEL_BASE`; another data directory's label adds
+``.<hash>``). launchd puts it in the job's ``XPC_SERVICE_NAME``."""
+
+OLD_AGENT_MARK: Final = "NETKEEPER_LAUNCHD_LOG_DIR"
+"""Set by the removed install script's plist, never by the login item's: a process with
+it was started by an agent whose definition still runs ``serve-launchd.sh``."""
 
 LAUNCHD_RESTART_EXIT: Final = 75
 """``EX_TEMPFAIL``. Any non-zero status makes launchd start the agent again; zero would
@@ -44,7 +53,10 @@ Mode = Literal["launchd", "exec"]
 
 def mode(environ: Mapping[str, str] = os.environ) -> Mode:
     """``launchd`` when the login item started this process, else ``exec``."""
-    return "launchd" if environ.get("XPC_SERVICE_NAME") == LAUNCHD_LABEL else "exec"
+    name = environ.get("XPC_SERVICE_NAME", "")
+    if name != LAUNCHD_LABEL and not name.startswith(f"{LAUNCHD_LABEL}."):
+        return "exec"
+    return "exec" if OLD_AGENT_MARK in environ else "launchd"
 
 
 @dataclass(slots=True)
