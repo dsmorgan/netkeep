@@ -71,10 +71,7 @@ export function ScheduleCard() {
             <p className="flex items-center gap-2">
               <span
                 aria-hidden="true"
-                className={cn(
-                  'size-2 rounded-full',
-                  armed ? 'bg-amber-500' : 'bg-muted-foreground/50',
-                )}
+                className={cn('size-2 rounded-full', armed ? 'bg-warn' : 'bg-muted-foreground/50')}
               />
               <span role="status" className="font-medium">
                 {armed

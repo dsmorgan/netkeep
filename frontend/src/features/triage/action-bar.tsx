@@ -57,7 +57,7 @@ export function ActionBar({ onAction }: { onAction: (action: TriageAction) => vo
       role="group"
       aria-label="Triage actions"
       data-testid="triage-actions"
-      className="flex flex-wrap items-center gap-1.5 rounded-xl bg-card p-2 ring-1 ring-foreground/10"
+      className="nk-glass flex flex-wrap items-center gap-1.5 p-2"
     >
       {BAR_BINDINGS.map((binding) => (
         <div key={binding.action} className="contents">

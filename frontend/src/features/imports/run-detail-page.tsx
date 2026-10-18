@@ -397,7 +397,7 @@ function RowsCard({ run, mapping }: { run: ImportRun; mapping: ColumnMapping }) 
                         ) : (
                           // The row landed and only a cell was dropped: the preview's
                           // amber, not the red of a row that failed (#94).
-                          <p className="text-amber-700 dark:text-amber-300">Dropped: {row.error}</p>
+                          <p className="text-warn-ink">Dropped: {row.error}</p>
                         ))}
                       {row.refused.length > 0 && (
                         <ul className="space-y-0.5 text-destructive">

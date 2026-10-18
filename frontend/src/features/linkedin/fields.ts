@@ -3,9 +3,9 @@ import { OUTCOME_TEXT, isPrefillOutcome } from '../linkedin-steps/prefill-copy'
 import type { RunStatus } from './types'
 
 export const RUN_STATUS_CLASSES: Record<RunStatus, string> = {
-  running: 'bg-sky-500/10 text-sky-700 dark:text-sky-300',
-  completed: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
-  aborted: 'bg-amber-500/15 text-amber-800 dark:text-amber-300',
+  running: 'bg-accent-soft text-accent-ink',
+  completed: 'bg-ok-soft text-ok-ink',
+  aborted: 'bg-warn-soft text-warn-ink',
   failed: 'bg-destructive/10 text-destructive',
 }
 

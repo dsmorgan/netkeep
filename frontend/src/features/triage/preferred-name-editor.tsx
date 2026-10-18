@@ -61,7 +61,7 @@ export function PreferredNameEditor({
       <input
         ref={input}
         id="triage-preferred-name"
-        className="h-8 min-w-40 flex-1 rounded-lg border border-border bg-background px-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+        className="h-8 min-w-40 flex-1 rounded-control border border-input bg-card px-2 text-sm focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         value={value}
         placeholder={firstName}
         maxLength={200}

@@ -335,7 +335,7 @@ function TagPicker({
           type="button"
           aria-pressed
           onClick={() => toggle(name)}
-          className="rounded-4xl border border-dashed border-amber-500/60 px-2 py-0.5 text-xs"
+          className="rounded-4xl border border-dashed border-warn/60 px-2 py-0.5 text-xs"
           title="No tag by this name — it matches nobody until you make one."
         >
           {name} (unknown)
@@ -409,7 +409,7 @@ function CampaignPicker({
           type="button"
           aria-pressed
           onClick={() => toggle(id)}
-          className="rounded-4xl border border-dashed border-amber-500/60 px-2 py-0.5 text-xs"
+          className="rounded-4xl border border-dashed border-warn/60 px-2 py-0.5 text-xs"
           title="No campaign has this id any more — it matches nobody."
         >
           {id < 0 ? `deleted campaign #${-id}` : `campaign #${id} (no longer there)`}
@@ -481,7 +481,7 @@ export function NodeEditor(props: NodeEditorProps) {
             <button
               type="button"
               onClick={() => props.onRequestAdd(path)}
-              className="inline-flex items-center gap-1 text-sm text-primary underline-offset-4 hover:underline"
+              className="inline-flex items-center gap-1 text-sm text-accent-ink underline-offset-4 hover:underline"
             >
               <ChevronRight className="size-3" aria-hidden />
               Add a condition

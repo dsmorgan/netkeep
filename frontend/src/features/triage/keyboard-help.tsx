@@ -39,7 +39,7 @@ export function KeyboardHelp({ onClose }: { onClose: () => void }) {
       className="fixed inset-x-4 bottom-4 z-50 mx-auto max-w-lg rounded-xl bg-popover p-4 text-popover-foreground shadow-lg ring-1 ring-foreground/15 focus-visible:outline-none sm:inset-x-auto sm:right-4"
     >
       <div className="flex items-start justify-between gap-4">
-        <h2 className="font-heading font-medium">Keyboard</h2>
+        <h2 className="font-heading font-bold">Keyboard</h2>
         <Button size="xs" variant="ghost" onClick={onClose}>
           Close
         </Button>

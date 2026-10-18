@@ -33,8 +33,8 @@ export function Callout({ tone = 'info', title, className, children, ...props }:
       className={cn(
         'flex gap-2 rounded-lg border px-3 py-2 text-sm',
         tone === 'info' && 'border-border bg-muted/40 text-muted-foreground',
-        tone === 'warning' && 'border-amber-500/40 bg-amber-500/10 text-foreground',
-        tone === 'danger' && 'border-destructive/40 bg-destructive/10 text-foreground',
+        tone === 'warning' && 'border-warn/40 bg-warn-soft text-foreground [&>svg]:text-warn-ink',
+        tone === 'danger' && 'border-bad/40 bg-bad-soft text-foreground [&>svg]:text-bad-ink',
         className,
       )}
       {...props}
@@ -55,7 +55,7 @@ export function EmptyState({ title, children }: { title: string; children?: Reac
       data-slot="empty-state"
       className="rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground"
     >
-      <p className="font-medium text-foreground">{title}</p>
+      <p className="font-semibold text-foreground">{title}</p>
       {children !== undefined && <div className="mt-1">{children}</div>}
     </div>
   )

@@ -80,10 +80,10 @@ export function MergePanel({
     <section
       aria-label="Merge contacts"
       data-testid="merge-panel"
-      className="flex flex-col gap-3 rounded-lg bg-card p-4 text-sm ring-1 ring-foreground/10"
+      className="nk-glass flex flex-col gap-3 p-4 text-sm"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <h3 className="font-heading text-base font-medium">
+        <h3 className="font-heading text-base font-bold">
           {fold === null
             ? `Merge ${contactLabel} with another contact`
             : `Merge ${contactLabel} with ${keep.id === contact.id ? foldLabel : keepLabel}`}

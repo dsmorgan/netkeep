@@ -398,7 +398,7 @@ export function TriagePage() {
                     it are what to do about them, and they are a separate
                     element because the card is an atomic live region and a text
                     field inside one is re-read on every keystroke. */}
-                <div className="flex min-w-0 flex-col gap-3 rounded-xl bg-card p-4 ring-1 ring-foreground/10">
+                <div className="nk-glass flex min-w-0 flex-col gap-3 p-4">
                   <ContactCard card={card} position={position} review={queue.reviewing} />
                   <CardSteps
                     card={card}
@@ -616,11 +616,8 @@ function EmptyQueue({
   // Skipped and Automatic queues keep their own wording.
   const fresh = (filter === 'unknown' || filter === 'both') && total === 0
   return (
-    <div
-      role="status"
-      className="flex flex-col items-start gap-2 rounded-xl bg-card p-6 ring-1 ring-foreground/10"
-    >
-      <p className="font-heading text-lg font-medium">
+    <div role="status" className="nk-glass flex flex-col items-start gap-2 p-6">
+      <p className="font-heading text-lg font-bold">
         {fresh ? 'Nothing to triage yet.' : EMPTY_QUEUE[filter]}
       </p>
       <p className="text-muted-foreground">

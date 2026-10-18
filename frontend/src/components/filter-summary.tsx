@@ -108,7 +108,7 @@ export function FilterSummary({
                   aria-label={`Remove ${chip.label}`}
                   title={`Remove ${chip.label}`}
                   onClick={() => remove(index)}
-                  className="inline-flex h-6 max-w-full min-w-0 items-center gap-1 rounded-4xl border border-border bg-muted/60 pr-1.5 pl-2.5 text-xs font-medium outline-none hover:bg-muted focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  className="inline-flex h-6 max-w-full min-w-0 items-center gap-1 rounded-4xl border border-border bg-muted/60 pr-1.5 pl-2.5 text-xs font-medium outline-none hover:bg-muted focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring"
                 >
                   <span className="truncate">{chip.label}</span>
                   <X aria-hidden="true" className="size-3 shrink-0" />

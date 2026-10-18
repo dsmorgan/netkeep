@@ -36,7 +36,7 @@ export function DoNotSendSection() {
   return (
     <Card size="sm">
       <CardHeader>
-        <h2 className="font-heading text-sm leading-snug font-medium">Do-not-send list</h2>
+        <h2 className="font-heading text-sm leading-snug font-bold">Do-not-send list</h2>
         <CardDescription>
           Addresses no campaign sends to, whichever contact holds them. An address with a +tag is
           its own address. Merging a contact that still has an address marked bounced or invalid

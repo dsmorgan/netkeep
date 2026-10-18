@@ -9,9 +9,9 @@ import { formatWhen } from './fields'
 import type { BrowserHealth } from './types'
 
 const SESSION_CLASSES: Record<string, string> = {
-  on: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+  on: 'bg-ok-soft text-ok-ink',
   off: 'bg-destructive/10 text-destructive',
-  unknown: 'bg-amber-500/15 text-amber-800 dark:text-amber-300',
+  unknown: 'bg-warn-soft text-warn-ink',
 }
 
 function message(error: unknown): string {

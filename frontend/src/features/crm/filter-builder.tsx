@@ -96,7 +96,7 @@ export function FilterBuilder({
             <button
               type="button"
               onClick={() => setOpenPaletteKey(ROOT_KEY)}
-              className="text-sm text-primary underline-offset-4 hover:underline"
+              className="text-sm text-accent-ink underline-offset-4 hover:underline"
             >
               Add a condition
             </button>

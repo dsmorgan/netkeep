@@ -101,10 +101,7 @@ export function RunDetail({
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         {data.aging_refused !== null && (
-          <p
-            role="status"
-            className="rounded-lg bg-amber-500/10 px-3 py-2 text-amber-800 dark:text-amber-300"
-          >
+          <p role="status" className="rounded-lg bg-warn-soft px-3 py-2 text-warn-ink">
             Network aging: {data.aging_refused}
           </p>
         )}

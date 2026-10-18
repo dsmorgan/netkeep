@@ -37,7 +37,7 @@ export function AboutYouSection() {
   return (
     <Card size="sm">
       <CardHeader>
-        <h2 className="font-heading text-sm leading-snug font-medium">About you</h2>
+        <h2 className="font-heading text-sm leading-snug font-bold">About you</h2>
         <CardDescription>
           Your own details. A test send renders a template&apos;s contact fields with them, and goes
           only to your own mailbox. They&apos;re never in your contacts or a campaign. Templates

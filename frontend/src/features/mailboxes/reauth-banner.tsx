@@ -3,7 +3,9 @@ import { AlertTriangle } from 'lucide-react'
 import { useCallback } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { toneClasses } from '@/components/ui/tone'
 import { useServerEvent } from '@/features/events/use-server-event'
+import { cn } from '@/lib/utils'
 
 import { mailboxKeys, mailboxListQuery, navigation, reasonText, startAuthorization } from './api'
 
@@ -35,18 +37,18 @@ export function ReauthBanner() {
   return (
     <div
       role="alert"
-      className="mb-4 flex flex-wrap items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-destructive"
+      className={cn('nk-glass mb-4 flex flex-wrap items-start gap-3 px-4 py-3', toneClasses('bad'))}
     >
-      <AlertTriangle className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
+      <AlertTriangle className="mt-0.5 size-5 shrink-0 text-bad-ink" aria-hidden="true" />
       <div className="min-w-0 flex-1 space-y-1">
-        <h2 className="font-heading text-sm font-semibold">Gmail needs you to sign in again</h2>
+        <h2 className="font-heading text-sm font-bold">Gmail needs you to sign in again</h2>
         {stuck.map((mailbox) => (
           <p key={mailbox.id} className="text-sm">
             <span className="font-medium">{mailbox.email}</span>:{' '}
             {reasonText(mailbox.status_reason) ?? 'Google no longer accepts the token.'}
           </p>
         ))}
-        <p className="text-xs text-destructive/80">
+        <p className="text-xs text-muted-foreground">
           Email steps are paused until it is authorized again.
         </p>
         {reauthorize.isError && <p className="text-sm">{(reauthorize.error as Error).message}</p>}

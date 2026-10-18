@@ -4,7 +4,9 @@ import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toneClasses } from '@/components/ui/tone'
 import { pollStatusKeys } from '@/features/poll-status/api'
+import { cn } from '@/lib/utils'
 
 import { clearSessionFlag, linkedinKeys } from './api'
 import { formatWhen } from './fields'
@@ -89,11 +91,11 @@ export function SessionBanner({ status }: { status: LinkedInStatus }) {
   return (
     <div
       role="alert"
-      className="flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-destructive"
+      className={cn('nk-glass flex items-start gap-3 px-4 py-3', toneClasses('bad'))}
     >
-      <AlertTriangle className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
+      <AlertTriangle className="mt-0.5 size-5 shrink-0 text-bad-ink" aria-hidden="true" />
       <div className="min-w-0 space-y-1">
-        <h2 className="font-heading text-sm font-semibold">
+        <h2 className="font-heading text-sm font-bold">
           {checkpoint ? 'LinkedIn asked for a checkpoint' : 'Logged out of LinkedIn'}
         </h2>
         <p className="text-sm">
@@ -111,7 +113,7 @@ export function SessionBanner({ status }: { status: LinkedInStatus }) {
             </>
           )}
         </p>
-        <p className="text-xs text-destructive/80">
+        <p className="text-xs text-muted-foreground">
           No run will touch the browser again until this is cleared.
         </p>
         {checkpoint && flaggedAt !== null && (

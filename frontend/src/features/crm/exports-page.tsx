@@ -58,7 +58,7 @@ export function ExportsPage() {
                 <h4 className="text-sm font-medium">{preset.label}</h4>
                 <p className="text-xs text-muted-foreground">{preset.description}</p>
                 {preset.caveat !== undefined && (
-                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">{preset.caveat}</p>
+                  <p className="mt-1 text-xs text-warn-ink">{preset.caveat}</p>
                 )}
               </div>
             ))}

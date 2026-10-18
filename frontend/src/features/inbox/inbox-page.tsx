@@ -34,8 +34,8 @@ const KIND_LABELS: Record<InboxKind, string> = {
 }
 
 const KIND_CLASSES: Record<InboxKind, string> = {
-  reply: 'bg-sky-500/15 text-sky-700 dark:text-sky-300',
-  unsubscribe: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
+  reply: 'bg-ok-soft text-ok-ink',
+  unsubscribe: 'bg-warn-soft text-warn-ink',
   bounce: 'bg-destructive/10 text-destructive',
 }
 
@@ -46,9 +46,9 @@ function ChannelBadge({ item }: { item: InboxItem }) {
       className={cn(
         'inline-flex h-5 shrink-0 items-center rounded-4xl px-2 text-xs font-medium whitespace-nowrap',
         outside
-          ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+          ? 'bg-accent-soft text-accent-ink'
           : item.channel === 'linkedin'
-            ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300'
+            ? 'bg-secondary text-secondary-foreground ring-1 ring-border'
             : 'bg-muted text-muted-foreground',
       )}
     >
@@ -231,7 +231,10 @@ export function InboxPage({ enrollment }: { enrollment?: number }) {
           {noMailbox ? (
             <>
               No mailbox is connected, so nothing can arrive yet. Connect Gmail on the{' '}
-              <Link to="/gmail" className="font-medium text-primary underline underline-offset-4">
+              <Link
+                to="/gmail"
+                className="font-medium text-accent-ink underline underline-offset-4"
+              >
                 Gmail page
               </Link>
               .

@@ -57,6 +57,13 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen">
+      {/* The subtle color field the glass panes sit over (#606). Decoration only. */}
+      <div aria-hidden="true" className="nk-field">
+        <i />
+        <i />
+        <i />
+        <i />
+      </div>
       {navOpen && (
         <div
           aria-hidden="true"
@@ -66,14 +73,18 @@ export function AppShell({ children }: { children: ReactNode }) {
         />
       )}
       <Sidebar id={navId} open={navOpen} onClose={closeNav} />
-      <div className="flex min-w-0 flex-1 flex-col" inert={navOpen} data-testid="shell-content">
+      <div
+        className="relative z-[1] flex min-w-0 flex-1 flex-col"
+        inert={navOpen}
+        data-testid="shell-content"
+      >
         <TopBar
           menuButtonRef={menuButton}
           navId={navId}
           navOpen={navOpen}
           onToggleNav={() => setNavOpen((open) => !open)}
         />
-        <main className="min-w-0 flex-1 p-4">
+        <main className="min-w-0 flex-1 p-(--space-page)">
           <ReauthBanner />
           <BrowserBanner />
           {children}

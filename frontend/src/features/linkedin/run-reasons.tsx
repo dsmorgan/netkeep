@@ -116,7 +116,7 @@ export function RunReasons({
   return (
     <div className="space-y-3">
       {stopped !== null && (
-        <p className="rounded-lg bg-amber-500/10 px-3 py-2">
+        <p className="rounded-lg bg-warn-soft px-3 py-2">
           Stopped at once by the page’s answer on visit {stopped.visit} (
           {stopped.contact_exists ? (
             <Link

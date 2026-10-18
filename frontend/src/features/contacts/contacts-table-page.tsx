@@ -372,7 +372,7 @@ export function ContactsTablePage({ search, onNavigate }: ContactsTablePageProps
       )}
 
       {applied !== undefined && !filterBarCanShow(applied.filter) && (
-        <p role="note" className="rounded-lg bg-amber-500/10 px-3 py-2">
+        <p role="note" className="rounded-lg bg-warn-soft px-3 py-2">
           “{applied.name}” filters on more than the controls above can show. Changing any of them
           replaces the view’s filter with only what they show, which may match more contacts.
         </p>

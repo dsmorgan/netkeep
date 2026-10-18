@@ -59,7 +59,7 @@ function toneOf(entry: PassedCard): 'secondary' | 'outline' | 'destructive' {
 
 const ROW = 'flex w-full min-w-0 items-center justify-between gap-2 rounded-md px-2 py-1 text-left'
 const PRESSABLE =
-  `${ROW} hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none ` +
+  `${ROW} hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ` +
   'aria-[current]:bg-muted aria-[current]:font-medium aria-[current]:ring-1 aria-[current]:ring-foreground/15'
 
 export function QueueList({
@@ -130,7 +130,7 @@ export function QueueList({
       // trail went and there is no row left to hand focus to — so it needs a
       // visible ring of its own, or a sighted keyboard user is told nothing
       // about where they just landed.
-      className="flex min-w-0 flex-col gap-2 rounded-xl bg-card p-3 ring-1 ring-foreground/10 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+      className="nk-glass flex min-w-0 flex-col gap-2 p-3 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
     >
       <div>
         <h3 className="font-medium">Queue · {filterLabel}</h3>

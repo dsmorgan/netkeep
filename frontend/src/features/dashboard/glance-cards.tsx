@@ -5,6 +5,7 @@ import type { ReactNode } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import type { Tone } from '@/components/ui/tone'
 import { budgetQuery, heatQuery, scheduleQuery, statusQuery } from '@/features/linkedin/api'
 import {
   autoSendCheckWhen,
@@ -36,14 +37,17 @@ import { changedJobsQuery, inboundQuery, lastRunQuery, nextFiresQuery, type Next
 function GlanceCard({
   title,
   description,
+  tone,
   children,
 }: {
   title: string
   description?: ReactNode
+  /** Tints the card when it holds something that needs you (#606). */
+  tone?: Tone
   children: ReactNode
 }) {
   return (
-    <Card size="sm">
+    <Card size="sm" tone={tone}>
       <CardHeader>
         <CardTitle level={2}>{title}</CardTitle>
         {description !== undefined && <CardDescription>{description}</CardDescription>}
@@ -412,7 +416,7 @@ export function BudgetHeatCard() {
         </p>
       ) : (
         <p className="flex items-center gap-2">
-          <span aria-hidden="true" className="size-2 rounded-full bg-emerald-500" />
+          <span aria-hidden="true" className="size-2 rounded-full bg-ok" />
           <span>
             Heat {heat.data.score.toFixed(2)} of {heat.data.threshold.toFixed(2)}
             {heat.data.multiplier > 1 && (
@@ -439,7 +443,10 @@ export function RepliesCard() {
   const inbound = useQuery(inboundQuery)
 
   return (
-    <GlanceCard title="Replies this week">
+    <GlanceCard
+      title="Replies this week"
+      tone={inbound.data !== undefined && inbound.data.count > 0 ? 'ok' : undefined}
+    >
       {inbound.isPending ? (
         <Checking />
       ) : inbound.isError ? (

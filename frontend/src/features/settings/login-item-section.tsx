@@ -40,7 +40,7 @@ export function LoginItemSection() {
   return (
     <Card size="sm">
       <CardHeader>
-        <h2 className="font-heading text-sm leading-snug font-medium">Run at login</h2>
+        <h2 className="font-heading text-sm leading-snug font-bold">Run at login</h2>
         <CardDescription>
           netkeeper keeps running in the background and restarts after a crash. This adds a launchd
           agent in your Library folder; turning it off removes the agent and keeps your data.

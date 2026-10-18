@@ -35,7 +35,7 @@ function Row({ row }: { row: LeftoverDraft }) {
     <li
       className={cn(
         'space-y-1 rounded-lg border p-2',
-        row.warning !== null ? 'border-amber-500/60' : 'border-border/60',
+        row.warning !== null ? 'border-warn/60' : 'border-border/60',
         row.low_priority && 'opacity-80',
       )}
     >
@@ -59,7 +59,7 @@ function Row({ row }: { row: LeftoverDraft }) {
           <p
             role="note"
             aria-label="Warning"
-            className="flex items-start gap-1.5 rounded-md bg-amber-500/10 px-2 py-1 text-amber-800 dark:text-amber-300"
+            className="flex items-start gap-1.5 rounded-md bg-warn-soft px-2 py-1 text-warn-ink"
           >
             <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
             {note.text}

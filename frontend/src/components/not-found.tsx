@@ -19,7 +19,7 @@ export function NotFound({
   backLabel: string
 }) {
   return (
-    <div role="alert" className="grid justify-items-start gap-3">
+    <div role="alert" className="nk-glass grid max-w-xl justify-items-start gap-3 p-(--space-card)">
       <p>{children}</p>
       <Link to={to} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}>
         <ArrowLeft data-icon="inline-start" />

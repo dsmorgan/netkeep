@@ -116,7 +116,7 @@ function Checklist({ missing }: { missing: Missing[] }) {
         return (
           <li key={requirement} className="flex items-start gap-2">
             {met ? (
-              <Check className="mt-0.5 size-4 shrink-0 text-emerald-600" aria-hidden="true" />
+              <Check className="mt-0.5 size-4 shrink-0 text-ok" aria-hidden="true" />
             ) : (
               <CircleDashed
                 className="mt-0.5 size-4 shrink-0 text-muted-foreground"
@@ -170,7 +170,7 @@ const STALE_STEP =
 function StaleNotice({ notice }: { notice: string | null }) {
   if (notice === null) return null
   return (
-    <p role="status" className="rounded-lg bg-amber-500/10 px-3 py-2 text-sm">
+    <p role="status" className="rounded-lg bg-warn-soft px-3 py-2 text-sm">
       {notice}
     </p>
   )
@@ -375,7 +375,7 @@ function StepState({
     )
   }
   return approved ? (
-    <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300">Approved</span>
+    <span className="text-xs font-medium text-ok-ink">Approved</span>
   ) : (
     <span className="text-xs text-muted-foreground">Not approved</span>
   )
@@ -405,9 +405,7 @@ function MessageView({
         {perMessage &&
           message.blocked === null &&
           (message.approved ? (
-            <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
-              Approved
-            </span>
+            <span className="text-xs font-medium text-ok-ink">Approved</span>
           ) : (
             <Button size="xs" disabled={pending} onClick={onApprove}>
               Approve this message
@@ -418,7 +416,7 @@ function MessageView({
       {message.subject !== null && <p className="font-medium">{message.subject}</p>}
       {message.body !== null && <pre className="font-sans whitespace-pre-wrap">{message.body}</pre>}
       {message.issues.length > 0 && (
-        <ul className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+        <ul className="mt-1 text-xs text-warn-ink">
           {message.issues.map((issue, i) => (
             <li key={i}>
               {issue.severity}: {issue.message}

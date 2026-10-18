@@ -65,7 +65,7 @@ export function DashboardPage() {
 
   if (stats.isError) {
     return (
-      <Card size="sm" className="max-w-xl" role="alert">
+      <Card size="sm" tone="bad" className="max-w-xl" role="alert">
         <CardHeader>
           <CardTitle level={2}>Backend unreachable</CardTitle>
         </CardHeader>
@@ -98,7 +98,7 @@ export function DashboardPage() {
             aria-hidden="true"
             className={cn(
               'size-2 rounded-full',
-              stream === 'connected' ? 'bg-emerald-500' : 'bg-muted-foreground/50',
+              stream === 'connected' ? 'bg-ok' : 'bg-muted-foreground/50',
             )}
           />
           <span role="status">
@@ -108,7 +108,7 @@ export function DashboardPage() {
       </div>
 
       {!hasContacts && (
-        <Card size="sm" className="border-primary/40">
+        <Card size="sm" tone="accent">
           <CardHeader>
             <CardTitle level={2}>Start here</CardTitle>
             <CardDescription>

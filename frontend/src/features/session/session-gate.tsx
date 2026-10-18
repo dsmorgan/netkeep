@@ -79,7 +79,7 @@ export function ConnectPage({
 }) {
   return (
     <main className="mx-auto grid max-w-xl gap-4 p-8">
-      <h1 className="font-heading text-xl font-medium">netkeeper</h1>
+      <h1 className="font-heading text-xl font-bold">netkeeper</h1>
       <Card>
         <CardHeader>
           <CardTitle level={2}>Connect this browser</CardTitle>

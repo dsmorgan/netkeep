@@ -292,9 +292,7 @@ export function MappingStep({
                             </option>
                           ))}
                         </select>
-                        {!field && (
-                          <span className="text-amber-700 dark:text-amber-300">Not imported</span>
-                        )}
+                        {!field && <span className="text-warn-ink">Not imported</span>}
                       </div>
                     </td>
                   </tr>

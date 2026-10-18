@@ -36,10 +36,7 @@ export function ReplyPollCard() {
         {status.isPending && <p role="status">Loading…</p>}
         {status.isError && <p role="alert">{message(status.error)}</p>}
         {status.isSuccess && !status.data.background_running && (
-          <p
-            role="note"
-            className="rounded-lg bg-amber-500/10 px-3 py-2 text-amber-800 dark:text-amber-300"
-          >
+          <p role="note" className="rounded-lg bg-warn-soft px-3 py-2 text-warn-ink">
             netkeeper serve isn’t running, so nothing is checked in the background.
           </p>
         )}

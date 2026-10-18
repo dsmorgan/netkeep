@@ -12,7 +12,7 @@ export function RiskWarning({ text }: { text: string | null | undefined }) {
     <p
       role="note"
       aria-label="Profile-visit risk"
-      className="rounded-lg bg-amber-500/10 px-3 py-2 text-amber-800 dark:text-amber-300"
+      className="rounded-lg bg-warn-soft px-3 py-2 text-warn-ink"
     >
       {text}
     </p>

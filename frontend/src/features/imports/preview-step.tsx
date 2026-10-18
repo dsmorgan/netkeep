@@ -208,9 +208,7 @@ export function PreviewStep({
                         </ul>
                       )}
                       {row.problem !== null && row.resolution !== 'skipped' && (
-                        <p className="mt-1 text-amber-700 dark:text-amber-300">
-                          Dropped: {row.problem}
-                        </p>
+                        <p className="mt-1 text-warn-ink">Dropped: {row.problem}</p>
                       )}
                     </td>
                   </tr>

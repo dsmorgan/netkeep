@@ -103,7 +103,7 @@ export function GmailSection({ outcome }: { outcome: GmailOutcome }) {
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
         {outcome.gmail === 'connected' && (
-          <p role="status" className="rounded-lg bg-emerald-500/10 px-3 py-2">
+          <p role="status" className="rounded-lg bg-ok-soft px-3 py-2">
             Gmail is connected.
           </p>
         )}
