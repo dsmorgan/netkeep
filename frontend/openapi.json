@@ -13641,7 +13641,7 @@
         "type": "object"
       },
       "SessionOut": {
-        "description": "Whether this browser is connected to the local API (#618).\n\n``claimable``: the first-browser claim is still open, so ``POST /session/claim``\nconnects this browser without a link.",
+        "description": "Whether this browser is connected to the local API (#618).\n\n``claimable``: the first-browser claim is still open, so ``POST /session/claim``\nconnects this browser without a link. ``persisted``: the key is in the Keychain;\nFalse when the Keychain refused it and it lives in memory until ``serve`` stops.\n``open_command``: the ``netkeeper open`` command line that makes a link this server\naccepts, for the connect page to show.",
         "properties": {
           "claimable": {
             "title": "Claimable",
@@ -13650,11 +13650,21 @@
           "connected": {
             "title": "Connected",
             "type": "boolean"
+          },
+          "open_command": {
+            "title": "Open Command",
+            "type": "string"
+          },
+          "persisted": {
+            "title": "Persisted",
+            "type": "boolean"
           }
         },
         "required": [
           "connected",
-          "claimable"
+          "claimable",
+          "persisted",
+          "open_command"
         ],
         "title": "SessionOut",
         "type": "object"
@@ -24598,6 +24608,7 @@
     },
     "/api/v1/session": {
       "get": {
+        "description": "Whether this browser is connected. A valid session cookie is set again, so a\nbrowser the UI loads in at least once every 400 days never expires.",
         "operationId": "get_session",
         "responses": {
           "200": {

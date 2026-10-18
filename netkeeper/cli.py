@@ -362,25 +362,57 @@ def open_command(
             show_default=False,
         ),
     ] = None,
+    base_url: Annotated[
+        str | None,
+        typer.Option(
+            "--base-url",
+            help=(
+                "The address you open netkeeper at, when it isn't web.host and web.port"
+                " (for `pnpm dev`, http://localhost:5173)."
+            ),
+            show_default=False,
+        ),
+    ] = None,
 ) -> None:
     """Print a one-time link that connects a browser to netkeeper's UI.
 
     The link works once, within two minutes. Open it in the browser you use for
-    netkeeper; that browser then stays connected, across restarts, for months.
-    A browser that isn't connected can't use the UI or the API (ADR 0013).
+    netkeeper; that browser then stays connected, across restarts. A browser that
+    isn't connected can't use the UI or the API (ADR 0013).
+
+    The key belongs to the data directory: run this with the same NETKEEPER_DATA as
+    `netkeeper serve`. The UI's connect page shows the exact command.
     """
     state = ctx.ensure_object(CliState)
     settings = _file_settings_or_exit(state)
-    base = local_api_key.base_url(settings.web.host, settings.web.port if port is None else port)
+    base = base_url or local_api_key.base_url(
+        settings.web.host, settings.web.port if port is None else port
+    )
     try:
         link = local_api_key.connect_url(base)
     except keychain.KeychainUnavailable as exc:
-        typer.echo(f"error: {exc}", err=True)
+        for line in KEYCHAIN_REFUSED_OPEN:
+            typer.echo(line, err=True)
+        typer.echo(f"\n(the Keychain said: {exc})", err=True)
         raise typer.Exit(code=1) from exc
     typer.echo("Open this link in the browser you use for netkeeper (it works once, within")
     typer.echo("two minutes):")
     typer.echo()
     typer.echo(f"  {link}")
+
+
+#: What `netkeeper open` says when the Keychain refuses (#618 review): no link can be
+#: made, and how to connect anyway.
+KEYCHAIN_REFUSED_OPEN: Final = (
+    "netkeeper can't make a link: the Keychain refused the local API key.",
+    "",
+    "While the Keychain refuses, netkeeper serve keeps its key in memory only. To connect",
+    "a browser now, restart netkeeper serve, then load the UI: the first browser to load",
+    "it after a restart connects itself.",
+    "",
+    "To fix it for good, unlock your login keychain (Keychain Access), or allow netkeeper",
+    "when macOS asks, then restart netkeeper serve.",
+)
 
 
 @app.command()

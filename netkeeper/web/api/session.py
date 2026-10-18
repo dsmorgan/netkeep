@@ -9,7 +9,8 @@ Three ways to get it, none of which needs the key itself in the browser:
   the code (``netkeeper.logging_setup``).
 * ``POST /session/claim``: the first browser after a key is made connects without a
   link. Once spent it answers ``403``. It needs the CSRF header like every state change.
-* A browser that already has the cookie keeps it for months and across restarts.
+* A browser that already has the cookie keeps it across restarts, and ``GET /session``,
+  which the UI calls on every load, sets it again so it never reaches its expiry.
 
 ``GET /session`` says which applies. These routes answer without the key
 (``OPEN_API_PATHS`` in :mod:`netkeeper.web.security`).
@@ -22,14 +23,17 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 
+from netkeeper.config import Settings
 from netkeeper.services.keychain import KeychainUnavailable
 from netkeeper.services.local_api_key import (
     COOKIE_MAX_AGE_S,
     LocalApiKey,
+    base_url,
     cookie_name,
+    open_command,
 )
 from netkeeper.web.schemas import SessionOut
-from netkeeper.web.security import has_local_credential, request_port
+from netkeeper.web.security import has_local_credential, has_session_cookie, request_port
 
 router = APIRouter(tags=["session"])
 
@@ -38,10 +42,19 @@ EXPIRED_TO = "/?connect=expired"
 
 
 @router.get("/session", operation_id="get_session")
-def get_session(request: Request) -> SessionOut:
+def get_session(request: Request, response: Response) -> SessionOut:
+    """Whether this browser is connected. A valid session cookie is set again, so a
+    browser the UI loads in at least once every 400 days never expires."""
     key = _key(request)
-    connected = has_local_credential(_headers(request), request.url.scheme, key)
-    return SessionOut(connected=connected, claimable=not key.claimed)
+    headers = _headers(request)
+    if has_session_cookie(headers, request.url.scheme, key):
+        _set_cookie(response, request, key)
+    return SessionOut(
+        connected=has_local_credential(headers, request.url.scheme, key),
+        claimable=not key.claimed,
+        persisted=key.persisted,
+        open_command=open_command(base=_base_if_not_default(request)),
+    )
 
 
 @router.post(
@@ -93,6 +106,14 @@ def connect_session(
 def _key(request: Request) -> LocalApiKey:
     key: LocalApiKey = request.app.state.local_api_key
     return key
+
+
+def _base_if_not_default(request: Request) -> str | None:
+    """The origin the browser used, when ``netkeeper open`` would not point there itself."""
+    settings: Settings = request.app.state.settings
+    used = f"{request.url.scheme}://{request.headers.get('host', '')}".lower()
+    default = base_url(settings.web.host, settings.web.port).lower()
+    return None if used == default else used
 
 
 def _headers(request: Request) -> dict[str, str]:
