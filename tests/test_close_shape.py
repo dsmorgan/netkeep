@@ -836,6 +836,22 @@ async def test_the_bubble_check_ignores_the_ui_and_google_tabs() -> None:
     assert_untouched(site, [*others, mine])
 
 
+async def test_the_bubble_check_never_reads_the_runs_own_tab() -> None:
+    """The bubble check reads other tabs only: this run's own tab, on LinkedIn and holding
+    the contact's bubble, is neither counted nor read."""
+    site = MessagingSite(PERSON)
+    own = _tab(site, _bubble())
+    other = _tab(site, _bubble())
+    provider, _ = fake_provider(site)
+    async with provider.run() as run:
+        run._page = own
+        found = await PageBubbleCheck(run).run(PERSON.profile_id)
+        run._page = None  # the run didn't open it, so it doesn't close it either
+    assert (found.tabs, found.on_origin, found.for_contact) == (1, 1, 1)
+    assert own.reads == 0 and other.reads > 0
+    assert_untouched(site, [own, other])
+
+
 def test_the_bubble_check_opens_only_linkedin_or_loopback() -> None:
     with pytest.raises(ValueError, match="never"):
         PageBubbleCheck(object(), origin="https://example.invalid")  # type: ignore[arg-type]

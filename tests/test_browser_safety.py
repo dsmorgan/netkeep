@@ -2215,20 +2215,30 @@ def test_the_unclaimed_tab_close_is_only_for_the_tab_the_run_created() -> None:
 #: (``pages``) and the browser's contexts (``contexts``). netkeeper's Chrome holds the
 #: UI and setup tabs too (ADR 0012), so every read of either is a site someone checked.
 TAB_SCAN_NAMES = ("pages", "contexts")
-#: Every such read in the browser roots, how many each function makes, and the filter
-#: that keeps it to the run's own tab or LinkedIn's:
+#: Every such read in the package, how many each function makes, and the filter that
+#: keeps it to the run's own tab or LinkedIn's:
 #:
 #: - ``BrowserRun._open_tab``: the new tab's wait. A tab open before the create is
 #:   skipped by identity, and a new one is read only while it's on ``RUN_TAB_URL``
 #:   (``test_the_tab_wait_reads_only_a_blank_tab``), then claimed only by target id.
-#: - ``BrowserRun.bubble_check``: reads only tabs on the LinkedIn origin it's given.
+#: - ``BrowserRun.bubble_check``: reads only tabs on the LinkedIn origin it's given,
+#:   and never the run's own.
 #: - ``AttachBrowserProvider._attach`` and ``preflight``: take or count the contexts,
 #:   and read no tab.
+#: - ``services/connections_sync.py``: not a tab at all. ``pages`` there is the sync's
+#:   count of result pages (``SyncRunReport.pages``, ``SyncResult.pages``, a progress
+#:   event's ``pages``); it's listed so that it's on record, not exempt by location.
 TAB_SCANS = {
     (LINKEDIN / "browser.py", "BrowserRun._open_tab", "pages"): 2,
     (LINKEDIN / "browser.py", "BrowserRun.bubble_check", "pages"): 1,
     (LINKEDIN / "browser.py", "AttachBrowserProvider._attach", "contexts"): 1,
     (LINKEDIN / "preflight.py", "preflight", "contexts"): 1,
+    (PACKAGE / "services" / "connections_sync.py", "SyncRunReport.counts", "pages"): 2,
+    (
+        PACKAGE / "services" / "connections_sync.py",
+        "sync_connections.record_progress",
+        "pages",
+    ): 1,
 }
 
 
@@ -2240,19 +2250,26 @@ def tab_scans(source: str, path: Path = MEMORY) -> Iterator[Input]:
             yield item
 
 
-def _browser_root_files() -> list[Path]:
-    return [p for root in BROWSER_ROOTS for p in ([root] if root.is_file() else python_files(root))]
+def package_sources() -> dict[Path, str]:
+    """Every file under ``netkeeper/``, by path: what the #634 pins read, and what their
+    mutation tests change one file of, or add one to."""
+    return {path: read_source(path) for path in python_files(PACKAGE)}
+
+
+def tab_scan_counts(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int]:
+    found: dict[tuple[Path, str, str], int] = {}
+    for path, source in sources.items():
+        for item in tab_scans(source, path):
+            key = (path, item.function, item.name)
+            found[key] = found.get(key, 0) + 1
+    return found
 
 
 def test_every_tab_scan_is_filtered_to_the_runs_tab_or_linkedins() -> None:
-    """#634: a new read of ``context.pages`` or ``browser.contexts`` fails here until
-    someone adds it to :data:`TAB_SCANS` with the filter that keeps it off the UI's tabs
-    and yours."""
-    found: dict[tuple[Path, str, str], int] = {}
-    for path in _browser_root_files():
-        for item in tab_scans(read_source(path), path):
-            key = (path, item.function, item.name)
-            found[key] = found.get(key, 0) + 1
+    """#634: a new read of ``context.pages`` or ``browser.contexts`` anywhere in the
+    package fails here until someone adds it to :data:`TAB_SCANS` with the filter that
+    keeps it off the UI's tabs and yours."""
+    found = tab_scan_counts(package_sources())
     assert found == TAB_SCANS, (
         "the tab scans changed.\n"
         f"  now:      {sorted((str(p.name), f, n, c) for (p, f, n), c in found.items())}\n"
@@ -2261,6 +2278,32 @@ def test_every_tab_scan_is_filtered_to_the_runs_tab_or_linkedins() -> None:
         " because the UI and setup tabs share this Chrome (ADR 0012), and is added to"
         " TAB_SCANS with that filter named."
     )
+
+
+#: The review's helper-module mutation (#645): a module outside the browser roots that
+#: lists a context's tabs, called from the run's close.
+TABHELP = PACKAGE / "tabhelp.py"
+TABHELP_SOURCE = "def tabs(c):\n    return list(c.pages)\n"
+#: Where the mutations put a line in ``BrowserRun.close``: its own, not ``close_sent_tab``'s.
+_RUN_CLOSE_ANCHOR = "        if self._message_clicked:\n            # ADR 0007: an attempted"
+
+
+def _in_run_close(lines: str) -> dict[Path, str]:
+    """The package with ``lines`` added to ``BrowserRun.close`` and ``tabhelp.py`` added."""
+    sources = package_sources()
+    browser = sources[LINKEDIN / "browser.py"]
+    assert browser.count(_RUN_CLOSE_ANCHOR) == 1
+    sources[LINKEDIN / "browser.py"] = browser.replace(
+        _RUN_CLOSE_ANCHOR, lines + _RUN_CLOSE_ANCHOR, 1
+    )
+    sources[TABHELP] = TABHELP_SOURCE
+    return sources
+
+
+def test_the_tab_scan_pin_catches_a_helper_module() -> None:
+    sources = _in_run_close("        tabs(self._attachment.context)\n")
+    assert tab_scan_counts(sources) != TAB_SCANS
+    assert (TABHELP, "tabs", "pages") in tab_scan_counts(sources)
 
 
 @pytest.mark.parametrize(
@@ -2363,9 +2406,56 @@ def test_the_tab_wait_pin_catches_a_read_before_the_url_check() -> None:
     assert tab_wait_problems(source.replace(guard, early + guard))
 
 
-#: #634: what a run's ``close`` and ``bring_to_front`` may be called on in
-#: ``browser.py``: its own observations and tap, the provider's run, and ``page``, the
-#: run's own tab, in the functions that take it from ``self._page``.
+#: The two names that close or raise something, reached anywhere in the package: an
+#: attribute called or held, ``getattr``, ``attrgetter``, ``methodcaller``.
+PAGE_ACTION_NAMES = ("close", "bring_to_front")
+#: #634: every reach of :data:`PAGE_ACTION_NAMES` in the package, by function. Outside
+#: ``browser.py`` none of them reaches a tab: they close files, sockets, database
+#: connections, zip archives, log handlers, and observations. A new one, anywhere,
+#: fails :func:`test_close_and_bring_forward_act_only_on_the_runs_own_tab` until it's
+#: added here.
+PAGE_ACTION_REACHES = {
+    (PACKAGE / path, function, name): count
+    for path, function, name, count in [
+        ("alembic/versions/0010_plain_text_message_summaries.py", "_plain_pass", "close", 1),
+        ("campaigns/gmail.py", "WriteOnceMixin._no_answer", "close", 1),
+        ("campaigns/gmail.py", "WriteOnceMixin.request", "close", 1),
+        ("campaigns/gmail_oauth.py", "LoopbackReceiver.__exit__", "close", 1),
+        ("crm/archive.py", "_TextExtractor.close", "close", 1),
+        ("crm/archive.py", "_plain_pass", "close", 1),
+        ("crm/history_workbook.py", "read_workbook", "close", 3),
+        ("db.py", "_sqlite_on_connect", "close", 1),
+        ("db.py", "_sqlite_pragma", "close", 1),
+        ("db.py", "session_scope", "close", 1),
+        ("linkedin/activity_lock.py", "Claim.release", "close", 1),
+        ("linkedin/activity_lock.py", "inspect_at", "close", 1),
+        ("linkedin/activity_lock.py", "read_holder", "close", 1),
+        ("linkedin/activity_lock.py", "try_claim_at", "close", 2),
+        ("linkedin/archive.py", "_open_zip", "close", 3),
+        ("linkedin/archive.py", "open_archive", "close", 3),
+        ("linkedin/browser.py", "AttachBrowserProvider.run", "close", 1),
+        ("linkedin/browser.py", "BrowserRun._open_body_tap", "close", 1),
+        ("linkedin/browser.py", "BrowserRun.close", "close", 2),
+        ("linkedin/browser.py", "BrowserRun.close_sent_tab", "close", 2),
+        ("linkedin/browser.py", "BrowserRun.hand_over", "close", 1),
+        ("linkedin/browser.py", "BrowserRun.bring_tab_forward", "bring_to_front", 1),
+        ("linkedin/observe.py", "Observation.__aexit__", "close", 1),
+        ("linkedin/observe.py", "Observation.close", "close", 1),
+        ("linkedin/page_profiles.py", "PageProfiles._end_visit", "close", 1),
+        ("logging_setup.py", "RotatingLogFile._cross_process_lock", "close", 1),
+        ("logging_setup.py", "RotatingLogFile._write_locked", "close", 1),
+        ("logging_setup.py", "RotatingLogFile.close", "close", 2),
+        ("logging_setup.py", "_install_file_handler", "close", 1),
+        ("logging_setup.py", "remove_file_handler", "close", 1),
+        ("services/backup.py", "_lock_exclusively", "close", 1),
+        ("services/backup.py", "_vacuum_into", "close", 1),
+        ("services/config_adopt.py", "_sync_directory", "close", 1),
+        ("services/login_item.py", "LoginItem._write_plist", "close", 1),
+    ]
+}
+#: What each of ``browser.py``'s reaches is on, called or held: the run's own
+#: observations and tap, the provider's run, and ``page``, the run's own tab, in the
+#: functions that take it from ``self._page``.
 PAGE_ACTION_SITES = {
     ("BrowserRun._open_body_tap", "tap.close"): 1,
     ("BrowserRun.hand_over", "observation.close"): 1,
@@ -2383,44 +2473,53 @@ OWN_PAGE_SOURCES = frozenset(
 )
 
 
-def page_action_problems(source: str) -> list[str]:
-    """Why a ``close`` or ``bring_to_front`` in ``source`` could act on a tab that isn't
-    the run's own (#634)."""
-    tree = parse(source)
+def page_action_problems(sources: dict[Path, str]) -> list[str]:
+    """Why a ``close`` or ``bring_to_front`` in the package could act on a tab that
+    isn't the run's own (#634)."""
+    problems = []
+    reaches: dict[tuple[Path, str, str], int] = {}
+    for path, source in sources.items():
+        for name in PAGE_ACTION_NAMES:
+            for item, _ in name_reaches(source, name, path):
+                key = (path, item.function, name)
+                reaches[key] = reaches.get(key, 0) + 1
+    if reaches != PAGE_ACTION_REACHES:
+        added = sorted(
+            (str(p.relative_to(PACKAGE)), f, n, c)
+            for (p, f, n), c in reaches.items()
+            if PAGE_ACTION_REACHES.get((p, f, n)) != c
+        )
+        problems.append(f"close and bring_to_front reaches changed: {added}")
+    tree = parse(sources[LINKEDIN / "browser.py"])
     scopes = _scoped(tree)
     found: dict[tuple[str, str], int] = {}
-    problems = []
     functions = {
         scopes.get(id(node), ""): node
         for node in walk(tree)
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
     }
     for node in walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr in {"close", "bring_to_front"}
-        ):
-            key = (scopes.get(id(node), ""), ast.unparse(node.func))
-            found[key] = found.get(key, 0) + 1
+        if isinstance(node, ast.Attribute) and node.attr in PAGE_ACTION_NAMES:
+            site = (scopes.get(id(node), ""), ast.unparse(node))
+            found[site] = found.get(site, 0) + 1
     if found != PAGE_ACTION_SITES:
         problems.append(f"close and bring_to_front sites changed: {sorted(found)}")
     for function, call in found:
         if not call.startswith("page."):
             continue
-        sources = []
+        assigned = []
         for node in walk(functions[function]):
             if not isinstance(node, ast.Assign):
                 continue
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id == "page":
-                    sources.append(ast.unparse(node.value))
+                    assigned.append(ast.unparse(node.value))
                 elif isinstance(target, ast.Tuple) and isinstance(node.value, ast.Tuple):
-                    for name, value in zip(target.elts, node.value.elts, strict=False):
-                        if isinstance(name, ast.Name) and name.id == "page":
-                            sources.append(ast.unparse(value))
-        if not sources or not set(sources) <= OWN_PAGE_SOURCES:
-            problems.append(f"{function} takes `page` from {sources}")
+                    for slot, value in zip(target.elts, node.value.elts, strict=False):
+                        if isinstance(slot, ast.Name) and slot.id == "page":
+                            assigned.append(ast.unparse(value))
+        if not assigned or not set(assigned) <= OWN_PAGE_SOURCES:
+            problems.append(f"{function} takes `page` from {assigned}")
     return problems
 
 
@@ -2428,7 +2527,7 @@ def test_close_and_bring_forward_act_only_on_the_runs_own_tab() -> None:
     """#634: a run closes and brings forward only its own tab, never one it found in the
     context. The behavior tests in ``tests/test_background_tab.py`` show it with a UI
     tab and a Google tab beside the run's."""
-    assert page_action_problems(read_source(LINKEDIN / "browser.py")) == []
+    assert page_action_problems(package_sources()) == []
 
 
 #: The tail that only ``close_sent_tab`` has, so a mutation lands there and not in ``close``.
@@ -2460,9 +2559,25 @@ _FRONTED = "        self._fronted += 1\n"
     ],
 )
 def test_the_page_action_pin_catches_each_mutation(old: str, new: str) -> None:
-    source = read_source(LINKEDIN / "browser.py")
+    sources = package_sources()
+    source = sources[LINKEDIN / "browser.py"]
     assert source.count(old) == 1
-    assert page_action_problems(source.replace(old, new))
+    sources[LINKEDIN / "browser.py"] = source.replace(old, new)
+    assert page_action_problems(sources)
+
+
+@pytest.mark.parametrize(
+    "lines",
+    [
+        # The review's alias (#645): a bound close, held, then called under another name.
+        "        shut = tabs(self._attachment.context)[0].close\n        await shut()\n",
+        "        await getattr(tabs(self._attachment.context)[0], 'close')()\n",
+        "        await operator.methodcaller('close')(tabs(self._attachment.context)[0])\n",
+    ],
+)
+def test_the_page_action_pin_catches_a_held_close(lines: str) -> None:
+    problems = page_action_problems(_in_run_close(lines))
+    assert any("reaches changed" in problem for problem in problems), problems
 
 
 def test_hand_over_is_reached_only_from_the_prefill() -> None:

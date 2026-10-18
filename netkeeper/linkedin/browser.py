@@ -4450,7 +4450,8 @@ class BrowserRun:
         is in. Reads only, and never this run's own tab: it opens, navigates, brings
         forward, clicks, types, and focuses nothing.
 
-        Of the context's open tabs, it reads only those on ``origin``. A tab is the
+        Of the context's open tabs other than this run's own, it reads only those on
+        ``origin``. A tab is the
         contact's when one of its ``Messaging`` dialogs (hidden ones counted, the first
         :data:`BUBBLE_CHECK_MAX_DIALOGS`) has exactly one header link, to
         ``/in/<profile id>/``, as :meth:`close_sent_bubble` checks it. It reports how many
@@ -4461,7 +4462,12 @@ class BrowserRun:
         want = urlsplit(origin)
         path = f"{PROFILE_PATH_PREFIX}{profile_id}/"
         with _bubble_step(BubbleCheckStep.TABS):
-            pages = [page for page in self._attachment.context.pages if not page.is_closed()]
+            own = self._page
+            pages = [
+                page
+                for page in self._attachment.context.pages
+                if page is not own and not page.is_closed()
+            ]
             on_origin: list[_MessagingPage] = []
             for page in pages:
                 try:
