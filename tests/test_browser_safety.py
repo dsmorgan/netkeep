@@ -1461,6 +1461,177 @@ def test_the_chrome_spawn_pin_rejects_every_other_way_to_start_a_process(
     assert chrome_spawn_pin_problems(source.replace(old, new, 1))
 
 
+# --- #599: who may start a launch ------------------------------------------------------
+
+#: The names a launch is reached by: the shared submit (``services/chrome_launch.py``)
+#: and the launcher ``serve`` holds on ``app.state``. Every reach of either, anywhere in
+#: the package, is listed here by file and function (ADR 0012, rule 5: only you trigger
+#: a spawn, from the button or a setting you turn on, never a run or the scheduler).
+LAUNCH_NAMES = ("submit_launch", "chrome_launcher")
+LAUNCH_REACHES = {
+    # The button's route: its import, then its one call.
+    (PACKAGE / "web" / "api" / "linkedin.py", "", "submit_launch"): 1,
+    (PACKAGE / "web" / "api" / "linkedin.py", "start_browser", "submit_launch"): 1,
+    # serve's start at startup: its import, then its one call.
+    (PACKAGE / "worker.py", "", "submit_launch"): 1,
+    (PACKAGE / "worker.py", "start_chrome_at_startup", "submit_launch"): 1,
+    # The route's getattr, and the health route's "can this process start Chrome?".
+    (PACKAGE / "web" / "api" / "linkedin.py", "_launcher", "chrome_launcher"): 1,
+    (PACKAGE / "web" / "api" / "linkedin.py", "get_browser_health", "chrome_launcher"): 1,
+    # serve's wiring puts it there; the start at startup reads it.
+    (PACKAGE / "worker.py", "serve_app", "chrome_launcher"): 1,
+    (PACKAGE / "worker.py", "start_chrome_at_startup", "chrome_launcher"): 1,
+}
+#: The files that hold a launcher: the reaches above, the launcher's module and its two
+#: importers. Every ``.start`` in them is listed, so a held launcher started anywhere
+#: but ``submit_launch`` and ``netkeeper open`` fails the pin below.
+LAUNCHER_FILES = (
+    PACKAGE / "chrome_spawn.py",
+    PACKAGE / "cli.py",
+    PACKAGE / "services" / "chrome_launch.py",
+    PACKAGE / "web" / "api" / "linkedin.py",
+    PACKAGE / "worker.py",
+)
+LAUNCHER_STARTS = {
+    # The two launches: the shared submit's task, and `netkeeper open`.
+    (PACKAGE / "services" / "chrome_launch.py", "submit_launch.run_launch"): 1,
+    (PACKAGE / "cli.py", "open_command"): 1,
+    # Not a launcher: a lost answer's ``start`` field, ``message_check.start()`` (a run
+    # record), and the sending window's start time.
+    (PACKAGE / "cli.py", "_run_lines"): 1,
+    (PACKAGE / "cli.py", "linkedin_message_check"): 1,
+    (PACKAGE / "cli.py", "_bubble_check"): 1,
+    (PACKAGE / "cli.py", "campaigns_sending_hours"): 1,
+    (PACKAGE / "web" / "api" / "linkedin.py", "get_run_diagnostics"): 1,
+}
+
+
+def launch_reaches(source: str, path: Path = MEMORY) -> Iterator[Input]:
+    """Every reach of a :data:`LAUNCH_NAMES` name: what :func:`name_reaches` reads (an
+    attribute, called or held; a ``from`` import, aliased or not; a literal to
+    ``getattr``), a bare name in any context, and a string that is exactly the name
+    (``vars(state)["chrome_launcher"]``, ``globals()["submit_launch"]``). One per line
+    and name: a ``getattr`` literal is both a reach and an exact string."""
+    tree = parse(source)
+    scopes = _scoped(tree)
+    for name in LAUNCH_NAMES:
+        found = {(item.line, item.function) for item, _ in name_reaches(source, name, path)}
+        for node in walk(tree):
+            if (isinstance(node, ast.Name) and node.id == name) or (
+                isinstance(node, ast.Constant) and node.value == name
+            ):
+                found.add((node.lineno, scopes.get(id(node), "")))
+        for line, function in sorted(found):
+            yield Input(path, line, function, name)
+
+
+def launch_reach_counts(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int]:
+    found: dict[tuple[Path, str, str], int] = {}
+    for path, source in sources.items():
+        for item in launch_reaches(source, path):
+            key = (path, item.function, item.name)
+            found[key] = found.get(key, 0) + 1
+    return found
+
+
+def launcher_start_counts(sources: dict[Path, str]) -> dict[tuple[Path, str], int]:
+    """Every ``.start`` attribute, called or held, in :data:`LAUNCHER_FILES`, by function."""
+    found: dict[tuple[Path, str], int] = {}
+    for path in LAUNCHER_FILES:
+        for item, _ in name_reaches(sources[path], "start", path):
+            key = (path, item.function)
+            found[key] = found.get(key, 0) + 1
+    return found
+
+
+def test_only_the_button_and_the_startup_setting_reach_a_launch() -> None:
+    """#599: ``submit_launch`` and ``app.state.chrome_launcher`` are reached only by the
+    **Start Chrome** route, the health route's check, and ``serve``'s wiring and start at
+    startup. A scheduler job, a run, or any other route that reached either fails here."""
+    found = launch_reach_counts(package_sources())
+    assert found == LAUNCH_REACHES, (
+        "the reaches of a Chrome launch changed.\n"
+        f"  now:      {sorted((str(p.name), f, n, c) for (p, f, n), c in found.items())}\n"
+        f"  expected: {sorted((str(p.name), f, n, c) for (p, f, n), c in LAUNCH_REACHES.items())}\n"
+        "Only you trigger a spawn: a button, netkeeper open, or a setting you turn on"
+        " (ADR 0012, rule 5). A run never starts Chrome."
+    )
+
+
+def test_only_submit_launch_and_open_start_the_launcher() -> None:
+    assert launcher_start_counts(package_sources()) == LAUNCHER_STARTS
+
+
+#: The review's mutation (#664): a second caller planted in ``serve_app``.
+_SERVE_APP_ANCHOR = "    app.state.after_listening = lambda: _after_listening(app)\n"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "    app.state.sneaky = lambda: submit_launch(app.state.tasks, app.state.bus,"
+        " app.state.chrome_launcher, user_id=1)\n",
+        "    app.state.sneaky = lambda: submit_launch\n",
+        "    held = app.state.chrome_launcher\n",
+        "    held = getattr(app.state, 'chrome_launcher')\n",
+        "    held = vars(app.state)['chrome_launcher']\n",
+        "    from netkeeper.services.chrome_launch import submit_launch as go\n",
+        "    import netkeeper.services.chrome_launch as cl\n    cl.submit_launch\n",
+    ],
+)
+def test_the_launch_reach_pin_catches_a_planted_caller(line: str) -> None:
+    sources = package_sources()
+    worker_source = sources[PACKAGE / "worker.py"]
+    assert worker_source.count(_SERVE_APP_ANCHOR) == 1
+    sources[PACKAGE / "worker.py"] = worker_source.replace(
+        _SERVE_APP_ANCHOR, _SERVE_APP_ANCHOR + line, 1
+    )
+    assert launch_reach_counts(sources) != LAUNCH_REACHES
+
+
+def test_the_launch_reach_pin_catches_a_caller_in_another_module() -> None:
+    sources = package_sources()
+    planted = PACKAGE / "services" / "scheduler.py"
+    sources[planted] += "\n\nasync def _sneaky(app):\n    await app.state.chrome_launcher.start()\n"
+    found = launch_reach_counts(sources)
+    assert (planted, "_sneaky", "chrome_launcher") in found
+
+
+@pytest.mark.parametrize(
+    ("path", "anchor", "line"),
+    [
+        # A held launcher started beside the startup path's own submit.
+        (
+            PACKAGE / "worker.py",
+            "    holder = profile_lock_pid(",
+            "    await launcher.start()\n",
+        ),
+        # Held first, then called under another name.
+        (
+            PACKAGE / "worker.py",
+            "    holder = profile_lock_pid(",
+            "    go = launcher.start\n    await go()\n",
+        ),
+        (
+            PACKAGE / "worker.py",
+            "    holder = profile_lock_pid(",
+            "    await getattr(launcher, 'start')()\n",
+        ),
+        # The button's route awaiting the launch itself instead of submitting it.
+        (
+            PACKAGE / "web" / "api" / "linkedin.py",
+            "    bus: EventBus = request.app.state.bus\n",
+            "    await launcher.start()\n",
+        ),
+    ],
+)
+def test_the_launcher_start_pin_catches_another_start(path: Path, anchor: str, line: str) -> None:
+    sources = package_sources()
+    assert sources[path].count(anchor) == 1, anchor
+    sources[path] = sources[path].replace(anchor, line + anchor, 1)
+    assert launcher_start_counts(sources) != LAUNCHER_STARTS
+
+
 def test_the_users_browser_context_is_never_mutated() -> None:
     """Spec 9.1: reuse contexts[0] as it is; no second context, no cookies, no UA.
 

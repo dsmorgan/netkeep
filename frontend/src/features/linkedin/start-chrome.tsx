@@ -2,7 +2,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { toneClasses } from '@/components/ui/tone'
 import { useServerEvent } from '@/features/events/use-server-event'
+import { cn } from '@/lib/utils'
 
 import { browserHealthQuery, linkedinKeys, startChrome } from './api'
 import {
@@ -68,7 +70,7 @@ export function StartChrome({ compact = false }: { compact?: boolean }) {
     const timer = setTimeout(() => {
       setTaskId(null)
       setSaid({
-        tone: 'problem',
+        tone: 'warn',
         text: "netkeeper didn't hear how the launch went. Look for netkeeper's Chrome window; if there's none, try again.",
       })
       void queryClient.invalidateQueries({ queryKey: linkedinKeys.browserHealth() })
@@ -108,8 +110,8 @@ export function StartChrome({ compact = false }: { compact?: boolean }) {
       </div>
       {said !== null && (
         <div
-          role={said.tone === 'problem' ? 'alert' : 'status'}
-          className={said.tone === 'problem' ? 'text-destructive' : undefined}
+          role={said.tone === 'ok' ? 'status' : 'alert'}
+          className={cn('nk-glass space-y-1 p-3', toneClasses(said.tone))}
         >
           <p>{said.text}</p>
           {said.detail !== undefined && said.detail !== '' && (

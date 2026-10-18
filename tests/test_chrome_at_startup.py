@@ -318,11 +318,77 @@ async def test_the_lifespan_runs_the_hook_as_a_task_and_cancels_it_at_shutdown(
             raise
 
     app.state.after_listening = hook
-    async with app.router.lifespan_context(app):
+    lifespan = app.router.lifespan_context(app)
+    # A hook awaited inline would hang startup: the timeout fails the test instead.
+    await asyncio.wait_for(lifespan.__aenter__(), 5)
+    try:
         await asyncio.wait_for(began.wait(), 1)
         assert cancelled == []
+    finally:
+        await asyncio.wait_for(lifespan.__aexit__(None, None, None), 5)
     await asyncio.sleep(0)
     assert cancelled == [True]
+
+
+def test_serve_tells_the_startup_hook_when_it_is_listening(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``cli serve`` sets ``app.state.listening`` to uvicorn's ``started``: without it,
+    the start at startup never starts Chrome."""
+    import uvicorn
+    from typer.testing import CliRunner
+
+    from netkeeper import cli as cli_module
+    from netkeeper.cli import app as cli_app
+
+    application = FastAPI()
+    seen: list[bool] = []
+
+    class _Server:
+        def __init__(self, config: uvicorn.Config) -> None:
+            self.config = config
+            self.should_exit = False
+            self.started = False
+
+        def run(self) -> None:
+            listening = application.state.listening
+            seen.append(listening())
+            self.started = True
+            seen.append(listening())
+
+    monkeypatch.setattr(cli_module, "serve_app", lambda settings, **_: application)
+    monkeypatch.setattr(uvicorn, "Server", _Server)
+    result = CliRunner().invoke(cli_app, ["serve", "--port", "0"])
+    assert result.exit_code == 0, result.output
+    assert seen == [False, True]
+
+
+def test_posture_no_probe_says_whether_netkeepers_chrome_is_running(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """#599: ``netkeeper posture --no-probe`` reads the profile's lock, never the port."""
+    from typer.testing import CliRunner
+
+    from netkeeper import migrations
+    from netkeeper.cli import app as cli_app
+    from netkeeper.db import database_url, make_engine, make_session_factory
+    from netkeeper.scoping import install_scope_guard
+    from netkeeper.services.users import ensure_local_user
+
+    url = database_url(tmp_path)
+    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    engine = make_engine(url)
+    migrations.upgrade(engine)
+    factory = make_session_factory(engine)
+    install_scope_guard(factory)
+    with session_scope(factory, write=True) as session:
+        ensure_local_user(session)
+    engine.dispose()
+    before = CliRunner().invoke(cli_app, ["posture", "--no-probe", "--details"])
+    assert "netkeeper's Chrome isn't running" in before.output, before.output
+    _hold_profile(os.getpid())
+    after = CliRunner().invoke(cli_app, ["posture", "--no-probe", "--details"])
+    assert f"netkeeper's Chrome is running (pid {os.getpid()})" in after.output, after.output
 
 
 # --- what the button reads -----------------------------------------------------------------
@@ -344,10 +410,8 @@ async def test_health_says_whether_netkeepers_chrome_is_running(
 async def test_health_ignores_a_lock_whose_process_is_gone(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from netkeeper.web.api import linkedin as linkedin_api
-
     _hold_profile(4_000_001)
-    monkeypatch.setattr(linkedin_api, "pid_alive", lambda pid: False)
+    monkeypatch.setattr(activity_lock, "pid_alive", lambda pid: False)
     body = (await client.get(HEALTH_URL)).json()
     assert (body["chrome_running"], body["chrome_pid"]) == (False, None)
 

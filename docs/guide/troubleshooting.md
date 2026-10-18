@@ -27,7 +27,7 @@ Still stuck? Open an issue with a support bundle and screenshots: see [Reporting
 | **Start Chrome** is disabled: "A run is using the browser" | A run holds the browser. Try again when it ends. |
 | **Start Chrome**: "points at another computer" or "has no valid port" | Fix **Chrome debug address** in Settings, under **LinkedIn runs**: netkeeper starts Chrome only on this computer, on the port you set. |
 | **Start Chrome**: "Chrome didn't start" | Check that Google Chrome is installed (on macOS, in `/Applications`). The message under it says what Chrome answered. |
-| Chrome doesn't start at login | Check that both **Run at login** and **Start netkeeper's Chrome when netkeeper starts** are on in Settings. netkeeper starts nothing when its Chrome is already running or a run is using the browser; `netkeeper.log` says which. |
+| Chrome doesn't start at login | Check that both **Run at login** and **Start netkeeper's Chrome when netkeeper starts** are on in Settings. netkeeper starts nothing when its Chrome is already running or a run is using the browser; `netkeeper.log` says which. If it says Chrome is already running when it isn't, a crash left the profile's lock behind: `make chrome` clears it. |
 | Chrome ignores the debug port | Chrome 136 and later refuse it on your default profile. Use the command netkeeper prints, which has its own `--user-data-dir`. |
 | Chrome won't start on the profile after a crash | `make chrome` clears the profile lock a crashed Chrome left behind. |
 | "the browser was busy with another run" | One netkeeper process uses the browser at a time. `netkeeper preflight` names the process that holds it. Wait for that run, or stop it. |
