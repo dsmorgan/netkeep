@@ -1201,6 +1201,7 @@ async def poll_and_fire(
     active_end: time = pacing.DEFAULT_ACTIVE_END,
     rng: random.Random | None = None,
     clock: Callable[[], datetime] | None = None,
+    kind_off: KindOffProvider | None = None,
 ) -> FireResult | None:
     """One heartbeat's check for ``(account_id, kind)``: fire if due, else no-op.
 
@@ -1319,7 +1320,17 @@ async def poll_and_fire(
         return None
     due, is_catchup, was_reoffer, fired_before, skipped_reason, next_due = claimed
     fired = skipped_reason is None
-    if not fired and kind is JobKind.AUTO_SEND:
+    # #598 review: a kind turned off for this user (auto-send, off) still advances its due
+    # time above, so turning it on applies within one interval; but a gate skip of it is
+    # neither noted as its last fire nor warned about, since it would not have sent anyway.
+    quiet = False
+    if not fired and kind_off is not None:
+        try:
+            quiet = await off_loop(kind_off, user, kind)
+        except Exception:
+            # Only the words depend on it: a fault here says the skip as before.
+            log.exception("scheduler: could not read whether %s is off", kind.value)
+    if not fired and kind is JobKind.AUTO_SEND and not quiet:
         # The gate skipped it, so no handler says how it ended (#505): this does.
         await off_loop(
             note_last_fire,
@@ -1394,7 +1405,7 @@ async def poll_and_fire(
                 active_start=active_start,
                 active_end=active_end,
             )
-    elif skipped_reason in ("disarmed", "paused"):
+    elif skipped_reason in ("disarmed", "paused") or quiet:
         # Every poll of a disarmed or paused account lands here; it is the expected state.
         log.debug(
             "scheduler: %s for account %d not fired: %s", kind.value, account_id, skipped_reason
@@ -1427,6 +1438,7 @@ async def poll_once(
     active_hours: ActiveHoursProvider | None = None,
     rng: random.Random | None = None,
     clock: Callable[[], datetime] | None = None,
+    kind_off: KindOffProvider | None = None,
 ) -> list[FireResult]:
     """:func:`poll_and_fire` every ``(user, account_id)`` in ``accounts`` across
     every kind in ``schedules``. The body of the heartbeat job in
@@ -1490,6 +1502,7 @@ async def poll_once(
                 active_end=user_end,
                 rng=rng,
                 clock=clock,
+                kind_off=kind_off,
             )
             if result is None:
                 continue
@@ -1680,6 +1693,10 @@ AccountsProvider = Callable[[], Iterable[tuple[User, int]]]
 #: skipped, never run with another user's hours or the default.
 ActiveHoursProvider = Callable[[User], tuple[time, time]]
 
+#: Whether a kind is turned off for a user now (auto-send with its flag off, #598):
+#: asked only for a fire the gate skipped, to keep that skip out of the notes and logs.
+KindOffProvider = Callable[[User, JobKind], bool]
+
 
 def build_scheduler(
     session_factory: sessionmaker[Session],
@@ -1695,6 +1712,7 @@ def build_scheduler(
     armed: ArmGate = DEFAULT_ARM_GATE,
     rng: random.Random | None = None,
     clock: Callable[[], datetime] = utcnow,
+    kind_off: KindOffProvider | None = None,
 ) -> AsyncIOScheduler:
     """Build (never start) an :class:`AsyncIOScheduler` with one heartbeat job.
 
@@ -1798,6 +1816,7 @@ def build_scheduler(
             active_hours=active_hours,
             rng=jitter,
             clock=clock,
+            kind_off=kind_off,
         )
 
     scheduler.add_job(

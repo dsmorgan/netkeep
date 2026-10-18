@@ -241,6 +241,27 @@ describe('ConfigSections', () => {
     await waitFor(() => expect(puts).toEqual([{ [POLL.key]: 7 }]))
   })
 
+  it('clears a page value of on that config.toml hides, with no question', async () => {
+    const hidden = {
+      ...AUTO_SEND,
+      value: false,
+      ui_value: true,
+      file_value: false,
+      source: 'file' as const,
+      editable: false,
+      locked_reason: 'Set in /etc/nk.toml, which wins over this page.',
+      warnings: ["This page also holds auto-send on, under config.toml's value."],
+    }
+    const { puts, confirms } = renderSections([PREFILLS, hidden])
+    const campaigns = within(await screen.findByRole('form', { name: 'Campaign defaults' }))
+    const group = within(campaigns.getByRole('group', { name: 'LinkedIn auto-send' }))
+    expect(group.getByText(/This page also holds auto-send on/)).toBeVisible()
+    fireEvent.click(group.getByRole('button', { name: "Turn off this page's auto-send" }))
+    await waitFor(() => expect(puts).toEqual([{ [AUTO_SEND.key]: null }]))
+    expect(confirms).toEqual([false])
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+  })
+
   it('shows auto-send locked when config.toml sets it', async () => {
     const pinned = {
       ...AUTO_SEND,
@@ -261,6 +282,7 @@ describe('ConfigSections', () => {
     fireEvent.click(box)
     expect(screen.queryByRole('alertdialog')).toBeNull()
     expect(puts).toEqual([])
+    expect(group.queryByRole('button', { name: "Turn off this page's auto-send" })).toBeNull()
   })
 
   it('warns above 20 before saving, saves only what changed, and shows the note after', async () => {

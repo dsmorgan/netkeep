@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import time, timedelta
 from pathlib import Path
@@ -121,11 +122,16 @@ async def test_config_toml_locks_the_auto_send_switch(
     assert field["locked_reason"].startswith("Set in /etc/netkeeper.toml")
     readers = await _on_everywhere(client)
     assert readers == dict.fromkeys(("options", "schedule", "settings"), file_value)
-    refused = await client.put(
-        URL, json={"values": {AUTO: not file_value}, "confirm": True}, headers=CSRF
+    # The page never turns it on under the file; it may always turn its own value off,
+    # which changes nothing in force (#598 review).
+    on = await client.put(URL, json={"values": {AUTO: True}, "confirm": True}, headers=CSRF)
+    assert on.status_code == 422
+    assert "the file wins" in on.json()["detail"]
+    off = await _put(client, {AUTO: False})
+    assert off.status_code == 200, off.text
+    assert await _on_everywhere(client) == dict.fromkeys(
+        ("options", "schedule", "settings"), file_value
     )
-    assert refused.status_code == 422
-    assert "the file wins" in refused.json()["detail"]
 
 
 async def test_a_saved_value_is_in_force_on_the_next_request(client: httpx.AsyncClient) -> None:
@@ -500,3 +506,62 @@ async def test_only_the_owner_sees_the_chrome_profile_path(
         refused = await client.get("/api/v1/linkedin/browser")
     assert refused.status_code == 403
     assert "cdp_url" not in refused.text and "launch_command" not in refused.text
+
+
+async def _served(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as c:
+            yield c
+
+
+def _file_sets_auto_send(value: bool) -> Settings:
+    base = Settings()
+    return replace(
+        base,
+        source_path=Path("/etc/netkeeper.toml"),
+        file_keys=frozenset({AUTO}),
+        campaigns=replace(base.campaigns, linkedin_auto_send=value),
+    )
+
+
+async def test_a_page_on_under_a_file_off_never_returns_when_the_line_goes(
+    app: FastAPI, bare_engine: Engine
+) -> None:
+    """The #639 review's sequence: confirm on, the file sets false, remove the line,
+    restart. Auto-send must be off, with nobody having confirmed it again."""
+    # 1. Confirm auto-send on, on the page.
+    async for c in _served(app):
+        on = await c.put(URL, json={"values": {AUTO: True}, "confirm": True}, headers=CSRF)
+        assert on.status_code == 200, on.text
+        assert (await _on_everywhere(c))["settings"] is True
+    # 2. config.toml sets it false, and serve restarts: the page's `true` is cleared.
+    async for c in _served(create_app(_file_sets_auto_send(False), engine=bare_engine)):
+        field = _field((await c.get(URL)).json(), AUTO)
+        assert (field["value"], field["source"], field["ui_value"]) == (False, "file", None)
+        assert ui_settings.AUTO_SEND_HIDDEN_ON not in field["warnings"]
+    # 3. The line is removed, and 4. serve restarts: 5. auto-send is off.
+    async for c in _served(create_app(Settings(), engine=bare_engine)):
+        assert await _on_everywhere(c) == dict.fromkeys(("options", "schedule", "settings"), False)
+
+
+async def test_a_hidden_page_on_can_be_cleared_while_the_file_sets_the_key(
+    running_app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    """Without a restart in between: the locked switch says the page still holds on, the
+    page clears it (off or reset, no confirmation), and removing the line leaves it off."""
+    on = await client.put(URL, json={"values": {AUTO: True}, "confirm": True}, headers=CSRF)
+    assert on.status_code == 200, on.text
+    file = running_app.state.settings
+    running_app.state.settings = _file_sets_auto_send(False)
+    field = _field((await client.get(URL)).json(), AUTO)
+    assert (field["value"], field["source"], field["ui_value"]) == (False, "file", True)
+    assert ui_settings.AUTO_SEND_HIDDEN_ON in field["warnings"]
+    refused = await client.put(URL, json={"values": {AUTO: True}, "confirm": True}, headers=CSRF)
+    assert refused.status_code == 422  # never on while the file sets it
+    cleared = await _put(client, {AUTO: None})
+    assert cleared.status_code == 200, cleared.text
+    field = _field(cleared.json(), AUTO)
+    assert (field["ui_value"], field["warnings"]) == (None, [])
+    running_app.state.settings = file  # the line is removed
+    assert await _on_everywhere(client) == dict.fromkeys(("options", "schedule", "settings"), False)

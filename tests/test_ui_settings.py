@@ -250,7 +250,7 @@ def test_config_toml_wins_over_the_auto_send_switch(
     session: Session, user: User, file_value: bool, page_value: bool
 ) -> None:
     """One source of truth: a key the file sets is the value in force, the page shows it
-    locked with the file's path, and the page cannot write it either way."""
+    locked with the file's path, and the page can never turn it on under the file."""
     base = _pinned(campaigns__linkedin_auto_send=file_value)
     set_setting(session, user, "config." + AUTO, page_value)  # a row from before the file
     assert ui_settings.auto_send_on(session, user, base) is file_value
@@ -259,9 +259,45 @@ def test_config_toml_wins_over_the_auto_send_switch(
     assert view.file_value is file_value
     assert view.locked_reason is not None and view.locked_reason.startswith("Set in /etc/nk.toml")
     with pytest.raises(ui_settings.SettingsRefused) as refused:
-        ui_settings.write(session, user, base, {AUTO: page_value}, confirm_auto_send=True)
+        ui_settings.write(session, user, base, {AUTO: True}, confirm_auto_send=True)
     assert "/etc/nk.toml sets it" in refused.value.problems[AUTO]
     assert ui_settings.auto_send_on(session, user, base) is file_value
+
+
+@pytest.mark.parametrize("file_value", [False, True])
+@pytest.mark.parametrize("off", [False, None])
+def test_the_page_may_turn_its_own_auto_send_off_under_the_file(
+    session: Session, user: User, file_value: bool, off: bool | None
+) -> None:
+    """#598 review: a page `true` hidden by the file must be clearable, or removing the
+    file's line later turns auto-send on with nobody confirming it."""
+    ui_settings.write(session, user, Settings(), {AUTO: True}, confirm_auto_send=True)
+    base = _pinned(campaigns__linkedin_auto_send=file_value)
+    hidden = _view(ui_settings.describe(base, ui_settings.stored(session, user)), AUTO)
+    assert ui_settings.AUTO_SEND_HIDDEN_ON in hidden.warnings
+    ui_settings.write(session, user, base, {AUTO: off})  # no confirmation
+    assert ui_settings.auto_send_on(session, user, base) is file_value  # the file still wins
+    assert ui_settings.auto_send_on(session, user, Settings()) is False  # the line removed
+    view = _view(ui_settings.describe(base, ui_settings.stored(session, user)), AUTO)
+    assert ui_settings.AUTO_SEND_HIDDEN_ON not in view.warnings
+
+
+def test_startup_drops_a_page_on_only_while_the_file_sets_the_key(
+    session: Session, user: User
+) -> None:
+    ui_settings.write(session, user, Settings(), {AUTO: True}, confirm_auto_send=True)
+    assert ui_settings.drop_overridden_auto_send(session, user, Settings()) is False
+    assert ui_settings.auto_send_on(session, user, Settings()) is True  # no file: kept
+    base = _pinned(campaigns__linkedin_auto_send=False)
+    assert ui_settings.drop_overridden_auto_send(session, user, base) is True
+    assert ui_settings.stored(session, user) == {}
+    assert ui_settings.drop_overridden_auto_send(session, user, base) is False
+
+
+def test_drop_stored_auto_send_leaves_an_off_value(session: Session, user: User) -> None:
+    ui_settings.write(session, user, Settings(), {AUTO: False})
+    assert ui_settings.drop_stored_auto_send(session, user) is False
+    assert ui_settings.stored(session, user) == {AUTO: False}
 
 
 # --- writing ----------------------------------------------------------------------

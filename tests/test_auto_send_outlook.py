@@ -49,6 +49,7 @@ from netkeeper.services import (
     runs,
     scheduled_runs,
     scheduler,
+    ui_settings,
 )
 from netkeeper.services import heat as heat_service
 from netkeeper.services.auto_send_outlook import Wait
@@ -59,6 +60,7 @@ from netkeeper.services.linkedin_accounts import (
     ensure_account,
     pause_schedule,
 )
+from netkeeper.services.scheduled_runs import auto_send_off
 from netkeeper.services.settings_kv import get_setting, set_setting
 
 AUTO = Settings(
@@ -688,6 +690,48 @@ async def test_the_scheduler_notes_a_fire_its_gate_skipped(lane: Lane) -> None:
     )
     assert result is not None and result.skipped_reason == "heat"
     assert _last(lane) == scheduler.LastFire(at=NOW, reason="heat")
+
+
+async def test_a_gate_skip_with_auto_send_off_is_quiet(
+    lane: Lane, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#598 review: serve always schedules auto-send. While it is off, a fire the gate
+    skips (here, heat) advances its due time, the scheduler's own bookkeeping, but is
+    neither noted as the last fire nor warned about: it would not have sent anyway."""
+    lane.enroll(contact=dict(CONTACT))
+    _scheduled(lane)
+    _hot(lane)
+    user = lane.read(lambda s, u: u)
+    with caplog.at_level(logging.DEBUG, logger="netkeeper.services.scheduler"):
+        result = await scheduler.poll_and_fire(
+            lane.factory,
+            user,
+            _account(lane),
+            scheduler.JobKind.AUTO_SEND,
+            now=NOW,
+            schedule=scheduler.AUTO_SEND_SCHEDULE,
+            registry=scheduler.default_registry(),
+            heat_settings=AUTO.linkedin.heat,
+            tz="UTC",
+            kind_off=auto_send_off(lane.factory, OFF),
+        )
+    assert result is not None and result.skipped_reason == "heat"
+    assert result.next_due is not None and result.next_due > NOW  # the due time advanced
+    assert _last(lane) is None
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def test_auto_send_off_reads_each_user_s_flag(lane: Lane) -> None:
+    off = auto_send_off(lane.factory, OFF)
+    user = lane.read(lambda s, u: u)
+    assert off(user, scheduler.JobKind.AUTO_SEND) is True
+    assert off(user, scheduler.JobKind.INBOX) is False  # only auto-send is ever off
+    lane.write(
+        lambda s, u: ui_settings.write(
+            s, u, Settings(), {ui_settings.AUTO_SEND_KEY: True}, confirm_auto_send=True
+        )
+    )
+    assert off(user, scheduler.JobKind.AUTO_SEND) is False
 
 
 def test_a_last_fire_that_cannot_be_read_is_none(lane: Lane) -> None:
