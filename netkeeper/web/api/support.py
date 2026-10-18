@@ -1,6 +1,8 @@
 """``/support``: the support bundle, for Settings, Support (#603).
 
 - ``GET /support/levels`` says what each level holds, for the page's preview.
+- ``GET /support/logs`` returns the last lines of the log file, filtered and redacted
+  (#655): the Logs view's read.
 - ``GET /support/bundle`` makes the ``.zip`` and sends it as a download. The full level
   holds real names, so it is refused (409) without ``confirm_full=true``, which the page
   sends only after you tick its confirmation.
@@ -20,7 +22,7 @@ user, so only the local owner account may make one (403 for anyone else), as wit
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Annotated, Final
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -28,9 +30,8 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from netkeeper.models import User
-from netkeeper.services import support_bundle
-from netkeeper.services.users import local_owner
-from netkeeper.web.deps import CurrentUser, SessionDep, effective_settings
+from netkeeper.services import log_tail, support_bundle
+from netkeeper.web.deps import CurrentUser, SessionDep, effective_settings, require_owner
 from netkeeper.web.security import CLIENT_HEADER, CLIENT_HEADER_VALUE
 
 router = APIRouter(tags=["support"])
@@ -54,13 +55,24 @@ class SupportLevelsOut(BaseModel):
     max_since_days: int
 
 
+class LogLineOut(BaseModel):
+    at: datetime
+    """Local time, with its offset."""
+    level: str
+    logger: str
+    message: str
+    """Redacted: marked personal values, addresses and credentials are placeholders."""
+
+
+class LogTailOut(BaseModel):
+    lines: list[LogLineOut]
+    """Oldest first, at most ``MAX_LINES``."""
+    reason: log_tail.Reason | None
+    """Why ``lines`` is empty: no log file, an empty one, or nothing passing the filters."""
+
+
 def _owner(session: SessionDep, user: CurrentUser) -> User:
-    owner = local_owner(session)
-    if owner is None or owner.id != user.id:
-        raise HTTPException(
-            status_code=403, detail="only the local owner account makes a support bundle"
-        )
-    return owner
+    return require_owner(session, user, "only the local owner account makes a support bundle")
 
 
 Owner = Annotated[User, Depends(_owner)]
@@ -95,6 +107,34 @@ def get_levels(owner: Owner) -> SupportLevelsOut:
             for spec in support_bundle.LEVELS.values()
         ],
         max_since_days=_MAX_DAYS,
+    )
+
+
+@router.get("/support/logs", operation_id="get_recent_logs")
+def get_logs(
+    request: Request,
+    owner: Owner,
+    lines: Annotated[int, Query(ge=1, le=log_tail.MAX_LINES)] = log_tail.DEFAULT_LINES,
+    level: log_tail.LevelName | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+) -> LogTailOut:
+    """The newest ``lines`` log records at ``level`` or above, within ``since``..``until``
+    (a time without an offset is local), oldest first, redacted like the support bundle."""
+    key = request.app.state.local_api_key
+    tail = log_tail.recent_lines(
+        lines=lines,
+        level=level,
+        since=since,
+        until=until,
+        secrets=(key.key, key.session_value()),
+    )
+    return LogTailOut(
+        lines=[
+            LogLineOut(at=item.at, level=item.level, logger=item.logger, message=item.message)
+            for item in tail.lines
+        ],
+        reason=tail.reason,
     )
 
 

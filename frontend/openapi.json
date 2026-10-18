@@ -9522,6 +9522,68 @@
         "title": "ListPatch",
         "type": "object"
       },
+      "LogLineOut": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "logger": {
+            "title": "Logger",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "level",
+          "logger",
+          "message"
+        ],
+        "title": "LogLineOut",
+        "type": "object"
+      },
+      "LogTailOut": {
+        "properties": {
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/LogLineOut"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "no_log_file",
+                  "empty_log",
+                  "no_match"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "lines",
+          "reason"
+        ],
+        "title": "LogTailOut",
+        "type": "object"
+      },
       "LoginItemIn": {
         "properties": {
           "enabled": {
@@ -25030,6 +25092,109 @@
           }
         },
         "summary": "Get Levels",
+        "tags": [
+          "support"
+        ]
+      }
+    },
+    "/api/v1/support/logs": {
+      "get": {
+        "description": "The newest ``lines`` log records at ``level`` or above, within ``since``..``until``\n(a time without an offset is local), oldest first, redacted like the support bundle.",
+        "operationId": "get_recent_logs",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "lines",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Lines",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "level",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "debug",
+                    "info",
+                    "warning",
+                    "error",
+                    "critical"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Level"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          },
+          {
+            "in": "query",
+            "name": "until",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Until"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogTailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Logs",
         "tags": [
           "support"
         ]

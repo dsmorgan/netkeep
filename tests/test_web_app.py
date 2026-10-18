@@ -141,6 +141,7 @@ API_PATHS = {
     "/api/v1/settings/config",
     "/api/v1/settings/restart",
     "/api/v1/support/levels",
+    "/api/v1/support/logs",
     "/api/v1/support/bundle",
     "/api/v1/session",
     "/api/v1/session/claim",

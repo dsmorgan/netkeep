@@ -92,6 +92,8 @@ _SECRET_GATES: Final[tuple[_Gate, ...]] = (
         _CREDENTIAL_TRIGGERS,
         rf"\g<1>\g<2>{SECRET}",
     ),
+    # A local connect code, <expires>.<nonce>.<hmac>, bare in a message (netkeeper open).
+    _Gate(re.compile(r"\b\d{9,12}\.[0-9a-f]{32}\.[0-9a-f]{64}\b"), (), SECRET),
     # LinkedIn's CSRF token is the JSESSIONID cookie's value, "ajax:" and digits.
     _Gate(re.compile(r"(?i)\bajax:\d+"), ("ajax:",), SECRET),
     # A browser cookie as a dict ({'name': 'li_at', 'value': '...'}, as Playwright has it).
