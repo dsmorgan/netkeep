@@ -126,7 +126,8 @@ ALLOWED_CONTEXT_MUTATIONS = frozenset(
         # #195: the run's tab opens in the background. A browser-level session creates
         # it (and `_close_unclaimed_tab` closes it on that session, by its own target id,
         # when it can't be identified), and a page-level session reads the target id of
-        # each tab that appears while it waits, the person's included.
+        # each new tab still on `about:blank` while it waits (#634: never a tab on
+        # another URL, such as the UI's or a Google page).
         (LINKEDIN / "browser.py", "BrowserRun._open_tab", "new_browser_cdp_session"),
         (LINKEDIN / "browser.py", "BrowserRun._target_id", "new_cdp_session"),
         # #633: preflight's cookie read, on the run's own blank tab, Chrome-filtered to
@@ -170,17 +171,18 @@ READ_ONLY_CDP_METHODS: dict[str, frozenset[str]] = {
 #: #195, the background tab. These aren't reads of the page, so they're kept apart from
 #: the ones above; none of them reaches a tab netkeeper doesn't own:
 #:
-#: - ``Target.createTarget``: the call ``context.new_page()`` makes, with ``url`` and
-#:   ``background`` only (no ``newWindow``, no ``browserContextId``: the default
-#:   context, ``contexts[0]``). ``background: true`` opens the tab behind the one in
-#:   front, and Chrome doesn't activate its window.
+#: - ``Target.createTarget``: the call ``context.new_page()`` makes, with ``url``,
+#:   ``newWindow`` and ``background`` only (no ``browserContextId``: the default
+#:   context, ``contexts[0]``). ``newWindow: true`` puts the run's tab in a window of
+#:   its own, never among the UI's tabs or yours (#632, ADR 0012); ``background: true``
+#:   opens it without Chrome activating a window.
 #: - ``Target.getTargetInfo`` with no params: a page session's own target id.
 #: - ``Target.closeTarget``: only the target id ``Target.createTarget`` just answered,
 #:   when that tab never showed up as a page.
 #:
 #: ``Page.bringToFront`` and ``Target.activateTarget`` are deliberately absent.
 TAB_CDP_METHODS: dict[str, frozenset[str]] = {
-    "Target.createTarget": frozenset({"url", "background"}),
+    "Target.createTarget": frozenset({"url", "newWindow", "background"}),
     "Target.getTargetInfo": frozenset(),
     "Target.closeTarget": frozenset({"targetId"}),
 }
@@ -2205,6 +2207,262 @@ def test_the_unclaimed_tab_close_is_only_for_the_tab_the_run_created() -> None:
         and any(isinstance(t, ast.Name) and t.id == "created" for t in node.targets)
     ]
     assert len(creates) == 1 and "'Target.createTarget'" in creates[0]
+
+
+# --- #634: runs read only LinkedIn's tabs, and act only on their own -----------------
+
+#: The two names that list what's open in the attached Chrome: a context's tabs
+#: (``pages``) and the browser's contexts (``contexts``). netkeeper's Chrome holds the
+#: UI and setup tabs too (ADR 0012), so every read of either is a site someone checked.
+TAB_SCAN_NAMES = ("pages", "contexts")
+#: Every such read in the browser roots, how many each function makes, and the filter
+#: that keeps it to the run's own tab or LinkedIn's:
+#:
+#: - ``BrowserRun._open_tab``: the new tab's wait. A tab open before the create is
+#:   skipped by identity, and a new one is read only while it's on ``RUN_TAB_URL``
+#:   (``test_the_tab_wait_reads_only_a_blank_tab``), then claimed only by target id.
+#: - ``BrowserRun.bubble_check``: reads only tabs on the LinkedIn origin it's given.
+#: - ``AttachBrowserProvider._attach`` and ``preflight``: take or count the contexts,
+#:   and read no tab.
+TAB_SCANS = {
+    (LINKEDIN / "browser.py", "BrowserRun._open_tab", "pages"): 2,
+    (LINKEDIN / "browser.py", "BrowserRun.bubble_check", "pages"): 1,
+    (LINKEDIN / "browser.py", "AttachBrowserProvider._attach", "contexts"): 1,
+    (LINKEDIN / "preflight.py", "preflight", "contexts"): 1,
+}
+
+
+def tab_scans(source: str, path: Path = MEMORY) -> Iterator[Input]:
+    """Every reach of a :data:`TAB_SCAN_NAMES` name, the way :func:`name_reaches` reads
+    one: an attribute, called or held; a ``from`` import; a literal to ``getattr``."""
+    for name in TAB_SCAN_NAMES:
+        for item, _ in name_reaches(source, name, path):
+            yield item
+
+
+def _browser_root_files() -> list[Path]:
+    return [p for root in BROWSER_ROOTS for p in ([root] if root.is_file() else python_files(root))]
+
+
+def test_every_tab_scan_is_filtered_to_the_runs_tab_or_linkedins() -> None:
+    """#634: a new read of ``context.pages`` or ``browser.contexts`` fails here until
+    someone adds it to :data:`TAB_SCANS` with the filter that keeps it off the UI's tabs
+    and yours."""
+    found: dict[tuple[Path, str, str], int] = {}
+    for path in _browser_root_files():
+        for item in tab_scans(read_source(path), path):
+            key = (path, item.function, item.name)
+            found[key] = found.get(key, 0) + 1
+    assert found == TAB_SCANS, (
+        "the tab scans changed.\n"
+        f"  now:      {sorted((str(p.name), f, n, c) for (p, f, n), c in found.items())}\n"
+        f"  expected: {sorted((str(p.name), f, n, c) for (p, f, n), c in TAB_SCANS.items())}\n"
+        "A new read of a context's tabs keeps to the run's own tab or LinkedIn's origin,"
+        " because the UI and setup tabs share this Chrome (ADR 0012), and is added to"
+        " TAB_SCANS with that filter named."
+    )
+
+
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        "tabs = context.pages\n",
+        "for tab in self._attachment.context.pages:\n    pass\n",
+        "tabs = getattr(context, 'pages')\n",
+        "every = browser.contexts[0].pages\n",
+        "n = len(run.browser.contexts)\n",
+    ],
+)
+def test_the_tab_scan_scanner_sees_every_spelling(snippet: str) -> None:
+    assert list(tab_scans(snippet))
+
+
+def tab_wait_problems(source: str) -> list[str]:
+    """Why ``BrowserRun._open_tab``'s wait could open a session on a tab that isn't on
+    ``RUN_TAB_URL``, or claim one by anything but its target id (#634)."""
+    tree = parse(source)
+    openers = _methods(tree, "BrowserRun")
+    if "_open_tab" not in openers:
+        return ["no BrowserRun._open_tab"]
+    loops = [
+        node
+        for node in walk(openers["_open_tab"])
+        if isinstance(node, ast.For) and ast.unparse(node.iter) == "context.pages"
+    ]
+    if len(loops) != 1:
+        return [f"{len(loops)} loops over context.pages, not 1"]
+    [loop] = loops
+    problems = []
+    guard = None
+    for index, statement in enumerate(loop.body):
+        if (
+            isinstance(statement, ast.If)
+            and ast.unparse(statement.test) == "page.url != RUN_TAB_URL"
+            and len(statement.body) == 1
+            and isinstance(statement.body[0], ast.Continue)
+            and not statement.orelse
+        ):
+            guard = index
+            break
+    reads = [
+        index
+        for index, statement in enumerate(loop.body)
+        for node in walk(statement)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "_target_id"
+    ]
+    if guard is None:
+        problems.append("no `if page.url != RUN_TAB_URL: continue` in the wait")
+    if not reads:
+        problems.append("the wait reads no target id")
+    elif guard is not None and min(reads) < guard:
+        problems.append("a target id is read before the URL check")
+    claims = [
+        ast.unparse(node.test)
+        for statement in loop.body
+        for node in walk(statement)
+        if isinstance(node, ast.If) and any(isinstance(n, ast.Return) for n in node.body)
+    ]
+    if claims != ["found == target_id"]:
+        problems.append(f"the wait claims a tab on {claims}, not its target id")
+    return problems
+
+
+def test_the_tab_wait_reads_only_a_blank_tab() -> None:
+    """#634: the wait opens a page-level session (``_target_id``) only on a new tab still
+    on ``RUN_TAB_URL``, which the run created its tab on, and claims a tab only when its
+    target id is the one Chrome answered. A UI or Google tab you open meanwhile gets
+    nothing."""
+    from netkeeper.linkedin import browser
+
+    assert browser.RUN_TAB_URL == "about:blank"
+    assert tab_wait_problems(read_source(LINKEDIN / "browser.py")) == []
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        (" " * 24 + "if page.url != RUN_TAB_URL:\n", " " * 24 + "if False:\n"),
+        ("page.url != RUN_TAB_URL", "page.url == RUN_TAB_URL"),
+        ("page.url != RUN_TAB_URL", "page.url != page.url"),
+        ("if found == target_id:", "if found:"),
+    ],
+)
+def test_the_tab_wait_pin_catches_each_mutation(old: str, new: str) -> None:
+    source = read_source(LINKEDIN / "browser.py")
+    assert source.count(old) == 1
+    assert tab_wait_problems(source.replace(old, new))
+
+
+def test_the_tab_wait_pin_catches_a_read_before_the_url_check() -> None:
+    source = read_source(LINKEDIN / "browser.py")
+    guard = "                        if page.url != RUN_TAB_URL:\n"
+    assert source.count(guard) == 1
+    early = "                        await self._target_id(page)\n"
+    assert tab_wait_problems(source.replace(guard, early + guard))
+
+
+#: #634: what a run's ``close`` and ``bring_to_front`` may be called on in
+#: ``browser.py``: its own observations and tap, the provider's run, and ``page``, the
+#: run's own tab, in the functions that take it from ``self._page``.
+PAGE_ACTION_SITES = {
+    ("BrowserRun._open_body_tap", "tap.close"): 1,
+    ("BrowserRun.hand_over", "observation.close"): 1,
+    ("BrowserRun.close_sent_tab", "observation.close"): 1,
+    ("BrowserRun.close_sent_tab", "page.close"): 1,
+    ("BrowserRun.close", "observation.close"): 1,
+    ("BrowserRun.close", "page.close"): 1,
+    ("BrowserRun.bring_tab_forward", "page.bring_to_front"): 1,
+    ("AttachBrowserProvider.run", "run.close"): 1,
+}
+#: Where a function that closes or raises ``page`` may have taken it from: the run's
+#: own tab (``self._page``, or ``ensure_page``), or nothing.
+OWN_PAGE_SOURCES = frozenset(
+    {"self._page", "None", "cast(_MessagingPage, await self.ensure_page())"}
+)
+
+
+def page_action_problems(source: str) -> list[str]:
+    """Why a ``close`` or ``bring_to_front`` in ``source`` could act on a tab that isn't
+    the run's own (#634)."""
+    tree = parse(source)
+    scopes = _scoped(tree)
+    found: dict[tuple[str, str], int] = {}
+    problems = []
+    functions = {
+        scopes.get(id(node), ""): node
+        for node in walk(tree)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+    for node in walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"close", "bring_to_front"}
+        ):
+            key = (scopes.get(id(node), ""), ast.unparse(node.func))
+            found[key] = found.get(key, 0) + 1
+    if found != PAGE_ACTION_SITES:
+        problems.append(f"close and bring_to_front sites changed: {sorted(found)}")
+    for function, call in found:
+        if not call.startswith("page."):
+            continue
+        sources = []
+        for node in walk(functions[function]):
+            if not isinstance(node, ast.Assign):
+                continue
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "page":
+                    sources.append(ast.unparse(node.value))
+                elif isinstance(target, ast.Tuple) and isinstance(node.value, ast.Tuple):
+                    for name, value in zip(target.elts, node.value.elts, strict=False):
+                        if isinstance(name, ast.Name) and name.id == "page":
+                            sources.append(ast.unparse(value))
+        if not sources or not set(sources) <= OWN_PAGE_SOURCES:
+            problems.append(f"{function} takes `page` from {sources}")
+    return problems
+
+
+def test_close_and_bring_forward_act_only_on_the_runs_own_tab() -> None:
+    """#634: a run closes and brings forward only its own tab, never one it found in the
+    context. The behavior tests in ``tests/test_background_tab.py`` show it with a UI
+    tab and a Google tab beside the run's."""
+    assert page_action_problems(read_source(LINKEDIN / "browser.py")) == []
+
+
+#: The tail that only ``close_sent_tab`` has, so a mutation lands there and not in ``close``.
+_SENT_TAB_CLOSE = (
+    "        if page is not None and not page.is_closed():\n"
+    "            try:\n"
+    "                await page.close()\n"
+    "                self._tab_closed = True\n"
+)
+_FRONTED = "        self._fronted += 1\n"
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        (
+            "        page, self._page = self._page, None\n" + _SENT_TAB_CLOSE,
+            "        page, self._page = self._attachment.context.pages[0], None\n"
+            + _SENT_TAB_CLOSE,
+        ),
+        (
+            "        await page.bring_to_front()\n",
+            "        await self._attachment.context.pages[0].bring_to_front()\n",
+        ),
+        (
+            "        page = cast(_MessagingPage, await self.ensure_page())\n" + _FRONTED,
+            "        page = cast(_MessagingPage, self._attachment.context.pages[-1])\n" + _FRONTED,
+        ),
+    ],
+)
+def test_the_page_action_pin_catches_each_mutation(old: str, new: str) -> None:
+    source = read_source(LINKEDIN / "browser.py")
+    assert source.count(old) == 1
+    assert page_action_problems(source.replace(old, new))
 
 
 def test_hand_over_is_reached_only_from_the_prefill() -> None:
