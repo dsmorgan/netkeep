@@ -196,7 +196,7 @@ import_app = typer.Typer(
 )
 contacts_app = typer.Typer(help="Inspect and add contacts.", no_args_is_help=True)
 browser_app = typer.Typer(
-    help="The Chrome netkeeper attaches to (it never starts one).", no_args_is_help=True
+    help="The Chrome netkeeper attaches to (a run never starts one).", no_args_is_help=True
 )
 linkedin_app = typer.Typer(
     help="LinkedIn runs by hand, their history, cancel, and scheduled-run arming.",
@@ -706,8 +706,9 @@ def browser_launch(
 ) -> None:
     """Show how to start the Chrome that netkeeper attaches to.
 
-    Prints a command for you to run in a terminal. netkeeper never starts Chrome
-    itself: a second browser on your LinkedIn account is what gets accounts restricted.
+    Prints a command for you to run in a terminal. Only you start netkeeper's
+    Chrome, and a run never does (ADR 0012): a second browser identity on your
+    LinkedIn account is what gets accounts restricted.
 
     Use --json for the port and profile path, for scripts.
     """
@@ -734,7 +735,7 @@ def browser_launch(
             )
         )
         return
-    typer.echo("netkeeper attaches to a Chrome you start yourself. It never starts one.")
+    typer.echo("netkeeper attaches to a Chrome you start yourself. A run never starts one.")
     typer.echo("Run this in a terminal (again whenever that Chrome is not running):")
     typer.echo()
     for line in chrome_launch_command(cdp_port(cdp_url), profile):
@@ -1232,7 +1233,7 @@ def rehearse_command(
 
     It never touches LinkedIn. The site must be a loopback url, a linkedin.com
     host is refused by name, and a rehearsal that somehow reached one raises
-    instead of reporting. Nothing here launches a browser (ADR 0002).
+    instead of reporting. Nothing here launches a browser (ADR 0002, ADR 0012).
     """
     state = ctx.ensure_object(CliState)
     settings = _load_settings_or_exit(state)
@@ -5889,7 +5890,7 @@ def _authorize_or_exit(
 
 
 def _present_authorization_url(url: str) -> None:
-    """Show the URL. netkeeper never opens a browser itself (ADR 0002); the person does."""
+    """Show the URL. Gmail linkage opens it in the UI's own tab or by your hand (ADR 0012)."""
     typer.echo("Open this URL in the browser signed in to the Gmail account, and allow access:")
     typer.echo()
     typer.echo(f"  {url}")

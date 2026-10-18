@@ -2,7 +2,7 @@
 # Start the netkeeper Chrome profile with its remote-debugging port, for a person
 # to run by hand.
 #
-# netkeeper itself never starts a browser (ADR 0002): `netkeeper browser launch`
+# A run never starts a browser (ADR 0002, ADR 0012): `netkeeper browser launch`
 # only prints the command, and nothing in the package runs this script. This is
 # that printed command plus the checks a person otherwise does by hand: is it
 # already running, is the port taken by something else, is the profile open

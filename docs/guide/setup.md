@@ -5,7 +5,7 @@ This guide takes you from a fresh clone to a database full of your LinkedIn conn
 You use two Chrome windows, and they are different:
 
 - **The UI's Chrome** is your everyday Google Chrome, where you open netkeeper at <http://127.0.0.1:8000>. netkeeper's UI requires Chrome.
-- **The LinkedIn Chrome** is a second Chrome window, with its own profile and a debug port, that you start yourself. netkeeper attaches to it to read LinkedIn and to type LinkedIn messages. It never starts a browser itself ([ADR 0002](../adr/0002-attach-only-browser-mode.md)).
+- **netkeeper's Chrome** is a second Chrome, with its own profile and a debug port, that you start yourself. It holds the UI, LinkedIn, and setup steps such as Gmail linkage, so you have one place to look. netkeeper attaches to it to read LinkedIn and to type LinkedIn messages. A run never starts a browser ([ADR 0002](../adr/0002-attach-only-browser-mode.md), [ADR 0012](../adr/0012-chrome-profiles.md)).
 
 ## 1. Install
 

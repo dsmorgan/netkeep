@@ -82,7 +82,7 @@ Everything else is in the UI. These remain in a terminal or a file, most of them
 | Action | How |
 |---|---|
 | Start `serve` at login | Settings, Run at login, or `netkeeper login-item on`. See [Run at login](../../README.md#run-at-login-macos). Two data directories each need their own `web.port`: the second `serve` can't bind a port the first holds, and its login item would restart it every 10 seconds. |
-| Start the LinkedIn Chrome | `make chrome`, or the command `netkeeper browser launch` prints. netkeeper never starts a browser. |
+| Start the LinkedIn Chrome | `make chrome`, or the command `netkeeper browser launch` prints. A run never starts a browser; only you do. |
 | Check the LinkedIn Chrome (optional) | `netkeeper preflight`. |
 | Turn on LinkedIn auto-send | Settings, **Campaign defaults**, **LinkedIn auto-send**, and confirm. It applies from the next auto-send check, within 10 minutes. `config.toml`'s `[campaigns] linkedin_auto_send` still works and wins over the page. Read [ADR 0008](../adr/0008-auto-send.md) first. |
 | Import the old mailing tool's history (optional) | `netkeeper history import` and `netkeeper history scan-gmail`. See [the guide](../history-import.md). |

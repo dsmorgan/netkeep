@@ -4,7 +4,7 @@ Date: 2026-10-17
 
 ## Status
 
-Proposed (#618).
+Accepted (2026-10-17)
 
 ## Context
 
@@ -41,3 +41,7 @@ The mechanics are in [architecture.md, section 14.2](../architecture.md#142-loca
 - **Unverified:** `serve` now reads the Keychain on every start. If the Python that made the item changes, macOS may prompt then.
 - **Keep true:** no response carries the key, and no page script can read the cookie. A path joins the open list only when it reads no data and changes nothing, or when it carries its own one-time proof.
 - **Follow-up:** rotating the key, which disconnects every browser, isn't built yet.
+
+## Amendments
+
+- 2026-10-17, #618: accepted with two decisions: keep the automatic first-browser claim (rule 6), and build no key rotation for now (the follow-up above stays open).
