@@ -8123,8 +8123,9 @@ export interface components {
          *     Built from `netkeeper.services.posture.posture()` with no browser probe: a
          *     live attach-and-read-the-session check has to await browser work, which may
          *     not happen inside a request handler (CLAUDE.md), so the session protection
-         *     here is always reported unknown rather than checked live — `netkeeper
-         *     preflight` is the live check, still a terminal command only.
+         *     here answers from the last recorded evidence rather than a live check. The live
+         *     checks are `netkeeper preflight` in a terminal and a Check connection run
+         *     (`POST /linkedin/browser/check`, #652), which the task runner runs.
          *
          *     ``gaps`` are known limits of what this report can see, not warnings; they
          *     never affect ``ok``. Neither do ``notes``: a choice the user is entitled to
