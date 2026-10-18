@@ -10,10 +10,11 @@ pages table in docs/architecture.md names it as arriving with P2-12).
 Read-only and per-user: `posture()` is called with no browser probe (`probe=None`)
 -- a live attach-and-read-the-session check has to await browser work, and CLAUDE.md
 forbids that inside a request handler. The LinkedIn session row answers instead from
-the last evidence the database holds (#282): what `netkeeper preflight` or `netkeeper
-posture --probe` last recorded, or the newest run that read LinkedIn without flagging
-the session. With neither, it says unknown rather than assuming healthy. A live check
-stays `netkeeper preflight`, a terminal command.
+the last evidence the database holds (#282): what `netkeeper preflight`, `netkeeper
+posture --probe`, or a Check connection run (`POST /linkedin/browser/check`, #652) last
+recorded, or the newest run that read LinkedIn without flagging the session. With none,
+it says unknown rather than assuming healthy. A live check is `netkeeper preflight` in a
+terminal, or a Check connection run, which the task runner runs outside any request.
 """
 
 from __future__ import annotations
