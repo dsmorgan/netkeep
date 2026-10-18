@@ -2546,9 +2546,9 @@ def session_row(
     """The ``linkedin session`` row as the web page shows it, without the rest (#181).
 
     Exactly the row :func:`posture` gives a report that ran no probe: what
-    the last ``netkeeper preflight`` or ``posture --probe`` recorded, or the
-    newest run that read LinkedIn, and the session flag over both. Read-only;
-    nothing here attaches to the browser.
+    the last ``netkeeper preflight``, ``posture --probe`` or Check connection run
+    (#652) recorded, or the newest run that read LinkedIn, and the session flag
+    over both. Read-only; nothing here attaches to the browser.
     """
     zone, _ = _zone_of(settings.timezone)
     return _linkedin_session(

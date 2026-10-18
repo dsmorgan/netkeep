@@ -215,7 +215,8 @@ def session_flag(session: Session, user: User) -> SessionFlag | None:
 
 SESSION_EVIDENCE_KEY: Final = "linkedin.session_evidence"
 """The ``settings_kv`` key holding the last :class:`SessionEvidence` a browser
-check recorded (``netkeeper preflight``, ``netkeeper posture --probe``)."""
+check recorded (``netkeeper preflight``, ``netkeeper posture --probe``, a Check
+connection run, #652)."""
 
 #: How many of the account's newest ended runs :func:`run_evidence` looks through
 #: for one that read LinkedIn. A handful of refused or empty runs in a row is
@@ -230,7 +231,8 @@ _FLAG_OUTCOME_VALUES: Final = frozenset(outcome.value for outcome in _FLAGGABLE)
 class SessionEvidence:
     """What the last look at the LinkedIn session found, when, and who looked.
 
-    ``source`` is ``"preflight"``, ``"posture --probe"``, or ``"run <id>"``.
+    ``source`` is ``"preflight"``, ``"posture --probe"``, ``"check run <id>"`` (Check
+    connection, #652), or ``"run <id>"``.
     Cookie *names* only, never a value: this is what a web page shows when it
     cannot probe the browser itself (a request handler may not, spec 9.9), and it
     must not carry more than preflight read.
@@ -253,8 +255,9 @@ def record_session_evidence(
 ) -> SessionEvidence:
     """Store what a browser check just found about ``user``'s LinkedIn session.
 
-    Called by ``netkeeper preflight`` and ``netkeeper posture --probe`` after
-    they read the cookie jar, so a later page load (which never probes) can say
+    Called by ``netkeeper preflight``, ``netkeeper posture --probe``, and a Check
+    connection run (:mod:`netkeeper.services.session_check`, #652) after they read
+    the cookie jar, so a later page load (which never probes) can say
     what they found. Needs a writer session. Replaces any earlier record: only
     the latest one is kept.
     """
