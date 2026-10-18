@@ -2560,6 +2560,12 @@ def session_row(
     )
 
 
+def probe_row(probe: SessionProbe) -> Protection:
+    """The ``linkedin session`` row from a live probe alone, as ``posture --probe`` gives
+    it: what a Check connection run (#652) records on its run. Pure; it reads nothing."""
+    return _linkedin_session(probe, now=datetime.now(UTC), zone=ZoneInfo("UTC"))
+
+
 def _zone_of(name: str) -> tuple[ZoneInfo, str | None]:
     """``name`` as a zone, or UTC with the warning that says so."""
     try:

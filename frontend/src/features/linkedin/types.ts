@@ -58,6 +58,7 @@ export const RUN_KIND_LABELS: Record<RunKind, string> = {
   enrich: 'Enrichment',
   inbox: 'Inbox poll',
   message_send: 'LinkedIn prefill',
+  session_check: 'Connection check',
 }
 
 export const RUN_TRIGGER_LABELS: Record<RunTrigger, string> = {
@@ -65,13 +66,15 @@ export const RUN_TRIGGER_LABELS: Record<RunTrigger, string> = {
   scheduled: 'Scheduled',
 }
 
-/** Every run kind, for the runs filter: the inbox poll and the prefill included (#383). */
+/** Every run kind, for the runs filter: the inbox poll, the prefill (#383) and Check
+ * connection (#652) included. */
 export const RUN_KINDS: readonly RunKind[] = [
   'connections_full',
   'connections_incremental',
   'enrich',
   'inbox',
   'message_send',
+  'session_check',
 ]
 
 export const RUN_STATUS_LABELS: Record<RunStatus, string> = {

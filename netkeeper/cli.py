@@ -179,6 +179,7 @@ from netkeeper.worker import (
     run_message_check,
     serve_app,
 )
+from netkeeper.worker import session_probe as _session_probe  # moved there with #652
 
 log = logging.getLogger(__name__)
 
@@ -1130,33 +1131,6 @@ def _profile_cell(check: ProfileCheck) -> str:
     if check.dedicated:
         return f"netkeeper's ({check.profile}, pid {check.browser_pid})"
     return f"refused, {check.verdict.value.replace('_', ' ')} ({check.profile})"
-
-
-def _session_probe(report: PreflightReport) -> SessionProbe:
-    """A preflight report reduced to what a posture report may say about it.
-
-    The adapter lives here rather than in ``services.posture`` because that
-    module may not import ``linkedin.preflight``: a module under ``services/``
-    that reaches the browser is how browser work ends up inside a request
-    handler, and ``tests/test_browser_safety.py`` fails the build for it.
-
-    Cookie *names* cross this line and cookie values do not -- they cannot,
-    because preflight never read one and :class:`SessionProbe` has no field to
-    put one in (spec 9.1, CLAUDE.md).
-    """
-    logged_in: dict[LoginState, bool | None] = {
-        LoginState.LOGGED_IN: True,
-        LoginState.NO_SESSION: False,
-        LoginState.UNKNOWN: None,
-    }
-    return SessionProbe(
-        attached=report.attached,
-        logged_in=logged_in[report.login],
-        browser_version=report.browser_version,
-        cookie_names=report.session_cookies,
-        problems=report.problems,
-        profile=report.profile,
-    )
 
 
 @app.command("posture")

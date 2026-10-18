@@ -25,6 +25,7 @@ Still stuck? Open an issue with a support bundle and screenshots: see [Reporting
 | Chrome ignores the debug port | Chrome 136 and later refuse it on your default profile. Use the command netkeeper prints, which has its own `--user-data-dir`. |
 | Chrome won't start on the profile after a crash | `make chrome` clears the profile lock a crashed Chrome left behind. |
 | "the browser was busy with another run" | One netkeeper process uses the browser at a time. `netkeeper preflight` names the process that holds it. Wait for that run, or stop it. |
+| A **Connection check** run in the runs list, "read the LinkedIn session from Chrome's cookie jar; visited nothing" | A check of the LinkedIn Chrome and its session (`POST /api/v1/linkedin/browser/check`), like `netkeeper preflight`. It opens no page and spends no budget. Its result is the session line on the run and on **Settings**, under **Posture**. If it ended "Chrome was not reachable" or "isn't netkeeper's own profile", start the LinkedIn Chrome with `make chrome` and check again. |
 | Posture: the activity lock "is probably stuck", or is held by something netkeeper can't name | Stop the process the warning names. netkeeper releases the lock when its holder exits. |
 
 ## Why a LinkedIn run stopped

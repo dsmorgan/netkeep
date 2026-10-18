@@ -48,7 +48,6 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from netkeeper.chrome_profile import ProfileCheck, check_dedicated_profile
-from netkeeper.cli import _session_probe
 from netkeeper.config import Settings
 from netkeeper.db import session_scope
 from netkeeper.linkedin import activity_lock
@@ -98,6 +97,7 @@ from netkeeper.services.scheduler import (
 )
 from netkeeper.services.setting_checks import MAX_ACTIVE_WINDOW_HOURS, WEEKEND_DAMPING_CEILING
 from netkeeper.services.settings_kv import delete_setting, set_setting
+from netkeeper.worker import session_probe as _session_probe
 
 #: test_browser_safety.py's syntax-tree caches, emptied when this module ends (#478).
 ast_caches = browser_safety.ast_caches

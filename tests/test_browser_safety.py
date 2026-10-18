@@ -2621,8 +2621,8 @@ TAB_SCAN_NAMES = ("pages", "contexts")
 #:   (``test_the_tab_wait_reads_only_a_blank_tab``), then claimed only by target id.
 #: - ``BrowserRun.bubble_check``: reads only tabs on the LinkedIn origin it's given,
 #:   and never the run's own.
-#: - ``AttachBrowserProvider._attach`` and ``preflight``: take or count the contexts,
-#:   and read no tab.
+#: - ``AttachBrowserProvider._attach`` and preflight's ``read_session``: take or count
+#:   the contexts, and read no tab.
 #: - ``services/connections_sync.py``: not a tab at all. ``pages`` there is the sync's
 #:   count of result pages (``SyncRunReport.pages``, ``SyncResult.pages``, a progress
 #:   event's ``pages``); it's listed so that it's on record, not exempt by location.
@@ -2630,7 +2630,7 @@ TAB_SCANS = {
     (LINKEDIN / "browser.py", "BrowserRun._open_tab", "pages"): 2,
     (LINKEDIN / "browser.py", "BrowserRun.bubble_check", "pages"): 1,
     (LINKEDIN / "browser.py", "AttachBrowserProvider._attach", "contexts"): 1,
-    (LINKEDIN / "preflight.py", "preflight", "contexts"): 1,
+    (LINKEDIN / "preflight.py", "read_session", "contexts"): 1,
     (PACKAGE / "services" / "connections_sync.py", "SyncRunReport.counts", "pages"): 2,
     (
         PACKAGE / "services" / "connections_sync.py",

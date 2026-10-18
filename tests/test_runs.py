@@ -73,6 +73,7 @@ def test_the_safety_constants_are_the_specs() -> None:
         SyncRunKind.ENRICH,
         SyncRunKind.INBOX,
         SyncRunKind.MESSAGE_SEND,  # P4-03 (#382)
+        SyncRunKind.SESSION_CHECK,  # #652: Check connection
     } == runs.RUNNABLE_KINDS
 
 

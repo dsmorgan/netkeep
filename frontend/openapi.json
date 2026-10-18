@@ -14587,13 +14587,14 @@
         "type": "object"
       },
       "SyncRunKind": {
-        "description": "Spec 8.4's run kinds. ``message_send`` has no runner yet.",
+        "description": "Spec 8.4's run kinds, and ``session_check``: the Check connection run (#652),\nwhich reads the LinkedIn session from Chrome's cookie jar and visits nothing.",
         "enum": [
           "connections_full",
           "connections_incremental",
           "enrich",
           "inbox",
-          "message_send"
+          "message_send",
+          "session_check"
         ],
         "title": "SyncRunKind",
         "type": "string"
@@ -22720,6 +22721,37 @@
           }
         },
         "summary": "Get Browser",
+        "tags": [
+          "linkedin"
+        ]
+      }
+    },
+    "/api/v1/linkedin/browser/check": {
+      "post": {
+        "description": "Start a Check connection run; answers at once, before any browser work.\n\nThe run visits no page, so it spends no budget, and the session flag, heat, and\nactive hours don't stop it, as they don't stop ``netkeeper preflight``.",
+        "operationId": "check_linkedin_browser",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunAccepted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Only the local owner account checks netkeeper's Chrome"
+          },
+          "409": {
+            "description": "Another run is running, or another process holds the browser"
+          },
+          "503": {
+            "description": "This process has no browser worker"
+          }
+        },
+        "summary": "Check Browser",
         "tags": [
           "linkedin"
         ]
