@@ -87,6 +87,7 @@ from netkeeper.services.scheduler import (
     JobKind,
     JobOutcome,
     JobRegistry,
+    KindOffProvider,
     LastFire,
     build_scheduler,
     note_last_fire,
@@ -510,6 +511,7 @@ def start_serve_scheduler(
         heat_settings=settings.heat,
         rng=extractor.rng,
         clock=extractor.clock,
+        kind_off=auto_send_off(factory, whole),
     )
     built.start()
     log.info("scheduler started: %s", ", ".join(kind.value for kind in schedules))
@@ -522,6 +524,21 @@ def start_serve_scheduler(
         if warning is not None:
             log.warning("%s", warning)
     return ServeScheduler(executor=executor, scheduler=built)
+
+
+def auto_send_off(factory: sessionmaker[Session], base: Settings) -> KindOffProvider:
+    """For the scheduler (#598 review): the auto-send kind is off for a user whose flag
+    in force is off, read at each call over ``base`` (the file's settings). Every other
+    kind is never off."""
+
+    def off(user: User, kind: JobKind) -> bool:
+        if kind is not JobKind.AUTO_SEND:
+            return False
+        with session_scope(factory) as session:
+            fresh = session.get(User, user.id)
+            return fresh is None or not ui_settings.auto_send_on(session, fresh, base)
+
+    return off
 
 
 def user_active_hours(factory: sessionmaker[Session], base: Settings) -> ActiveHoursProvider:

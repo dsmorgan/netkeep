@@ -252,14 +252,16 @@ function FieldRow({
  * LinkedIn auto-send (#598). Off saves at once with no question: it stops any auto-send
  * that hasn't clicked Send. On saves only after the dialog, which states the risks in
  * the backend's words, and sends `confirm` with it. A value config.toml sets shows
- * locked, with the file's path.
+ * locked, with the file's path, and a `true` the page still holds under it can be cleared.
  */
 function ConfirmedSwitch({ field }: { field: ConfigField }) {
   const id = useId()
   const queryClient = useQueryClient()
   const [asking, setAsking] = useState(false)
   const save = useMutation({
-    mutationFn: (on: boolean) => saveConfigSettings({ [field.key]: on }, { confirm: on }),
+    // `null` clears the page's own value: allowed even while config.toml sets the key.
+    mutationFn: (on: boolean | null) =>
+      saveConfigSettings({ [field.key]: on }, { confirm: on === true }),
     onSuccess: (data: ConfigSettings) => {
       queryClient.setQueryData(configSettingsQuery.queryKey, data)
       // The posture report, the LinkedIn queue and the campaign pages all show it.
@@ -268,6 +270,9 @@ function ConfirmedSwitch({ field }: { field: ConfigField }) {
     },
   })
   const on = field.value === true
+  // config.toml wins, but the page still holds `true` under it: clear it here, so removing
+  // the file's line can never turn auto-send on with nobody confirming it (#598 review).
+  const hiddenOn = field.source === 'file' && field.ui_value === true
   return (
     <div className="space-y-1.5" role="group" aria-label={field.label}>
       <div className="flex flex-wrap items-center gap-2">
@@ -297,6 +302,17 @@ function ConfirmedSwitch({ field }: { field: ConfigField }) {
       </p>
       {field.locked_reason !== null && (
         <p className="text-muted-foreground">{field.locked_reason}</p>
+      )}
+      {hiddenOn && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={save.isPending}
+          onClick={() => save.mutate(null)}
+        >
+          Turn off this page&apos;s auto-send
+        </Button>
       )}
       {!asking && save.isError && <p role="alert">{message(save.error)}</p>}
       {field.warnings.map((w) => (

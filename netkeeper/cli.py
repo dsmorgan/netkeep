@@ -2736,7 +2736,8 @@ def restore(
     Refuses while serve runs, or while any other process has the database open. Backs
     up the database in place into backups/ first (a pre-restore backup, kept 30 days),
     so restoring that backup undoes this. Then writes the backup over the database in
-    one transaction (a failure leaves what was there) and runs db upgrade.
+    one transaction (a failure leaves what was there) and runs db upgrade. LinkedIn
+    auto-send set on the Settings page comes back off: turn it on again there.
     """
     directory = data_dir() / BACKUPS_DIRNAME
     try:
@@ -2768,6 +2769,11 @@ def restore(
         f"restored {result.source} (migration {result.source_revision}) to {result.database}"
     )
     typer.echo(f"ran db upgrade: the database is at migration {result.revision}")
+    if result.auto_send_cleared:
+        typer.echo(
+            "LinkedIn auto-send was on in the Settings page of the backup; it is off now."
+            " Turn it on again in Settings, with its confirmation, if you mean it."
+        )
     if result.previous is not None:
         typer.echo(f"to undo, run: netkeeper restore {result.previous.name}")
 

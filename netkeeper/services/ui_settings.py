@@ -38,7 +38,11 @@ a confirmation (:data:`AUTO_SEND_CONFIRM`, the ``confirm_auto_send`` argument to
 off applies at once: the scheduler's next fire claims nothing, and an auto-send already
 running stops at its next gate, before the navigation or before the Send click. On
 applies from the scheduler's next fire. A key ``config.toml`` sets wins here too, so the
-file and the page never disagree.
+file and the page never disagree. Two more rules keep a stored ``true`` from coming
+back with nobody confirming it: while the file sets the key, the page may still turn
+its own value off (``false``, or ``null`` to reset), never on; and ``serve`` drops a
+stored ``true`` at startup while the file sets the key (:func:`drop_overridden_auto_send`),
+as ``netkeeper restore`` drops one a backup brings back (:func:`drop_stored_auto_send`).
 
 **What is not here.** Secrets never are settings; they stay in the Keychain. ``web.*``
 stays file-only: it is the address the page itself is served from, so a wrong value
@@ -81,7 +85,7 @@ from netkeeper.services.setting_checks import (
     auto_send_warnings,
     weekend_multiplier_warnings,
 )
-from netkeeper.services.settings_kv import delete_setting, set_setting
+from netkeeper.services.settings_kv import delete_setting, get_setting, set_setting
 
 log = logging.getLogger(__name__)
 
@@ -154,6 +158,13 @@ AUTO_SEND_CONFIRM: Final = (
     " any auto-send that hasn't clicked Send yet."
 )
 """What turning LinkedIn auto-send on means, in the words the confirmation shows (#598)."""
+
+AUTO_SEND_HIDDEN_ON: Final = (
+    "This page also holds auto-send on, under config.toml's value. Removing the key from"
+    " config.toml would turn auto-send on, so turn the page's value off here; netkeeper"
+    " serve also clears it when it next starts."
+)
+"""Said while the file sets auto-send and the page still stores ``true`` (#598 review)."""
 
 _BUDGET_NOTE = (
     "Applies from the next LinkedIn run and the next prefill. A run already going keeps"
@@ -619,6 +630,31 @@ def _replace_path(node: Any, parts: list[str], value: object) -> Any:
     return replace(node, **{head: new})
 
 
+def drop_stored_auto_send(session: Session, user: User) -> bool:
+    """Remove ``user``'s stored page ``true`` for auto-send, so it is off unless the file
+    turns it on; True when there was one. Only a person's confirmation on the page turns
+    it on again. Needs a writer session."""
+    if get_setting(session, user, KEY_PREFIX + AUTO_SEND_KEY) is not True:
+        return False
+    delete_setting(session, user, KEY_PREFIX + AUTO_SEND_KEY)
+    return True
+
+
+def drop_overridden_auto_send(session: Session, user: User, base: Settings) -> bool:
+    """At ``serve``'s startup (#598 review): while ``config.toml`` sets auto-send, drop
+    ``user``'s stored page ``true``, so removing the file's line later can never bring it
+    back unconfirmed. True when one was dropped. Needs a writer session."""
+    if not file_sets(base, AUTO_SEND_KEY) or not drop_stored_auto_send(session, user):
+        return False
+    log.info(
+        "cleared user %d's LinkedIn auto-send setting from the Settings page: %s sets"
+        " campaigns.linkedin_auto_send, which wins; turn it on again on the page to use it",
+        user.id,
+        base.source_path,
+    )
+    return True
+
+
 def auto_send_on(session: Session, user: User, base: Settings) -> bool:
     """Whether LinkedIn auto-send is on for ``user`` now (#598): ``config.toml`` when it
     sets the key, else the Settings page, else off. Read where a send decides, never kept:
@@ -778,7 +814,9 @@ def write(
         if not spec.editable:
             problems[key] = spec.locked_reason or "the Settings page does not change it"
             continue
-        if file_sets(base, key):
+        if file_sets(base, key) and not (key == AUTO_SEND_KEY and (raw is False or raw is None)):
+            # Auto-send's own page value may always go off (#598 review): a hidden `true`
+            # under a file `false` would turn auto-send on once the file line is removed.
             problems[key] = (
                 f"{base.source_path} sets it, and the file wins; remove {key} there to"
                 " change it here"
@@ -915,6 +953,8 @@ def describe(
             and value_at(started, spec.key) != value
         )
         warnings, notes = checks(spec.key, effective)
+        if spec.key == AUTO_SEND_KEY and pinned and ui_value is True:
+            warnings = (*warnings, AUTO_SEND_HIDDEN_ON)
         views.append(
             FieldView(
                 spec=spec,

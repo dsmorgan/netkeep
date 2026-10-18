@@ -360,6 +360,44 @@ def test_restore_command_says_what_it_did(data: Path) -> None:
     assert _marker(data / DATABASE_FILENAME) == "original"
 
 
+def _page_auto_send(directory: Path, on: bool | None) -> bool:
+    """Set (or, with None, only read) the local user's Settings-page auto-send; the value
+    in force over the defaults."""
+    engine = make_engine(database_url(directory))
+    try:
+        factory = make_session_factory(engine)
+        install_scope_guard(factory)
+        with session_scope(factory, write=True) as session:
+            user = ensure_local_user(session)
+            if on is not None:
+                ui_settings.write(
+                    session, user, Settings(), {ui_settings.AUTO_SEND_KEY: on}, confirm_auto_send=on
+                )
+            return ui_settings.auto_send_on(session, user, Settings())
+    finally:
+        engine.dispose()
+
+
+def test_a_restore_turns_a_page_auto_send_from_the_backup_off(data: Path) -> None:
+    """#598 review: a backup taken with auto-send on never turns it on again unconfirmed."""
+    assert _page_auto_send(data, True) is True
+    saved = _backup_now(data, datetime(2026, 10, 1, tzinfo=UTC))
+    assert _page_auto_send(data, False) is False
+
+    result = CliRunner().invoke(cli, ["restore", saved.name])
+
+    assert result.exit_code == 0, result.output
+    assert "LinkedIn auto-send was on in the Settings page of the backup" in result.stdout
+    assert _page_auto_send(data, None) is False
+    assert _marker(data / DATABASE_FILENAME) == "original"  # the rest came back
+
+
+def test_a_restore_with_auto_send_off_says_nothing_about_it(data: Path) -> None:
+    saved = _backup_now(data, datetime(2026, 10, 1, tzinfo=UTC))
+    result = restore_backup(saved, database_url(data), data / "backups")
+    assert result.auto_send_cleared == ()
+
+
 def test_restore_command_refuses_while_serve_runs(data: Path) -> None:
     saved = _backup_now(data, datetime(2026, 10, 1, tzinfo=UTC))
     _mark(data, "live")

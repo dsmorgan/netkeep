@@ -38,6 +38,7 @@ from run_fakes import fake_provider
 from sqlalchemy.orm import Session, sessionmaker
 from test_linkedin_steps import LINKEDIN, Lane, make_lane
 
+from netkeeper import db as db_module
 from netkeeper.config import BudgetSettings, LinkedInSettings, Settings
 from netkeeper.linkedin.browser import (
     CLOSE_HIDDEN_TEXT,
@@ -880,10 +881,19 @@ def _last_fire(lane: Lane) -> Any:
     return lane.read(lambda s, u: scheduler.last_fire(s, u, account, scheduler.JobKind.AUTO_SEND))
 
 
-async def test_the_handler_claims_nothing_with_the_flag_off(lane: Lane) -> None:
+async def test_the_handler_claims_nothing_with_the_flag_off(
+    lane: Lane, monkeypatch: pytest.MonkeyPatch
+) -> None:
     lane.enroll(contact=dict(CONTACT))
     lane.write(lambda s, u: record_poll(s, u, NOW - timedelta(minutes=1)))
+
+    def no_writer(session: Session) -> None:
+        raise AssertionError("the handler opened a write session with auto-send off")
+
+    # Off, the handler only reads the flag: it never takes the SQLite write lock.
+    monkeypatch.setattr(db_module, "mark_for_write", no_writer)
     assert await _fire(lane, OFF, _NoTasks()) is scheduler.JobOutcome.NOTHING_TO_SEND
+    monkeypatch.undo()
     assert lane.runs() == []
     assert _last_fire(lane) is None  # off, the fire notes nothing
 
@@ -899,6 +909,38 @@ async def test_the_page_turning_auto_send_on_applies_from_the_next_fire(lane: La
     assert tasks.submitted == 1
     [run] = lane.runs()
     assert (run.kind, run.trigger) == (SyncRunKind.MESSAGE_SEND, SyncRunTrigger.SCHEDULED)
+
+
+async def test_two_users_each_have_their_own_switch(lane: Lane) -> None:
+    """#598: the flag is per user. The lane's user turns auto-send on and is claimed for;
+    a second user, off, gets nothing claimed and nothing noted."""
+    import factories
+
+    lane.enroll(contact=dict(CONTACT))
+    lane.write(lambda s, u: record_poll(s, u, NOW - timedelta(minutes=1)))
+    lane.write(_page_auto_send(True))
+
+    def second(session: Session, user: User) -> tuple[int, int]:
+        other = factories.make_user(session)
+        arm_scheduled_runs(session, other, now=NOW - timedelta(days=1))
+        return other.id, ensure_account(session, other).id
+
+    other_id, other_account = lane.write(second)
+    handler = scheduled_runs._auto_send_handler(
+        lane.factory, cast(Any, None), cast(Any, _NoTasks()), OFF, clock=lambda: NOW
+    )
+    ctx = scheduler.JobContext(other_id, other_account, scheduler.JobKind.AUTO_SEND, NOW, False)
+    assert await handler(ctx) is scheduler.JobOutcome.NOTHING_TO_SEND
+    with lane.factory() as session:
+        other = session.get(User, other_id)
+        assert other is not None
+        assert ui_settings.auto_send_on(session, other, OFF) is False
+        assert (
+            scheduler.last_fire(session, other, other_account, scheduler.JobKind.AUTO_SEND) is None
+        )
+    tasks = _SeenTasks()
+    assert await _fire(lane, OFF, tasks) is None
+    assert tasks.submitted == 1
 
 
 async def test_the_page_turning_auto_send_off_stops_the_next_fire(lane: Lane) -> None:

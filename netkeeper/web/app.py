@@ -29,7 +29,7 @@ from datetime import time, timedelta
 from types import ModuleType
 
 from fastapi import APIRouter, FastAPI
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from netkeeper import __version__, migrations
@@ -234,6 +234,10 @@ def _start(app: FastAPI, engine: Engine, settings: Settings) -> TaskRunner:
         # One whose account's browser lock is held right now belongs to a live
         # process (a `netkeeper linkedin sync` in a terminal) and is left alone.
         fail_interrupted_runs(session, now=utcnow())
+        # #598 review: a page `true` under a file that sets auto-send never outlives this
+        # start, so removing the file's line later cannot turn auto-send on unconfirmed.
+        for each in session.scalars(select(User).order_by(User.id)):
+            ui_settings.drop_overridden_auto_send(session, each, settings)
         started = ui_settings.resolve(session, user, settings)
         set_log_rotation(max_mb=started.logs.max_mb, keep=started.logs.keep)
         _log_settings_page_risks(settings, started)

@@ -21,13 +21,16 @@ from pathlib import Path
 
 from alembic.script import ScriptDirectory
 from alembic.util.exc import CommandError
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select
 from sqlalchemy.engine import URL, make_url
 
 from netkeeper import migrations
-from netkeeper.db import make_engine
+from netkeeper.db import make_engine, make_session_factory, session_scope
 from netkeeper.localtime import find_zone
 from netkeeper.logging_setup import personal
+from netkeeper.models import User
+from netkeeper.scoping import install_scope_guard
+from netkeeper.services import ui_settings
 
 BACKUPS_DIRNAME = "backups"
 STAMP_FORMAT = "%Y%m%dT%H%M%SZ"
@@ -71,6 +74,8 @@ class RestoreResult:
     source_revision: str
     revision: str | None
     """The revision after ``db upgrade``: the head of this netkeeper."""
+    auto_send_cleared: tuple[int, ...] = ()
+    """The users whose Settings-page LinkedIn auto-send the backup had on, now off (#598)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -285,6 +290,9 @@ def restore_backup(
        process that opened the path while the lock was held reads the restored
        database once it gets in.
     4. The migrations run to head (``db upgrade``).
+    5. A Settings-page LinkedIn auto-send the backup had on is turned off, for each
+       user, and logged (#598): only a person's confirmation on the page turns it on,
+       and a restore is not that. ``config.toml`` still wins where it sets the key.
 
     Nothing is pruned: the backup of the database replaced must outlive the restore.
     Between the exclusive connection closing and the migrations, a process that was
@@ -323,6 +331,7 @@ def restore_backup(
     try:
         migrations.upgrade(engine)
         revision = migrations.current_revision(engine)
+        cleared = _turn_auto_send_off(engine)
     except Exception as exc:
         before = (
             "" if previous is None else f"; the database it replaced is backed up at {previous}"
@@ -339,7 +348,26 @@ def restore_backup(
         previous=previous,
         source_revision=source_revision,
         revision=revision,
+        auto_send_cleared=cleared,
     )
+
+
+def _turn_auto_send_off(engine: Engine) -> tuple[int, ...]:
+    """Step 5 of :func:`restore_backup`: each user's stored page ``true`` for auto-send,
+    removed. The ids of the users it was on for."""
+    factory = make_session_factory(engine)
+    install_scope_guard(factory)
+    cleared: list[int] = []
+    with session_scope(factory, write=True) as session:
+        for user in session.scalars(select(User).order_by(User.id)):
+            if ui_settings.drop_stored_auto_send(session, user):
+                cleared.append(user.id)
+                log.info(
+                    "restore: turned off user %d's LinkedIn auto-send from the Settings page;"
+                    " turn it on again there, with its confirmation, to use it",
+                    user.id,
+                )
+    return tuple(cleared)
 
 
 IN_USE = "another netkeeper process has the database open; stop it and retry"
