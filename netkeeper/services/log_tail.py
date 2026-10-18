@@ -30,7 +30,7 @@ from typing import Final, Literal
 
 from netkeeper.logging_setup import LOG_DIRNAME, PERSONAL_CLOSE, PERSONAL_OPEN
 from netkeeper.paths import data_dir
-from netkeeper.redaction import SECRET, Redactor
+from netkeeper.redaction import MESSAGE_LEFT_OUT, SECRET, Redactor
 from netkeeper.services.support_bundle import log_files
 
 log = logging.getLogger(__name__)
@@ -38,6 +38,9 @@ log = logging.getLogger(__name__)
 MAX_LINES: Final = 1000
 """The most records one request returns."""
 DEFAULT_LINES: Final = 200
+SPAN_MAX_LINES: Final = 200
+SPAN_MAX_BYTES: Final = 64 * 1024
+"""How far a personal span may run before the record is cut (an unterminated marker)."""
 
 LevelName = Literal["debug", "info", "warning", "error", "critical"]
 Reason = Literal["no_log_file", "empty_log", "no_match"]
@@ -89,24 +92,39 @@ def _records(directory: Path) -> Iterable[str]:
     """Every record of every log file, oldest first, as raw text.
 
     A span open at the end of a file carries on into the next one: a rotation can fall
-    inside a record's span."""
+    inside a record's span. A span that stays open past :data:`SPAN_MAX_LINES` lines or
+    :data:`SPAN_MAX_BYTES` bytes (an unterminated marker) ends its record with
+    :data:`~netkeeper.redaction.MESSAGE_LEFT_OUT`; the lines after that are dropped
+    unread, not split into records, until one holds a closing marker."""
     current: list[str] | None = None
+    size = 0
     opened = False  # inside a personal span: the next line continues the record
+    dropping = False  # past the cap: skip lines until a closing marker
     for path in log_files(directory):
         try:
             with path.open(encoding="utf-8", errors="replace") as handle:
                 for line in handle:
+                    if dropping:
+                        if PERSONAL_CLOSE in line:
+                            dropping = line.rfind(PERSONAL_OPEN) > line.rfind(PERSONAL_CLOSE)
+                        continue
                     if current is not None and opened:
                         current.append(line)
+                        size += len(line)
                     elif _HEADER.match(line):
                         if current is not None:
                             yield "".join(current)
-                        current = [line]
+                        current, size = [line], len(line)
                     elif current is not None:
                         current.append(line)
+                        size += len(line)
                     else:
                         continue
                     opened = _span_open(opened, line)
+                    if opened and (len(current) > SPAN_MAX_LINES or size > SPAN_MAX_BYTES):
+                        text = "".join(current)
+                        yield text[: text.rfind(PERSONAL_OPEN)] + MESSAGE_LEFT_OUT
+                        current, size, opened, dropping = None, 0, False, True
         except OSError as exc:
             log.warning("log tail: cannot read a log file: %s", type(exc).__name__)
             continue
