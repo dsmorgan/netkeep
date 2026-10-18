@@ -3358,6 +3358,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/support/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Logs
+         * @description The newest ``lines`` log records at ``level`` or above, within ``since``..``until``
+         *     (a time without an offset is local), oldest first, redacted like the support bundle.
+         */
+        get: operations["get_recent_logs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tags": {
         parameters: {
             query?: never;
@@ -7104,6 +7125,27 @@ export interface components {
             filter?: components["schemas"]["FilterTree-Input"] | null;
             /** Name */
             name?: string | null;
+        };
+        /** LogLineOut */
+        LogLineOut: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Level */
+            level: string;
+            /** Logger */
+            logger: string;
+            /** Message */
+            message: string;
+        };
+        /** LogTailOut */
+        LogTailOut: {
+            /** Lines */
+            lines: components["schemas"]["LogLineOut"][];
+            /** Reason */
+            reason: ("no_log_file" | "empty_log" | "no_match") | null;
         };
         /** LoginItemIn */
         LoginItemIn: {
@@ -16642,6 +16684,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SupportLevelsOut"];
+                };
+            };
+        };
+    };
+    get_recent_logs: {
+        parameters: {
+            query?: {
+                lines?: number;
+                level?: ("debug" | "info" | "warning" | "error" | "critical") | null;
+                since?: string | null;
+                until?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogTailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
