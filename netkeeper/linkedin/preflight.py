@@ -47,6 +47,11 @@ CSRF_COOKIE = "JSESSIONID"
 #: Cookie-jar domain suffix the session is looked for under. This is a string
 #: compared against cookies already in the browser, never a URL anything requests.
 COOKIE_DOMAIN_SUFFIX = "linkedin.com"
+#: The only URLs the cookie read asks for (ADR 0012, #633). The browser returns a cookie
+#: when its domain and path match one of these, so Google's, and every other site's, never
+#: leave the jar. ``www.linkedin.com`` sees cookies set on ``.linkedin.com``,
+#: ``.www.linkedin.com`` and ``www.linkedin.com``, which is where both names below live.
+COOKIE_URLS = ("https://www.linkedin.com/",)
 
 # Read on the blank tab the run opens. Nothing here is overridden or spoofed
 # anywhere in netkeeper; the point is to show the user what LinkedIn will see.
@@ -183,12 +188,13 @@ class _SessionCookie:
 async def _read_session_cookies(context: ContextLike) -> tuple[_SessionCookie, ...] | None:
     """The LinkedIn cookies in the user's jar, by name. None when the jar is unreadable.
 
-    ``context.cookies()`` is a DevTools read of cookies the browser already holds. It
-    sends nothing to linkedin.com, and this function copies names and expiry times
+    ``context.cookies(COOKIE_URLS)`` is a DevTools read of cookies the browser already
+    holds, scoped to LinkedIn so no other site's cookie reaches this process (ADR 0012).
+    It sends nothing to linkedin.com, and this function copies names and expiry times
     only: no code path here can put a cookie value in a log line or a report.
     """
     try:
-        jar = await context.cookies()
+        jar = await context.cookies(COOKIE_URLS)
     except Exception as exc:
         log.warning("could not read the browser's cookie jar: %s", personal_exc(exc))
         return None
