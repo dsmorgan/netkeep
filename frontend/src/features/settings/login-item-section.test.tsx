@@ -101,14 +101,21 @@ describe('LoginItemSection', () => {
   })
 
   it('tells you how to check and links the launchctl entry', async () => {
-    renderSection(OFF)
+    renderSection({ ...OFF, enabled: true, state: 'Registered: starts at next login' })
     expect(
       await screen.findByText(/open netkeeper's bookmark without starting/),
     ).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'If it is not there' })).toHaveAttribute(
+    expect(screen.getByText('fun.tnkr.netkeeper')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: "If the page doesn't open" })).toHaveAttribute(
       'href',
       expect.stringContaining('troubleshooting.md#run-at-login-does-nothing'),
     )
+  })
+
+  it('hides the How to check line while it is off', async () => {
+    renderSection(OFF)
+    await screen.findByText('Off')
+    expect(screen.queryByText(/How to check/)).not.toBeInTheDocument()
   })
 
   it('says why the switch is disabled off macOS', async () => {

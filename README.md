@@ -70,7 +70,7 @@ Settings, **Run at login**, has a switch, "Start netkeeper when I log in". It in
 
 ```sh
 netkeeper login-item on                  # install or replace the agent (--host and --port pass through to serve)
-netkeeper login-item status              # starts at login? loaded in launchd? which plist and log?
+netkeeper login-item status              # which state? starts at login? loaded in launchd? which plist and log?
 netkeeper login-item off                 # stop the agent and remove the plist; data and logs stay
 NETKEEPER_DATA=~/nk netkeeper login-item on   # another data directory gets its own agent
 ```

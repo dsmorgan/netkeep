@@ -173,7 +173,10 @@ class Status:
     def state(self) -> State:
         """What to tell the person. A leftover old-script agent comes first: it cannot
         start, so nothing else about it is true. Running means launchd has the job (this
-        ``serve`` is that job, or another copy of it is)."""
+        ``serve`` is that job, or another copy of it is). ``loaded`` counts because the CLI
+        can never be the job, so it is the only signal there; in the web API, loaded without
+        ``this_serve_is_the_agent`` means the agent is waiting behind this serve. A plist that
+        runs another netkeeper wins over Running: an old checkout's agent is usually loaded."""
         if self.legacy:
             return State.NEEDS_REPAIR
         if not self.enabled:

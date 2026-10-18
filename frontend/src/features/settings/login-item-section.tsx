@@ -100,7 +100,7 @@ export function LoginItemSection() {
             {repair.isError && <p role="alert">{message(repair.error)}</p>}
             {change.isSuccess && change.data.message && <p role="status">{change.data.message}</p>}
             {change.isError && <p role="alert">{message(change.error)}</p>}
-            {item.supported && (
+            {item.supported && item.enabled && (
               <p className="text-muted-foreground">
                 How to check: after your next login, open netkeeper&apos;s bookmark without starting
                 anything.{' '}
@@ -110,13 +110,15 @@ export function LoginItemSection() {
                   rel="noreferrer"
                   className="underline underline-offset-2"
                 >
-                  If it is not there
+                  If the page doesn't open
                 </a>
-                , the troubleshooting entry shows how to ask launchd.
+                , the troubleshooting entry shows how to ask launchd about the agent.
               </p>
             )}
             {item.supported && (
               <p className="text-muted-foreground">
+                Agent label: <code className="font-mono text-xs break-all">{item.label}</code>
+                <br />
                 Log: <code className="font-mono text-xs break-all">{item.log_path}</code>
               </p>
             )}
