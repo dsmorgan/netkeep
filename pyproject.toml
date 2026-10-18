@@ -48,7 +48,7 @@ dependencies = [
   "openpyxl>=3.1",
   # Template spelling warnings (#522): pure Python, its English word list ships inside
   # the package, so the check needs no system library and never fetches anything.
-  "pyspellchecker==0.8.3",
+  "pyspellchecker==0.9.1",
 ]
 
 [project.optional-dependencies]
