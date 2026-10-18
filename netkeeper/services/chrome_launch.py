@@ -33,6 +33,11 @@ class LaunchStatus(enum.StrEnum):
     """netkeeper's Chrome was running; it opened the UI's app window, and the process
     the launcher started exited."""
 
+    HANDOFF_UNCONFIRMED = "handoff_unconfirmed"
+    """netkeeper's Chrome was running and still holds the profile, but the process the
+    launcher started exited nonzero, so the window can't be confirmed. It probably
+    opened: Chrome may exit nonzero after notifying the running instance."""
+
     REFUSED = "refused"
     """A check before the spawn refused; nothing was started. :attr:`LaunchResult.refusal`
     says which."""
@@ -73,6 +78,12 @@ class LaunchResult:
     def opened(self) -> bool:
         """Whether the UI's window is now open in netkeeper's Chrome."""
         return self.status in (LaunchStatus.STARTED, LaunchStatus.HANDED_OFF)
+
+    @property
+    def reached_chrome(self) -> bool:
+        """Whether the launch reached netkeeper's Chrome: opened, or a hand-off that
+        couldn't be confirmed. ``netkeeper open`` exits 0 for these."""
+        return self.opened or self.status is LaunchStatus.HANDOFF_UNCONFIRMED
 
 
 @dataclass(frozen=True, slots=True)

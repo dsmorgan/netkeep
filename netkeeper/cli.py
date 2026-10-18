@@ -418,7 +418,7 @@ def open_command(
         # The address in force (#597), the same one `browser launch` prints.
         cdp_url = _load_settings_or_exit(state).linkedin.cdp_url
         launched = asyncio.run(_open_launcher(cdp_url, base, key).start())
-        if launched.opened:
+        if launched.reached_chrome:
             typer.echo(f"{launched.message}.")
         else:
             typer.echo(f"netkeeper's Chrome: {launched.message}.", err=True)
@@ -427,7 +427,7 @@ def open_command(
     typer.echo("two minutes):")
     typer.echo()
     typer.echo(f"  {link}")
-    if launched is not None and not launched.opened:
+    if launched is not None and not launched.reached_chrome:
         raise typer.Exit(code=1)
 
 

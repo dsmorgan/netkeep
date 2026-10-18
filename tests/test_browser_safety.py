@@ -970,7 +970,12 @@ def launchctl_pin_problems(source: str) -> list[str]:
             problems.append(f"line {node.lineno}: 'subprocess' as a string (getattr?)")
         if isinstance(node, ast.Name) and node.id in _SPAWN_BANNED_NAMES:
             problems.append(f"line {node.lineno}: {node.id}")
-        if isinstance(node, ast.Attribute) and node.attr in _SPAWN_BANNED_NAMES | {"modules"}:
+        if isinstance(node, ast.Attribute) and node.attr in _SPAWN_BANNED_NAMES | {
+            "modules",
+            "__dict__",
+            "__getattribute__",
+            "getattr_static",
+        }:
             problems.append(f"line {node.lineno}: .{node.attr}")
     imports = [n for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom))]
     for node in imports:
@@ -1183,7 +1188,12 @@ def chrome_spawn_pin_problems(source: str) -> list[str]:
             problems.append(f"line {node.lineno}: 'subprocess' as a string (getattr?)")
         if isinstance(node, ast.Name) and node.id in _SPAWN_BANNED_NAMES:
             problems.append(f"line {node.lineno}: {node.id}")
-        if isinstance(node, ast.Attribute) and node.attr in _SPAWN_BANNED_NAMES | {"modules"}:
+        if isinstance(node, ast.Attribute) and node.attr in _SPAWN_BANNED_NAMES | {
+            "modules",
+            "__dict__",
+            "__getattribute__",
+            "getattr_static",
+        }:
             problems.append(f"line {node.lineno}: .{node.attr}")
     imports = [
         node
@@ -1432,6 +1442,14 @@ _IN_PORT_ANSWERS = (
             f"_p = getattr(asyncio, 'create_subprocess_' + 'exec')\n\n\n{_PORT_ANSWERS}",
         ),
         (_PORT_ANSWERS, f"_p = vars(subprocess)['Popen']\n\n\n{_PORT_ANSWERS}"),
+        # #658 re-review: disguised names.
+        (
+            _PORT_ANSWERS,
+            f"_p = asyncio.__dict__['create_subprocess_' + 'exec']\n\n\n{_PORT_ANSWERS}",
+        ),
+        (_PORT_ANSWERS, f"_p = socket.os.__dict__['posix_' + 'spawn']\n\n\n{_PORT_ANSWERS}"),
+        (_PORT_ANSWERS, f"_p = object.__getattribute__(asyncio, 'x')\n\n\n{_PORT_ANSWERS}"),
+        (_PORT_ANSWERS, f"_p = inspect.getattr_static(asyncio, 'x')\n\n\n{_PORT_ANSWERS}"),
     ],
 )
 def test_the_chrome_spawn_pin_rejects_every_other_way_to_start_a_process(

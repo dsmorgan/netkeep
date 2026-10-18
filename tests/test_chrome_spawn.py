@@ -559,3 +559,35 @@ async def test_a_cold_start_another_chrome_took_is_not_a_start(tmp_path: Path) -
     case = _Case(process=_Process(exits=0))
     result = await case.launcher(tmp_path).start()
     assert result.status is LaunchStatus.FAILED, result
+
+
+@pytest.mark.parametrize("status", [21, 3])
+async def test_a_hand_off_that_exits_nonzero_is_unconfirmed_not_failed(
+    tmp_path: Path, status: int
+) -> None:
+    """Chrome may exit nonzero after notifying the running instance (#658 re-review)."""
+    case = _Case(
+        answers=True,
+        probe=PortProbe(busy=False, browser_pid=LOCK_PID),
+        lock_pid=LOCK_PID,
+        process=_Process(exits=status),
+    )
+    result = await case.launcher(tmp_path).start()
+    assert result.status is LaunchStatus.HANDOFF_UNCONFIRMED, result
+    assert result.reached_chrome and not result.opened
+    assert f"exited with status {status}" in result.message
+    assert "probably opened in the running Chrome" in result.message
+    assert ("profile in use" in result.message) is (status == 21)
+
+
+async def test_a_nonzero_hand_off_after_which_another_pid_holds_the_profile_failed(
+    tmp_path: Path,
+) -> None:
+    case = _Case(
+        answers=True,
+        probe=PortProbe(busy=False, browser_pid=LOCK_PID),
+        lock_pid=LOCK_PID,
+        process=_Process(exits=21),
+        takes_over=True,
+    )
+    assert (await case.launcher(tmp_path).start()).status is LaunchStatus.FAILED

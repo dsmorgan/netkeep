@@ -360,3 +360,47 @@ async def test_a_launch_that_raises_still_reports_failed(
         pass
     assert event.data["status"] == "failed" and event.data["task_id"] == response.json()["task_id"]
     assert "RuntimeError" in event.data["message"]
+
+
+async def test_a_busy_legacy_lock_never_trusts_a_note_left_on_the_free_account_lock(
+    tmp_path: Path,
+) -> None:
+    key = activity_lock.SINGLE_ACCOUNT_KEY
+    # A crash left a note naming a Chrome on the account's lock file; nobody holds it.
+    activity_lock.lock_path(key, tmp_path).parent.mkdir(parents=True, exist_ok=True)
+    activity_lock.lock_path(key, tmp_path).write_text(
+        '{"pid": 1, "command": "netkeeper serve", "browser_pid": 4242}'
+    )
+    legacy = activity_lock.try_claim(activity_lock.LEGACY_SHARED_KEY, tmp_path)
+    assert legacy is not None
+    try:
+        probe = await launcher_probe(
+            CDP_URL,
+            locks=ActivityLocks(tmp_path, legacy_partner=key),
+            account=key,
+            connector=FakeConnector(),
+        )
+    finally:
+        legacy.release()
+    assert probe == PortProbe(busy=True, verified_pid=None)
+
+
+def test_netkeeper_open_exits_0_for_an_unconfirmed_hand_off(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    chrome = os.getpid()
+    profile = data_dir() / "chrome-profile"
+    profile.mkdir(parents=True)
+    (profile / "SingletonLock").symlink_to(f"fakehost.local-{chrome}")
+
+    async def probe(url: str, **_: object) -> PortProbe:
+        return PortProbe(busy=False, browser_pid=chrome)
+
+    spawned = _Spawned(exits=21)
+    monkeypatch.setattr(chrome_spawn, "spawn_chrome", spawned)
+    monkeypatch.setattr(chrome_spawn, "port_answers", lambda port: True)
+    monkeypatch.setattr(cli_module, "launcher_probe", probe)
+    result = CliRunner().invoke(cli, [*_config(tmp_path), "open"])
+    assert result.exit_code == 0, result.output
+    assert "can't confirm the window opened" in result.output
+    assert re.findall(r"http://\S+/api/v1/session/connect\S+", result.output)
