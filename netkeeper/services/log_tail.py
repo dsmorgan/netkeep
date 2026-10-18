@@ -7,8 +7,14 @@ The Logs view's read: ``<data>/logs/netkeeper.log`` and its rotated files, the n
 with the live local key and its cookie value added, so a page never shows a marked
 personal value, an address or a credential.
 
-A record is whole: a line that does not start with a date continues the record above
-it (a traceback), and the redaction keeps only its shape.
+A record is whole: a line that does not start with ``date LEVEL logger`` (a known
+level, a dotted logger name) continues the record above it (a traceback), and the
+redaction keeps only its shape. So does every line while a personal span is open, even
+one that starts with a date, as in the support bundle. The redaction runs over the whole
+record before it is split into fields, so no field carries text it has not seen.
+
+The log has no UTC offset, so the records of the hour that repeats when daylight saving
+time ends cannot be told apart, and the ``since`` and ``until`` filters cannot either.
 """
 
 from __future__ import annotations
@@ -22,9 +28,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Final, Literal
 
-from netkeeper.logging_setup import LOG_DIRNAME
+from netkeeper.logging_setup import LOG_DIRNAME, PERSONAL_CLOSE, PERSONAL_OPEN
 from netkeeper.paths import data_dir
-from netkeeper.redaction import RECORD_START, SECRET, Redactor
+from netkeeper.redaction import SECRET, Redactor
 from netkeeper.services.support_bundle import log_files
 
 log = logging.getLogger(__name__)
@@ -37,12 +43,15 @@ LevelName = Literal["debug", "info", "warning", "error", "critical"]
 Reason = Literal["no_log_file", "empty_log", "no_match"]
 
 _RANK: Final = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40, "CRITICAL": 50}
+_LEVELS: Final = "|".join(_RANK)
 _RECORD: Final = re.compile(
-    r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (\w+) (\S+)(?: (.*))?$", re.DOTALL
+    rf"^(\d{{4}}-\d{{2}}-\d{{2}} \d{{2}}:\d{{2}}:\d{{2}}) ({_LEVELS}) ([A-Za-z_][\w.]*)(?: (.*))?$",
+    re.DOTALL,
+)
+_HEADER: Final = re.compile(
+    rf"^\d{{4}}-\d{{2}}-\d{{2}} \d{{2}}:\d{{2}}:\d{{2}} (?:{_LEVELS}) [A-Za-z_][\w.]*(?: |$)"
 )
 _STAMP: Final = "%Y-%m-%d %H:%M:%S"
-_DUMMY_START: Final = "2000-01-01 00:00:00 "
-"""Stands in front of a message so the redaction sees it as a record's first line."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,24 +77,41 @@ def _cutoff(moment: datetime | None) -> str | None:
     return local.strftime(_STAMP)
 
 
+def _span_open(was_open: bool, line: str) -> bool:
+    """Whether a personal span is open after ``line``, given whether one was before it."""
+    opening, closing = line.rfind(PERSONAL_OPEN), line.rfind(PERSONAL_CLOSE)
+    if opening == closing:  # neither marker is here
+        return was_open
+    return opening > closing
+
+
 def _records(directory: Path) -> Iterable[str]:
-    """Every record of every log file, oldest first, as raw text."""
+    """Every record of every log file, oldest first, as raw text.
+
+    A span open at the end of a file carries on into the next one: a rotation can fall
+    inside a record's span."""
+    current: list[str] | None = None
+    opened = False  # inside a personal span: the next line continues the record
     for path in log_files(directory):
-        current: list[str] | None = None
         try:
             with path.open(encoding="utf-8", errors="replace") as handle:
                 for line in handle:
-                    if RECORD_START.match(line):
+                    if current is not None and opened:
+                        current.append(line)
+                    elif _HEADER.match(line):
                         if current is not None:
                             yield "".join(current)
                         current = [line]
                     elif current is not None:
                         current.append(line)
+                    else:
+                        continue
+                    opened = _span_open(opened, line)
         except OSError as exc:
             log.warning("log tail: cannot read a log file: %s", type(exc).__name__)
             continue
-        if current is not None:
-            yield "".join(current)
+    if current is not None:
+        yield "".join(current)
 
 
 def _scrub_exact(text: str, secrets: Iterable[str]) -> str:
@@ -113,7 +139,7 @@ def recent_lines(
     directory = data_dir() / LOG_DIRNAME if directory is None else directory
     if not any(True for _ in log_files(directory)):
         return LogTail((), "no_log_file")
-    kept: deque[re.Match[str]] = deque(maxlen=lines)
+    kept: deque[str] = deque(maxlen=lines)
     seen = False
     for record in _records(directory):
         seen = True
@@ -125,22 +151,24 @@ def recent_lines(
             continue
         if (start is not None and at < start) or (end is not None and at > end):
             continue
-        kept.append(found)
+        kept.append(record)
     if not seen:
         return LogTail((), "empty_log")
     redactor = Redactor([(data_dir(), "<data>"), (Path.home(), "~")])
     out: list[LogLine] = []
     secret_values = tuple(secrets)
-    for found in kept:
-        text = _scrub_exact(found.group(4) or "", secret_values)
-        message = redactor.log(_DUMMY_START + text)[len(_DUMMY_START) :]
-        logger = _scrub_exact(found.group(3), secret_values)
+    for record in kept:
+        # Every field comes from the record after the whole redaction pass.
+        text = redactor.log(_scrub_exact(record, secret_values))
+        found = _RECORD.match(text.rstrip("\n"))
+        if found is None:
+            continue
         out.append(
             LogLine(
                 at=datetime.strptime(found.group(1), _STAMP).astimezone(),
-                level=found.group(2).upper(),
-                logger=redactor.scrub(logger),
-                message=message,
+                level=found.group(2),
+                logger=found.group(3),
+                message=found.group(4) or "",
             )
         )
     return LogTail(tuple(out), None if out else "no_match")
