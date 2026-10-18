@@ -13,6 +13,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from isolation.harness import acting_as
+from local_api import LocalKey
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -511,7 +512,9 @@ async def test_only_the_owner_sees_the_chrome_profile_path(
 async def _served(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as c:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://127.0.0.1", auth=LocalKey(app)
+        ) as c:
             yield c
 
 
