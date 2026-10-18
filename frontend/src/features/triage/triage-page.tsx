@@ -342,7 +342,7 @@ export function TriagePage() {
       {queue.actionErrors.length > 0 && (
         <div
           role="alert"
-          className="flex flex-col gap-1 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          className="flex flex-col gap-1 rounded-lg bg-bad-soft px-3 py-2 text-sm text-destructive"
         >
           {queue.actionErrors.map((failure, index) => (
             <p key={`${index}-${failure}`}>{failure}</p>

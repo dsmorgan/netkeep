@@ -360,7 +360,7 @@ export function AddContactForm({ onDone }: { onDone: () => void }) {
       )}
 
       {failure !== null && (
-        <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-destructive">
+        <p role="alert" className="rounded-lg bg-bad-soft px-3 py-2 text-destructive">
           {failure}
         </p>
       )}

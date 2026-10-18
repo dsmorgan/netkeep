@@ -229,10 +229,7 @@ function BulkConfirmDialog({
         )}
 
         {!composing && refusal && (
-          <div
-            role="alert"
-            className="grid gap-2 rounded-lg bg-destructive/10 p-3 text-destructive"
-          >
+          <div role="alert" className="grid gap-2 rounded-lg bg-bad-soft p-3 text-destructive">
             <p>{refusalMessage(refusal)}</p>
             <p className="text-destructive/80">Nothing was changed.</p>
           </div>

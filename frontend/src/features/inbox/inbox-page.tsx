@@ -36,7 +36,7 @@ const KIND_LABELS: Record<InboxKind, string> = {
 const KIND_CLASSES: Record<InboxKind, string> = {
   reply: 'bg-ok-soft text-ok-ink',
   unsubscribe: 'bg-warn-soft text-warn-ink',
-  bounce: 'bg-destructive/10 text-destructive',
+  bounce: 'bg-bad-soft text-destructive',
 }
 
 function ChannelBadge({ item }: { item: InboxItem }) {

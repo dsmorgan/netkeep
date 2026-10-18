@@ -351,7 +351,7 @@ function StepBody({
       return (
         <>
           {step.state === 'failing' && (
-            <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-destructive">
+            <p role="alert" className="rounded-lg bg-bad-soft px-3 py-2 text-destructive">
               Gmail refused the token when you connected: the Gmail API is off in this project.
               Enable it, then connect again.
             </p>
@@ -474,7 +474,7 @@ function StepBody({
       if (stale !== undefined) {
         return (
           <>
-            <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-destructive">
+            <p role="alert" className="rounded-lg bg-bad-soft px-3 py-2 text-destructive">
               <strong>{stale.email}</strong> needs re-authorizing.{' '}
               {reasonText(stale.status_reason) ?? 'Google no longer accepts its token.'}
             </p>

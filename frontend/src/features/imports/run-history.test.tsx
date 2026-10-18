@@ -216,14 +216,14 @@ describe('one import run', () => {
 
     // This caller never passes ConfirmDialog a confirmVariant (R-08): a
     // rollback is genuinely destructive, so it must render that way by the
-    // component's own default, not by this caller opting in. `bg-destructive/10`
+    // component's own default, not by this caller opting in. `bg-bad-soft`
     // is the destructive variant's own class (button.tsx) — not the generic
     // `aria-invalid:*-destructive*` classes every button carries regardless
     // of variant, and not `default`'s `bg-primary`.
     const confirmButton = dialog.getByRole('button', {
       name: 'Delete 2 contacts and restore the rest',
     })
-    expect(confirmButton.className).toContain('bg-destructive/10')
+    expect(confirmButton.className).toContain('bg-bad-soft')
     expect(confirmButton.className).not.toContain('bg-primary')
 
     fireEvent.click(confirmButton)

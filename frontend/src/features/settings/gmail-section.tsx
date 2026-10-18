@@ -108,7 +108,7 @@ export function GmailSection({ outcome }: { outcome: GmailOutcome }) {
           </p>
         )}
         {outcome.gmail === 'error' && (
-          <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-destructive">
+          <p role="alert" className="rounded-lg bg-bad-soft px-3 py-2 text-destructive">
             Gmail was not connected. {reasonText(outcome.reason) ?? 'Start again.'}
           </p>
         )}

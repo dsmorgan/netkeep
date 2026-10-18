@@ -716,6 +716,30 @@ describe('RepliesCard', () => {
     )
     expect(body.queryByText(/\d+ repl/)).not.toBeInTheDocument()
   })
+
+  // #606: the card is tinted green only when something came in.
+  const repliesCard = () =>
+    screen
+      .getByRole('heading', { level: 2, name: 'Replies this week' })
+      .closest('[data-slot="card"]')
+
+  it('is tinted green when inbound messages came in', async () => {
+    renderCard(RepliesCard, { [PATH]: json(inbound(3)) })
+    await screen.findByText(/inbound messages \(email and LinkedIn\)/)
+    expect(repliesCard()).toHaveAttribute('data-tone', 'ok')
+  })
+
+  it('stays plain when nothing came in', async () => {
+    renderCard(RepliesCard, { [PATH]: json(inbound(0)) })
+    await screen.findByText('No inbound messages logged in the last 7 days.')
+    expect(repliesCard()).not.toHaveAttribute('data-tone')
+  })
+
+  it('stays plain when the count could not be loaded', async () => {
+    renderCard(RepliesCard, { [PATH]: broken })
+    await screen.findByText('Inbound messages could not be loaded.')
+    expect(repliesCard()).not.toHaveAttribute('data-tone')
+  })
 })
 
 // --- changed jobs ------------------------------------------------------------------------

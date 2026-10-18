@@ -6,7 +6,7 @@ export const RUN_STATUS_CLASSES: Record<RunStatus, string> = {
   running: 'bg-accent-soft text-accent-ink',
   completed: 'bg-ok-soft text-ok-ink',
   aborted: 'bg-warn-soft text-warn-ink',
-  failed: 'bg-destructive/10 text-destructive',
+  failed: 'bg-bad-soft text-destructive',
 }
 
 /**

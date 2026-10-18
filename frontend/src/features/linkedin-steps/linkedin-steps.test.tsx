@@ -615,6 +615,16 @@ describe('waiting for you', () => {
     expect(tray).toHaveClass('nk-tray')
   })
 
+  it('leaves the waiting list plain when nothing waits (#606)', async () => {
+    renderSection()
+    await screen.findByText('Nothing waits for you.')
+    const card = screen
+      .getByRole('heading', { level: 2, name: 'Waiting for you' })
+      .closest('[data-slot="card"]')
+    expect(card).not.toHaveAttribute('data-tone')
+    expect(card).not.toHaveClass('nk-tint')
+  })
+
   it('highlights a stale message', async () => {
     renderSection({
       'GET /api/v1/campaigns/linkedin/waiting': () =>
