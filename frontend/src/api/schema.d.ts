@@ -2195,8 +2195,8 @@ export interface paths {
          * Get Browser
          * @description ``netkeeper browser launch``'s instructions, as data (spec 9.1, ADR 0002).
          *
-         *     netkeeper never starts Chrome; it only ever prints (here, shows) the command
-         *     for a person to run themselves. Everything below comes from config -- no
+         *     Only a person starts netkeeper's Chrome, and a run never does (ADR 0012); this
+         *     shows the command for a person to run themselves. Everything below comes from config -- no
          *     attach, so this never awaits browser work (CLAUDE.md). The address is the one in
          *     force (the file, then the Settings page, #597): after a change Chrome is started
          *     on the new port, then serve restarted to attach there. Owner only: the profile
