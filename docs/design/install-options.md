@@ -135,11 +135,11 @@ cryptography 49.0.0 removed macOS x86_64 support, and 48.0.1 is the last release
 - **`--no-build`.** The resolver then picks only versions that have a wheel for the machine, which lands on the same 48.x for Intel without naming it. It's less explicit, and it can fail to resolve where the constraint would have said why.
 - **Apple silicon only.** The simplest, and Intel Macs are a shrinking share; but it drops users we may have.
 
-The ADR recommends the first, with a CI job that installs the built wheel on a macOS x86_64 runner, for as long as 48.x is acceptable. Whether Intel is in 1.0 at all is the maintainer's call.
+The ADR recommends the first, with a CI job that installs the built wheel on a macOS x86_64 runner, for as long as 48.x is acceptable. The maintainer decided that Intel is in 1.0 (2026-10-18).
 
 ### The PyPI name
 
-Resolved: the project is renamed to `netkeep` (#661), so none of the fallbacks above is needed. The text below records the research.
+Resolved: the project is renamed to `netkeep` (#661), so none of the fallbacks below is needed. The text below records the research.
 
 `https://pypi.org/simple/netkeeper/` (JSON) answers `"status": "active"` with no versions or files: the name is registered by someone, with no releases. `/pypi/netkeeper/json` answers 404 only because there are no releases. Unless the maintainer owns it, a first upload gets 403. The fallbacks:
 
