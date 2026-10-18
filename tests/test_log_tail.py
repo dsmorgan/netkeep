@@ -327,3 +327,53 @@ async def test_only_the_owner_reads_the_logs(
     assert response.status_code == 403
     assert "visible" not in response.text
     assert _messages(await _get(client)) == ["visible to the owner"]
+
+
+# --- a personal span that holds a line shaped like a record ---------------------------
+
+SPAN_SECRET = ("Jane", "Doe-Secret", "jane.private")
+
+
+def _span_log() -> list[str]:
+    return [
+        "2026-10-18 09:00:00 INFO netkeeper.x saved ⟦line one\n"
+        "2026-10-18 09:00:01 Jane Doe-Secret jane.private⟧ done\n",
+    ]
+
+
+async def test_a_span_holding_a_record_shaped_line_is_one_redacted_record(
+    client: httpx.AsyncClient,
+) -> None:
+    _write(*_span_log(), _record(START, "INFO", "after"))
+    body = await _get(client)
+    assert len(body["lines"]) == 2  # type: ignore[arg-type]
+    assert _leaks(str(body), SPAN_SECRET) == []
+    assert "saved <personal-1> done" in _messages(body)[0]
+
+
+async def test_a_span_crossing_a_rotated_file_boundary_is_redacted(
+    client: httpx.AsyncClient,
+) -> None:
+    _write("2026-10-18 09:00:00 INFO netkeeper.x saved ⟦line one\n", name=f"{LOG_FILENAME}.1")
+    _write(
+        "2026-10-18 09:00:01 Jane Doe-Secret jane.private⟧ done\n",
+        _record(START, "INFO", "after"),
+    )
+    body = await _get(client)
+    assert len(body["lines"]) == 2  # type: ignore[arg-type]
+    assert _leaks(str(body), SPAN_SECRET) == []
+
+
+async def test_a_dated_line_with_no_known_level_or_logger_is_not_a_record(
+    client: httpx.AsyncClient,
+) -> None:
+    _write(
+        _record(START, "INFO", "first"),
+        "2026-10-18 09:00:01 Jane Doe-Secret says hello\n",
+        "2026-10-18 09:00:02 NOTICE not.a.level text\n",
+    )
+    body = await _get(client)
+    assert len(body["lines"]) == 1  # type: ignore[arg-type]
+    for line in body["lines"]:  # type: ignore[attr-defined]
+        assert line["level"] == "INFO"
+        assert line["logger"] == "netkeeper.test"
