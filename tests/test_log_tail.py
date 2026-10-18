@@ -332,36 +332,115 @@ async def test_only_the_owner_reads_the_logs(
 # --- a personal span that holds a line shaped like a record ---------------------------
 
 SPAN_SECRET = ("Jane", "Doe-Secret", "jane.private")
+FORGED = (
+    "2026-10-18 09:00:01 Jane Doe-Secret jane.private\u27e7 done\n",  # unknown level
+    "2026-10-18 09:00:01 ERROR netkeeper.forged Jane Doe-Secret jane.private\u27e7 done\n",
+)
+OPENER = "2026-10-18 09:00:00 INFO netkeeper.x saved \u27e6line one\n"
 
 
-def _span_log() -> list[str]:
-    return [
-        "2026-10-18 09:00:00 INFO netkeeper.x saved ⟦line one\n"
-        "2026-10-18 09:00:01 Jane Doe-Secret jane.private⟧ done\n",
-    ]
-
-
+@pytest.mark.parametrize("forged", FORGED)
 async def test_a_span_holding_a_record_shaped_line_is_one_redacted_record(
-    client: httpx.AsyncClient,
+    client: httpx.AsyncClient, forged: str
 ) -> None:
-    _write(*_span_log(), _record(START, "INFO", "after"))
+    _write(OPENER + forged, _record(START, "INFO", "after"))
     body = await _get(client)
     assert len(body["lines"]) == 2  # type: ignore[arg-type]
     assert _leaks(str(body), SPAN_SECRET) == []
     assert "saved <personal-1> done" in _messages(body)[0]
+    assert (await _get(client, level="error"))["reason"] == "no_match"
 
 
+@pytest.mark.parametrize("forged", FORGED)
 async def test_a_span_crossing_a_rotated_file_boundary_is_redacted(
-    client: httpx.AsyncClient,
+    client: httpx.AsyncClient, forged: str
 ) -> None:
-    _write("2026-10-18 09:00:00 INFO netkeeper.x saved ⟦line one\n", name=f"{LOG_FILENAME}.1")
-    _write(
-        "2026-10-18 09:00:01 Jane Doe-Secret jane.private⟧ done\n",
-        _record(START, "INFO", "after"),
-    )
+    _write(OPENER, name=f"{LOG_FILENAME}.1")
+    _write(forged, _record(START, "INFO", "after"))
     body = await _get(client)
     assert len(body["lines"]) == 2  # type: ignore[arg-type]
     assert _leaks(str(body), SPAN_SECRET) == []
+    assert (await _get(client, level="error"))["reason"] == "no_match"
+
+
+# --- an unterminated span is capped -----------------------------------------------------
+
+
+def test_the_span_limits_are_pinned() -> None:
+    assert log_tail.SPAN_MAX_LINES == 200
+    assert log_tail.SPAN_MAX_BYTES == 64 * 1024
+
+
+def _unterminated(count: int, *, forged: bool = False) -> list[str]:
+    """A cut-short span, then ``count`` ordinary records."""
+    cut = "2026-10-18 09:00:00 INFO netkeeper.x cut \u27e6Jane Doe-Secret\n"
+    more = []
+    for n in range(count):
+        who = "ERROR netkeeper.forged Jane Doe-Secret" if forged and n == 5 else "INFO netkeeper.y"
+        more.append(f"2026-10-18 09:01:{n % 60:02d} {who} swallowed {n}\n")
+    return [cut + "".join(more)]
+
+
+async def test_an_unterminated_span_ends_its_record_and_drops_the_rest(
+    client: httpx.AsyncClient,
+) -> None:
+    _write(
+        *_unterminated(500, forged=True), "ignored\u27e7 tail\n", _record(START, "INFO", "later")
+    )
+    body = await _get(client)
+    assert _messages(body)[0].startswith("cut ")
+    assert "<message left out>" in _messages(body)[0]
+    assert _messages(body)[-1] == "later"
+    assert len(body["lines"]) == 2  # type: ignore[arg-type]
+    assert not any("swallowed" in m for m in _messages(body))
+    assert _leaks(str(body), SPAN_SECRET) == []
+    assert (await _get(client, level="error"))["reason"] == "no_match"
+
+
+async def test_a_span_just_under_the_line_cap_is_kept_whole(client: httpx.AsyncClient) -> None:
+    middle = "".join(f"line {n}\n" for n in range(log_tail.SPAN_MAX_LINES - 3))
+    _write(
+        "2026-10-18 09:00:00 INFO netkeeper.x a \u27e6b\n" + middle + "c\u27e7 end\n",
+        _record(START, "INFO", "later"),
+    )
+    body = await _get(client)
+    assert _messages(body)[0].endswith("end")
+    assert _messages(body)[-1] == "later"
+
+
+async def test_a_span_past_the_byte_cap_is_cut(client: httpx.AsyncClient) -> None:
+    big = "x" * 1000 + "\n"
+    _write(
+        "2026-10-18 09:00:00 INFO netkeeper.x a \u27e6b\n" + big * 70 + "c\u27e7 end\n",
+        _record(START, "INFO", "later"),
+    )
+    body = await _get(client)
+    assert "<message left out>" in _messages(body)[0]
+    assert _messages(body)[-1] == "later"
+
+
+async def test_a_normal_record_after_an_unterminated_marker_still_comes_back(
+    client: httpx.AsyncClient,
+) -> None:
+    _write(*_unterminated(400), "tail\u27e7\n", _record(START, "WARNING", "still here"))
+    body = await _get(client, level="warning")
+    assert _messages(body) == ["still here"]
+
+
+def test_a_huge_unterminated_log_stays_small(tmp_path: Path) -> None:
+    import tracemalloc
+
+    line = "2026-10-18 09:01:00 INFO netkeeper.y " + "a" * 80 + "\n"
+    (tmp_path / LOG_FILENAME).write_text(
+        "2026-10-18 09:00:00 INFO netkeeper.x cut \u27e6Jane\n" + line * (10_000_000 // len(line))
+    )
+    tracemalloc.start()
+    tail = log_tail.recent_lines(directory=tmp_path)
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    assert peak < 2_000_000
+    assert len(tail.lines) == 1
+    assert len(tail.lines[0].message) < 200
 
 
 async def test_a_dated_line_with_no_known_level_or_logger_is_not_a_record(
