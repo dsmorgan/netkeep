@@ -107,7 +107,7 @@ The table shows each manual step in [networking-workflow.md](networking-workflow
 ### 4.2 Non-functional
 
 - N1. macOS 14+ is the primary platform. Linux via container is supported for everything; the LinkedIn steps need Chrome on the same host as the backend.
-- N2. Chrome is the only supported browser for the UI. The LinkedIn steps drive netkeeper's Chrome over CDP: a Chrome you start yourself, with its own profile, which also holds the UI and setup tabs (ADR 0012). The UI works in any browser. Firefox and Safari have no CDP.
+- N2. Chrome is the only supported browser for the UI. The LinkedIn steps drive netkeeper's Chrome over CDP: a Chrome you start yourself, with its own profile, which also holds the UI and setup tabs (ADR 0012). The UI requires Chrome, and it works the same in a Chrome other than netkeeper's, with no hint (ADR 0012 rule 8). Firefox and Safari have no CDP.
 - N3. All data lives in one SQLite file plus a secrets store in the macOS Keychain. Backups are one command.
 - N4. The web UI binds `127.0.0.1` only and needs no login in local mode, but state-changing API calls are protected against cross-site requests from other local pages.
 - N8. Every user-owned row carries `user_id`, every query is scoped through one helper, and a two-user isolation test covers every list endpoint. Nothing in v1 needs this; retrofitting it is what would be expensive.
@@ -194,7 +194,7 @@ Deferred until the local form has matured, and decided by a future ADR: login an
 |---|---|---|
 | Language | Python 3.12 | Matches igtracker; Playwright, SQLAlchemy, and the Google client libraries are mature here |
 | Package manager | `uv` | Fast, lockfile, `uv run` for scripts |
-| Browser driver | Playwright (Python) `connect_over_cdp` | No bundled browser needed in attach mode; any Chromium works for the LinkedIn steps' own browser (the UI itself requires Chrome, N2) |
+| Browser driver | Playwright (Python) `connect_over_cdp` | No bundled browser needed in attach mode; netkeeper's Chrome holds the UI too (ADR 0012); any Chromium works for the LinkedIn steps' own browser, but the UI requires Chrome (N2) |
 | Database | SQLite via SQLAlchemy 2.0, Alembic migrations, WAL mode | Single file, zero ops, fast enough for 10k contacts. `UTCDateTime` decorator from igtracker |
 | Web framework | FastAPI, Pydantic v2, `sse-starlette` | Typed API, OpenAPI for free, SSE for progress |
 | Scheduler | APScheduler 3.x (asyncio) | Proven in igtracker including the restart-safe next-fire logic |
@@ -448,7 +448,7 @@ open -na "Google Chrome" --args \
 
 Chrome 136 and later refuse `--remote-debugging-port` on the default profile directory, so a dedicated profile is mandatory. You log in to LinkedIn in that profile once. LinkedIn sees one new device at setup and then a stable one. Use that profile for your own LinkedIn browsing too, so organic activity and sidecar activity share a session.
 
-This Chrome is netkeeper's one Chrome (ADR 0012): the UI opens as an app window in it, and setup tabs such as Gmail linkage open there too. Only you start it (a button, `netkeeper open`, or a start-at-login setting you turn on); a run never spawns anything, and attaches only to the configured port serving this profile. One launcher is the only spawn, with the flags above plus the UI's `--app` URL (#636).
+This Chrome is netkeeper's one Chrome (ADR 0012): setup tabs such as Gmail linkage open there, and so does the UI. *Planned (#636, #549, #599):* one launcher, the only spawn, opens the UI as an `--app` window in it, with the flags above plus the UI's `--app` URL, started only by you through a button, `netkeeper open`, or a start-at-login setting. *Today,* `netkeeper open` only prints a one-time link, and you start the Chrome by hand. Either way a run never spawns anything, and attaches only to the configured port serving this profile (#624).
 
 Invariants inherited from igtracker: reuse `browser.contexts[0]`; open one tab per run and close only that tab; never `add_init_script` or `route` on the shared context; never write cookies; never override the UA or timezone. [ADR 0006](adr/0006-observe-dont-request.md) adds two: never intercept, alter, or answer a request, and never send one of netkeeper's own; netkeeper reads the responses its tab's page loads (9.3). [ADR 0007](adr/0007-prefill-inputs.md) (#375) adds the prefill's inputs: one click on **Message**, at most one focus on the verified composer, typing into that one verified, empty composer for the contact, never Enter and never a Send click, and a prefill run that hands its tab to you instead of closing it (11.6). `netkeeper preflight` verifies the attach, that the profile still holds a LinkedIn session, and that its fingerprint looks like a normal Chrome. It answers all three locally and navigates nowhere: the session state comes from the names and expiry of the profile's own cookies, read over CDP, and the fingerprint from `navigator` properties on the blank tab the run opens. Whether a session is not merely present but still accepted is something only a job can learn, from the classification in 9.7. Cookie values are never read, reported, or logged.
 
