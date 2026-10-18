@@ -2586,9 +2586,12 @@ class ContextLike(Protocol):
         this, scoped to its own loopback fixture, against the developer's
         real Chrome profile (spec 9.1).
 
-        ``netkeeper.linkedin.preflight`` scopes its read to LinkedIn's URLs
-        (#633, ADR 0012). Every ``cookies(`` call in the package must pass ``urls``;
-        ``tests/test_cookie_read_scope.py`` enforces it.
+        Netkeeper's own code never calls this (#633, ADR 0012): Playwright's
+        Chromium driver fetches the whole profile's jar, every site's cookie
+        value included, into its Node process before it filters by ``urls``.
+        ``netkeeper.linkedin.preflight`` sends CDP ``Network.getCookies`` with
+        ``urls`` instead, so Chrome filters first. ``tests/test_cookie_read_scope.py``
+        refuses any other way to read the jar in ``netkeeper/``.
         """
         ...
 

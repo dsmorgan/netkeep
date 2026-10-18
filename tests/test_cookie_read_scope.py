@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from urllib.parse import urlparse
 
+import pytest
 from browser_fakes import FakeContext
 from test_preflight import FAKE_CSRF_VALUE, FAKE_SESSION_VALUE, cookie, make_provider
 
@@ -29,22 +31,68 @@ def google_jar() -> list[dict[str, object]]:
     ]
 
 
-def unscoped_calls(source: str) -> list[int]:
-    """Line numbers of ``.cookies(...)`` calls that pass no urls, or ``urls=None``."""
+BANNED_ATTRIBUTES = frozenset({"cookies", "storage_state"})
+BANNED_NAMES = frozenset({"cookies", "storage_state"})
+BANNED_METHODS = frozenset({"Storage.getCookies", "Network.getAllCookies"})
+SCOPED_METHOD = "Network.getCookies"
+
+
+def _scoped_urls(params: ast.expr | None) -> bool:
+    """True when the params are a dict whose ``urls`` is not None or an empty literal."""
+    if not isinstance(params, ast.Dict):
+        return False
+    for key, value in zip(params.keys, params.values, strict=True):
+        if isinstance(key, ast.Constant) and key.value == "urls":
+            if isinstance(value, ast.Constant):
+                return False
+            return not (isinstance(value, ast.List | ast.Tuple | ast.Set) and not value.elts)
+    return False
+
+
+def jar_reads(source: str) -> list[int]:
+    """Line numbers that could read the whole cookie jar.
+
+    Playwright's ``cookies`` and ``storage_state`` (an attribute of anything, aliased
+    or called, or named to ``getattr``), the CDP methods that return every cookie, and
+    ``Network.getCookies`` sent without a non-empty ``urls``. The one allowed read is
+    CDP ``Network.getCookies`` with ``urls``.
+    """
     bad: list[int] = []
-    for node in ast.walk(ast.parse(source)):
-        if not (
+    allowed: set[int] = set()
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "cookies"
+            and node.func.attr == "send"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and node.args[0].value == SCOPED_METHOD
+            and _scoped_urls(node.args[1] if len(node.args) > 1 else None)
         ):
-            continue
-        urls = node.args[0] if node.args else None
-        for keyword in node.keywords:
-            if keyword.arg == "urls":
-                urls = keyword.value
-        if urls is None or (isinstance(urls, ast.Constant) and urls.value is None):
-            bad.append(node.lineno)
+            allowed.add(id(node.args[0]))
+    for node in ast.walk(tree):
+        line = getattr(node, "lineno", 0)
+        if (
+            (isinstance(node, ast.Attribute) and node.attr in BANNED_ATTRIBUTES)
+            or (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in {"getattr", "hasattr"}
+                and any(
+                    isinstance(arg, ast.Constant) and arg.value in BANNED_NAMES for arg in node.args
+                )
+            )
+            or (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and (
+                    node.value in BANNED_METHODS
+                    or (node.value == SCOPED_METHOD and id(node) not in allowed)
+                )
+            )
+        ):
+            bad.append(line)
     return bad
 
 
@@ -53,8 +101,24 @@ def unscoped_calls(source: str) -> list[int]:
 
 async def test_the_fake_returns_google_cookies_to_an_unscoped_read() -> None:
     context = FakeContext(cookies=google_jar())
-    names = {item["name"] for item in await context.cookies()}
-    assert "SID" in names  # the hazard the scoped read removes
+    urls: str | list[str] | tuple[str, ...] | None
+    for urls in (None, [], ()):
+        names = {item["name"] for item in await context.cookies(urls)}
+        assert "SID" in names  # the hazard the scoped read removes
+
+
+async def test_the_fake_honors_path_and_secure_like_the_browser() -> None:
+    jar = [
+        cookie("li_at", FAKE_SESSION_VALUE),
+        {**cookie("elsewhere", "x"), "path": "/foo"},
+        {**cookie("insecure-only", "x"), "secure": True},
+    ]
+    context = FakeContext(cookies=jar)
+    assert [c["name"] for c in await context.cookies(["https://www.linkedin.com/"])] == [
+        "li_at",
+        "insecure-only",
+    ]
+    assert [c["name"] for c in await context.cookies(["http://www.linkedin.com/"])] == ["li_at"]
 
 
 # --- the preflight read ------------------------------------------------------
@@ -65,8 +129,18 @@ async def test_the_preflight_read_is_scoped_to_linkedin() -> None:
 
     context = make_context(google_jar())
     await preflight(provider_for(context))
-    assert context.last_cookies_urls == COOKIE_URLS
+    assert context.last_cookies_urls == list(COOKIE_URLS)
     assert all("linkedin.com" in url for url in COOKIE_URLS)
+
+
+async def test_the_read_is_one_session_that_enables_nothing_and_detaches() -> None:
+    from test_preflight import make_context, provider_for
+
+    context = make_context(google_jar())
+    await preflight(provider_for(context))
+    (session,) = context.cookie_sessions
+    assert session.calls == [("Network.getCookies", {"urls": list(COOKIE_URLS)})]
+    assert session.detached
 
 
 async def test_google_cookies_never_reach_the_read() -> None:
@@ -98,24 +172,60 @@ async def test_a_google_only_jar_reads_as_no_session() -> None:
     assert report.login is LoginState.NO_SESSION
 
 
-# --- every call in the package -----------------------------------------------
+# --- every way to read the jar in the package -------------------------------
 
 
-def test_every_cookies_call_in_the_package_passes_urls() -> None:
+def test_nothing_in_the_package_reads_the_whole_jar() -> None:
     found = {
         f"{path.relative_to(PACKAGE.parent)}:{n}"
         for path in PACKAGE.rglob("*.py")
-        for n in unscoped_calls(path.read_text())
+        for n in jar_reads(path.read_text())
     }
-    assert not found, f"pass urls to cookies() (ADR 0012): {sorted(found)}"
+    assert not found, (
+        f"read cookies only with CDP Network.getCookies and urls (ADR 0012): {sorted(found)}"
+    )
 
 
-def test_the_scanner_flags_an_unscoped_call() -> None:
-    assert unscoped_calls("jar = await context.cookies()") == [1]
-    assert unscoped_calls("jar = await context.cookies(None)") == [1]
-    assert unscoped_calls("jar = await context.cookies(urls=None)") == [1]
+def test_the_cookie_urls_are_linkedins_alone() -> None:
+    assert COOKIE_URLS
+    assert all(urlparse(url).hostname == "www.linkedin.com" for url in COOKIE_URLS)
 
 
-def test_the_scanner_passes_a_scoped_call() -> None:
-    assert unscoped_calls("jar = await context.cookies(COOKIE_URLS)") == []
-    assert unscoped_calls("jar = await context.cookies(urls=['https://x.invalid/'])") == []
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        "jar = await context.cookies()",
+        "jar = await context.cookies(['https://www.linkedin.com/'])",
+        "jar = await context.cookies([])",
+        "jar = await context.cookies(())",
+        "jar = await context.cookies(*a)",
+        "f = ctx.cookies\nawait f()",
+        "f = getattr(ctx, 'cookies')\nawait f()",
+        "await ctx.storage_state()",
+        "f = getattr(ctx, 'storage_state')",
+        "await session.send('Storage.getCookies')",
+        "await session.send('Storage.getCookies', {'browserContextId': b})",
+        "await session.send('Network.getAllCookies')",
+        "await session.send('Network.getCookies')",
+        "await session.send('Network.getCookies', {})",
+        "await session.send('Network.getCookies', {'urls': []})",
+        "await session.send('Network.getCookies', {'urls': ()})",
+        "await session.send('Network.getCookies', {'urls': None})",
+        "await session.send('Network.getCookies', params)",
+        "method = 'Network.getCookies'\nawait session.send(method, {'urls': u})",
+    ],
+)
+def test_the_scanner_flags_a_read_of_the_whole_jar(snippet: str) -> None:
+    assert jar_reads(snippet)
+
+
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        "await session.send('Network.getCookies', {'urls': list(COOKIE_URLS)})",
+        "await session.send('Network.getCookies', {'urls': ['https://www.linkedin.com/']})",
+        "await session.send('Page.getLayoutMetrics')",
+    ],
+)
+def test_the_scanner_passes_the_scoped_read(snippet: str) -> None:
+    assert jar_reads(snippet) == []
