@@ -9,8 +9,10 @@ from __future__ import annotations
 import io
 import logging
 import re
+import shlex
 import zipfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator, Sequence
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
@@ -18,8 +20,11 @@ import pytest
 from fastapi import FastAPI
 from gmail_fakes import MemoryKeyring
 from local_api import LocalKey
+from sqlalchemy import Engine
+from starlette.routing import BaseRoute
 from typer.testing import CliRunner
 
+from netkeeper import paths
 from netkeeper.cli import app as cli
 from netkeeper.config import Settings
 from netkeeper.db import session_scope
@@ -34,6 +39,7 @@ from netkeeper.services import keychain, local_api_key
 from netkeeper.services.local_api_key import LocalApiKey
 from netkeeper.services.support_bundle import Level, build_bundle
 from netkeeper.services.users import ensure_local_user
+from netkeeper.web.app import create_app
 from netkeeper.web.security import OPEN_API_PATHS, RULE_LOCAL_KEY
 
 CSRF = {"X-Netkeeper-Client": "1"}
@@ -247,10 +253,12 @@ async def test_the_bearer_key_or_the_cookie_lets_a_request_through(
 
 async def test_the_open_paths_answer_without_the_credential(anonymous: httpx.AsyncClient) -> None:
     assert (await anonymous.get("/api/v1/health")).status_code == 200
-    assert (await anonymous.get("/api/v1/session")).json() == {
-        "connected": False,
-        "claimable": True,
-    }
+    session = (await anonymous.get("/api/v1/session")).json()
+    assert (session["connected"], session["claimable"], session["persisted"]) == (
+        False,
+        True,
+        True,
+    )
     callback = await anonymous.get("/api/v1/mailboxes/oauth/callback?state=x")
     assert callback.status_code == 303  # its own state check refuses it
     assert "state_mismatch" in callback.headers["location"]
@@ -301,10 +309,8 @@ async def test_the_first_browser_claims_the_session_once(
     assert _key(running_app).key not in set_cookie
     # httpx keeps the cookie, as the browser would.
     assert (await anonymous.get("/api/v1/me")).status_code == 200
-    assert (await anonymous.get("/api/v1/session")).json() == {
-        "connected": True,
-        "claimable": False,
-    }
+    session = (await anonymous.get("/api/v1/session")).json()
+    assert (session["connected"], session["claimable"]) == (True, False)
     assert (await anonymous.post("/api/v1/session/claim", headers=CSRF)).status_code == 204
     entry = (keychain.service_name(), "install/local-api-claimed")
     assert memory_keyring.entries[entry] == "1"
@@ -365,7 +371,17 @@ def test_netkeeper_open_says_so_when_the_keychain_refuses(memory_keyring: Memory
     memory_keyring.broken = True
     result = CliRunner().invoke(cli, ["open"])
     assert result.exit_code == 1
-    assert "Keychain" in result.output
+    # Not a dead end (#618 review): it says how to connect anyway, and how to fix it.
+    assert "the Keychain refused the local API key" in result.output
+    assert "restart netkeeper serve, then load the UI" in result.output
+    assert "unlock your login keychain" in result.output
+
+
+def test_netkeeper_open_points_the_link_at_a_base_url_given() -> None:
+    result = CliRunner().invoke(cli, ["open", "--base-url", "http://localhost:5173"])
+    assert result.exit_code == 0, result.output
+    [link] = re.findall(r"http://\S+", result.output)
+    assert link.startswith("http://localhost:5173/api/v1/session/connect?code=")
 
 
 # --- never in logs or the bundle --------------------------------------------------------
@@ -439,3 +455,142 @@ async def test_the_key_never_reaches_the_log_or_the_support_bundle(
         assert any("made the local API key" in text for text in files.values()), files.keys()
         for name, text in files.items():
             assert all(value not in text for value in secrets_), name
+
+
+# --- the review's follow-ups ------------------------------------------------------------
+
+
+async def test_get_session_sets_a_valid_cookie_again(
+    running_app: FastAPI, anonymous: httpx.AsyncClient
+) -> None:
+    """A browser the UI loads in keeps its cookie past the 400 days (#618 review)."""
+    value = _key(running_app).session_value()
+    refreshed = await anonymous.get("/api/v1/session", headers={"Cookie": f"{COOKIE}={value}"})
+    assert refreshed.json()["connected"] is True
+    set_cookie = refreshed.headers["set-cookie"]
+    assert set_cookie.startswith(f"{COOKIE}={value};")
+    assert "Max-Age=34560000" in set_cookie
+    assert "HttpOnly" in set_cookie
+    assert "SameSite=strict" in set_cookie
+
+
+async def test_get_session_sets_no_cookie_without_a_valid_one(
+    running_app: FastAPI, anonymous: httpx.AsyncClient
+) -> None:
+    assert "set-cookie" not in (await anonymous.get("/api/v1/session")).headers
+    forged = {"Cookie": f"{COOKIE}={LocalApiKey('guess').session_value()}"}
+    assert "set-cookie" not in (await anonymous.get("/api/v1/session", headers=forged)).headers
+    # The Bearer key connects a client, but a client is not a browser to give a cookie.
+    bearer = {"Authorization": f"Bearer {_key(running_app).key}"}
+    answered = await anonymous.get("/api/v1/session", headers=bearer)
+    assert answered.json()["connected"] is True
+    assert "set-cookie" not in answered.headers
+
+
+async def test_a_key_in_memory_says_so(app: FastAPI, memory_keyring: MemoryKeyring) -> None:
+    """When the Keychain refuses, the UI is told, so it can say so (#618 review)."""
+    memory_keyring.broken = True
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url=BASE) as client:
+            session = (await client.get("/api/v1/session")).json()
+            assert (session["persisted"], session["claimable"]) == (False, True)
+            assert (await client.post("/api/v1/session/claim", headers=CSRF)).status_code == 204
+            assert (await client.get("/api/v1/me")).status_code == 200
+
+
+async def test_the_open_command_names_a_data_directory_that_is_not_the_default(
+    anonymous: httpx.AsyncClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    command = (await anonymous.get("/api/v1/session")).json()["open_command"]
+    # The test's data directory is not the default, and the client is not on web.port.
+    assert command == (
+        f"NETKEEPER_DATA={shlex.quote(str(paths.data_dir()))} netkeeper open"
+        " --base-url http://127.0.0.1"
+    )
+    monkeypatch.setattr(paths, "is_default_data_dir", lambda _: True)
+    monkeypatch.setenv("NETKEEPER_KEYCHAIN_SERVICE", "netkeeper-alt")
+    assert local_api_key.open_command() == "NETKEEPER_KEYCHAIN_SERVICE=netkeeper-alt netkeeper open"
+    monkeypatch.delenv("NETKEEPER_KEYCHAIN_SERVICE")
+    assert local_api_key.open_command() == "netkeeper open"
+
+
+async def test_the_open_command_has_no_base_url_on_the_configured_address(
+    running_app: FastAPI,
+) -> None:
+    transport = httpx.ASGITransport(app=running_app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8000") as client:
+        command = (await client.get("/api/v1/session")).json()["open_command"]
+    assert "--base-url" not in command
+
+
+def test_a_key_made_at_once_by_two_processes_is_read_back(
+    memory_keyring: MemoryKeyring, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``netkeeper open`` and the first ``serve`` both make a key: each goes on with the
+    one the Keychain kept, not the one it wrote (#618 review)."""
+    real_set = keychain.set_install_secret
+
+    def another_process_wins(name: str, value: str) -> None:
+        real_set(name, value)
+        if name == local_api_key.KEY_ENTRY:
+            real_set(name, "the-other-process-key")
+
+    monkeypatch.setattr(keychain, "set_install_secret", another_process_wins)
+    assert local_api_key.stored_key() == "the-other-process-key"
+
+
+#: Routes outside ``/api/`` that answer without the key, pinned (#618 review): each holds
+#: no data. A new one, schema or not, fails the walk below until it is added here.
+OPEN_OTHER_ROUTES = frozenset(
+    {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc", "/assets", "/{path:path}"}
+)
+
+
+@pytest.mark.parametrize("built", [False, True])
+async def test_every_route_needs_the_key_unless_it_is_pinned_open(
+    bare_engine: Engine,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _migrated_template: Path,
+    built: bool,
+) -> None:
+    """Walks every route the app has, hidden from the schema or not, as an anonymous client."""
+    import conftest
+
+    conftest._copy_template(_migrated_template, tmp_path / "bare")
+    dist = tmp_path / "dist"
+    if built:
+        (dist / "assets").mkdir(parents=True)
+        (dist / "index.html").write_text("<!doctype html>")
+    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", str(dist))
+    app = create_app(Settings(), engine=bare_engine)
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url=BASE) as client:
+            checked = 0
+            for path, methods in _every_route(app.routes):
+                if not path.startswith("/api/"):
+                    assert path in OPEN_OTHER_ROUTES, f"unpinned open route {path}"
+                    continue
+                if path in OPEN_API_PATHS:
+                    continue
+                concrete = re.sub(r"\{[^}]+\}", "1", path)
+                for method in sorted(methods):
+                    client.cookies.clear()
+                    response = await client.request(method, concrete, headers=CSRF)
+                    assert response.status_code == 401, (method, path)
+                    checked += 1
+    assert checked > 150  # the walk reached the included routers, not just the app's own
+
+
+def _every_route(routes: Sequence[BaseRoute], prefix: str = "") -> Iterator[tuple[str, set[str]]]:
+    """``(path, methods)`` for every route, through the routers FastAPI includes."""
+    for route in routes:
+        context = getattr(route, "include_context", None)
+        if context is not None:  # an included router: its own routes, under its prefix
+            yield from _every_route(route.original_router.routes, prefix + context.prefix)  # type: ignore[attr-defined]
+            continue
+        path = getattr(route, "path", None)
+        assert path is not None, f"a route this walk cannot read: {route!r}"
+        yield prefix + path, set(getattr(route, "methods", None) or {"GET"})

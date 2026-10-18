@@ -163,6 +163,11 @@ def has_local_credential(headers: Mapping[str, str], scheme: str, key: LocalApiK
         return False
     if key.accepts_bearer(headers.get("authorization")):
         return True
+    return has_session_cookie(headers, scheme, key)
+
+
+def has_session_cookie(headers: Mapping[str, str], scheme: str, key: LocalApiKey) -> bool:
+    """Whether the request carries a valid session cookie for ``key`` (not the Bearer key)."""
     # Starlette's lenient parser: other programs on localhost share this host's cookie
     # jar, and one malformed cookie of theirs must not hide ours.
     cookies = cookie_parser(headers.get("cookie", ""))

@@ -77,10 +77,15 @@ class SessionOut(BaseModel):
     """Whether this browser is connected to the local API (#618).
 
     ``claimable``: the first-browser claim is still open, so ``POST /session/claim``
-    connects this browser without a link."""
+    connects this browser without a link. ``persisted``: the key is in the Keychain;
+    False when the Keychain refused it and it lives in memory until ``serve`` stops.
+    ``open_command``: the ``netkeeper open`` command line that makes a link this server
+    accepts, for the connect page to show."""
 
     connected: bool
     claimable: bool
+    persisted: bool
+    open_command: str
 
 
 class UserOut(BaseModel):

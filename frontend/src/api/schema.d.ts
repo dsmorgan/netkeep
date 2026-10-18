@@ -3159,7 +3159,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Session */
+        /**
+         * Get Session
+         * @description Whether this browser is connected. A valid session cookie is set again, so a
+         *     browser the UI loads in at least once every 400 days never expires.
+         */
         get: operations["get_session"];
         put?: never;
         post?: never;
@@ -8752,13 +8756,20 @@ export interface components {
          * @description Whether this browser is connected to the local API (#618).
          *
          *     ``claimable``: the first-browser claim is still open, so ``POST /session/claim``
-         *     connects this browser without a link.
+         *     connects this browser without a link. ``persisted``: the key is in the Keychain;
+         *     False when the Keychain refused it and it lives in memory until ``serve`` stops.
+         *     ``open_command``: the ``netkeeper open`` command line that makes a link this server
+         *     accepts, for the connect page to show.
          */
         SessionOut: {
             /** Claimable */
             claimable: boolean;
             /** Connected */
             connected: boolean;
+            /** Open Command */
+            open_command: string;
+            /** Persisted */
+            persisted: boolean;
         };
         /**
          * Severity

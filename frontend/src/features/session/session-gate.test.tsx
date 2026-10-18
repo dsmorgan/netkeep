@@ -7,7 +7,12 @@ import { jsonResponse, mockFetch } from '@/test/fetch'
 
 import { SessionGate } from './session-gate'
 
-type Session = { connected: boolean; claimable: boolean }
+type Session = {
+  connected: boolean
+  claimable: boolean
+  persisted?: boolean
+  open_command?: string
+}
 
 /** A fake server: the session state, the claim's answer, and every request seen. */
 function serve(session: Session, claimStatus = 204) {
@@ -15,10 +20,12 @@ function serve(session: Session, claimStatus = 204) {
   mockFetch((request) => {
     const { pathname } = new URL(request.url)
     seen.push(`${request.method} ${pathname}`)
-    if (pathname === '/api/v1/session') return jsonResponse(session)
+    if (pathname === '/api/v1/session') {
+      return jsonResponse({ persisted: true, open_command: 'netkeeper open', ...session })
+    }
     if (pathname === '/api/v1/session/claim') {
       if (claimStatus === 204) {
-        session = { connected: true, claimable: false }
+        session = { ...session, connected: true, claimable: false }
         return new Response(null, { status: 204 })
       }
       return jsonResponse({ detail: 'another browser already connected' }, claimStatus)
@@ -33,7 +40,7 @@ function serve(session: Session, claimStatus = 204) {
   return {
     seen,
     disconnect: () => {
-      session = { connected: false, claimable: false }
+      session = { ...session, connected: false, claimable: false }
     },
   }
 }
@@ -105,5 +112,53 @@ describe('SessionGate', () => {
     // The default offline fetch throws, as a stopped server would.
     renderGate()
     expect(await screen.findByText('the app')).toBeInTheDocument()
+  })
+
+  it('says another browser or program connected first, and shows the exact command', async () => {
+    serve({
+      connected: false,
+      claimable: false,
+      open_command: "NETKEEPER_DATA='/tmp/nk scratch' netkeeper open",
+    })
+    renderGate()
+    expect(
+      await screen.findByText(/Another browser or program has already connected/),
+    ).toBeInTheDocument()
+    expect(screen.getByText("NETKEEPER_DATA='/tmp/nk scratch' netkeeper open")).toBeInTheDocument()
+  })
+
+  it('drops the connect query from the address once it has read it', async () => {
+    window.history.replaceState(null, '', '/contacts?connect=expired&q=1#top')
+    serve({ connected: false, claimable: false })
+    renderGate()
+    expect(await screen.findByRole('alert')).toHaveTextContent('expired')
+    expect(`${window.location.pathname}${window.location.search}${window.location.hash}`).toBe(
+      '/contacts?q=1#top',
+    )
+  })
+
+  it('shows a banner above the app when the key lives only in memory', async () => {
+    serve({ connected: true, claimable: false, persisted: false })
+    renderGate()
+    expect(await screen.findByText('the app')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('The Keychain refused')
+    expect(screen.getByRole('status')).toHaveTextContent('unlock your login keychain')
+  })
+
+  it('shows no banner when the key is in the Keychain', async () => {
+    serve({ connected: true, claimable: false })
+    renderGate()
+    expect(await screen.findByText('the app')).toBeInTheDocument()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('explains the way back, not a command that cannot work, when the key is in memory', async () => {
+    serve({ connected: false, claimable: false, persisted: false })
+    renderGate()
+    expect(
+      await screen.findByText(/Restart\s+netkeeper, then load this page first/),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Copy command' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Check again' })).toBeInTheDocument()
   })
 })

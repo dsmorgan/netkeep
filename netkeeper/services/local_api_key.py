@@ -35,13 +35,16 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import os
 import secrets
+import shlex
 import threading
 import time
 from dataclasses import dataclass, field
 from typing import Final
 from urllib.parse import urlencode
 
+from netkeeper import paths
 from netkeeper.logging_setup import personal_exc
 from netkeeper.services import keychain
 
@@ -148,7 +151,9 @@ def load_or_create() -> LocalApiKey:
     except keychain.KeychainUnavailable as exc:
         log.warning(
             "the Keychain refused the local API key, so it lives in memory until netkeeper"
-            " stops: a browser connects again after a restart (%s)",
+            " stops: after a restart, the first browser to load the UI connects itself, and"
+            " `netkeeper open` can't make a link. Unlock the login keychain, or allow"
+            " netkeeper when macOS asks, then restart (%s)",
             personal_exc(exc),
         )
         return LocalApiKey(_new_key(), persisted=False)
@@ -162,12 +167,40 @@ def stored_key() -> str:
     refuses: a client has no use for a key ``serve`` will never see.
     """
     key = keychain.get_install_secret(KEY_ENTRY)
-    if key is None:
-        key = _new_key()
-        keychain.delete_install_secret(CLAIMED_ENTRY)  # a new key opens the claim again
-        keychain.set_install_secret(KEY_ENTRY, key)
-        log.info("made the local API key (#618)")
-    return key
+    if key is not None:
+        return key
+    keychain.delete_install_secret(CLAIMED_ENTRY)  # a new key opens the claim again
+    keychain.set_install_secret(KEY_ENTRY, _new_key())
+    log.info("made the local API key (#618)")
+    # Read back what is stored rather than trusting what was written: when `netkeeper
+    # open` and the first `serve` both make one, both go on with the last one written.
+    # The Keychain has no compare-and-set, so a write landing between another process's
+    # write and its read-back still wins; that costs one link that reads as expired.
+    stored = keychain.get_install_secret(KEY_ENTRY)
+    if stored is None:
+        raise keychain.KeychainUnavailable("the Keychain lost the local API key just stored")
+    return stored
+
+
+def open_command(*, base: str | None = None) -> str:
+    """The ``netkeeper open`` command line that makes a link for this server's key.
+
+    It names the data directory (and a ``$NETKEEPER_KEYCHAIN_SERVICE`` override) when
+    they are not the defaults, because the key belongs to the data directory, and
+    ``--base-url`` when the browser reaches the server somewhere other than where
+    ``netkeeper open`` would point it (the Vite dev server, a ``serve --port``).
+    """
+    words: list[str] = []
+    override = os.environ.get(keychain.SERVICE_ENV, "").strip()
+    if override:
+        words.append(f"{keychain.SERVICE_ENV}={shlex.quote(override)}")
+    directory = paths.data_dir()
+    if not paths.is_default_data_dir(directory):
+        words.append(f"{paths.DATA_ENV}={shlex.quote(str(directory))}")
+    words += ["netkeeper", "open"]
+    if base is not None:
+        words += ["--base-url", shlex.quote(base)]
+    return " ".join(words)
 
 
 def mint_code(key: str, *, now: float | None = None) -> str:
