@@ -139,6 +139,8 @@ The ADR recommends the first, with a CI job that installs the built wheel on a m
 
 ### The PyPI name
 
+Resolved: the project is renamed to `netkeep` (#661), so none of the fallbacks above is needed. The text below records the research.
+
 `https://pypi.org/simple/netkeeper/` (JSON) answers `"status": "active"` with no versions or files: the name is registered by someone, with no releases. `/pypi/netkeeper/json` answers 404 only because there are no releases. Unless the maintainer owns it, a first upload gets 403. The fallbacks:
 
 - **A PEP 541 request** for the empty project. It may succeed, but it takes weeks to months and isn't certain.
