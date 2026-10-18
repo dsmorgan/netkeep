@@ -7,10 +7,7 @@ export function AttentionDot({ className }: { className?: string }) {
     <span
       aria-hidden="true"
       data-testid="attention-dot"
-      className={cn(
-        'inline-block size-2 shrink-0 rounded-full bg-amber-500 dark:bg-amber-400',
-        className,
-      )}
+      className={cn('inline-block size-2 shrink-0 rounded-full bg-warn', className)}
     />
   )
 }
@@ -27,7 +24,7 @@ export function NavBadge({ count, flag }: { count: number; flag: boolean }) {
       {count > 0 && (
         <span
           data-testid="attention-count"
-          className="min-w-5 rounded-full bg-primary px-1.5 text-center text-xs leading-5 font-medium text-primary-foreground tabular-nums"
+          className="min-w-5 rounded-full bg-sidebar-primary px-1.5 text-center text-xs leading-5 font-bold text-sidebar-primary-foreground tabular-nums"
         >
           {badgeText(count)}
         </span>

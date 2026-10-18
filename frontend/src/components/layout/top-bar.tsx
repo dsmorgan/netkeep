@@ -25,7 +25,7 @@ export function TopBar({ menuButtonRef, navId, navOpen, onToggleNav }: TopBarPro
   // At phone width the badges are inside the closed drawer; the menu button stands in.
   const marked = needsYou(attention.data)
   return (
-    <header className="flex h-11 items-center justify-between gap-2 border-b px-4">
+    <header className="flex h-11 items-center justify-between gap-2 border-b border-border/70 px-(--space-page)">
       <div className="flex min-w-0 items-center gap-2">
         {/* Below `sm` only: from `sm` up the sidebar is always in place. */}
         <Button
@@ -41,7 +41,9 @@ export function TopBar({ menuButtonRef, navId, navOpen, onToggleNav }: TopBarPro
           <Menu aria-hidden="true" />
           {marked && <AttentionDot className="absolute top-1 right-1 ring-2 ring-background" />}
         </Button>
-        <h1 className="truncate font-medium">{sectionLabel(pathname)}</h1>
+        <h1 className="truncate font-heading text-page-title font-extrabold tracking-heading">
+          {sectionLabel(pathname)}
+        </h1>
       </div>
       <div className="flex min-w-0 items-center gap-3">
         <ActivityIndicator compact announce campaigns />

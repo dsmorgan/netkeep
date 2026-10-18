@@ -28,7 +28,7 @@ export function BackupsSection() {
   return (
     <Card size="sm">
       <CardHeader>
-        <h2 className="font-heading text-sm leading-snug font-medium">Backup files</h2>
+        <h2 className="font-heading text-sm leading-snug font-bold">Backup files</h2>
         <CardDescription>
           Snapshots of the database, newest first. To restore one, stop netkeeper serve, then run
           its command in a terminal: it backs up the database in place first, so you can undo it.

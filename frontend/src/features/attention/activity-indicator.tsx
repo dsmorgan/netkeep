@@ -19,7 +19,7 @@ function ActivityIcon({ state }: { state: ActivityState }) {
         <LoaderCircle
           aria-hidden="true"
           data-icon="running"
-          className={cn(ICON_CLASS, 'animate-spin text-primary motion-reduce:animate-none')}
+          className={cn(ICON_CLASS, 'animate-spin text-accent-ink motion-reduce:animate-none')}
         />
       )
     case 'stopped':
@@ -27,7 +27,7 @@ function ActivityIcon({ state }: { state: ActivityState }) {
         <TriangleAlert
           aria-hidden="true"
           data-icon="stopped"
-          className={cn(ICON_CLASS, 'text-amber-600 dark:text-amber-400')}
+          className={cn(ICON_CLASS, 'text-warn')}
         />
       )
     case 'paused':
@@ -37,7 +37,7 @@ function ActivityIcon({ state }: { state: ActivityState }) {
         <Circle
           aria-hidden="true"
           data-icon="armed"
-          className={cn(ICON_CLASS, 'fill-current text-primary')}
+          className={cn(ICON_CLASS, 'fill-current text-accent-ink')}
         />
       )
     case 'idle':
@@ -110,7 +110,7 @@ export function ActivityIndicator({
           <LoaderCircle
             aria-hidden="true"
             data-icon="campaign-sending"
-            className={cn(ICON_CLASS, 'animate-spin text-primary motion-reduce:animate-none')}
+            className={cn(ICON_CLASS, 'animate-spin text-accent-ink motion-reduce:animate-none')}
           />
           <span className={cn('truncate', compact && 'max-sm:sr-only')}>
             {CAMPAIGN_SENDING_TEXT}

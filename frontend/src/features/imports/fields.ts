@@ -77,9 +77,9 @@ export const RESOLUTION_LABELS: Record<Resolution, string> = {
 
 /** Badge colouring per outcome; `candidate` is the one that wants attention. */
 export const RESOLUTION_CLASSES: Record<Resolution, string> = {
-  matched: 'bg-sky-500/10 text-sky-700 dark:text-sky-300',
-  created: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
-  candidate: 'bg-amber-500/15 text-amber-800 dark:text-amber-300',
+  matched: 'bg-accent-soft text-accent-ink',
+  created: 'bg-ok-soft text-ok-ink',
+  candidate: 'bg-warn-soft text-warn-ink',
   skipped: 'bg-muted text-muted-foreground',
 }
 
@@ -147,8 +147,8 @@ export const RUN_STATUS_LABELS: Record<RunStatus, string> = {
 }
 
 export const RUN_STATUS_CLASSES: Record<RunStatus, string> = {
-  draft: 'bg-amber-500/15 text-amber-800 dark:text-amber-300',
-  committed: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+  draft: 'bg-warn-soft text-warn-ink',
+  committed: 'bg-ok-soft text-ok-ink',
   rolled_back: 'bg-muted text-muted-foreground',
 }
 

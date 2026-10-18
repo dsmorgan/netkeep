@@ -68,7 +68,7 @@ function ConsoleLink({
       aria-label={label}
       target="_blank"
       rel="noopener noreferrer"
-      className="font-medium text-primary underline underline-offset-4"
+      className="font-medium text-accent-ink underline underline-offset-4"
     >
       {children}
     </a>

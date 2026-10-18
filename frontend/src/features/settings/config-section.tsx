@@ -55,7 +55,7 @@ export function ConfigSections() {
         return (
           <Card size="sm" key={group.id}>
             <CardHeader>
-              <h2 className="font-heading text-sm leading-snug font-medium">{group.title}</h2>
+              <h2 className="font-heading text-sm leading-snug font-bold">{group.title}</h2>
               <CardDescription>
                 {group.description}
                 {group.id === 'logs' && (
@@ -218,7 +218,7 @@ function FieldRow({
         <p className="text-muted-foreground">{field.locked_reason}</p>
       )}
       {field.restart_pending && (
-        <p role="status" className="text-amber-800 dark:text-amber-300">
+        <p role="status" className="text-warn-ink">
           Restart netkeeper to apply this value: the running server still uses the one it started
           with.
         </p>
@@ -230,7 +230,7 @@ function FieldRow({
       )}
       {problem !== null && <p role="alert">{problem}</p>}
       {hint !== null && (
-        <p role="note" className="text-amber-800 dark:text-amber-300">
+        <p role="note" className="text-warn-ink">
           {hint}
         </p>
       )}
@@ -240,7 +240,7 @@ function FieldRow({
         </p>
       ))}
       {field.notes.map((n) => (
-        <p key={n} role="note" className="text-amber-800 dark:text-amber-300">
+        <p key={n} role="note" className="text-warn-ink">
           {n}
         </p>
       ))}

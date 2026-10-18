@@ -428,7 +428,7 @@ describe('one import run', () => {
     expect(fetched.at(-1)?.query.get('offset')).toBe('50')
   })
 
-  it('shows a dropped cell on a row that landed in amber, and a skipped row in red', async () => {
+  it('shows a dropped cell on a row that landed in the warning color, and a skipped row in red', async () => {
     const template = COMMITTED_ROWS[0]!
     const rows = [
       {
@@ -452,7 +452,7 @@ describe('one import run', () => {
     await renderApp('/imports/runs/7')
 
     const dropped = await screen.findByText('Dropped: Email dropped: not an address')
-    expect(dropped).toHaveClass('text-amber-700')
+    expect(dropped).toHaveClass('text-warn-ink')
     expect(screen.getByText('names nobody')).toHaveClass('text-destructive')
   })
 

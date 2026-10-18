@@ -604,6 +604,17 @@ describe('waiting for you', () => {
     expect(row).not.toHaveAttribute('data-state', 'stale')
   })
 
+  it('tints the waiting list as the send tray only while something waits (#606)', async () => {
+    renderSection({
+      'GET /api/v1/campaigns/linkedin/waiting': () =>
+        jsonResponse(waitingPage([waitingItem({ status: 'stale', prefilled_at: hoursAgo(80) })])),
+    })
+    const list = await screen.findByRole('list', { name: 'Waiting for you' })
+    const tray = list.closest('[data-slot="card"]')
+    expect(tray).toHaveAttribute('data-tone', 'accent')
+    expect(tray).toHaveClass('nk-tray')
+  })
+
   it('highlights a stale message', async () => {
     renderSection({
       'GET /api/v1/campaigns/linkedin/waiting': () =>
@@ -612,7 +623,7 @@ describe('waiting for you', () => {
 
     const row = await screen.findByRole('listitem', { name: 'Tobias Marrowbone, stale' })
     expect(row).toHaveAttribute('data-state', 'stale')
-    expect(row.className).toMatch(/amber/)
+    expect(row.className).toMatch(/\bborder-warn\b/)
     expect(within(row).getByText('Stale')).toBeVisible()
     expect(row).toHaveTextContent('Prefilled 3 days ago')
   })

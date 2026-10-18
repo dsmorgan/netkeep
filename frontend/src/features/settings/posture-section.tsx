@@ -20,9 +20,9 @@ import {
 } from './api'
 
 const STATUS_CLASSES: Record<string, string> = {
-  on: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+  on: 'bg-ok-soft text-ok-ink',
   off: 'bg-destructive/10 text-destructive',
-  unknown: 'bg-amber-500/15 text-amber-800 dark:text-amber-300',
+  unknown: 'bg-warn-soft text-warn-ink',
 }
 
 function message(error: unknown): string {
@@ -54,7 +54,7 @@ export function PostureSection() {
   return (
     <Card size="sm">
       <CardHeader>
-        <h2 className="font-heading text-sm leading-snug font-medium">Posture</h2>
+        <h2 className="font-heading text-sm leading-snug font-bold">Posture</h2>
         <CardDescription>Every protection running right now, read-only.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
@@ -172,9 +172,7 @@ function ManualSends({ rows }: { rows: readonly Protection[] }) {
       data-auto-send={autoSendOn ? 'on' : 'off'}
       className={cn(
         'rounded-lg border-2 p-3',
-        autoSendOn
-          ? 'border-destructive bg-destructive/10'
-          : 'border-emerald-600/50 bg-emerald-500/10',
+        autoSendOn ? 'border-destructive bg-destructive/10' : 'border-ok/50 bg-ok-soft',
       )}
     >
       <p className="flex flex-wrap items-center gap-2 font-medium">
@@ -215,7 +213,7 @@ function ReplyPollAcknowledge({ rows }: { rows: readonly Protection[] }) {
     ) : null
   }
   return (
-    <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+    <div className="rounded-lg border border-warn/40 bg-warn-soft p-3">
       <p className="font-medium">LinkedIn replies to check by hand</p>
       <ul className="mt-1 space-y-1">
         {row.warnings.map((warning) => (
@@ -266,9 +264,7 @@ export function ProtectionDetail({ row, expanded }: { row: Protection; expanded:
       <p>
         {renderInlineMarkdown(expanded ? row.value : row.summary)}
         {!expanded && row.notes.length > 0 && (
-          <span className="text-amber-800 dark:text-amber-300">
-            {` (${noteCount(row.notes.length)})`}
-          </span>
+          <span className="text-warn-ink">{` (${noteCount(row.notes.length)})`}</span>
         )}
       </p>
       {row.warnings.length > 0 && (
@@ -280,7 +276,7 @@ export function ProtectionDetail({ row, expanded }: { row: Protection; expanded:
       )}
       {/* Notes describe a choice, not a fault (#318): shown, never counted against the verdict. */}
       {expanded && row.notes.length > 0 && (
-        <ul className="mt-1 space-y-1 text-amber-800 dark:text-amber-300" aria-label="Notes">
+        <ul className="mt-1 space-y-1 text-warn-ink" aria-label="Notes">
           {row.notes.map((note) => (
             <li key={note}>{renderInlineMarkdown(note)}</li>
           ))}

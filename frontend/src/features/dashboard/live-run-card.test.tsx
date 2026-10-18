@@ -89,6 +89,10 @@ function running(overrides: Record<string, Handler> = {}): Record<string, Handle
   }
 }
 
+function liveRunCard(): HTMLElement | null {
+  return screen.getByRole('heading', { name: 'Live LinkedIn run' }).closest('[data-slot="card"]')
+}
+
 function posted(calls: Call[], path: string): boolean {
   return calls.some((call) => call.method === 'POST' && call.path === path)
 }
@@ -106,6 +110,40 @@ describe('LiveRunCard', () => {
     })
     expect(await screen.findByText('No LinkedIn run is going.')).toBeInTheDocument()
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  })
+
+  it('tints the card with the accent while a run is going (#606)', async () => {
+    renderCard(running())
+    await screen.findByText('Enrichment')
+    expect(liveRunCard()).toHaveAttribute('data-tone', 'accent')
+  })
+
+  it('tints the card amber while a run is paused and waits on you', async () => {
+    const paused = run({
+      id: 7,
+      status: 'aborted',
+      stop_reason: 'paused',
+      planned: 10,
+      completed: 4,
+    })
+    renderCard({
+      'GET /api/v1/linkedin/status': () => jsonResponse(STATUS_CLEAR),
+      'GET /api/v1/linkedin/runs': () => jsonResponse(runPage([paused])),
+      'GET /api/v1/linkedin/runs/7': () => jsonResponse(paused),
+      'GET /api/v1/linkedin/runs/7/contacts': () => jsonResponse(CONTACTS),
+    })
+    await screen.findByText('Paused')
+    expect(liveRunCard()).toHaveAttribute('data-tone', 'warn')
+  })
+
+  it('leaves the card plain when no run is going', async () => {
+    renderCard({
+      'GET /api/v1/linkedin/status': () => jsonResponse(STATUS_CLEAR),
+      'GET /api/v1/linkedin/runs': () =>
+        jsonResponse(runPage([run({ status: 'completed', stop_reason: 'end_of_list' })])),
+    })
+    await screen.findByText('No LinkedIn run is going.')
+    expect(liveRunCard()).not.toHaveAttribute('data-tone')
   })
 
   it('shows the running run, its progress, and the contacts it touched, linked', async () => {

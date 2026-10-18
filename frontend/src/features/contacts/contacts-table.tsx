@@ -149,7 +149,7 @@ export function ContactsTable({
       ref={viewportRef}
       data-testid="contacts-scroll"
       data-virtualized={virtualized || undefined}
-      className="max-h-[calc(100vh-16rem)] overflow-auto rounded-xl ring-1 ring-foreground/10"
+      className="nk-glass max-h-[calc(100vh-16rem)] overflow-auto"
     >
       <Table>
         <TableHeader>
@@ -170,7 +170,7 @@ export function ContactsTable({
                     <button
                       type="button"
                       onClick={() => onSort(column.sort as SortField)}
-                      className="-mx-1 inline-flex items-center gap-1 rounded px-1 py-0.5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+                      className="-mx-1 inline-flex items-center gap-1 rounded px-1 py-0.5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                     >
                       {column.label}
                       <SortIcon direction={key?.direction} />

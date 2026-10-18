@@ -305,9 +305,9 @@ describe('the shape that keeps the decision row on screen', () => {
     // A second bordered box is a second box's worth of padding between the
     // person and the thing they came here to press.
     for (const node of [card, steps]) {
-      expect(node.className).not.toMatch(/\bring-1\b/)
+      expect(node.className).not.toMatch(/\bnk-glass\b/)
     }
-    expect(card.parentElement?.className).toMatch(/\bring-1\b/)
+    expect(card.parentElement?.className).toMatch(/\bnk-glass\b/)
   })
 
   it('keeps the notice line below the card rather than above it', async () => {

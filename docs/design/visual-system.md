@@ -1,0 +1,45 @@
+# Visual system
+
+The web UI follows direction **B5, Tinted glass**, chosen on #605 (2026-10-18): a navy sidebar, heavy headings and strong state colors, with every card a glass pane over a subtle color field. Cards that need you are tinted with their state color and carry two offset sheets underneath for depth.
+
+Every token lives in `frontend/src/index.css`: light values in `:root`, dark overrides under `@media (prefers-color-scheme: dark)`. The app follows the OS scheme.
+
+## Tokens
+
+| Group | Tokens | Notes |
+| --- | --- | --- |
+| Accent | `--accent-hue` (255), `--accent-chroma` (0.2), `--accent-lightness` (55% light, 74% dark), `--brand` | `--primary`, the focus ring, the charts, the sidebar badge and the first color-field blob all derive from the hue. |
+| Neutrals | `--background`, `--foreground`, `--card`, `--popover`, `--muted`, `--muted-foreground`, `--secondary`, `--border`, `--input` | shadcn's names, so the kit picks them up. |
+| Sidebar | `--sidebar`, `--sidebar-foreground`, `--sidebar-accent` (the active link), `--sidebar-primary` | Navy in both schemes. |
+| State | `--ok`, `--warn`, `--bad`, each with `-ink` (text) and `-soft` (a 14 to 16% tint behind it); `--accent-ink`, `--accent-soft` | Tailwind utilities: `text-warn-ink`, `bg-warn-soft`, `border-warn/40`, `bg-ok`. `--destructive` is `--bad-ink`. |
+| Type | `text-page-title`, `text-card-title`, `text-eyebrow`, `tracking-heading` | System font stacks. Headings are bold (cards, dialogs) or extra bold (page title). |
+| Spacing | `--space-page`, `--space-card`, `--space-card-sm` | Page gutter and card padding. |
+| Radius | `--radius` (12px), `rounded-control` (0.6 of it, for buttons and inputs) | Cards use `--radius`. |
+| Elevation | `--elevation-pane`, `--elevation-overlay`, `--elevation-drop` | `shadow-overlay` is for dialogs, popovers and menus. |
+| Glass | `--glass`, `--glass-opacity` (62%), `--glass-blur` (18px), `--glass-saturate`, `--glass-edge`, `--glass-highlight`, `--glass-rim`, `--glass-fill`, `--tint-mix` (20% light, 30% dark), `--tray-mix` | |
+| Field | `--field-opacity` (0.45, "Subtle"), `--field-mix`, `--field-1` to `--field-4` | Four blurred blobs fixed behind the shell. |
+
+## Materials
+
+- **`nk-glass`** is a pane. `Card` has it by default, and so do the shell banners and the triage panes.
+- **`nk-tint nk-tone-<tone>`** tints a pane. Pass `tone` to `Card` (`accent`, `ok`, `warn` or `bad`), or call `toneClasses(tone)` from `components/ui/tone.ts` for a surface that is not a `Card`. `tray` lightens the tint for a list to read through, such as Waiting for you.
+- Inside a tint, the heading takes the state color mixed 45% toward the ink, muted text leans 45% toward the ink, and the `-ink` colors are mixed the same way, so text stays readable on the tint.
+
+Use a tone only for something that needs the person: the live run (accent, or amber while paused), the messages waiting to send (accent tray), replies (ok), and a stopped session or mailbox (bad). Ordinary cards stay plain glass.
+
+## Fallbacks and accessibility
+
+- Panes are solid first. Glass is applied only inside `@supports (backdrop-filter: blur(1px))`, and `prefers-reduced-transparency: reduce` turns the field off and the panes solid again. A solid tint is the state color at 0.6 of the tint mix over `--card`.
+- `prefers-reduced-motion: reduce` stops the field's drift.
+- Focus is a 2px ring in `--ring` on every control.
+- `frontend/src/theme.test.ts` holds every text token to WCAG AA (4.5:1) in both schemes. It composites each glass and tinted pane over the page and over the center of each field blob, and checks the worst case, so the glass opacity can go down only as far as the text allows.
+
+## Change the accent hue
+
+Edit one line in `:root`:
+
+```css
+--accent-hue: 275; /* indigo */
+```
+
+Raise or lower `--accent-chroma` if the new hue looks dull or clips. Then run `pnpm test`. The theme test fails if text on or in the accent drops below AA, and until `public/favicon.svg` is redrawn in the new `--primary` (it prints the hex it expects).

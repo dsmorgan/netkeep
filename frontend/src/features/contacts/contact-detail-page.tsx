@@ -126,7 +126,7 @@ export function ContactDetailPage({ contactId }: { contactId: number }) {
           <ArrowLeft data-icon="inline-start" />
           Contacts
         </Link>
-        <h2 className="font-heading text-lg font-medium">{name}</h2>
+        <h2 className="font-heading text-lg font-bold">{name}</h2>
         <Badge variant={contact.met === 'met' ? 'default' : 'outline'}>
           {MET_LABELS[contact.met]}
         </Badge>

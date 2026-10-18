@@ -2,6 +2,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { toneClasses } from '@/components/ui/tone'
+import { cn } from '@/lib/utils'
 
 import {
   type ConfigSettings,
@@ -98,7 +100,7 @@ export function RestartBanner({
   return (
     <section
       aria-label="Restart netkeeper"
-      className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-700 dark:bg-amber-950"
+      className={cn('nk-glass space-y-2 p-3 text-sm', toneClasses('warn'))}
     >
       <p>
         {settings.config_changed

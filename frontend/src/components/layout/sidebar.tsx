@@ -71,17 +71,23 @@ export function Sidebar({ id, open, onClose }: SidebarProps) {
       data-open={open}
       {...(open ? { role: 'dialog', 'aria-modal': true, 'aria-label': 'Navigation' } : {})}
       className={cn(
-        'flex w-48 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground',
+        'relative z-[1] flex w-48 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground',
         'max-sm:fixed max-sm:inset-y-0 max-sm:left-0 max-sm:z-40 max-sm:w-64 max-sm:shadow-lg max-sm:transition-transform',
         open ? 'max-sm:translate-x-0' : 'max-sm:invisible max-sm:-translate-x-full',
       )}
     >
-      <div className="flex h-11 items-center justify-between border-b px-3 font-semibold tracking-tight">
-        netkeeper
+      <div className="flex h-11 items-center justify-between border-b border-sidebar-border px-3 font-heading text-base font-extrabold tracking-heading text-sidebar-accent-foreground">
+        <span className="flex items-center gap-2">
+          <span
+            aria-hidden="true"
+            className="size-2.5 rounded-[3px] bg-sidebar-primary shadow-[0_0_0_3px_color-mix(in_oklab,var(--sidebar-primary)_30%,transparent)]"
+          />
+          netkeeper
+        </span>
         <Button
           variant="ghost"
           size="icon-sm"
-          className="sm:hidden"
+          className="text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground sm:hidden"
           aria-label="Close navigation"
           onClick={() => onClose(true)}
         >
@@ -104,7 +110,7 @@ export function Sidebar({ id, open, onClose }: SidebarProps) {
 }
 
 const LINK_CLASS =
-  'flex items-center gap-2 rounded-md px-2 py-1.5 text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-[status=active]:bg-sidebar-accent data-[status=active]:font-medium data-[status=active]:text-sidebar-accent-foreground'
+  'flex items-center gap-2 rounded-md px-2 py-1.5 text-sidebar-foreground hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sidebar-ring data-[status=active]:bg-sidebar-accent data-[status=active]:font-semibold data-[status=active]:text-sidebar-accent-foreground'
 
 function owns(item: NavItem, pathname: string): boolean {
   return item.to === '/' ? pathname === '/' : pathname.startsWith(item.to)

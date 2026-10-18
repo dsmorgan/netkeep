@@ -34,7 +34,7 @@ export function SchedulePause({ schedule }: { schedule: Schedule }) {
     <div className="flex flex-col gap-2">
       {schedule.paused ? (
         <>
-          <p role="status" className="font-medium text-amber-800 dark:text-amber-300">
+          <p role="status" className="font-medium text-warn-ink">
             Paused{schedule.paused_at === null ? '' : ` since ${formatWhen(schedule.paused_at)}`} —
             no new scheduled run starts.
           </p>

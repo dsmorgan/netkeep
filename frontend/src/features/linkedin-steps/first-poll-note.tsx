@@ -18,14 +18,14 @@ export function FirstPollNote({ buttonIsHere = false }: { buttonIsHere?: boolean
   const [before = '', after = ''] = FIRST_POLL_NOTE.split(CHECK_INBOX_LABEL)
   const [head = '', tail = ''] = before.split(FIRST_POLL_COMMAND)
   return (
-    <p role="note" className="rounded-md border border-amber-500/60 bg-amber-500/10 px-2 py-1">
+    <p role="note" className="rounded-md border border-warn/60 bg-warn-soft px-2 py-1">
       {head}
       <code className="rounded bg-muted px-1 font-mono text-xs">{FIRST_POLL_COMMAND}</code>
       {tail}
       {buttonIsHere ? (
         CHECK_INBOX_LABEL
       ) : (
-        <Link to="/linkedin" className="font-medium text-primary underline underline-offset-4">
+        <Link to="/linkedin" className="font-medium text-accent-ink underline underline-offset-4">
           {CHECK_INBOX_LABEL}
         </Link>
       )}

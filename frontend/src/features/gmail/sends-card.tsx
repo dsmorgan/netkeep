@@ -55,7 +55,7 @@ export function SendsCard() {
                   className="h-2 overflow-hidden rounded-full bg-muted"
                 >
                   <div
-                    className={cn('h-full', warning === null ? 'bg-emerald-500' : 'bg-amber-500')}
+                    className={cn('h-full', warning === null ? 'bg-ok' : 'bg-warn')}
                     style={{ width: `${share}%` }}
                   />
                 </div>
@@ -75,7 +75,7 @@ export function SendsCard() {
                   <p
                     role="note"
                     aria-label="Daily cap"
-                    className="rounded-lg bg-amber-500/10 px-3 py-2 text-amber-800 dark:text-amber-300"
+                    className="rounded-lg bg-warn-soft px-3 py-2 text-warn-ink"
                   >
                     {warning}
                   </p>

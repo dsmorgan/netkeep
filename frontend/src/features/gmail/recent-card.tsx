@@ -10,9 +10,9 @@ function message(error: unknown): string {
 }
 
 const STATUS_CLASSES: Record<string, string> = {
-  sent: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
-  received: 'bg-sky-500/10 text-sky-700 dark:text-sky-300',
-  drafted: 'bg-sky-500/10 text-sky-700 dark:text-sky-300',
+  sent: 'bg-ok-soft text-ok-ink',
+  received: 'bg-accent-soft text-accent-ink',
+  drafted: 'bg-accent-soft text-accent-ink',
   scheduled: 'bg-muted text-muted-foreground',
   discarded: 'bg-muted text-muted-foreground',
   bounced: 'bg-destructive/10 text-destructive',

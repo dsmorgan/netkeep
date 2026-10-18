@@ -50,7 +50,7 @@ export function InlineLint({
             key={`${issue.rule}-${issue.field ?? ''}-${index}`}
             className={cn(
               'flex flex-wrap gap-2 rounded-md border-l-4 bg-muted/40 px-2 py-1.5',
-              issue.severity === 'error' ? 'border-destructive' : 'border-amber-500',
+              issue.severity === 'error' ? 'border-destructive' : 'border-warn',
             )}
           >
             <Badge
@@ -141,7 +141,7 @@ export function LineMarks({
               data-severity={severity}
               className={cn(
                 severity === 'error' && 'rounded-sm bg-destructive/15',
-                severity === 'warning' && 'rounded-sm bg-amber-500/20',
+                severity === 'warning' && 'rounded-sm bg-warn-soft',
               )}
             >
               {line === '' ? ' ' : line}

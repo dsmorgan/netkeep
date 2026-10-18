@@ -35,7 +35,7 @@ export function SupportSection() {
   return (
     <Card size="sm">
       <CardHeader>
-        <h2 className="font-heading text-sm leading-snug font-medium">Support</h2>
+        <h2 className="font-heading text-sm leading-snug font-bold">Support</h2>
         <CardDescription>
           A support bundle collects versions, settings, posture, breakers, recent runs and logs into
           one .zip file, so someone helping you can see what happened. netkeeper never uploads it:

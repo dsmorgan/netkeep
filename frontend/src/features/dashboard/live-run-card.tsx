@@ -69,8 +69,11 @@ export function LiveRunCard() {
     void queryClient.invalidateQueries({ queryKey: linkedinKeys.runContacts(run_id) })
   })
 
+  // A run going now is the accent; one paused and waiting on you is a warning.
+  const tone = runningId !== null ? 'accent' : pausedId !== null ? 'warn' : undefined
+
   return (
-    <Card size="sm">
+    <Card size="sm" tone={tone}>
       <CardHeader>
         <CardTitle level={2}>Live LinkedIn run</CardTitle>
         <CardDescription>The run going now, live, and the contacts it touched.</CardDescription>

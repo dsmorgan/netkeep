@@ -17,8 +17,8 @@ const STATE_LABELS: Record<StepState, string> = {
 /** Same color vocabulary as the import run status badge: emerald done, amber mid-flight. */
 const STATE_CLASSES: Record<StepState, string> = {
   not_started: 'bg-muted text-muted-foreground',
-  in_progress: 'bg-amber-500/15 text-amber-800 dark:text-amber-300',
-  done: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+  in_progress: 'bg-warn-soft text-warn-ink',
+  done: 'bg-ok-soft text-ok-ink',
 }
 
 /**

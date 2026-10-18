@@ -8,9 +8,9 @@ const PILL =
 
 const CAMPAIGN_CLASSES: Record<CampaignStatus, string> = {
   draft: 'bg-muted text-muted-foreground',
-  reviewing: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
-  active: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
-  paused: 'bg-sky-500/15 text-sky-700 dark:text-sky-300',
+  reviewing: 'bg-warn-soft text-warn-ink',
+  active: 'bg-ok-soft text-ok-ink',
+  paused: 'bg-accent-soft text-accent-ink',
   completed: 'bg-muted text-foreground',
   archived: 'bg-muted text-muted-foreground',
 }
@@ -22,8 +22,8 @@ export function CampaignStatusBadge({ status }: { status: CampaignStatus }) {
 }
 
 const ENROLLMENT_CLASSES: Partial<Record<EnrollmentStatus, string>> = {
-  active: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
-  replied: 'bg-sky-500/15 text-sky-700 dark:text-sky-300',
+  active: 'bg-ok-soft text-ok-ink',
+  replied: 'bg-accent-soft text-accent-ink',
   bounced: 'bg-destructive/10 text-destructive',
   opted_out: 'bg-destructive/10 text-destructive',
 }

@@ -168,7 +168,7 @@ function AutoSendBadge() {
     </p>
   ) : (
     <p className="flex flex-wrap items-center gap-2">
-      <span className="inline-flex h-5 items-center rounded-4xl bg-emerald-500/15 px-2 text-xs font-medium text-emerald-800 ring-1 ring-emerald-600/40 dark:text-emerald-300">
+      <span className="inline-flex h-5 items-center rounded-4xl bg-ok-soft px-2 text-xs font-medium text-ok-ink ring-1 ring-ok/40">
         Auto-send off
       </span>
       <span className="text-muted-foreground">You send every LinkedIn message yourself.</span>
@@ -228,7 +228,7 @@ export function LinkedInQueueCard({ campaignId, run }: { campaignId?: number; ru
         <FirstPollNote />
         {!typing && <p className="text-muted-foreground">{PREFILL_NOTE}</p>}
         {typing && (
-          <div role="status" className="rounded-lg border border-sky-500/40 bg-sky-500/10 p-3">
+          <div role="status" className="rounded-lg border border-primary/40 bg-accent-soft p-3">
             <p className="font-medium">{TYPING}</p>
             <p>{TYPING_WARNING}</p>
             {run.progress !== null && (
@@ -591,7 +591,8 @@ export function WaitingForYouCard({ campaignId }: { campaignId?: number }) {
   const now = new Date()
   const items = waiting.data?.items ?? []
   return (
-    <Card>
+    // The send tray: tinted while messages wait for you to send them.
+    <Card tone={items.length > 0 ? 'accent' : undefined} tray>
       <CardHeader>
         <CardTitle level={2}>Waiting for you</CardTitle>
         <CardDescription>
@@ -660,7 +661,7 @@ function WaitingRow({
       data-state={state}
       className={cn(
         'flex flex-col gap-1.5 rounded-lg border p-3',
-        state === 'stale' && 'border-amber-500/60 bg-amber-500/10',
+        state === 'stale' && 'border-warn/60 bg-warn-soft',
         (state === 'interrupted' || state === 'partly_typed') &&
           'border-destructive/40 bg-destructive/5',
         state === 'partly_typed' && 'border-destructive bg-destructive/10',

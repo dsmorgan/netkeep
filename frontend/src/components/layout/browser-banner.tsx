@@ -33,10 +33,7 @@ export function BrowserBanner() {
   if (dismissed || detectBrowser(window.navigator) !== 'other') return null
 
   return (
-    <div
-      role="status"
-      className="mb-4 flex flex-wrap items-start gap-3 rounded-xl border border-border bg-muted px-4 py-3 text-sm"
-    >
+    <div role="status" className="nk-glass mb-4 flex flex-wrap items-start gap-3 px-4 py-3 text-sm">
       <Info className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
       <p className="min-w-0 flex-1">
         netkeeper is built and tested for Google Chrome. Other browsers may work, but they are not

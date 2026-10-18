@@ -77,9 +77,7 @@ export function Note({
       role={role}
       className={cn(
         'flex items-start gap-2 rounded-lg px-3 py-2',
-        tone === 'warn'
-          ? 'bg-amber-500/10 text-amber-900 dark:text-amber-200'
-          : 'bg-muted text-muted-foreground',
+        tone === 'warn' ? 'bg-warn-soft text-warn-ink' : 'bg-muted text-muted-foreground',
       )}
     >
       <Icon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />

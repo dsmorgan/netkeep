@@ -182,7 +182,7 @@ export function CardSteps({
                         // Named for the tag, so a screen reader hears which one
                         // this takes off rather than a row of bare crosses.
                         aria-label={`Take the tag ${tag.name} off ${name}`}
-                        className="rounded-sm px-0.5 leading-none opacity-60 hover:opacity-100 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                        className="rounded-sm px-0.5 leading-none opacity-60 hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                         onClick={() => onRemoveTag(contact.id, tag.id)}
                       >
                         <span aria-hidden="true">×</span>
@@ -218,7 +218,7 @@ export function CardSteps({
       </div>
 
       <div className="border-t border-foreground/10 pt-3">
-        <p id="triage-decision-question" className="font-heading font-medium">
+        <p id="triage-decision-question" className="font-heading font-bold">
           <span aria-hidden="true" className="mr-2 text-xs font-normal text-muted-foreground">
             3
           </span>

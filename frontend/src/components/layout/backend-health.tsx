@@ -20,7 +20,7 @@ export function BackendHealth() {
         aria-hidden="true"
         className={cn(
           'size-2 rounded-full',
-          tone === 'up' && 'bg-emerald-500',
+          tone === 'up' && 'bg-ok',
           tone === 'down' && 'bg-destructive',
           tone === 'pending' && 'bg-muted-foreground/50',
         )}

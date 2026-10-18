@@ -51,7 +51,7 @@ export function PredicatePalette({ onPick, onCancel }: PredicatePaletteProps) {
                   type="button"
                   data-op={spec.op}
                   onClick={() => onPick(spec)}
-                  className="rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-border hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                  className="rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:border-border hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                 >
                   <span className="block text-sm font-medium">{spec.label}</span>
                   <span className="block text-xs text-muted-foreground">{spec.hint}</span>

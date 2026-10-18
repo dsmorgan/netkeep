@@ -172,7 +172,7 @@ export function HeatPanel() {
                 aria-hidden="true"
                 className={cn(
                   'size-2 rounded-full',
-                  heat.data.tripped ? 'bg-destructive' : 'bg-emerald-500',
+                  heat.data.tripped ? 'bg-destructive' : 'bg-ok',
                 )}
               />
               <span role="status" className="font-medium">

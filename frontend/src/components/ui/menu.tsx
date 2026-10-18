@@ -6,7 +6,7 @@ import * as React from 'react'
 import { cn } from 'cn'
 
 const POPUP_CLASS =
-  'z-50 max-h-[min(24rem,var(--available-height))] min-w-40 origin-(--transform-origin) overflow-y-auto rounded-lg bg-popover p-1 text-sm text-popover-foreground ring-1 ring-foreground/10 shadow-lg outline-none data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0'
+  'z-50 max-h-[min(24rem,var(--available-height))] min-w-40 origin-(--transform-origin) overflow-y-auto rounded-lg bg-popover p-1 text-sm text-popover-foreground shadow-overlay outline-none data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0'
 
 const ITEM_CLASS =
   'relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none select-none data-highlighted:bg-muted data-highlighted:text-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=size-])]:size-4'

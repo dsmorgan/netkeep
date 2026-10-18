@@ -24,7 +24,7 @@ export function SendingHoursSection() {
   return (
     <Card size="sm">
       <CardHeader>
-        <h2 className="font-heading text-sm leading-snug font-medium">Sending hours</h2>
+        <h2 className="font-heading text-sm leading-snug font-bold">Sending hours</h2>
         <CardDescription>
           When campaign email may go out, in your time zone
           {current.data !== undefined ? ` (${current.data.timezone})` : ''}. Only a campaign&apos;s

@@ -43,10 +43,7 @@ export function JumpToContact({
   })
 
   return (
-    <section
-      aria-label="Jump to a contact"
-      className="flex min-w-0 flex-col gap-2 rounded-xl bg-card p-3 ring-1 ring-foreground/10"
-    >
+    <section aria-label="Jump to a contact" className="nk-glass flex min-w-0 flex-col gap-2 p-3">
       <div>
         <h3 className="font-medium">Jump to a contact</h3>
         <p className="text-xs text-muted-foreground">
@@ -77,7 +74,7 @@ export function JumpToContact({
             <li key={row.id}>
               <button
                 type="button"
-                className="flex w-full min-w-0 items-center rounded-md px-2 py-1 text-left hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                className="flex w-full min-w-0 items-center rounded-md px-2 py-1 text-left hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                 onClick={() => {
                   void onJump(row.id)
                   setText('')

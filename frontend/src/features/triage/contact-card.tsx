@@ -93,7 +93,7 @@ export function ContactCard({
         </p>
       )}
       <div className="min-w-0">
-        <h2 className="font-heading text-xl leading-tight font-medium break-words">
+        <h2 className="font-heading text-xl leading-tight font-bold break-words">
           {/* The contact page, in a new tab so the run keeps its place: it has
               the Met control and everything else the card does not (#322). */}
           <a
@@ -144,7 +144,7 @@ export function ContactCard({
 
       {contact.li_url !== null && (
         <a
-          className="inline-flex w-fit items-center gap-1 text-sm text-primary underline-offset-4 hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+          className="inline-flex w-fit items-center gap-1 text-sm text-accent-ink underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           href={contact.li_url}
           target="_blank"
           rel="noreferrer noopener"

@@ -327,7 +327,7 @@ export function AddContactForm({ onDone }: { onDone: () => void }) {
       )}
 
       {duplicate !== null && (
-        <div role="alert" className="grid gap-2 rounded-lg bg-amber-500/10 px-3 py-2">
+        <div role="alert" className="grid gap-2 rounded-lg bg-warn-soft px-3 py-2">
           <p>
             {duplicate.matched_by === 'name'
               ? 'This may already be a contact'
