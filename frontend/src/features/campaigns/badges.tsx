@@ -24,8 +24,8 @@ export function CampaignStatusBadge({ status }: { status: CampaignStatus }) {
 const ENROLLMENT_CLASSES: Partial<Record<EnrollmentStatus, string>> = {
   active: 'bg-ok-soft text-ok-ink',
   replied: 'bg-accent-soft text-accent-ink',
-  bounced: 'bg-destructive/10 text-destructive',
-  opted_out: 'bg-destructive/10 text-destructive',
+  bounced: 'bg-bad-soft text-destructive',
+  opted_out: 'bg-bad-soft text-destructive',
 }
 
 export function EnrollmentStatusBadge({ status }: { status: EnrollmentStatus }) {

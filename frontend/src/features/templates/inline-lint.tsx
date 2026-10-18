@@ -140,7 +140,7 @@ export function LineMarks({
               data-line={index + 1}
               data-severity={severity}
               className={cn(
-                severity === 'error' && 'rounded-sm bg-destructive/15',
+                severity === 'error' && 'rounded-sm bg-bad-soft',
                 severity === 'warning' && 'rounded-sm bg-warn-soft',
               )}
             >

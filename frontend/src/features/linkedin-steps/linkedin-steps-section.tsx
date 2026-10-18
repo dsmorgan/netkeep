@@ -158,7 +158,7 @@ function AutoSendBadge() {
   return options.data.auto_send ? (
     <p
       role="note"
-      className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-2 py-1 text-destructive"
+      className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/50 bg-bad-soft px-2 py-1 text-destructive"
     >
       <Badge variant="destructive">Auto-send on</Badge>
       {AUTO_SEND_ON_NOTE}
@@ -663,8 +663,8 @@ function WaitingRow({
         'flex flex-col gap-1.5 rounded-lg border p-3',
         state === 'stale' && 'border-warn/60 bg-warn-soft',
         (state === 'interrupted' || state === 'partly_typed') &&
-          'border-destructive/40 bg-destructive/5',
-        state === 'partly_typed' && 'border-destructive bg-destructive/10',
+          'border-destructive/40 bg-bad-soft',
+        state === 'partly_typed' && 'border-destructive bg-bad-soft',
       )}
     >
       <div className="flex flex-wrap items-center gap-2">

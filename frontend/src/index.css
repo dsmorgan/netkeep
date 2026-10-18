@@ -124,7 +124,7 @@
   --destructive: var(--bad-ink);
   --border: #d6dbe8;
   --input: #ccd2e1;
-  --ring: oklch(55% 0.24 var(--accent-hue));
+  --ring: oklch(51% 0.24 var(--accent-hue));
   --chart-1: oklch(85% 0.08 var(--accent-hue));
   --chart-2: oklch(72% 0.14 var(--accent-hue));
   --chart-3: oklch(58% 0.18 var(--accent-hue));
@@ -181,6 +181,11 @@
   --glass-inner: color-mix(in oklab, var(--glass) 58%, transparent);
   --tint-mix: 20%;
   --tray-mix: 9%;
+  /* How much state color the inks keep inside a tint; the rest is the ink. */
+  --tint-ink-mix: 45%;
+  /* The two sheets under a tinted pane. */
+  --stack-near: 26%;
+  --stack-far: 13%;
 
   /* The color field behind the shell: Subtle. */
   --field-opacity: 0.45;
@@ -246,6 +251,9 @@
     --glass-rim: rgb(0 0 0 / 35%);
     --tint-mix: 30%;
     --tray-mix: 14%;
+    /* Brighter on a dark page, or the sheets disappear into it. */
+    --stack-near: 42%;
+    --stack-far: 24%;
 
     --field-mix: 62%;
     --field-2: #1f6bff;
@@ -357,14 +365,16 @@
     background-color: color-mix(in oklab, var(--tone) calc(var(--tint) * 0.6), var(--card));
     box-shadow:
       0 0 0 1px color-mix(in oklab, var(--tone) 35%, var(--border)),
-      0 7px 0 -3px color-mix(in oklab, var(--tone) 26%, transparent),
-      0 14px 0 -7px color-mix(in oklab, var(--tone) 13%, transparent);
+      0 7px 0 -3px color-mix(in oklab, var(--tone) var(--stack-near), transparent),
+      0 14px 0 -7px color-mix(in oklab, var(--tone) var(--stack-far), transparent);
     /* Inside a tint, state text and muted text lean toward the ink so they stay readable on it. */
     --muted-foreground: color-mix(in oklab, var(--muted-base) 55%, var(--foreground));
-    --ok-ink: color-mix(in oklab, var(--ok) 45%, var(--foreground));
-    --warn-ink: color-mix(in oklab, var(--warn) 45%, var(--foreground));
-    --bad-ink: color-mix(in oklab, var(--bad) 45%, var(--foreground));
-    --accent-ink: color-mix(in oklab, var(--brand) 45%, var(--foreground));
+    --ok-ink: color-mix(in oklab, var(--ok) var(--tint-ink-mix), var(--foreground));
+    --warn-ink: color-mix(in oklab, var(--warn) var(--tint-ink-mix), var(--foreground));
+    --bad-ink: color-mix(in oklab, var(--bad) var(--tint-ink-mix), var(--foreground));
+    --accent-ink: color-mix(in oklab, var(--brand) var(--tint-ink-mix), var(--foreground));
+    /* An alias computes on :root, so it is restated here to pick up the tinted ink. */
+    --destructive: var(--bad-ink);
     --ok-soft: var(--glass-inner);
     --warn-soft: var(--glass-inner);
     --bad-soft: var(--glass-inner);
@@ -393,8 +403,8 @@
         inset 0 1px 0 var(--glass-highlight),
         0 0 0 1px var(--glass-rim),
         0 0 0 1px color-mix(in oklab, var(--tone) 30%, var(--glass-edge)),
-        0 7px 0 -3px color-mix(in oklab, var(--tone) 26%, transparent),
-        0 14px 0 -7px color-mix(in oklab, var(--tone) 13%, transparent),
+        0 7px 0 -3px color-mix(in oklab, var(--tone) var(--stack-near), transparent),
+        0 14px 0 -7px color-mix(in oklab, var(--tone) var(--stack-far), transparent),
         var(--elevation-drop);
     }
   }

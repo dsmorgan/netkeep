@@ -10,7 +10,7 @@ import type { BrowserHealth } from './types'
 
 const SESSION_CLASSES: Record<string, string> = {
   on: 'bg-ok-soft text-ok-ink',
-  off: 'bg-destructive/10 text-destructive',
+  off: 'bg-bad-soft text-destructive',
   unknown: 'bg-warn-soft text-warn-ink',
 }
 

@@ -15,8 +15,8 @@ const STATUS_CLASSES: Record<string, string> = {
   drafted: 'bg-accent-soft text-accent-ink',
   scheduled: 'bg-muted text-muted-foreground',
   discarded: 'bg-muted text-muted-foreground',
-  bounced: 'bg-destructive/10 text-destructive',
-  failed: 'bg-destructive/10 text-destructive',
+  bounced: 'bg-bad-soft text-destructive',
+  failed: 'bg-bad-soft text-destructive',
 }
 
 function when(iso: string): string {

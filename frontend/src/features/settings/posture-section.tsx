@@ -21,7 +21,7 @@ import {
 
 const STATUS_CLASSES: Record<string, string> = {
   on: 'bg-ok-soft text-ok-ink',
-  off: 'bg-destructive/10 text-destructive',
+  off: 'bg-bad-soft text-destructive',
   unknown: 'bg-warn-soft text-warn-ink',
 }
 
@@ -172,7 +172,7 @@ function ManualSends({ rows }: { rows: readonly Protection[] }) {
       data-auto-send={autoSendOn ? 'on' : 'off'}
       className={cn(
         'rounded-lg border-2 p-3',
-        autoSendOn ? 'border-destructive bg-destructive/10' : 'border-ok/50 bg-ok-soft',
+        autoSendOn ? 'border-destructive bg-bad-soft' : 'border-ok/50 bg-ok-soft',
       )}
     >
       <p className="flex flex-wrap items-center gap-2 font-medium">

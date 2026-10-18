@@ -44,7 +44,7 @@ export function ErrorNote({ children }: { children: ReactNode }) {
   return (
     <p
       role="alert"
-      className="flex items-start gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-destructive"
+      className="flex items-start gap-2 rounded-lg bg-bad-soft px-3 py-2 text-destructive"
     >
       <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
       <span>{children}</span>

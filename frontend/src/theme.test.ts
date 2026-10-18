@@ -199,10 +199,42 @@ function parse(value: string): Color {
 const colorOf = (tokens: Tokens, name: string) => parse(resolve(`var(--${name})`, tokens))
 const percentOf = (tokens: Tokens, name: string) => number(resolve(`var(--${name})`, tokens))
 
+/**
+ * Custom properties as the browser computes them on an element inside `.nk-tint`.
+ * Every `:root` token arrives already computed (inherited), so an alias such as
+ * `--destructive: var(--bad-ink)` keeps the `:root` value of `--bad-ink`; only what
+ * `.nk-tint` itself declares is recomputed there, against those inherited values.
+ */
+function insideTint(tokens: Tokens): Tokens {
+  const inherited: Tokens = {}
+  for (const [name, value] of Object.entries(tokens)) {
+    try {
+      inherited[name] = resolve(value, tokens)
+    } catch {
+      inherited[name] = value
+    }
+  }
+  return { ...inherited, ...inTint }
+}
+
+/** `:root` color tokens that are aliases of a token `.nk-tint` redefines. */
+function aliasesOfTinted(tokens: Tokens): string[] {
+  const tinted = new Set(Object.keys(inTint))
+  return Object.entries(tokens)
+    .filter(([name, value]) =>
+      [...value.matchAll(/var\(--([a-z0-9-]+)\)/g)].some(
+        (match) => tinted.has(match[1] as string) && !tinted.has(name),
+      ),
+    )
+    .map(([name]) => name)
+}
+
 // ---- The surfaces ----
 
 const TONES = { accent: 'brand', ok: 'ok', warn: 'warn', bad: 'bad' } as const
 const INKS = ['ok-ink', 'warn-ink', 'bad-ink', 'accent-ink'] as const
+/** Text tokens that alias an ink; `.nk-tint` must redefine them too, or they skip its inks. */
+const ALIASES = ['destructive'] as const
 const SOFTS = {
   'ok-ink': 'ok-soft',
   'warn-ink': 'warn-soft',
@@ -267,7 +299,7 @@ describe.each([
   ['light', light],
   ['dark', dark],
 ] as const)('the %s theme', (_, tokens) => {
-  const withTint = { ...tokens, ...inTint }
+  const withTint = insideTint(tokens)
 
   it.each(SOLID_PAIRS)('keeps %s on %s at WCAG AA', (text, surface) => {
     expect(contrast(colorOf(tokens, text), colorOf(tokens, surface))).toBeGreaterThanOrEqual(4.5)
@@ -297,6 +329,19 @@ describe.each([
     },
   )
 
+  // WCAG 1.4.11: the focus ring is non-text, so 3:1 against everything it sits on.
+  it('keeps the focus ring at 3:1 on the field, on glass and on every tint', () => {
+    const surfaces = [
+      ...backdrops(tokens),
+      ...panes(tokens, colorOf(tokens, 'glass-fill'), colorOf(tokens, 'card')),
+      ...(Object.keys(TONES) as (keyof typeof TONES)[]).flatMap((tone) => [
+        ...tintPanes(tokens, tone, 'tint-mix'),
+        ...tintPanes(tokens, tone, 'tray-mix'),
+      ]),
+    ]
+    expect(worst(colorOf(tokens, 'ring'), surfaces)).toBeGreaterThanOrEqual(3)
+  })
+
   describe.each(Object.keys(TONES) as (keyof typeof TONES)[])('a %s-tinted pane', (tone) => {
     const surfaces = [
       ...tintPanes(tokens, tone, 'tint-mix'),
@@ -304,8 +349,21 @@ describe.each([
     ]
     const heading = mix(colorOf(tokens, TONES[tone]), 0.45, colorOf(tokens, 'foreground'))
 
-    it.each(['foreground', 'muted-foreground', ...INKS])('keeps %s readable on it', (text) => {
-      expect(worst(colorOf(withTint, text), surfaces)).toBeGreaterThanOrEqual(4.5)
+    it.each(['foreground', 'muted-foreground', ...INKS, ...ALIASES])(
+      'keeps %s readable on it',
+      (text) => {
+        expect(worst(colorOf(withTint, text), surfaces)).toBeGreaterThanOrEqual(4.5)
+      },
+    )
+
+    // An error or a destructive badge or button in a tinted pane: `text-destructive` on
+    // `bg-bad-soft`, at rest and at the button's `/70` hover.
+    it.each([1, 0.7])('keeps destructive readable on bad-soft at %s inside it', (strength) => {
+      const soft = colorOf(withTint, 'bad-soft')
+      const onSoft = surfaces.map((surface) =>
+        over({ rgb: soft.rgb, alpha: soft.alpha * strength }, surface),
+      )
+      expect(worst(colorOf(withTint, 'destructive'), onSoft)).toBeGreaterThanOrEqual(4.5)
     })
 
     it.each(INKS)('keeps %s readable on its soft tint inside it', (ink) => {
@@ -317,6 +375,35 @@ describe.each([
     it('keeps its heading readable on it', () => {
       expect(worst(heading, surfaces)).toBeGreaterThanOrEqual(4.5)
     })
+  })
+})
+
+describe.each([
+  ['light', light],
+  ['dark', dark],
+] as const)('a tint in the %s theme', (_, tokens) => {
+  it('redefines every alias of a token it changes, so none keeps the page value', () => {
+    expect(aliasesOfTinted(tokens)).toEqual([])
+  })
+})
+
+/** Every source file the app is built from, as text. */
+const SOURCES = import.meta.glob<string>(['./**/*.{ts,tsx}', '!./**/*.test.{ts,tsx}'], {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+})
+
+describe('red behind text', () => {
+  // `bg-destructive/N` overlays red on whatever is under it. On a dark tint that
+  // brightens the surface until red text drops to about 3.2:1, while `bg-bad-soft`
+  // turns into plain inner glass inside a tint, which the checks above cover.
+  it('is bg-bad-soft everywhere, never bg-destructive/N', () => {
+    expect(Object.keys(SOURCES).length).toBeGreaterThan(100)
+    const offenders = Object.keys(SOURCES).filter((file) =>
+      /\bbg-destructive\/\d+/.test(SOURCES[file] as string),
+    )
+    expect(offenders).toEqual([])
   })
 })
 

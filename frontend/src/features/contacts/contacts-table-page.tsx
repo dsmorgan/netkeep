@@ -352,7 +352,7 @@ export function ContactsTablePage({ search, onNavigate }: ContactsTablePageProps
       />
 
       {viewFailed && (
-        <div role="alert" className="grid gap-2 rounded-xl bg-destructive/10 p-4 text-destructive">
+        <div role="alert" className="grid gap-2 rounded-xl bg-bad-soft p-4 text-destructive">
           <p>
             The saved view in this link could not be loaded, so its contacts are not shown:{' '}
             {views.error?.message}
@@ -379,7 +379,7 @@ export function ContactsTablePage({ search, onNavigate }: ContactsTablePageProps
       )}
 
       {failure && (
-        <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-destructive">
+        <p role="alert" className="rounded-lg bg-bad-soft px-3 py-2 text-destructive">
           {failure}
         </p>
       )}
@@ -417,7 +417,7 @@ export function ContactsTablePage({ search, onNavigate }: ContactsTablePageProps
       {page.isPending && !viewFailed && <p className="text-muted-foreground">Loading contacts…</p>}
 
       {page.isError && (
-        <div role="alert" className="grid gap-2 rounded-xl bg-destructive/10 p-4 text-destructive">
+        <div role="alert" className="grid gap-2 rounded-xl bg-bad-soft p-4 text-destructive">
           <p>Contacts could not be loaded: {page.error.message}</p>
           <div>
             <Button size="sm" variant="outline" onClick={() => void page.refetch()}>
