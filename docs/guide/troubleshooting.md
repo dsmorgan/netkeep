@@ -81,17 +81,19 @@ Turning on **Start netkeeper when I log in** while netkeeper is running only reg
 
 | State | Meaning | What to do |
 |---|---|---|
-| Off | No login agent for this data directory. | Turn the switch on. |
+| Off | No login agent for this data directory, or launchd has it turned off (for example in Login Items in System Settings). | Turn the switch on. |
 | Registered: starts at next login | The agent is in place but launchd hasn't started it. | Log out and back in, then open netkeeper's bookmark without starting anything. |
 | Running from login agent | launchd started this netkeeper. | Nothing. |
 | Needs repair | An agent from the removed install script serves this data directory and can't start. | **Repair** on the card, or `netkeeper login-item on` in a terminal. |
 | Points at a different netkeeper | The agent runs another copy than the one you are using, such as an old checkout. | **Repair** on the card. |
 
-`netkeeper login-item status` prints the same state names. To ask launchd directly, run this in a terminal. Use the label the status shows; the default data directory's is `fun.tnkr.netkeeper`:
+`netkeeper login-item status` prints the same state names. To ask launchd directly, run this in a terminal. The label is on the card, and `NETKEEPER_DATA=<dir> netkeeper login-item status` prints it on its `label:` line. The default data directory's is `fun.tnkr.netkeeper`; any other has a hash after it:
 
 ```sh
-launchctl print gui/$(id -u)/fun.tnkr.netkeeper
+launchctl print gui/$(id -u)/<label>
 ```
+
+For example, `launchctl print gui/$(id -u)/fun.tnkr.netkeeper`.
 
 `state = running` and a `pid` mean launchd started it. "Could not find service" means the agent isn't loaded: log out and back in, or run `netkeeper login-item on` with netkeeper stopped to load it now. `<data dir>/logs/serve.err.log` holds the agent's crashes.
 

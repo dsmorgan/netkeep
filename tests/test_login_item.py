@@ -366,6 +366,9 @@ def test_each_state_has_its_words(launchctl: FakeLaunchctl, tmp_path: Path, data
         environ={},
     )
     assert moved.status().state.value == "Points at a different netkeeper"
+    launchctl.loaded.add(off.label)  # an old checkout's agent is usually loaded: still different
+    assert moved.status().loaded
+    assert moved.status().state.value == "Points at a different netkeeper"
 
     other = tmp_path / "other-data"
     write_old_plist(tmp_path, other)
