@@ -132,23 +132,27 @@ describe('StartChrome', () => {
   })
 
   it.each([
-    ['handed_off', null, 'status', 'It opened netkeeper in a new window.'],
-    ['handoff_unconfirmed', null, 'status', "couldn't confirm the new window opened"],
-    ['failed', null, 'alert', "Chrome didn't start. Check that Google Chrome is installed"],
-    ['refused', 'not_dedicated', 'alert', "Another Chrome is using netkeeper's debug port"],
-    ['refused', 'profile_without_port', 'alert', 'without the debug port'],
-    ['refused', 'run_holds_browser', 'alert', 'Try again when the run ends.'],
-    ['refused', 'remote_address', 'alert', 'points at another computer'],
-    ['refused', 'invalid_port', 'alert', 'has no valid port'],
-  ] as const)('says %s (%s) in plain words', async (status, refusal, role, words) => {
-    const { source, starts } = renderButton()
-    await press(source, starts, launch({ status, refusal, message: 'the launcher’s words' }))
-    const said = await screen.findByRole(role)
-    expect(said).toHaveTextContent(words)
-    if (status !== 'handed_off') {
-      expect(said).toHaveTextContent('netkeeper said: the launcher’s words')
-    }
-  })
+    ['handed_off', null, 'status', 'ok', 'It opened netkeeper in a new window.'],
+    ['handoff_unconfirmed', null, 'status', 'ok', "couldn't confirm the new window opened"],
+    ['failed', null, 'alert', 'bad', "Chrome didn't start. Check that Google Chrome is installed"],
+    ['refused', 'not_dedicated', 'alert', 'warn', "Another Chrome is using netkeeper's debug port"],
+    ['refused', 'profile_without_port', 'alert', 'warn', 'without the debug port'],
+    ['refused', 'run_holds_browser', 'alert', 'warn', 'Try again when the run ends.'],
+    ['refused', 'remote_address', 'alert', 'warn', 'points at another computer'],
+    ['refused', 'invalid_port', 'alert', 'warn', 'has no valid port'],
+  ] as const)(
+    'says %s (%s) in plain words, with its tint',
+    async (status, refusal, role, tone, words) => {
+      const { source, starts } = renderButton()
+      await press(source, starts, launch({ status, refusal, message: 'the launcher’s words' }))
+      const said = await screen.findByRole(role)
+      expect(said).toHaveTextContent(words)
+      expect(said).toHaveClass('nk-glass', 'nk-tint', `nk-tone-${tone}`)
+      if (status !== 'handed_off') {
+        expect(said).toHaveTextContent('netkeeper said: the launcher’s words')
+      }
+    },
+  )
 
   it('says a launch already under way (409) plainly', async () => {
     renderButton(

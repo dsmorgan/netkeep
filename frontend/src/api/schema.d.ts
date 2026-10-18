@@ -2248,10 +2248,11 @@ export interface paths {
          *     The ``linkedin session`` posture row (the last ``netkeeper preflight`` or
          *     ``posture --probe``, or the newest run that read LinkedIn, under the session
          *     flag), and the newest run that could not reach Chrome when that is newer.
-         *     Nothing here attaches to the browser (spec 9.9, CLAUDE.md); a live check is
-         *     still ``netkeeper preflight`` in a terminal. Whether netkeeper's Chrome is running
-         *     is read from its profile's lock file, and whether a run holds the browser from the
-         *     lock files, for the **Start Chrome** button (#599).
+         *     Nothing here attaches to the browser (spec 9.9, CLAUDE.md); that takes a live
+         *     check (``netkeeper preflight`` or a Check connection run). For the **Start Chrome**
+         *     button (#599), whether netkeeper's Chrome is running is read from its profile's
+         *     lock file, the same reading as the posture report's dedicated-profile row, and
+         *     whether a run holds the browser from the browser lock files.
          */
         get: operations["get_linkedin_browser_health"];
         put?: never;

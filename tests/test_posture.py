@@ -276,8 +276,35 @@ def test_the_profile_row_without_a_probe_says_every_attach_checks(
 
     assert row.status is Status.ON
     assert row.warnings == ()
-    assert row.value == "checked at every attach"
+    assert row.value == "checked at every attach; netkeeper's Chrome isn't running"
+    assert row.summary == "checked at every attach"
     assert row.key == KEY_DEDICATED_PROFILE == "dedicated_profile"
+
+
+def test_the_profile_row_says_netkeepers_chrome_is_running_without_a_probe(
+    writer: Session, user: User, tmp_path: Path
+) -> None:
+    """#599: from the profile's lock file alone, so it shows with ``--no-probe``."""
+    from netkeeper.paths import data_dir
+
+    hold_profile(data_dir() / "chrome-profile", os.getpid())  # a live pid
+    report = _report(writer, user, probe=None)
+    row = _row(report, "dedicated chrome profile")
+    assert (
+        row.value == f"checked at every attach; netkeeper's Chrome is running (pid {os.getpid()})"
+    )
+    assert row.status is Status.ON and row.warnings == ()
+
+
+def test_a_stale_profile_lock_isnt_a_running_chrome(
+    writer: Session, user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from netkeeper.paths import data_dir
+
+    hold_profile(data_dir() / "chrome-profile", 4_000_002)
+    monkeypatch.setattr(activity_lock, "pid_alive", lambda pid: False)
+    row = _row(_report(writer, user, probe=None), "dedicated chrome profile")
+    assert row.value.endswith("netkeeper's Chrome isn't running")
 
 
 def test_the_profile_row_names_the_dedicated_profile(

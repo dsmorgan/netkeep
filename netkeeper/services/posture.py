@@ -55,7 +55,7 @@ from __future__ import annotations
 import enum
 import math
 import textwrap
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
@@ -76,7 +76,7 @@ from netkeeper.campaigns.templates import (
     describe_removed_field_campaigns,
     removed_field_campaigns,
 )
-from netkeeper.chrome_profile import ProfileCheck
+from netkeeper.chrome_profile import ProfileCheck, profile_lock_pid
 from netkeeper.config import HeatSettings, LinkedInSettings, PacingSettings, Settings
 from netkeeper.crm import inbox_apply
 from netkeeper.crm.inbox_apply import short_first_poll
@@ -91,9 +91,11 @@ from netkeeper.linkedin.pacing import (
     warmup_budget,
 )
 from netkeeper.models import Mailbox, SyncRunKind, SyncRunStatus, User
+from netkeeper.paths import data_dir
 from netkeeper.scoping import scoped
 from netkeeper.services import heat as heat_rows
 from netkeeper.services import inbox_hold, route_breaker
+from netkeeper.services.browser_launch import CHROME_PROFILE_DIRNAME
 from netkeeper.services.budgets import (
     HARD_MAX_PER_DAY,
     HARD_MAX_PER_WEEK,
@@ -551,6 +553,7 @@ def posture(
     probe: SessionProbe | None = None,
     heat_gate: HeatGate | None = None,
     lock: activity_lock.LockState | None = None,
+    chrome_pid: Callable[[], int | None] | None = None,
 ) -> PostureReport:
     """Summarize every protection the extractor has, as of ``now``.
 
@@ -571,6 +574,10 @@ def posture(
     ``lock`` is the account's activity lock as the caller inspected it; ``None``
     inspects ``account_id``'s own lock (``activity_lock.account_key``) here. The
     inspection peeks with a shared file lock it drops at once, and creates nothing.
+
+    ``chrome_pid`` reads whether netkeeper's Chrome is running (#599); ``None`` is
+    :func:`netkeeper_chrome_pid`, a read of the profile's lock file that never connects
+    to the port, so the dedicated-profile row says it with or without a probe.
 
     Read-only: a plain ``session_scope(factory)`` is enough and a writer is not
     needed.
@@ -601,7 +608,7 @@ def posture(
 
     protections: list[Protection] = [
         _browser_mode(browser_mode, linkedin.cdp_url),
-        _dedicated_profile(probe),
+        _dedicated_profile(probe, (netkeeper_chrome_pid if chrome_pid is None else chrome_pid)()),
         _activity_lock(lock, now=now, account=activity_lock.account_key(account_id)),
         _linkedin_session(
             probe,
@@ -833,19 +840,43 @@ def _browser_mode(mode: str, cdp_url: str) -> Protection:
     )
 
 
-def _dedicated_profile(probe: SessionProbe | None) -> Protection:
+def netkeeper_chrome_pid(profile: Path | None = None) -> int | None:
+    """The live process holding netkeeper's Chrome profile, from its ``SingletonLock`` (#599).
+
+    ``profile`` defaults to ``<data dir>/chrome-profile``. A file read and a signal-0
+    check: it never connects to the port or attaches, so a request handler and
+    ``posture --no-probe`` may call it. A stale lock whose pid was reused reads as
+    running, which fails safe: ``serve``'s start at startup then starts nothing.
+    """
+    folder = data_dir() / CHROME_PROFILE_DIRNAME if profile is None else profile
+    pid = profile_lock_pid(folder)
+    return pid if pid is not None and activity_lock.pid_alive(pid) else None
+
+
+def _running(pid: int | None) -> str:
+    return (
+        "netkeeper's Chrome isn't running"
+        if pid is None
+        else f"netkeeper's Chrome is running (pid {pid})"
+    )
+
+
+def _dedicated_profile(probe: SessionProbe | None, running_pid: int | None) -> Protection:
     """Whether the Chrome on the port is netkeeper's dedicated profile (ADR 0012, #624).
 
     Every attach checks, and refuses anything else, so the row is on without a probe.
     A probe that was refused for it says why, as a warning: until that Chrome is quit
-    and netkeeper's is started, no run can attach.
+    and netkeeper's is started, no run can attach. Without a probe, the row also says
+    whether netkeeper's Chrome is running, from its profile's lock file (#599): that's
+    information, not a protection, so a Chrome that isn't running is no warning.
     """
     check = None if probe is None else probe.profile
     if check is None:
         return Protection(
             name="dedicated chrome profile",
             status=Status.ON,
-            value="checked at every attach",
+            value=f"checked at every attach; {_running(running_pid)}",
+            brief="checked at every attach",
             key=KEY_DEDICATED_PROFILE,
         )
     if check.dedicated:

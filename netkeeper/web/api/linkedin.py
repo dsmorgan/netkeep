@@ -63,10 +63,8 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from netkeeper.chrome_profile import profile_lock_pid
 from netkeeper.config import LinkedInSettings
 from netkeeper.crm.inbox_apply import clear_short_first_poll, forget_owner
-from netkeeper.linkedin.activity_lock import pid_alive
 from netkeeper.models import Contact, SyncRun, SyncRunKind, SyncRunStatus, SyncRunTrigger, User
 from netkeeper.models.base import utcnow
 from netkeeper.paths import data_dir
@@ -884,10 +882,11 @@ def get_browser_health(
     The ``linkedin session`` posture row (the last ``netkeeper preflight`` or
     ``posture --probe``, or the newest run that read LinkedIn, under the session
     flag), and the newest run that could not reach Chrome when that is newer.
-    Nothing here attaches to the browser (spec 9.9, CLAUDE.md); a live check is
-    still ``netkeeper preflight`` in a terminal. Whether netkeeper's Chrome is running
-    is read from its profile's lock file, and whether a run holds the browser from the
-    lock files, for the **Start Chrome** button (#599).
+    Nothing here attaches to the browser (spec 9.9, CLAUDE.md); that takes a live
+    check (``netkeeper preflight`` or a Check connection run). For the **Start Chrome**
+    button (#599), whether netkeeper's Chrome is running is read from its profile's
+    lock file, the same reading as the posture report's dedicated-profile row, and
+    whether a run holds the browser from the browser lock files.
     """
     now = utcnow()
     account = find_account(session, user)
@@ -907,7 +906,7 @@ def get_browser_health(
     ):
         unreachable = None
     running = None if account is None else runs.running_run(session, user, account.id)
-    chrome_pid = _netkeeper_chrome_pid()
+    chrome_pid = posture_service.netkeeper_chrome_pid()
     return BrowserHealthOut(
         checked_at=now,
         can_start_runs=request.app.state.executor is not None,
@@ -925,15 +924,6 @@ def get_browser_health(
             and is_owner(session, user)
         ),
     )
-
-
-def _netkeeper_chrome_pid() -> int | None:
-    """The live process holding netkeeper's Chrome profile, from its ``SingletonLock`` (#599).
-
-    A file read and a signal-0 check: it never connects to the port or attaches.
-    """
-    pid = profile_lock_pid(data_dir() / CHROME_PROFILE_DIRNAME)
-    return pid if pid is not None and pid_alive(pid) else None
 
 
 # --- launch instructions ---------------------------------------------------------------
