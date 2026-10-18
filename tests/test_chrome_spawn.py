@@ -561,8 +561,8 @@ async def test_a_cold_start_another_chrome_took_is_not_a_start(tmp_path: Path) -
     assert result.status is LaunchStatus.FAILED, result
 
 
-@pytest.mark.parametrize("status", [21, 3])
-async def test_a_hand_off_that_exits_nonzero_is_unconfirmed_not_failed(
+@pytest.mark.parametrize("status", [3, 1])
+async def test_a_hand_off_that_exits_with_another_code_is_unconfirmed_not_failed(
     tmp_path: Path, status: int
 ) -> None:
     """Chrome may exit nonzero after notifying the running instance (#658 re-review)."""
@@ -577,7 +577,25 @@ async def test_a_hand_off_that_exits_nonzero_is_unconfirmed_not_failed(
     assert result.reached_chrome and not result.opened
     assert f"exited with status {status}" in result.message
     assert "probably opened in the running Chrome" in result.message
-    assert ("profile in use" in result.message) is (status == 21)
+
+
+@pytest.mark.parametrize(
+    ("status", "words"),
+    [(21, "Chrome refused the hand-off: the profile is in use"), (-11, "killed by signal 11")],
+)
+async def test_a_hand_off_refused_as_profile_in_use_or_killed_failed(
+    tmp_path: Path, status: int, words: str
+) -> None:
+    case = _Case(
+        answers=True,
+        probe=PortProbe(busy=False, browser_pid=LOCK_PID),
+        lock_pid=LOCK_PID,
+        process=_Process(exits=status),
+    )
+    result = await case.launcher(tmp_path).start()
+    assert result.status is LaunchStatus.FAILED, result
+    assert not result.reached_chrome
+    assert words in result.message and "probably opened" not in result.message
 
 
 async def test_a_nonzero_hand_off_after_which_another_pid_holds_the_profile_failed(

@@ -357,10 +357,11 @@ class ChromeLauncher:
 
         A hand-off (``expected`` is the verified Chrome's pid) succeeds only when the
         launched process exits 0 and that pid still holds the profile: Chrome's singleton
-        can replace a running Chrome that doesn't answer in time. One that exits nonzero
-        with that pid still holding the profile is ``handoff_unconfirmed``: Chrome may
-        exit nonzero after notifying the running instance. A pid that changed, or a
-        launched process still running, is ``failed``. A cold start
+        can replace a running Chrome that doesn't answer in time. One that exits with
+        another positive status with that pid still holding the profile is
+        ``handoff_unconfirmed``: Chrome may exit nonzero after notifying the running
+        instance. Status 21 (the profile in use: Chrome aborted), a signal, a pid that
+        changed, or a launched process still running is ``failed``. A cold start
         (``expected`` is ``None``) succeeds only while the launched process runs and no
         other process holds the profile.
         """
@@ -378,20 +379,30 @@ class ChromeLauncher:
                     f"opened the UI in netkeeper's Chrome on port {port}",
                     pid=expected,
                 )
+            if status == PROFILE_IN_USE_EXIT:
+                # Chrome's RESULT_CODE_PROFILE_IN_USE: it aborted without reaching the
+                # running instance (observed: the running Chrome's targets didn't change).
+                return _failed(
+                    f"Chrome refused the hand-off: the profile is in use (the launched"
+                    f" process exited with status {status}), so the UI's window didn't open"
+                    f" in netkeeper's Chrome (pid {expected}). Check that Chrome, then run"
+                    " netkeeper open again"
+                )
+            if status is not None and status < 0:
+                return _failed(
+                    f"the launched Chrome was killed by signal {-status} during the hand-off,"
+                    f" so the UI's window may not have opened in netkeeper's Chrome (pid"
+                    f" {expected}). Check that Chrome, then run netkeeper open again"
+                )
             if status is not None and still_held:
                 # Chrome may exit nonzero after notifying the running instance; what a
                 # headed hand-off exits with is not verified live (the design doc).
-                refused = (
-                    " (status 21 can mean Chrome refused the hand-off: profile in use)"
-                    if status == PROFILE_IN_USE_EXIT
-                    else ""
-                )
                 log.warning("hand-off unconfirmed: the launched Chrome exited %d", status)
                 return LaunchResult(
                     LaunchStatus.HANDOFF_UNCONFIRMED,
                     f"handed the UI's window to netkeeper's Chrome (pid {expected}) on port"
-                    f" {port}, but the launched process exited with status {status}{refused},"
-                    " so netkeeper can't confirm the window opened. It probably opened in the"
+                    f" {port}, but the launched process exited with status {status}, so"
+                    " netkeeper can't confirm the window opened. It probably opened in the"
                     " running Chrome: check there",
                     pid=expected,
                 )

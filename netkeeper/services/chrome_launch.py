@@ -35,8 +35,9 @@ class LaunchStatus(enum.StrEnum):
 
     HANDOFF_UNCONFIRMED = "handoff_unconfirmed"
     """netkeeper's Chrome was running and still holds the profile, but the process the
-    launcher started exited nonzero, so the window can't be confirmed. It probably
-    opened: Chrome may exit nonzero after notifying the running instance."""
+    launcher started exited with a positive status other than 21, so the window can't be
+    confirmed. It probably opened: Chrome may exit nonzero after notifying the running
+    instance. Status 21 (profile in use) and a signal are :attr:`FAILED`."""
 
     REFUSED = "refused"
     """A check before the spawn refused; nothing was started. :attr:`LaunchResult.refusal`

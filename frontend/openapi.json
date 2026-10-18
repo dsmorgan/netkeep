@@ -1656,7 +1656,7 @@
         "type": "object"
       },
       "BrowserStartAccepted": {
-        "description": "The ``202`` of ``POST /linkedin/browser/start``: the task running the launch.\n\nHow it went arrives on ``GET /events`` as ``browser.launch`` with the same\n``task_id``: ``status`` (``started``, ``handed_off``, ``refused`` or ``failed``),\n``refusal`` (which check refused, or null), ``message`` and ``pid``.",
+        "description": "The ``202`` of ``POST /linkedin/browser/start``: the task running the launch.\n\nHow it went arrives on ``GET /events`` as ``browser.launch`` with the same\n``task_id``: ``status`` (``started``, ``handed_off``, ``handoff_unconfirmed``,\n``refused`` or ``failed``),\n``refusal`` (which check refused, or null), ``message`` and ``pid``.",
         "properties": {
           "task_id": {
             "title": "Task Id",
