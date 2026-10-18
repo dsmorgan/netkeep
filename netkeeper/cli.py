@@ -31,6 +31,7 @@ from netkeeper.campaigns import gmail_oauth
 from netkeeper.campaigns import schedule as schedule_module
 from netkeeper.campaigns.spelling import normalize as normalize_word
 from netkeeper.chrome_profile import ProfileCheck
+from netkeeper.chrome_spawn import ChromeLauncher
 from netkeeper.config import ConfigError, Settings, load_settings, render_toml
 from netkeeper.crm import do_not_send, import_runs, inbox_apply, new_contact
 from netkeeper.crm.archive import ArchiveImport, import_archive
@@ -46,7 +47,7 @@ from netkeeper.crm.lists import ListCount, find_list, list_lists, list_views, me
 from netkeeper.crm.self_contact import ensure_self_contact
 from netkeeper.crm.tags import ensure_default_rules, find_tag, list_tags, run_rules
 from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.linkedin.activity_lock import SINGLE_ACCOUNT_KEY, account_key
+from netkeeper.linkedin.activity_lock import SINGLE_ACCOUNT_KEY, account_key, pid_alive
 from netkeeper.linkedin.archive import ArchiveFormatError
 from netkeeper.linkedin.browser import (
     CHROME_PROFILE_DIRNAME,
@@ -130,6 +131,7 @@ from netkeeper.services.backup import (
     restore_backup,
 )
 from netkeeper.services.browser_launch import cdp_port, chrome_launch_command, remote_host_note
+from netkeeper.services.chrome_launch import PortProbe
 from netkeeper.services.events import EventBus
 from netkeeper.services.linkedin_accounts import (
     account_id_for,
@@ -172,6 +174,7 @@ from netkeeper.worker import (
     BrowserWorker,
     BubbleCheckResult,
     MessageCheckResult,
+    launcher_probe,
     run_bubble_check,
     run_message_check,
     serve_app,
@@ -374,12 +377,25 @@ def open_command(
             show_default=False,
         ),
     ] = None,
+    link_only: Annotated[
+        bool,
+        typer.Option(
+            "--link-only",
+            help="Only print the link: don't start netkeeper's Chrome or open a window in it.",
+        ),
+    ] = False,
 ) -> None:
-    """Print a one-time link that connects a browser to netkeeper's UI.
+    """Open netkeeper's UI in netkeeper's Chrome, starting that Chrome if it's down.
 
-    The link works once, within two minutes. Open it in the browser you use for
-    netkeeper; that browser then stays connected, across restarts. A browser that
-    isn't connected can't use the UI or the API (ADR 0013).
+    The UI opens as an app window in netkeeper's own Chrome: its dedicated profile, on
+    the configured debugging port (ADR 0012). When that Chrome is running, it opens the
+    window there; when it isn't, this starts it. It refuses, and says why, when the port
+    answers as another Chrome, when that profile is open without the port, or, for a
+    start, while a run holds the browser.
+
+    It also prints a one-time link that connects a browser to the UI, for any other
+    browser (or with --link-only, instead). The link works once, within two minutes; a
+    browser that isn't connected can't use the UI or the API (ADR 0013).
 
     The key belongs to the data directory: run this with the same NETKEEPER_DATA as
     `netkeeper serve`. The UI's connect page shows the exact command.
@@ -390,16 +406,52 @@ def open_command(
         settings.web.host, settings.web.port if port is None else port
     )
     try:
-        link = local_api_key.connect_url(base)
+        key = local_api_key.stored_key()
+        link = local_api_key.connect_url(base, key)
     except keychain.KeychainUnavailable as exc:
         for line in KEYCHAIN_REFUSED_OPEN:
             typer.echo(line, err=True)
         typer.echo(f"\n(the Keychain said: {exc})", err=True)
         raise typer.Exit(code=1) from exc
-    typer.echo("Open this link in the browser you use for netkeeper (it works once, within")
+    launched = None
+    if not link_only:
+        # The address in force (#597), the same one `browser launch` prints.
+        cdp_url = _load_settings_or_exit(state).linkedin.cdp_url
+        launched = asyncio.run(_open_launcher(cdp_url, base, key).start())
+        if launched.opened:
+            typer.echo(f"{launched.message}.")
+        else:
+            typer.echo(f"netkeeper's Chrome: {launched.message}.", err=True)
+        typer.echo()
+    typer.echo("To open netkeeper in another browser, use this link (it works once, within")
     typer.echo("two minutes):")
     typer.echo()
     typer.echo(f"  {link}")
+    if launched is not None and not launched.opened:
+        raise typer.Exit(code=1)
+
+
+def _open_launcher(cdp_url: str, base: str, key: str) -> ChromeLauncher:
+    """The Chrome launcher for `netkeeper open` (#636): ``cdp_url``, the dedicated profile,
+    a fresh connect link to ``base`` for the UI's window, and the activity lock's key."""
+
+    async def address() -> str:
+        return cdp_url
+
+    async def probe(url: str) -> PortProbe:
+        account = _browser_lock_key()
+        return await launcher_probe(
+            url, locks=ActivityLocks(legacy_partner=account), account=account
+        )
+
+    return ChromeLauncher(
+        cdp_url=address,
+        profile=data_dir() / CHROME_PROFILE_DIRNAME,
+        app_url=lambda: local_api_key.connect_url(base, key),
+        probe=probe,
+        run_holds_browser=runs.any_browser_lock_held,
+        pid_alive=pid_alive,
+    )
 
 
 #: What `netkeeper open` says when the Keychain refuses (#618 review): no link can be
@@ -465,7 +517,7 @@ def serve(
             APP_FACTORY, factory=True, reload=True, host=bind_host, port=bind_port, log_config=None
         )
         return
-    application = serve_app(settings)
+    application = serve_app(settings, ui_base=local_api_key.base_url(bind_host, bind_port))
     server = uvicorn.Server(
         uvicorn.Config(application, host=bind_host, port=bind_port, log_config=None)
     )

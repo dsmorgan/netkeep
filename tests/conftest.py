@@ -13,7 +13,7 @@ from local_api import LocalKey
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper import migrations
+from netkeeper import chrome_spawn, migrations
 from netkeeper.campaigns import gmail_oauth
 from netkeeper.config import Settings
 from netkeeper.db import DATABASE_FILENAME, database_url, make_engine, make_session_factory
@@ -65,6 +65,19 @@ def _no_real_launchd(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(login_item, "run_launchctl", blocked)
     monkeypatch.setattr(login_item, "default_agents_dir", blocked)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_chrome_spawn(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test starts Chrome or knocks on a real port (#636): a test of the launcher hands
+    ``ChromeLauncher`` its own ``spawn`` and ``answers``, and a test of
+    ``spawn_chrome`` itself gives the module a fake ``subprocess``."""
+
+    def blocked(*_args: object) -> object:
+        raise AssertionError("a test must give ChromeLauncher a fake spawn and answers")
+
+    monkeypatch.setattr(chrome_spawn, "spawn_chrome", blocked)
+    monkeypatch.setattr(chrome_spawn, "port_answers", blocked)
 
 
 @pytest.fixture(autouse=True)

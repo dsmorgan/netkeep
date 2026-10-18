@@ -83,6 +83,7 @@ from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
+from pathlib import Path
 from typing import Any, Final, Protocol, cast
 
 from sqlalchemy import CursorResult, case, literal, select
@@ -209,6 +210,28 @@ def browser_held_for(session: Session) -> BrowserHeld:
     """:func:`lock_held` for this database: the legacy lock counts for the local account."""
     local = local_account_id(session)
     return lambda account_id: lock_held(account_id, legacy=account_id == local)
+
+
+def any_browser_lock_held(directory: Path | None = None) -> bool:
+    """Whether any process holds any account's browser lock in this data directory (#636).
+
+    The Chrome launcher refuses a cold start while one is held: a run is attached, or
+    about to attach. It reads every ``browser-*.lock`` file under ``directory`` (default
+    ``<data dir>/locks``) with :func:`activity_lock.inspect_at`'s peek, so it needs no
+    database and never attaches. A lock that can't be inspected counts as held.
+    """
+    folder = activity_lock.locks_dir() if directory is None else directory
+    try:
+        paths = sorted(folder.glob("browser-*.lock"))
+    except OSError:
+        return True
+    for path in paths:
+        try:
+            if activity_lock.inspect_at(path, path.stem).held:
+                return True
+        except OSError:
+            return True
+    return False
 
 
 def runner_id() -> str:

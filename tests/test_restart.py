@@ -438,7 +438,7 @@ def test_serve_relaunches_only_when_a_restart_was_asked_for(
         monkeypatch.setenv(name, value)
     application = FastAPI()
     application.state.ask_restart = ask
-    monkeypatch.setattr(cli, "serve_app", lambda settings: application)
+    monkeypatch.setattr(cli, "serve_app", lambda settings, **_: application)
     monkeypatch.setattr(uvicorn, "Server", _FakeServer)
     calls: list[str] = []
     monkeypatch.setattr(restart, "relaunch", calls.append)

@@ -358,7 +358,7 @@ async def test_the_cookie_survives_a_restart(app: FastAPI) -> None:
 
 
 def test_netkeeper_open_prints_a_link_the_server_accepts() -> None:
-    result = CliRunner().invoke(cli, ["open", "--port", "8123"])
+    result = CliRunner().invoke(cli, ["open", "--port", "8123", "--link-only"])
     assert result.exit_code == 0, result.output
     [link] = re.findall(r"http://\S+", result.output)
     assert link.startswith("http://127.0.0.1:8123/api/v1/session/connect?code=")
@@ -378,7 +378,7 @@ def test_netkeeper_open_says_so_when_the_keychain_refuses(memory_keyring: Memory
 
 
 def test_netkeeper_open_points_the_link_at_a_base_url_given() -> None:
-    result = CliRunner().invoke(cli, ["open", "--base-url", "http://localhost:5173"])
+    result = CliRunner().invoke(cli, ["open", "--base-url", "http://localhost:5173", "--link-only"])
     assert result.exit_code == 0, result.output
     [link] = re.findall(r"http://\S+", result.output)
     assert link.startswith("http://localhost:5173/api/v1/session/connect?code=")

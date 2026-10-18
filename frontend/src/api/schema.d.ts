@@ -2237,6 +2237,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/linkedin/browser/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Browser
+         * @description Start netkeeper's Chrome with the UI in an app window, or open the window in it (#636).
+         *
+         *     Your act, from a button (ADR 0012, rule 5). It submits the launch to the task runner
+         *     and answers ``202`` at once: the checks before a spawn can take seconds, and nothing
+         *     is spawned inside a request. The launch refuses when the port answers as another
+         *     Chrome, when the profile is open without the port, or, for a cold start, while a run
+         *     holds the browser; how it went arrives as ``browser.launch`` on ``GET /events``.
+         *     ``first_run`` (setup's first-run button) also opens LinkedIn's sign-in page.
+         */
+        post: operations["start_linkedin_browser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/linkedin/budget": {
         parameters: {
             query?: never;
@@ -4561,6 +4588,32 @@ export interface components {
             profile_dir: string;
             /** Remote Host Note */
             remote_host_note: string | null;
+        };
+        /**
+         * BrowserStartAccepted
+         * @description The ``202`` of ``POST /linkedin/browser/start``: the task running the launch.
+         *
+         *     How it went arrives on ``GET /events`` as ``browser.launch`` with the same
+         *     ``task_id``: ``status`` (``started``, ``handed_off``, ``refused`` or ``failed``),
+         *     ``refusal`` (which check refused, or null), ``message`` and ``pid``.
+         */
+        BrowserStartAccepted: {
+            /** Task Id */
+            task_id: string;
+        };
+        /**
+         * BrowserStartIn
+         * @description ``POST /linkedin/browser/start``'s body (#636).
+         *
+         *     ``first_run`` is setup's first-run button only (#599): it also opens LinkedIn's
+         *     sign-in page beside the UI's window.
+         */
+        BrowserStartIn: {
+            /**
+             * First Run
+             * @default false
+             */
+            first_run: boolean;
         };
         /**
          * BudgetOut
@@ -14602,6 +14655,60 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["BrowserHealthOut"];
                 };
+            };
+        };
+    };
+    start_linkedin_browser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BrowserStartIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserStartAccepted"];
+                };
+            };
+            /** @description Only the local owner account starts netkeeper's Chrome */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A launch is already under way */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description This process has no Chrome launcher */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

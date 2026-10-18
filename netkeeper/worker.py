@@ -59,12 +59,14 @@ from typing import Any, Final, Protocol
 from fastapi import FastAPI
 from sqlalchemy.orm import Session, sessionmaker
 
+from netkeeper.chrome_spawn import ChromeLauncher
 from netkeeper.config import LinkedInSettings, Settings, load_settings
 from netkeeper.crm.inbox_apply import owner_hold
 from netkeeper.db import CancelledWhileFailing, off_loop, session_scope
 from netkeeper.linkedin import activity_lock
 from netkeeper.linkedin.activity_lock import account_key
 from netkeeper.linkedin.browser import (
+    CHROME_PROFILE_DIRNAME,
     ActivityLocks,
     AttachBrowserProvider,
     BrowserBusy,
@@ -73,6 +75,8 @@ from netkeeper.linkedin.browser import (
     BrowserUnavailable,
     BubbleCheck,
     BubbleCheckFailed,
+    CdpConnector,
+    PlaywrightCdpConnector,
     ProfileRefused,
     ReadFailure,
     classify_read_failure,
@@ -90,12 +94,21 @@ from netkeeper.linkedin.page_messaging import PageBubbleCheck, PageMessageCheck,
 from netkeeper.linkedin.page_profiles import PageProfiles
 from netkeeper.logging_setup import personal_exc, setup_logging
 from netkeeper.models import SyncRunKind, SyncRunStatus, SyncRunTrigger, User
-from netkeeper.services import message_check, message_send, route_breaker, runs, ui_settings
+from netkeeper.paths import data_dir
+from netkeeper.services import (
+    local_api_key,
+    message_check,
+    message_send,
+    route_breaker,
+    runs,
+    ui_settings,
+)
 from netkeeper.services.budgets import (
     ActionClass,
     li_message_risk_warning,
     profile_visit_risk_warning,
 )
+from netkeeper.services.chrome_launch import PortProbe
 from netkeeper.services.connections_sync import sync_connections
 from netkeeper.services.enrichment import enrich_contacts
 from netkeeper.services.events import Event, EventBus
@@ -733,8 +746,12 @@ def _local_cdp_url(session: Session, settings: Settings) -> str:
     return ui_settings.resolve(session, user, settings).linkedin.cdp_url
 
 
-def serve_app(settings: Settings) -> FastAPI:
-    """The app ``netkeeper serve`` runs: ``create_app`` with the extractor.
+def serve_app(settings: Settings, *, ui_base: str | None = None) -> FastAPI:
+    """The app ``netkeeper serve`` runs: ``create_app`` with the extractor and the launcher.
+
+    ``ui_base`` is the origin a browser here reaches the server at (``serve --host`` and
+    ``--port``), where the Chrome launcher points the UI's window; it defaults to
+    ``web.host`` and ``web.port``.
 
     Logs the profile-visit risk warning (#318) once here, at startup, when the
     daily limit is above the level netkeeper was designed around, and the same for
@@ -747,7 +764,85 @@ def serve_app(settings: Settings) -> FastAPI:
         message_risk = li_message_risk_warning(action, settings.linkedin.budget)
         if message_risk is not None:
             log.warning("%s", message_risk)
-    return create_app(settings, extractor=serve_extractor(settings))
+    app = create_app(settings, extractor=serve_extractor(settings))
+    base = ui_base or local_api_key.base_url(settings.web.host, settings.web.port)
+    app.state.chrome_launcher = serve_chrome_launcher(app, settings, base)
+    return app
+
+
+# --- the Chrome launcher (#636) ---------------------------------------------------
+
+
+async def launcher_probe(
+    cdp_url: str, *, locks: ActivityLocks, account: str, connector: CdpConnector | None = None
+) -> PortProbe:
+    """What the Chrome on ``cdp_url`` names for itself, for the launcher's checks (#636).
+
+    Under ``account``'s activity lock, never waiting: one connection through the attach's
+    own connector, which reads the browser's pid (#624) and nothing else, then detaches.
+    A held lock is ``busy``, and nothing connects: a run is attached, and a second CDP
+    client would drop its connection (spec 9.9). A Chrome that can't be reached is no pid,
+    which the launcher refuses.
+    """
+    chosen = PlaywrightCdpConnector() if connector is None else connector
+    try:
+        async with locks.hold(account):
+            try:
+                connection = await chosen.connect(cdp_url)
+            except BrowserUnavailable as exc:
+                log.info("the launcher's probe couldn't attach: %s", personal_exc(exc))
+                return PortProbe(busy=False)
+            try:
+                return PortProbe(busy=False, browser_pid=connection.browser_pid)
+            finally:
+                await connection.detach()
+    except BrowserBusy:
+        return PortProbe(busy=True)
+
+
+def launcher_lock_key(session: Session) -> str:
+    """The activity-lock key the launcher's probe holds: the local user's account's."""
+    local = local_account_id(session)
+    return activity_lock.SINGLE_ACCOUNT_KEY if local is None else account_key(local)
+
+
+def serve_chrome_launcher(app: FastAPI, settings: Settings, ui_base: str) -> ChromeLauncher:
+    """The launcher ``serve`` puts on ``app.state.chrome_launcher`` (#636, ADR 0012).
+
+    The app holds it only as a :class:`~netkeeper.services.chrome_launch.ChromeSpawner`,
+    and ``POST /linkedin/browser/start`` submits its launch to the task runner. At each
+    launch it reads the Chrome address in force (the file, then the Settings page,
+    #597), mints a connect link for ``ui_base`` from the key ``serve`` holds (ADR 0013),
+    and probes under the local account's activity lock. Building it starts nothing.
+    """
+
+    def factory() -> sessionmaker[Session]:
+        made: sessionmaker[Session] = app.state.session_factory
+        return made
+
+    def address() -> tuple[str, str]:
+        with session_scope(factory()) as session:
+            return _local_cdp_url(session, settings), launcher_lock_key(session)
+
+    async def cdp_url() -> str:
+        return (await off_loop(address))[0]
+
+    async def probe(url: str) -> PortProbe:
+        key = (await off_loop(address))[1]
+        return await launcher_probe(url, locks=ActivityLocks(legacy_partner=key), account=key)
+
+    def app_url() -> str:
+        held: local_api_key.LocalApiKey = app.state.local_api_key
+        return local_api_key.connect_url(ui_base, held.key)
+
+    return ChromeLauncher(
+        cdp_url=cdp_url,
+        profile=data_dir() / CHROME_PROFILE_DIRNAME,
+        app_url=app_url,
+        probe=probe,
+        run_holds_browser=runs.any_browser_lock_held,
+        pid_alive=activity_lock.pid_alive,
+    )
 
 
 def dev_app() -> FastAPI:
