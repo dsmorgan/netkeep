@@ -19,7 +19,7 @@ from typer.testing import CliRunner
 from netkeeper.cli import app as cli
 from netkeeper.paths import default_data_dir
 from netkeeper.services import keychain, login_item
-from netkeeper.services.login_item import LoginItem, LoginItemError, RunResult
+from netkeeper.services.login_item import LoginItem, LoginItemError, RunResult, State
 
 UID = 501
 EXE = "/opt/nk/bin/netkeeper"
@@ -209,7 +209,20 @@ def test_a_serving_process_registers_the_agent_without_starting_it(
     assert not outcome.started
     assert outcome.status.enabled
     assert not outcome.status.loaded
-    assert "next login" in outcome.message
+    assert outcome.message.startswith("Registered. netkeeper will start by itself")
+    assert outcome.status.state is State.REGISTERED
+
+
+def test_the_settings_switch_says_registered_and_why_nothing_changes(
+    launchctl: FakeLaunchctl, tmp_path: Path, data: Path
+) -> None:
+    outcome = make(launchctl, tmp_path, data, lock_held=True).enable(serving_here=True)
+    assert not outcome.started
+    assert outcome.message == (
+        "Registered. netkeeper will start by itself the next time you log in to this Mac."
+        " Nothing changes now, because netkeeper is already running: starting another copy"
+        " would only fail against the serve lock."
+    )
 
 
 def test_the_settings_switch_never_bootstraps_even_if_the_lock_looks_free(
@@ -330,6 +343,46 @@ def test_a_plist_that_runs_another_netkeeper_is_flagged(
     assert not item.status().stale
 
 
+def test_each_state_has_its_words(launchctl: FakeLaunchctl, tmp_path: Path, data: Path) -> None:
+    """The Settings card and ``login-item status`` print these exact names."""
+    off = make(launchctl, tmp_path, data)
+    assert off.status().state is State.OFF
+    assert off.status().state.value == "Off"
+
+    off.enable()  # lock free: the agent is started
+    assert off.status().state.value == "Running from login agent"
+    launchctl.loaded.clear()  # booted out: the plist is there, nothing runs
+    assert off.status().state.value == "Registered: starts at next login"
+    me = make(launchctl, tmp_path, data, environ={"XPC_SERVICE_NAME": off.label})
+    assert me.status().state.value == "Running from login agent"
+
+    moved = LoginItem(
+        data=data,
+        agents_dir=tmp_path / "LaunchAgents",
+        runner=launchctl,
+        uid=UID,
+        executable=Path("/elsewhere/netkeeper"),
+        macos=True,
+        environ={},
+    )
+    assert moved.status().state.value == "Points at a different netkeeper"
+
+    other = tmp_path / "other-data"
+    write_old_plist(tmp_path, other)
+    assert make(launchctl, tmp_path, other).status().state.value == "Needs repair"
+
+
+def test_turning_it_on_with_nothing_running_says_it_started(
+    launchctl: FakeLaunchctl, tmp_path: Path, data: Path
+) -> None:
+    outcome = make(launchctl, tmp_path, data).enable()
+    assert outcome.started
+    assert outcome.message == (
+        "Started. netkeeper is starting now, and will start by itself every time you log in"
+        " to this Mac."
+    )
+
+
 def test_a_failed_bootstrap_leaves_no_plist_behind(
     launchctl: FakeLaunchctl, tmp_path: Path, data: Path
 ) -> None:
@@ -404,11 +457,13 @@ def cli_item(
 
 def test_cli_on_status_off(cli_item: LoginItem) -> None:
     runner = CliRunner()
+    assert "state: Off" in runner.invoke(cli, ["login-item", "status"]).output
     assert "starts at login: no" in runner.invoke(cli, ["login-item", "status"]).output
     on = runner.invoke(cli, ["login-item", "on", "--port", "8082"])
     assert on.exit_code == 0, on.output
     assert read_plist(cli_item)["ProgramArguments"][-2:] == ["--port", "8082"]  # type: ignore[index]
     assert "starts at login: yes" in runner.invoke(cli, ["login-item", "status"]).output
+    assert "state: Running from login agent" in runner.invoke(cli, ["login-item", "status"]).output
     assert runner.invoke(cli, ["login-item", "off"]).exit_code == 0
     assert not cli_item.plist_path.exists()
 
@@ -584,7 +639,8 @@ def test_a_serve_that_never_lets_go_is_reported_honestly(
     stuck = make(launchctl, tmp_path, data, lock_held=True)
     outcome = stuck.enable()
     assert not outcome.started
+    assert outcome.message.startswith("Registered. netkeeper will start by itself")
     assert "not finished stopping" in outcome.message
-    assert "running now" not in outcome.message
+    assert "already running" not in outcome.message
     assert launchctl.loaded == set()
     assert outcome.status.enabled  # the plist is in place for the next login

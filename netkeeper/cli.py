@@ -2892,6 +2892,7 @@ def login_item_status() -> None:
     if not status.supported:
         typer.echo(f"not available: {status.reason}")
         raise typer.Exit(code=1)
+    typer.echo(f"state: {status.state.value}")
     typer.echo(f"starts at login: {'yes' if status.enabled else 'no'}")
     typer.echo(f"loaded in launchd: {'yes' if status.loaded else 'no'}")
     typer.echo(f"label: {status.label}")

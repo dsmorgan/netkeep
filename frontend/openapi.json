@@ -9583,6 +9583,10 @@
             "title": "Running Under Launchd",
             "type": "boolean"
           },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
           "supported": {
             "title": "Supported",
             "type": "boolean"
@@ -9606,6 +9610,7 @@
         "required": [
           "supported",
           "unsupported_reason",
+          "state",
           "enabled",
           "running_under_launchd",
           "this_server_is_the_login_item",

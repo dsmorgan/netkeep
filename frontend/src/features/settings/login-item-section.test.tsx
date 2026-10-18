@@ -7,9 +7,15 @@ import { jsonResponse, mockFetch } from '@/test/fetch'
 import type { LoginItem } from './api'
 import { LoginItemSection } from './login-item-section'
 
+const REGISTERED =
+  'Registered. netkeeper will start by itself the next time you log in to this Mac. Nothing changes now, because netkeeper is already running.'
+const STARTED =
+  'Started. netkeeper is starting now, and will start by itself every time you log in to this Mac.'
+
 const OFF: LoginItem = {
   supported: true,
   unsupported_reason: null,
+  state: 'Off',
   enabled: false,
   running_under_launchd: false,
   this_server_is_the_login_item: false,
@@ -43,7 +49,8 @@ function renderSection(initial: LoginItem, onPut?: (enabled: boolean) => Respons
     return jsonResponse({
       ...initial,
       enabled: body.enabled,
-      message: 'Turned on. netkeeper is running now, so launchd will start it at your next login.',
+      state: 'Registered: starts at next login',
+      message: REGISTERED,
     })
   })
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -62,8 +69,46 @@ describe('LoginItemSection', () => {
     expect(box).not.toBeChecked()
     fireEvent.click(box)
     await waitFor(() => expect(puts).toEqual([true]))
-    expect(await screen.findByText(/start it at your next login/)).toBeInTheDocument()
+    expect(await screen.findByText(REGISTERED)).toBeInTheDocument()
+    expect(screen.getByText('Registered: starts at next login')).toBeInTheDocument()
     await waitFor(() => expect(box).toBeChecked())
+  })
+
+  it('says what happened when the CLI-style start ran', async () => {
+    renderSection(OFF, () =>
+      jsonResponse({
+        ...OFF,
+        enabled: true,
+        running_under_launchd: true,
+        state: 'Running from login agent',
+        message: STARTED,
+      }),
+    )
+    fireEvent.click(await screen.findByRole('checkbox'))
+    expect(await screen.findByText(STARTED)).toBeInTheDocument()
+    expect(screen.queryByText(/Nothing changes now/)).not.toBeInTheDocument()
+  })
+
+  it.each([
+    'Off',
+    'Registered: starts at next login',
+    'Running from login agent',
+    'Needs repair',
+    'Points at a different netkeeper',
+  ])('shows the state %s', async (state) => {
+    renderSection({ ...OFF, state })
+    expect(await screen.findByText(state)).toBeInTheDocument()
+  })
+
+  it('tells you how to check and links the launchctl entry', async () => {
+    renderSection(OFF)
+    expect(
+      await screen.findByText(/open netkeeper's bookmark without starting/),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'If it is not there' })).toHaveAttribute(
+      'href',
+      expect.stringContaining('troubleshooting.md#run-at-login-does-nothing'),
+    )
   })
 
   it('says why the switch is disabled off macOS', async () => {
