@@ -31,7 +31,7 @@ from netkeeper.campaigns import gmail_oauth
 from netkeeper.campaigns import schedule as schedule_module
 from netkeeper.campaigns.spelling import normalize as normalize_word
 from netkeeper.chrome_profile import ProfileCheck
-from netkeeper.chrome_spawn import ChromeLauncher
+from netkeeper.chrome_spawn import ChromeLauncher, configured_port
 from netkeeper.config import ConfigError, Settings, load_settings, render_toml
 from netkeeper.crm import do_not_send, import_runs, inbox_apply, new_contact
 from netkeeper.crm.archive import ArchiveImport, import_archive
@@ -444,10 +444,12 @@ def _open_launcher(cdp_url: str, base: str, key: str) -> ChromeLauncher:
             url, locks=ActivityLocks(legacy_partner=account), account=account
         )
 
+    ui_port = configured_port(base)
     return ChromeLauncher(
         cdp_url=address,
         profile=data_dir() / CHROME_PROFILE_DIRNAME,
         app_url=lambda: local_api_key.connect_url(base, key),
+        ui_port=0 if ui_port is None else ui_port,
         probe=probe,
         run_holds_browser=runs.any_browser_lock_held,
         pid_alive=pid_alive,

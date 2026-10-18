@@ -7,6 +7,7 @@ covers its callers. Fakes only: no test starts Chrome or knocks on a port.
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,13 +20,14 @@ from fastapi import FastAPI
 from isolation.harness import FixedUser
 from typer.testing import CliRunner
 
-from netkeeper import chrome_spawn
+from netkeeper import chrome_spawn, worker
+from netkeeper import cli as cli_module
 from netkeeper.chrome_spawn import ChromeLaunch, ChromeLauncher
 from netkeeper.cli import app as cli
 from netkeeper.config import Settings
 from netkeeper.db import session_scope
 from netkeeper.linkedin import activity_lock
-from netkeeper.linkedin.browser import ActivityLocks, BrowserUnavailable
+from netkeeper.linkedin.browser import ActivityLocks, AttachBrowserProvider, BrowserUnavailable
 from netkeeper.models import UserKind
 from netkeeper.paths import data_dir
 from netkeeper.services import runs
@@ -222,11 +224,22 @@ def _config(tmp_path: Path) -> list[str]:
 def test_netkeeper_open_opens_the_ui_in_netkeepers_chrome(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    # netkeeper's Chrome is up: this test process stands in for it, holding the profile.
+    chrome = os.getpid()
+    profile = data_dir() / "chrome-profile"
+    profile.mkdir(parents=True)
+    (profile / "SingletonLock").symlink_to(f"fakehost.local-{chrome}")
+
+    async def probe(url: str, **_: object) -> PortProbe:
+        return PortProbe(busy=False, browser_pid=chrome)
+
     spawned = _Spawned()
     monkeypatch.setattr(chrome_spawn, "spawn_chrome", spawned)
-    monkeypatch.setattr(chrome_spawn, "port_answers", lambda port: False)
+    monkeypatch.setattr(chrome_spawn, "port_answers", lambda port: True)
+    monkeypatch.setattr(cli_module, "launcher_probe", probe)
     result = CliRunner().invoke(cli, [*_config(tmp_path), "open", "--port", "8125"])
     assert result.exit_code == 0, result.output
+    assert "opened the UI in netkeeper's Chrome on port 9333" in result.output
     [launch] = spawned.launches
     assert launch.port == 9333 and not launch.first_run
     assert launch.profile == data_dir() / "chrome-profile"
@@ -259,3 +272,91 @@ def test_netkeeper_open_link_only_starts_nothing() -> None:
     result = CliRunner().invoke(cli, ["open", "--link-only"])
     assert result.exit_code == 0, result.output
     assert len(re.findall(r"http://\S+", result.output)) == 1
+
+
+# --- #658 review ------------------------------------------------------------------------
+
+
+async def test_a_runs_attach_records_the_chrome_it_verified_in_the_lock_note(
+    tmp_path: Path,
+) -> None:
+    """The evidence a hand-off during a run uses: the pid the run's own #624 check passed."""
+    connector = FakeConnector(browser_pid=4343)
+    locks = ActivityLocks(tmp_path)
+    provider = AttachBrowserProvider(CDP_URL, connector=connector, locks=locks)
+    key = activity_lock.SINGLE_ACCOUNT_KEY
+    async with provider.run(key):
+        holder = activity_lock.read_holder(key, tmp_path)
+        assert holder is not None and holder.browser_pid == 4343
+        probe = await launcher_probe(CDP_URL, locks=ActivityLocks(tmp_path), account=key)
+    assert probe == PortProbe(busy=True, verified_pid=4343)
+    assert connector.attaches == 1  # the probe opened no second client
+    assert activity_lock.read_holder(key, tmp_path) is None  # released, note erased
+
+
+async def test_a_held_lock_before_the_attach_names_no_verified_chrome(tmp_path: Path) -> None:
+    held = activity_lock.try_claim(activity_lock.SINGLE_ACCOUNT_KEY, tmp_path)
+    assert held is not None
+    try:
+        probe = await launcher_probe(
+            CDP_URL,
+            locks=ActivityLocks(tmp_path),
+            account=activity_lock.SINGLE_ACCOUNT_KEY,
+            connector=FakeConnector(),
+        )
+    finally:
+        held.release()
+    assert probe == PortProbe(busy=True, verified_pid=None)
+
+
+class _SilentConnector:
+    """A port that accepts but never speaks CDP."""
+
+    async def connect(self, cdp_url: str) -> object:
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+
+async def test_the_probe_gives_up_quickly_and_lets_go_of_the_lock(tmp_path: Path) -> None:
+    key = activity_lock.SINGLE_ACCOUNT_KEY
+    probe = await launcher_probe(
+        CDP_URL,
+        locks=ActivityLocks(tmp_path),
+        account=key,
+        connector=_SilentConnector(),  # type: ignore[arg-type]
+        timeout_s=0.05,
+    )
+    assert probe == PortProbe(busy=False, browser_pid=None)
+    assert not activity_lock.inspect(key, tmp_path).held
+
+
+def test_the_probes_connect_timeout_is_five_seconds() -> None:
+    assert worker.PROBE_CONNECT_TIMEOUT_S == 5.0
+
+
+async def test_a_non_owner_gets_403_before_503(
+    client: httpx.AsyncClient, running_app: FastAPI
+) -> None:
+    with session_scope(running_app.state.session_factory, write=True) as session:
+        other = factories.make_user(session, kind=UserKind.HOSTED).id
+    running_app.state.auth = FixedUser(other)
+    assert (await client.post(START, json={}, headers=CSRF)).status_code == 403
+
+
+class _BrokenSpawner:
+    async def start(self, *, first_run: bool = False) -> LaunchResult:
+        raise RuntimeError("database is locked")
+
+
+async def test_a_launch_that_raises_still_reports_failed(
+    client: httpx.AsyncClient, running_app: FastAPI
+) -> None:
+    running_app.state.chrome_launcher = _BrokenSpawner()
+    events = running_app.state.bus.subscribe()
+    response = await client.post(START, json={}, headers=CSRF)
+    assert response.status_code == 202
+    await running_app.state.tasks.join()
+    while (event := await asyncio.wait_for(anext(events), 1)).type != LAUNCH_EVENT:
+        pass
+    assert event.data["status"] == "failed" and event.data["task_id"] == response.json()["task_id"]
+    assert "RuntimeError" in event.data["message"]

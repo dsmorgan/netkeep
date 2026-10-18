@@ -8,36 +8,47 @@ the list :func:`chrome_argv` builds, with no shell. Nothing else here, or anywhe
 else, may start one.
 
 **The arguments.** Chrome's binary (``/Applications/Google Chrome.app/Contents/MacOS/
-Google Chrome`` on macOS, ``google-chrome`` on Linux), then exactly the flags
-``netkeeper browser launch`` prints (:func:`netkeeper.services.browser_launch.chrome_flags`:
-``--remote-debugging-port=<port>`` and ``--user-data-dir=<profile>``), then
-``--app=<the UI's connect link>``, then, on the first-run path only, LinkedIn's sign-in
-page as a positional argument. Never a headless flag, a fresh profile, or any other
-flag or URL. The binary runs directly, not through ``open -na``, so the launcher sees
-that process's own exit status, with no LaunchServices step in between.
+Google Chrome`` on macOS; ``google-chrome`` on Linux, found on ``PATH``), then exactly
+the flags ``netkeeper browser launch`` prints
+(:func:`netkeeper.services.browser_launch.chrome_flags`: ``--remote-debugging-port=<port>``
+and ``--user-data-dir=<profile>``), then ``--app=<the UI's connect link>``, then, on the
+first-run path only, LinkedIn's sign-in page as a positional argument. Never a headless
+flag, a fresh profile, or any other flag or URL. The ``--app`` link must be exactly
+``http://127.0.0.1:<serve's port>/...`` or ``http://localhost:<serve's port>/...``
+(:func:`check_app_url`). The binary runs directly, not through ``open -na``, so the
+launcher sees that process's own exit status, with no LaunchServices step in between.
 
 **Before a spawn,** :meth:`ChromeLauncher.start` looks, and refuses (saying which case
 applied, as ``scripts/chrome.sh --status`` does) when:
 
+- ``linkedin.cdp_url`` names another host, or no valid port: the launcher never falls
+  back to Chrome's default port;
 - the port answers, but the Chrome on it isn't the dedicated profile
   (:func:`netkeeper.chrome_profile.check_dedicated_profile`, #624, on the pid the
   Chrome on the port names over the attach's connector, under the browser lock). While
-  a run holds that lock, no second CDP client may attach (spec 9.9), so the profile
-  must instead name the port in its ``DevToolsActivePort`` file, with the process
-  holding its ``SingletonLock`` alive;
+  a run holds that lock, no second CDP client may attach (spec 9.9), so the launcher
+  uses the pid that run's own attach verified, from the lock's holder note: it must be
+  the pid in the profile's ``SingletonLock``, and alive;
 - the port is silent, but a live process holds the profile's ``SingletonLock``: a
   hand-off would open the UI in a Chrome that runs can't attach to;
 - the port is silent and a run holds a browser lock: a cold start then is refused.
-  Opening the UI's window into a running netkeeper Chrome stays allowed during a run;
-- ``linkedin.cdp_url`` names another host, which no local Chrome can serve.
+  Opening the UI's window into a running netkeeper Chrome stays allowed during a run.
 
 **Hand-off.** When netkeeper's Chrome is already up, the same command hands its
 arguments to it through the profile's singleton: the running Chrome opens the UI's
 window and the launched process exits 0. Not verified live: that the running process
 honors ``--app`` and the positional URL on a hand-off (docs/design/chrome-profiles.md).
+Chrome's singleton can replace a running Chrome that doesn't answer in time, so after
+the settle the launcher reads the profile's lock again and reports a success only when
+it names the process it expected.
 
 **Detached.** Chrome runs in its own session with its standard streams on
 ``/dev/null``, so it outlives ``serve`` and a terminal's Ctrl-C.
+
+**The connect code is in Chrome's arguments.** Any local user can read a process's
+arguments (``ps -axww``), and a Chrome started cold keeps them for its whole life. The
+code there is good once, within 120 seconds (ADR 0013), and Chrome spends it within
+about a second.
 
 **Who may call it.** Only ``netkeeper/cli.py`` (``netkeeper open``) and
 ``netkeeper/worker.py`` (``serve``'s wiring) import this module; a test pins that
@@ -52,6 +63,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import socket
 import subprocess
 import sys
@@ -59,11 +71,11 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Protocol
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from netkeeper.chrome_profile import check_dedicated_profile, profile_lock_pid
 from netkeeper.logging_setup import personal_exc
-from netkeeper.services.browser_launch import cdp_port, chrome_flags, remote_host_note
+from netkeeper.services.browser_launch import chrome_flags, remote_host_note
 from netkeeper.services.chrome_launch import LaunchResult, LaunchStatus, PortProbe, Refusal
 
 log = logging.getLogger(__name__)
@@ -75,10 +87,12 @@ LINUX_CHROME: Final = "google-chrome"
 #: The one site URL the launcher may pass, and only from the first-run path.
 LINKEDIN_SIGNIN_URL: Final = "https://www.linkedin.com/login"
 
-#: The file Chrome writes into its profile with the debugging port it listens on.
-DEVTOOLS_ACTIVE_PORT: Final = "DevToolsActivePort"
-
-_LOOPBACK: Final = frozenset({"127.0.0.1", "localhost", "::1"})
+#: The only netloc an ``--app`` link may have: a loopback name and a port, nothing else
+#: (no userinfo, no backslash, no percent-escape, no whitespace).
+_APP_NETLOC: Final = re.compile(r"(?:127\.0\.0\.1|localhost):([1-9][0-9]{0,4})")
+#: What an ``--app`` link's path, query and fragment may hold: printable ASCII, no
+#: backslash and no space, so Chrome's URL parser and Python's read it the same way.
+_APP_REST: Final = re.compile(r"[!#-\[\]-~]*")
 
 #: How long a launched process has to exit, as a hand-off does, before it counts as a
 #: Chrome that started.
@@ -96,13 +110,15 @@ class LaunchArgumentError(ValueError):
 class ChromeLaunch:
     """Everything the one argument list is built from, all of it config.
 
-    ``app_url`` is the UI's connect link (:func:`netkeeper.services.local_api_key.connect_url`).
+    ``app_url`` is the UI's connect link (:func:`netkeeper.services.local_api_key.connect_url`),
+    and ``ui_port`` the port ``serve`` listens on, which that link must name.
     ``first_run`` adds LinkedIn's sign-in page; only setup's first-run button sets it.
     """
 
     port: int
     profile: Path
     app_url: str
+    ui_port: int
     first_run: bool = False
     platform: str = sys.platform
 
@@ -112,15 +128,39 @@ def chrome_binary(platform: str) -> str:
     return MACOS_CHROME if platform == "darwin" else LINUX_CHROME
 
 
+def check_app_url(url: str, ui_port: int) -> None:
+    """Raise :class:`LaunchArgumentError` unless ``url`` is netkeeper's own UI, exactly.
+
+    ``http``, a netloc that is exactly ``127.0.0.1:<ui_port>`` or ``localhost:<ui_port>``,
+    a path from ``/``, and nothing two URL parsers could read differently: no userinfo,
+    no backslash (Chrome reads it as ``/``), no whitespace, no non-ASCII, and the URL
+    rebuilt from its parts must be the same string. So no other site rides in on
+    ``--app``.
+    """
+    parts = urlsplit(url)
+    netloc = _APP_NETLOC.fullmatch(parts.netloc)
+    if (
+        parts.scheme != "http"
+        or netloc is None
+        or not parts.path.startswith("/")
+        or not _APP_REST.fullmatch(url[len(f"http://{parts.netloc}") :])
+        or urlunsplit(parts) != url
+    ):
+        raise LaunchArgumentError("the UI's link must be http://127.0.0.1:<port>/ or localhost")
+    port = int(netloc.group(1))
+    if not 0 < port < 65536 or port != ui_port:
+        raise LaunchArgumentError(f"the UI's link must name serve's port, {ui_port}")
+
+
 def chrome_argv(launch: ChromeLaunch) -> list[str]:
     """The one argument list: the binary, the printed flags, ``--app``, and the sign-in URL.
 
-    Raises :class:`LaunchArgumentError` when ``app_url`` isn't an ``http`` link to a
-    loopback address, so no other site can ride in on ``--app``.
+    Raises :class:`LaunchArgumentError` when ``app_url`` isn't netkeeper's own UI
+    (:func:`check_app_url`) or the debugging port isn't a port.
     """
-    parts = urlsplit(launch.app_url)
-    if parts.scheme != "http" or parts.hostname not in _LOOPBACK:
-        raise LaunchArgumentError("the UI's link must be an http link to this machine")
+    check_app_url(launch.app_url, launch.ui_port)
+    if not 0 < launch.port < 65536:
+        raise LaunchArgumentError(f"{launch.port} is not a debugging port")
     argv = [chrome_binary(launch.platform), *chrome_flags(launch.port, launch.profile)]
     argv.append(f"--app={launch.app_url}")
     if launch.first_run:
@@ -163,18 +203,17 @@ def port_answers(port: int) -> bool:
         return False
 
 
-def devtools_port(profile: Path) -> int | None:
-    """The port in ``profile``'s ``DevToolsActivePort``, or ``None`` when there's none to read.
+def configured_port(cdp_url: str) -> int | None:
+    """The port ``cdp_url`` names, or ``None`` when it names none or an invalid one.
 
-    Chrome writes the file into its ``--user-data-dir`` when its debugging port opens:
-    the port on the first line, the browser's endpoint on the second.
+    Unlike :func:`netkeeper.services.browser_launch.cdp_port`, never Chrome's default:
+    the launcher starts Chrome only on a port you configured.
     """
     try:
-        first = (profile / DEVTOOLS_ACTIVE_PORT).read_text(encoding="utf-8").split("\n", 1)[0]
-    except (OSError, UnicodeDecodeError):
+        port = urlsplit(cdp_url).port
+    except ValueError:
         return None
-    first = first.strip()
-    return int(first) if first.isdigit() and 0 < int(first) < 65536 else None
+    return port if port is not None and 0 < port < 65536 else None
 
 
 Spawn = Callable[[ChromeLaunch], Process]
@@ -184,9 +223,10 @@ class ChromeLauncher:
     """The checks, then the spawn: a :class:`~netkeeper.services.chrome_launch.ChromeSpawner`.
 
     Every input is the caller's: ``cdp_url`` (the address in force, read at each launch),
-    ``profile`` (the dedicated profile), ``app_url`` (a fresh connect link per launch),
-    ``probe`` (what the Chrome on the port names for itself, read through the attach's
-    connector under the browser lock: :func:`netkeeper.worker.launcher_probe`),
+    ``profile`` (the dedicated profile), ``app_url`` (a fresh connect link per launch) and
+    ``ui_port`` (serve's port, which that link must name), ``probe`` (what the Chrome on
+    the port names for itself, read through the attach's connector under the browser
+    lock, or the pid a run holding it verified: :func:`netkeeper.worker.launcher_probe`),
     ``run_holds_browser`` (whether a run holds a browser lock:
     :func:`netkeeper.services.runs.any_browser_lock_held`) and ``pid_alive``.
     ``spawn`` and ``answers`` default to :func:`spawn_chrome` and :func:`port_answers`,
@@ -199,6 +239,7 @@ class ChromeLauncher:
         cdp_url: Callable[[], Awaitable[str]],
         profile: Path,
         app_url: Callable[[], str],
+        ui_port: int,
         probe: Callable[[str], Awaitable[PortProbe]],
         run_holds_browser: Callable[[], bool],
         pid_alive: Callable[[int], bool],
@@ -211,6 +252,7 @@ class ChromeLauncher:
         self._cdp_url = cdp_url
         self.profile = profile
         self._app_url = app_url
+        self.ui_port = ui_port
         self._probe = probe
         self._run_holds_browser = run_holds_browser
         self._pid_alive = pid_alive
@@ -226,13 +268,20 @@ class ChromeLauncher:
         note = remote_host_note(cdp_url)
         if note is not None:
             return _refused(Refusal.REMOTE_ADDRESS, f"{note} netkeeper starts Chrome only here")
-        port = cdp_port(cdp_url)
+        port = configured_port(cdp_url)
+        if port is None:
+            return _refused(
+                Refusal.INVALID_PORT,
+                f"linkedin.cdp_url ({cdp_url}) names no valid port, and netkeeper starts"
+                " Chrome only on the port you set. Fix it in config.toml or on the Settings page",
+            )
         answers = port_answers if self._answers is None else self._answers
+        expected: int | None
         if await asyncio.to_thread(answers, port):
-            refusal = await self._not_dedicated(cdp_url, port)
-            if refusal is not None:
-                return refusal
-            hand_off = True
+            verified = await self._dedicated_pid(cdp_url, port)
+            if isinstance(verified, LaunchResult):
+                return verified
+            expected = verified
         else:
             lock_pid = profile_lock_pid(self.profile)
             if lock_pid is not None and self._pid_alive(lock_pid):
@@ -249,12 +298,13 @@ class ChromeLauncher:
                     "a run holds the browser, so netkeeper won't start Chrome now. Try again"
                     " when the run ends",
                 )
-            hand_off = False
+            expected = None
         try:
             launch = ChromeLaunch(
                 port=port,
                 profile=self.profile,
                 app_url=self._app_url(),
+                ui_port=self.ui_port,
                 first_run=first_run,
                 platform=self._platform,
             )
@@ -263,34 +313,35 @@ class ChromeLauncher:
         except (OSError, LaunchArgumentError) as exc:
             log.warning("could not start Chrome: %s", personal_exc(exc))
             return LaunchResult(LaunchStatus.FAILED, f"couldn't start Chrome: {exc}")
-        return await self._settle(process, hand_off=hand_off, port=port)
+        return await self._settle(process, expected=expected, port=port)
 
-    async def _not_dedicated(self, cdp_url: str, port: int) -> LaunchResult | None:
-        """The refusal when the Chrome on ``port`` isn't netkeeper's profile, else ``None``.
+    async def _dedicated_pid(self, cdp_url: str, port: int) -> int | LaunchResult:
+        """The pid of netkeeper's Chrome on ``port``, or the refusal when it isn't shown to be.
 
         #624's check, on the pid the Chrome on the port names for itself. While a run
         holds the browser, no second CDP client may attach (spec 9.9), so the probe
-        reads nothing over CDP: then the profile itself must name ``port``, in the
-        ``DevToolsActivePort`` file Chrome writes into it, and the process holding the
-        profile's lock must be alive. Anything else refuses.
+        connects to nothing and hands back the pid that run's attach verified: it must
+        be the pid in the profile's ``SingletonLock``, and alive. Anything else refuses.
         """
         probe = await self._probe(cdp_url)
+        lock_pid = profile_lock_pid(self.profile)
         if not probe.busy:
             check = check_dedicated_profile(self.profile, probe.browser_pid)
-            if check.dedicated:
-                return None
+            if check.dedicated and check.browser_pid is not None:
+                return check.browser_pid
             reason = check.reason
+        elif (
+            probe.verified_pid is not None
+            and probe.verified_pid == lock_pid
+            and self._pid_alive(lock_pid)
+        ):
+            return lock_pid
         else:
-            lock_pid = profile_lock_pid(self.profile)
-            if (
-                lock_pid is not None
-                and self._pid_alive(lock_pid)
-                and devtools_port(self.profile) == port
-            ):
-                return None
             reason = (
-                "a run holds the browser, and netkeeper's profile doesn't show its Chrome"
-                f" listening on port {port}, so the Chrome on it can't be shown to be netkeeper's"
+                "a run holds the browser, and the Chrome its attach verified"
+                f" (pid {probe.verified_pid or 'unknown'}) isn't the live one holding"
+                f" netkeeper's profile (pid {lock_pid or 'none'}), so the Chrome on that port"
+                " can't be shown to be netkeeper's"
             )
         return _refused(
             Refusal.NOT_DEDICATED,
@@ -299,27 +350,59 @@ class ChromeLauncher:
             " linkedin.cdp_url to a free port",
         )
 
-    async def _settle(self, process: Process, *, hand_off: bool, port: int) -> LaunchResult:
-        """How the launched process went: exited 0 (a hand-off), failed, or still running."""
+    async def _settle(self, process: Process, *, expected: int | None, port: int) -> LaunchResult:
+        """How the launch went, from the process's exit and the profile's lock afterward.
+
+        A hand-off (``expected`` is the verified Chrome's pid) succeeds only when the
+        launched process exits 0 and that pid still holds the profile: Chrome's singleton
+        can replace a running Chrome that doesn't answer in time. A cold start
+        (``expected`` is ``None``) succeeds only while the launched process runs and no
+        other process holds the profile.
+        """
         waited = 0.0
         while (status := process.poll()) is None and waited < self._settle_s:
             await self._sleep(_POLL_S)
             waited += _POLL_S
-        if status is None:
+        if status is not None and status != 0:
+            log.warning("Chrome exited with status %d at launch", status)
+            return LaunchResult(
+                LaunchStatus.FAILED, f"Chrome exited with status {status} at launch"
+            )
+        holder = profile_lock_pid(self.profile)
+        if expected is not None:
+            if status == 0 and holder == expected and self._pid_alive(expected):
+                log.info("handed the UI's window to netkeeper's Chrome on port %d", port)
+                return LaunchResult(
+                    LaunchStatus.HANDED_OFF,
+                    f"opened the UI in netkeeper's Chrome on port {port}",
+                    pid=expected,
+                )
+            return _failed(
+                f"netkeeper's Chrome (pid {expected}) didn't confirm the UI's window: the"
+                f" launched process {'exited' if status == 0 else 'is still running'}, and"
+                f" netkeeper's profile is held by pid {holder or 'none'}. Check netkeeper's"
+                " Chrome, then run netkeeper open again"
+            )
+        if status is None and holder in (None, process.pid):
             log.info("started netkeeper's Chrome (pid %d) on port %d", process.pid, port)
             return LaunchResult(
                 LaunchStatus.STARTED,
                 f"started netkeeper's Chrome on port {port}, with the UI in its own window",
                 pid=process.pid,
             )
-        if status == 0:
-            log.info("handed the UI's window to netkeeper's Chrome on port %d", port)
-            words = "netkeeper's Chrome" if hand_off else "a netkeeper Chrome that just started"
-            return LaunchResult(LaunchStatus.HANDED_OFF, f"opened the UI in {words} on port {port}")
-        log.warning("Chrome exited with status %d at launch", status)
-        return LaunchResult(LaunchStatus.FAILED, f"Chrome exited with status {status} at launch")
+        return _failed(
+            f"the Chrome netkeeper started (pid {process.pid}) "
+            f"{'handed off and exited' if status == 0 else 'is running'}, but netkeeper's"
+            f" profile is held by pid {holder or 'none'}, which the checks didn't see."
+            " Check netkeeper's Chrome, then run netkeeper open again"
+        )
 
 
 def _refused(refusal: Refusal, message: str) -> LaunchResult:
     log.warning("refused to start Chrome (%s): %s", refusal.value, message)
     return LaunchResult(LaunchStatus.REFUSED, message, refusal=refusal)
+
+
+def _failed(message: str) -> LaunchResult:
+    log.warning("Chrome launch unconfirmed: %s", message)
+    return LaunchResult(LaunchStatus.FAILED, message)

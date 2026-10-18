@@ -56,6 +56,9 @@ class Refusal(enum.StrEnum):
     REMOTE_ADDRESS = "remote_address"
     """``linkedin.cdp_url`` names another host, which no Chrome started here can serve."""
 
+    INVALID_PORT = "invalid_port"
+    """``linkedin.cdp_url`` names no valid port. The launcher never guesses one."""
+
 
 @dataclass(frozen=True, slots=True)
 class LaunchResult:
@@ -74,16 +77,21 @@ class LaunchResult:
 
 @dataclass(frozen=True, slots=True)
 class PortProbe:
-    """What the launcher learned from the Chrome on the port, through the attach's connector.
+    """What the launcher learned about the Chrome on the port, without driving it.
 
-    ``busy`` is true when a run holds the browser lock, so no second CDP client was
-    opened and ``browser_pid`` is unknown. Otherwise ``browser_pid`` is the pid the
-    Chrome on the port named for itself, or ``None`` when it named none (or the port
-    didn't answer as Chrome).
+    With the browser lock free, the probe connects once through the attach's connector:
+    ``busy`` is false and ``browser_pid`` is the pid the Chrome on the port named for
+    itself, or ``None`` when it named none (or didn't answer as Chrome in time).
+
+    With the lock held, a run is attached and a second CDP client would drop its
+    connection, so nothing connects: ``busy`` is true and ``verified_pid`` is the Chrome
+    pid that run's attach verified as the dedicated profile (#624), from the lock's
+    holder note, or ``None`` when the note has none (the run hasn't attached yet).
     """
 
     busy: bool
     browser_pid: int | None = None
+    verified_pid: int | None = None
 
 
 class ChromeSpawner(Protocol):

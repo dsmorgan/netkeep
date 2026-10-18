@@ -2759,6 +2759,7 @@ class ActivityLocks:
     ) -> None:
         self._directory = directory
         self._locks: dict[str, asyncio.Lock] = {}
+        self._held: dict[str, list[activity_lock.Claim]] = {}
         #: The account whose holds also claim the legacy ``browser-local.lock``
         #: (#169 F): the local user's account, which is what pre-P2-10 code acted
         #: for. Account 1 unless whoever builds the registry knows better; a
@@ -2809,13 +2810,25 @@ class ActivityLocks:
         await lock.acquire()
         try:
             claims = await self._claims(account, wait=wait)
+            self._held[account] = claims
             try:
                 yield
             finally:
+                self._held.pop(account, None)
                 for claim in reversed(claims):
                     claim.release()
         finally:
             lock.release()
+
+    def record_browser(self, account: str, browser_pid: int | None) -> None:
+        """Note in ``account``'s held lock files the Chrome pid its attach verified (#636).
+
+        The Chrome launcher reads it while this hold lasts: a hand-off into a running
+        netkeeper Chrome during a run needs that pid to be the profile's lock holder,
+        and the launcher may not open a second CDP client to find out.
+        """
+        for claim in self._held.get(account, ()):
+            claim.record_browser(browser_pid)
 
     async def _claims(self, account: str, *, wait: bool) -> list[activity_lock.Claim]:
         """The account's file lock; for :attr:`legacy_partner`, the legacy one first (#169 F).
@@ -5000,6 +5013,7 @@ class BrowserRun:
         log.warning("lost the browser (%s); reattaching once", personal_exc(cause))
         await _detach_quietly(self._attachment.detach)
         self._attachment = await self._provider._attach()
+        self._provider.locks.record_browser(self.account, self._attachment.profile.browser_pid)
         try:
             return await self._open_tab()
         except Exception as exc:
@@ -5227,6 +5241,7 @@ class AttachBrowserProvider:
         """
         async with self.locks.hold(account, wait=wait):
             attachment = await self._attach()
+            self.locks.record_browser(account, attachment.profile.browser_pid)
             run = BrowserRun(self, account, attachment)
             try:
                 yield run

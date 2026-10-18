@@ -96,6 +96,10 @@ class Holder:
     pid: int
     command: str
     since: datetime | None
+    #: The Chrome browser process the holder's attach verified as netkeeper's dedicated
+    #: profile (#624), once it has attached; ``None`` before that. The Chrome launcher
+    #: reads it to allow a hand-off during a run without a second CDP client (#636).
+    browser_pid: int | None = None
 
     def describe(self) -> str:
         """``netkeeper serve (pid 4242, since 2026-09-23 14:02 UTC)``."""
@@ -124,6 +128,14 @@ class Claim:
     @property
     def held(self) -> bool:
         return self._fd is not None
+
+    def record_browser(self, browser_pid: int | None) -> None:
+        """Add the Chrome pid this holder's attach verified (#624) to the note (#636).
+
+        Advisory, like the rest of the note: it never decides whether the lock is held.
+        """
+        if self._fd is not None:
+            _write_note(self._fd, browser_pid=browser_pid)
 
     def release(self) -> None:
         """Erase the note, unlock, close. Idempotent.
@@ -264,12 +276,14 @@ def process_label() -> str:
     return " ".join(words)
 
 
-def _write_note(fd: int) -> None:
-    note = {
+def _write_note(fd: int, *, browser_pid: int | None = None) -> None:
+    note: dict[str, object] = {
         "pid": os.getpid(),
         "command": process_label(),
         "since": datetime.now(UTC).isoformat(timespec="seconds"),
     }
+    if browser_pid is not None:
+        note["browser_pid"] = browser_pid
     try:
         os.ftruncate(fd, 0)
         os.pwrite(fd, json.dumps(note).encode(), 0)
@@ -292,4 +306,12 @@ def _read_note(fd: int) -> Holder | None:
         except ValueError:
             since = None
     command = note.get("command")
-    return Holder(pid=note["pid"], command=command if isinstance(command, str) else "", since=since)
+    browser = note.get("browser_pid")
+    return Holder(
+        pid=note["pid"],
+        command=command if isinstance(command, str) else "",
+        since=since,
+        browser_pid=browser
+        if isinstance(browser, int) and not isinstance(browser, bool) and browser > 0
+        else None,
+    )

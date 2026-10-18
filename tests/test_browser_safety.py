@@ -968,6 +968,10 @@ def launchctl_pin_problems(source: str) -> list[str]:
             problems.append(f"line {node.lineno}: subprocess used other than subprocess.run(...)")
         if isinstance(node, ast.Constant) and node.value == "subprocess":
             problems.append(f"line {node.lineno}: 'subprocess' as a string (getattr?)")
+        if isinstance(node, ast.Name) and node.id in _SPAWN_BANNED_NAMES:
+            problems.append(f"line {node.lineno}: {node.id}")
+        if isinstance(node, ast.Attribute) and node.attr in _SPAWN_BANNED_NAMES | {"modules"}:
+            problems.append(f"line {node.lineno}: .{node.attr}")
     imports = [n for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom))]
     for node in imports:
         if (
@@ -1115,7 +1119,20 @@ _POPEN_KEYWORDS = {
 }
 
 #: Modules ``chrome_spawn.py`` may not import at all, besides ``from`` imports of these.
-_SPAWN_BANNED_IMPORTS = (PROCESS_MODULES - {"subprocess"}) | {"os", "multiprocessing"}
+_SPAWN_BANNED_IMPORTS = (PROCESS_MODULES - {"subprocess"}) | {
+    "os",
+    "multiprocessing",
+    "ctypes",
+    "concurrent",
+    "importlib",
+    "_posixsubprocess",
+}
+
+#: Names ``chrome_spawn.py`` may not use at all, called or not: each reaches a module or
+#: an attribute by a value the pin can't read. The module needs none of them.
+_SPAWN_BANNED_NAMES = frozenset(
+    {"__import__", "getattr", "vars", "import_module", "attrgetter", "methodcaller", "eval", "exec"}
+)
 
 
 def is_chrome_spawn_finding(finding: Finding) -> bool:
@@ -1164,6 +1181,10 @@ def chrome_spawn_pin_problems(source: str) -> list[str]:
                     problems.append(f"line {node.lineno}: imports {alias.name}")
         if isinstance(node, ast.Constant) and node.value == "subprocess":
             problems.append(f"line {node.lineno}: 'subprocess' as a string (getattr?)")
+        if isinstance(node, ast.Name) and node.id in _SPAWN_BANNED_NAMES:
+            problems.append(f"line {node.lineno}: {node.id}")
+        if isinstance(node, ast.Attribute) and node.attr in _SPAWN_BANNED_NAMES | {"modules"}:
+            problems.append(f"line {node.lineno}: .{node.attr}")
     imports = [
         node
         for node in tree.body
@@ -1390,6 +1411,27 @@ _IN_PORT_ANSWERS = (
             "from netkeeper.chrome_profile",
             "from netkeeper.linkedin import browser\nfrom netkeeper.chrome_profile",
         ),
+        # #658 review: plain imports and dynamic lookups that start a process.
+        (_PORT_ANSWERS, f"import ctypes\n\n\n{_PORT_ANSWERS}"),
+        (_PORT_ANSWERS, f"from concurrent.futures import ProcessPoolExecutor\n\n\n{_PORT_ANSWERS}"),
+        (_PORT_ANSWERS, f"import concurrent.futures\n\n\n{_PORT_ANSWERS}"),
+        (_PORT_ANSWERS, f"import _posixsubprocess\n\n\n{_PORT_ANSWERS}"),
+        (
+            _PORT_ANSWERS,
+            "import importlib\n_m = importlib.import_module('sub' + 'process')\n\n\n"
+            + _PORT_ANSWERS,
+        ),
+        (_PORT_ANSWERS, f"_m = __import__('sub' + 'process')\n\n\n{_PORT_ANSWERS}"),
+        (
+            _PORT_ANSWERS,
+            f"_p = getattr(sys.modules['sub' + 'process'], 'Pop' + 'en')\n\n\n{_PORT_ANSWERS}",
+        ),
+        (_PORT_ANSWERS, f"_m = sys.modules['subprocess']\n\n\n{_PORT_ANSWERS}"),
+        (
+            _PORT_ANSWERS,
+            f"_p = getattr(asyncio, 'create_subprocess_' + 'exec')\n\n\n{_PORT_ANSWERS}",
+        ),
+        (_PORT_ANSWERS, f"_p = vars(subprocess)['Popen']\n\n\n{_PORT_ANSWERS}"),
     ],
 )
 def test_the_chrome_spawn_pin_rejects_every_other_way_to_start_a_process(
