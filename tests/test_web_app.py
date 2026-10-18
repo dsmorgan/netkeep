@@ -94,6 +94,7 @@ API_PATHS = {
     "/api/v1/linkedin/session-flag/clear",
     "/api/v1/linkedin/browser",
     "/api/v1/linkedin/browser/health",
+    "/api/v1/linkedin/browser/start",
     "/api/v1/tags",
     "/api/v1/tags/{tag_id}",
     "/api/v1/contacts/{contact_id}/tags",

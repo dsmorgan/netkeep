@@ -74,6 +74,14 @@ One function builds one argument list from config and spawns it:
 - **Runs.** Starting Chrome cold is refused while a process holds the account's browser lock (checked through `services.runs`), and #599's button is disabled then. Opening the UI's window into a running Chrome is allowed during a run, because it's your act and touches no run tab.
 - **Detached.** Run it detached, so the Chrome outlives `serve`.
 
+### As built (#636)
+
+- `netkeeper/chrome_spawn.py`: `chrome_argv` builds the list, and `spawn_chrome` runs it with `subprocess.Popen`, no shell, in its own session, with every stream on `/dev/null`. `ChromeLauncher.start` makes the checks first.
+- **The dedicated check.** With no run attached, the probe holds the local account's activity lock, connects once through the attach's own connector, reads the browser's pid (#624's `read_browser_pid`), and detaches. While a run holds the lock, a second CDP client would drop the run's connection, so the probe connects to nothing. A hand-off then needs the profile's own `DevToolsActivePort` file to name the configured port, with the process holding `SingletonLock` alive. Anything else refuses.
+- **Runs.** A cold start reads every `browser-*.lock` under `<data dir>/locks` (`services.runs.any_browser_lock_held`), so it needs no database.
+- **Exit status.** The launcher watches the process for up to 5 seconds. Exit 0 is a hand-off, any other exit is a failure, and a process still running is a cold start.
+- **Callers.** `netkeeper open` (it still prints a one-time link, for another browser, and `--link-only` prints only that). `serve` puts the launcher on `app.state.chrome_launcher` as a `services.chrome_launch.ChromeSpawner`. `POST /api/v1/linkedin/browser/start` (owner only, one launch at a time) submits it to the task runner, answers `202`, and publishes `browser.launch` with the result. `{"first_run": true}` adds LinkedIn's sign-in page. #599's button, start-at-login, and #549's open-at-login aren't built yet.
+
 ### Why an `--app` window
 
 An app window has no tab strip. A run's tab never opens among the UI's tabs, and the UI's window never switches to another tab. A run that raises its own window (#632) can still cover the UI's window on screen. Links the UI opens in a new tab, such as the Gmail wizard's Console links, open in a normal window of the same Chrome. Not verified live: whether Chrome ever places a run's `background: true` tab into an app window. #632 checks this.

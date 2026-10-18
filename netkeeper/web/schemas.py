@@ -2333,6 +2333,29 @@ class BrowserLaunchOut(BaseModel):
     check_command: str
 
 
+class BrowserStartIn(BaseModel):
+    """``POST /linkedin/browser/start``'s body (#636).
+
+    ``first_run`` is setup's first-run button only (#599): it also opens LinkedIn's
+    sign-in page beside the UI's window.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    first_run: bool = False
+
+
+class BrowserStartAccepted(BaseModel):
+    """The ``202`` of ``POST /linkedin/browser/start``: the task running the launch.
+
+    How it went arrives on ``GET /events`` as ``browser.launch`` with the same
+    ``task_id``: ``status`` (``started``, ``handed_off``, ``refused`` or ``failed``),
+    ``refusal`` (which check refused, or null), ``message`` and ``pid``.
+    """
+
+    task_id: str
+
+
 # --- templates (spec 8.5, 11.1; P3-03) ----------------------------------------
 
 TemplateName = Annotated[str, Field(min_length=1, max_length=TEMPLATE_NAME_MAX_LENGTH)]

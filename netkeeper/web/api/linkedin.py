@@ -44,6 +44,10 @@ built on:
   Read-only and built from config alone; it never attaches (spec 9.9, CLAUDE.md).
 * ``GET /linkedin/browser/health``: what the last preflight or run recorded about
   Chrome and the session. Read-only; it never attaches either (#181).
+* ``POST /linkedin/browser/start``: start netkeeper's Chrome with the UI in an app
+  window, or open the window in it (#636, ADR 0012). It submits the launch to the task
+  runner and answers ``202``; the result is ``browser.launch`` on the event stream.
+  Without ``serve``'s launcher on ``app.state`` it answers ``503``.
 
 Every ``GET`` here only reads: none starts, resumes, arms, or clears anything. Every
 ``POST`` and ``DELETE`` goes through the CSRF guard (``X-Netkeeper-Client: 1``
@@ -82,6 +86,8 @@ from netkeeper.services.browser_launch import (
     chrome_launch_command,
     remote_host_note,
 )
+from netkeeper.services.chrome_launch import LAUNCH_EVENT, ChromeSpawner
+from netkeeper.services.events import Event, EventBus
 from netkeeper.services.heat import cooldown_multiplier
 from netkeeper.services.linkedin_accounts import (
     account_id_for,
@@ -118,6 +124,8 @@ from netkeeper.web.schemas import (
     BreakerResetOut,
     BrowserHealthOut,
     BrowserLaunchOut,
+    BrowserStartAccepted,
+    BrowserStartIn,
     BudgetOut,
     BudgetStatusOut,
     HeatClearIn,
@@ -934,3 +942,72 @@ def get_browser(request: Request, session: SessionDep, user: CurrentUser) -> Bro
         remote_host_note=remote_host_note(cdp_url),
         check_command="netkeeper preflight",
     )
+
+
+# --- starting netkeeper's Chrome (#636) -------------------------------------------------
+
+#: The task name a launch runs under; one at a time.
+LAUNCH_TASK: Final = "chrome_launch"
+
+_NO_LAUNCHER = (
+    "this netkeeper process has no Chrome launcher (it was not started by `netkeeper serve`),"
+    " so it cannot start Chrome"
+)
+
+
+def _launcher(request: Request) -> ChromeSpawner:
+    launcher: ChromeSpawner | None = getattr(request.app.state, "chrome_launcher", None)
+    if launcher is None:
+        raise HTTPException(status_code=503, detail=_NO_LAUNCHER)
+    return launcher
+
+
+@router.post(
+    "/browser/start",
+    operation_id="start_linkedin_browser",
+    status_code=202,
+    responses={
+        403: {"description": "Only the local owner account starts netkeeper's Chrome"},
+        409: {"description": "A launch is already under way"},
+        503: {"description": "This process has no Chrome launcher"},
+    },
+)
+async def start_browser(
+    body: BrowserStartIn, request: Request, user: CurrentUser, session: SessionDep, tasks: Tasks
+) -> BrowserStartAccepted:
+    """Start netkeeper's Chrome with the UI in an app window, or open the window in it (#636).
+
+    Your act, from a button (ADR 0012, rule 5). It submits the launch to the task runner
+    and answers ``202`` at once: the checks before a spawn can take seconds, and nothing
+    is spawned inside a request. The launch refuses when the port answers as another
+    Chrome, when the profile is open without the port, or, for a cold start, while a run
+    holds the browser; how it went arrives as ``browser.launch`` on ``GET /events``.
+    ``first_run`` (setup's first-run button) also opens LinkedIn's sign-in page.
+    """
+    launcher = _launcher(request)
+    require_owner(session, user, "only the local owner account starts netkeeper's Chrome")
+    if any(task.name == LAUNCH_TASK for task in tasks.active()):
+        raise HTTPException(status_code=409, detail="netkeeper's Chrome is already starting")
+    bus: EventBus = request.app.state.bus
+    user_id = user.id
+    first_run = body.first_run
+    task_id = ""
+
+    async def run_launch() -> None:
+        result = await launcher.start(first_run=first_run)
+        bus.publish(
+            Event(
+                type=LAUNCH_EVENT,
+                data={
+                    "task_id": task_id,
+                    "status": result.status.value,
+                    "refusal": None if result.refusal is None else result.refusal.value,
+                    "message": result.message,
+                    "pid": result.pid,
+                },
+                user_id=user_id,
+            )
+        )
+
+    task_id = tasks.submit(LAUNCH_TASK, run_launch, user_id=user_id).id
+    return BrowserStartAccepted(task_id=task_id)

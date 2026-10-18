@@ -911,7 +911,11 @@ def is_launchctl_import(finding: Finding) -> bool:
 
 def test_no_code_path_starts_a_process() -> None:
     """`netkeeper browser launch` prints a command. Nothing runs one."""
-    findings = [f for f in scan([PACKAGE], process_starts) if not is_launchctl_import(f)]
+    findings = [
+        f
+        for f in scan([PACKAGE], process_starts)
+        if not is_launchctl_import(f) and not is_chrome_spawn_finding(f)
+    ]
     for path, count in ALLOWED_PROCESS_STARTS.items():
         hits = [f for f in findings if f.path == path and f.detail == "execv() starts a process"]
         assert len(hits) == count, (
@@ -1077,6 +1081,324 @@ def test_the_launchctl_pin_rejects_every_other_way_to_start_a_process(old: str, 
     source = LOGIN_ITEM.read_text()
     assert old in source, old
     assert launchctl_pin_problems(source.replace(old, new, 1))
+
+
+# --- the Chrome launcher's one spawn (#636, ADR 0012) ---------------------------------
+#
+# ADR 0012, rule 2: one launcher is the only process netkeeper starts for a browser. One
+# function in one module may spawn, and only the list ``chrome_argv`` builds from config
+# (``tests/test_chrome_spawn.py`` pins that list to the printed command). Nothing else in
+# the package may spawn, including the rest of that module, and only ``netkeeper open``
+# and ``serve``'s wiring import it.
+
+CHROME_SPAWN = PACKAGE / "chrome_spawn.py"
+CHROME_SPAWN_FUNCTION = "spawn_chrome"
+CHROME_ARGV_FUNCTION = "chrome_argv"
+
+#: The only modules that may import the launcher, as paths from the repository root.
+#: A module that needs it adds itself here on purpose, in a diff someone reads. Nothing
+#: under web/ belongs here: a route reaches the launcher as a ChromeSpawner on app.state.
+CHROME_SPAWN_IMPORTERS = frozenset(
+    {
+        Path("netkeeper/cli.py"),  # `netkeeper open`
+        Path("netkeeper/worker.py"),  # serve's wiring: app.state.chrome_launcher
+    }
+)
+
+#: The keywords of the one ``subprocess.Popen`` call, and what each must be: detached
+#: (its own session) with every stream on /dev/null. No shell, executable, env or cwd.
+_POPEN_KEYWORDS = {
+    "stdin": "DEVNULL",
+    "stdout": "DEVNULL",
+    "stderr": "DEVNULL",
+    "start_new_session": True,
+}
+
+#: Modules ``chrome_spawn.py`` may not import at all, besides ``from`` imports of these.
+_SPAWN_BANNED_IMPORTS = (PROCESS_MODULES - {"subprocess"}) | {"os", "multiprocessing"}
+
+
+def is_chrome_spawn_finding(finding: Finding) -> bool:
+    """The launcher's ``import subprocess`` and its ``Popen``, pinned by the test below."""
+    return finding.path == CHROME_SPAWN and (
+        finding.detail.startswith("imports subprocess")
+        or finding.detail == "Popen() starts a process"
+    )
+
+
+def _is_subprocess_attr(node: ast.AST, attr: str) -> bool:
+    return (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "subprocess"
+        and node.attr == attr
+    )
+
+
+def chrome_spawn_pin_problems(source: str) -> list[str]:
+    """What is wrong with ``chrome_spawn.py``'s one process start, from its syntax tree.
+
+    The module imports ``subprocess`` once, under its own name, and uses it only in
+    ``spawn_chrome``, whose body is exactly ``argv = chrome_argv(launch)`` and ``return
+    subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL, start_new_session=True)``. Anything else (another call or
+    reference, an alias, a ``getattr``, a ``from`` import, a shell, another program, a
+    changed list, a second definition or a reassigned name) is a problem.
+    """
+    tree = ast.parse(source)
+    problems: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            root = node.module.split(".")[0]
+            if root in PROCESS_MODULES | _SPAWN_BANNED_IMPORTS | {"asyncio"}:
+                problems.append(f"line {node.lineno}: from {node.module} import ...")
+            if node.module.startswith("netkeeper.linkedin"):
+                problems.append(f"line {node.lineno}: imports {node.module}")
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] in _SPAWN_BANNED_IMPORTS:
+                    problems.append(f"line {node.lineno}: import {alias.name}")
+                if alias.name == "subprocess" and alias.asname:
+                    problems.append(f"line {node.lineno}: subprocess imported under an alias")
+                if alias.name.startswith("netkeeper.linkedin"):
+                    problems.append(f"line {node.lineno}: imports {alias.name}")
+        if isinstance(node, ast.Constant) and node.value == "subprocess":
+            problems.append(f"line {node.lineno}: 'subprocess' as a string (getattr?)")
+    imports = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.Import) and any(a.name == "subprocess" for a in node.names)
+    ]
+    if len(imports) != 1:
+        problems.append(f"{len(imports)} top-level `import subprocess`, not exactly 1")
+
+    defs = [
+        node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == CHROME_SPAWN_FUNCTION
+    ]
+    if len(defs) != 1 or not isinstance(defs[0], ast.FunctionDef):
+        problems.append(f"not exactly one top-level `def {CHROME_SPAWN_FUNCTION}`")
+        return problems
+    spawn = defs[0]
+    if [d.name for d in tree.body if isinstance(d, ast.FunctionDef)].count(
+        CHROME_ARGV_FUNCTION
+    ) != 1:
+        problems.append(f"not exactly one top-level `def {CHROME_ARGV_FUNCTION}`")
+    for node in ast.walk(tree):
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+            targets = [node.target]
+        for target in targets:
+            for named in ast.walk(target):
+                if isinstance(named, ast.Name) and named.id in (
+                    "subprocess",
+                    CHROME_SPAWN_FUNCTION,
+                    CHROME_ARGV_FUNCTION,
+                ):
+                    problems.append(f"line {target.lineno}: {named.id} is assigned")
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            problems.append(f"line {node.lineno}: a global or nonlocal declaration")
+
+    # The function itself: one argument, no decorators, and exactly two statements.
+    arguments = spawn.args
+    if (
+        spawn.decorator_list
+        or [a.arg for a in arguments.args] != ["launch"]
+        or arguments.posonlyargs
+        or arguments.kwonlyargs
+        or arguments.vararg
+        or arguments.kwarg
+        or arguments.defaults
+    ):
+        problems.append(f"{CHROME_SPAWN_FUNCTION} does not take exactly `launch`")
+    body = list(spawn.body)
+    if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
+        body = body[1:]  # the docstring
+    built = body[0] if body else None
+    built_ok = (
+        isinstance(built, ast.Assign)
+        and len(built.targets) == 1
+        and isinstance(built.targets[0], ast.Name)
+        and built.targets[0].id == "argv"
+        and isinstance(built.value, ast.Call)
+        and isinstance(built.value.func, ast.Name)
+        and built.value.func.id == CHROME_ARGV_FUNCTION
+        and len(built.value.args) == 1
+        and isinstance(built.value.args[0], ast.Name)
+        and built.value.args[0].id == "launch"
+        and not built.value.keywords
+    )
+    if not built_ok:
+        problems.append(f"the list is not `argv = {CHROME_ARGV_FUNCTION}(launch)`")
+    returned = body[1] if len(body) > 1 else None
+    call = returned.value if isinstance(returned, ast.Return) else None
+    if (
+        len(body) != 2
+        or not isinstance(call, ast.Call)
+        or not _is_subprocess_attr(call.func, "Popen")
+    ):
+        problems.append(
+            f"{CHROME_SPAWN_FUNCTION} is not the list, then `return subprocess.Popen(...)`"
+        )
+        call = None
+
+    # Every use of `subprocess`: the import, the one Popen, and DEVNULL in its keywords.
+    allowed: set[int] = set()
+    if call is not None:
+        allowed.add(id(call.func))
+        program = call.args[0] if len(call.args) == 1 else None
+        if not (isinstance(program, ast.Name) and program.id == "argv"):
+            problems.append(f"line {call.lineno}: the program is not `argv`")
+        given: dict[str, ast.expr] = {}
+        for keyword in call.keywords:
+            if keyword.arg is None:
+                problems.append(f"line {call.lineno}: **keywords")
+                continue
+            given[keyword.arg] = keyword.value
+        if set(given) != set(_POPEN_KEYWORDS):
+            problems.append(f"line {call.lineno}: keywords {sorted(given)}")
+        for key, want in _POPEN_KEYWORDS.items():
+            value = given.get(key)
+            if value is None:
+                continue
+            if isinstance(want, str):
+                if _is_subprocess_attr(value, want):
+                    allowed.add(id(value))
+                else:
+                    problems.append(f"line {call.lineno}: {key} is not subprocess.{want}")
+            elif not (isinstance(value, ast.Constant) and value.value is want):
+                problems.append(f"line {call.lineno}: {key} is not {want}")
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "subprocess"
+            and id(node) not in allowed
+        ):
+            problems.append(f"line {node.lineno}: subprocess.{node.attr}")
+    # A bare `subprocess` (held, or handed to getattr) is a problem; as an attribute's
+    # value it was checked just above.
+    attribute_values = {id(n.value) for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Name)
+            and node.id == "subprocess"
+            and id(node) not in attribute_values
+        ):
+            problems.append(f"line {node.lineno}: subprocess used other than as an attribute")
+    # And no other way to start a process anywhere in the module.
+    for finding in process_starts(source, CHROME_SPAWN):
+        if not is_chrome_spawn_finding(finding):
+            problems.append(str(finding))
+    popens = [
+        node for node in ast.walk(tree) if isinstance(node, ast.Attribute) and node.attr == "Popen"
+    ]
+    if len(popens) != 1:
+        problems.append(f"{len(popens)} references to Popen, not exactly 1")
+    return problems
+
+
+def test_the_one_process_netkeeper_spawns_is_the_chrome_launchers() -> None:
+    """``spawn_chrome`` starts Chrome's binary with ``chrome_argv``'s list, detached, and
+    nothing else in ``chrome_spawn.py`` starts anything (#636)."""
+    source = CHROME_SPAWN.read_text()
+    assert chrome_spawn_pin_problems(source) == []
+    hits = [
+        f for f in process_starts(source, CHROME_SPAWN) if f.detail == "Popen() starts a process"
+    ]
+    # One call site: the scanner reads it twice, as a call and as an attribute.
+    assert len({f.line for f in hits}) == 1, hits
+
+
+def test_only_the_cli_and_serves_wiring_import_the_chrome_launcher() -> None:
+    """``netkeeper open`` and ``serve``'s wiring, and nothing else: no route, no run."""
+
+    def importers(source: str, path: Path) -> Iterator[Finding]:
+        for line, name in imported_names(source, path):
+            if name == "netkeeper.chrome_spawn" or name.startswith("netkeeper.chrome_spawn."):
+                yield Finding(path, line, f"imports {name}")
+
+    found = {f.path.resolve().relative_to(REPO_ROOT) for f in scan([PACKAGE], importers)}
+    assert found == set(CHROME_SPAWN_IMPORTERS), sorted(str(p) for p in found)
+    assert (
+        CHROME_SPAWN.parent == PACKAGE
+    )  # beside worker.py: not under web/, linkedin/ or services/
+
+
+def test_the_importer_scan_sees_each_way_to_import_the_launcher() -> None:
+    names = [
+        "import netkeeper.chrome_spawn\n",
+        "from netkeeper import chrome_spawn\n",
+        "from netkeeper.chrome_spawn import spawn_chrome\n",
+    ]
+    for snippet in names:
+        assert any(name == "netkeeper.chrome_spawn" for _, name in imported_names(snippet)), snippet
+
+
+_SPAWN_RETURN = "    argv = chrome_argv(launch)\n    return subprocess.Popen("
+_SPAWN_END = "        start_new_session=True,\n    )\n"
+_PORT_ANSWERS = "def port_answers(port: int) -> bool:\n"
+_IN_PORT_ANSWERS = (
+    '    """Whether anything accepts a connection on loopback ``port``. Sends nothing."""\n'
+)
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        # A shell, another program, other options.
+        (_SPAWN_END, "        start_new_session=True,\n        shell=True,\n    )\n"),
+        (_SPAWN_END, "        start_new_session=True,\n        executable='/bin/sh',\n    )\n"),
+        (_SPAWN_END, "        start_new_session=True,\n        env={},\n    )\n"),
+        (_SPAWN_END, "        start_new_session=True,\n        cwd='/',\n    )\n"),
+        (_SPAWN_END, "        start_new_session=True,\n        **{},\n    )\n"),
+        ("start_new_session=True,", "start_new_session=False,"),
+        ("stdout=subprocess.DEVNULL,", "stdout=subprocess.PIPE,"),
+        ("        argv,\n        stdin=", "        ['/bin/sh', '-c', 'x'],\n        stdin="),
+        ("        argv,\n        stdin=", "        [*argv, '--headless'],\n        stdin="),
+        # A changed list.
+        ("    argv = chrome_argv(launch)\n", "    argv = chrome_argv(launch) + ['--headless']\n"),
+        (
+            "    argv = chrome_argv(launch)\n",
+            "    argv = chrome_argv(launch)\n    argv.append('--headless')\n",
+        ),
+        ("    argv = chrome_argv(launch)\n", "    argv = ['/bin/sh', '-c', 'x']\n"),
+        (_PORT_ANSWERS, f"chrome_argv = list\n\n\n{_PORT_ANSWERS}"),
+        # Another spawn, or the same one by another route.
+        (_IN_PORT_ANSWERS, f"{_IN_PORT_ANSWERS}    subprocess.Popen(['/usr/bin/open', 'x'])\n"),
+        (_IN_PORT_ANSWERS, f"{_IN_PORT_ANSWERS}    subprocess.run(['/usr/bin/open', 'x'])\n"),
+        (_PORT_ANSWERS, f"_p = subprocess.Popen\n\n\n{_PORT_ANSWERS}"),
+        (_PORT_ANSWERS, f"_p = getattr(subprocess, 'Popen')\n\n\n{_PORT_ANSWERS}"),
+        (_PORT_ANSWERS, f"_s = __import__('subprocess')\n\n\n{_PORT_ANSWERS}"),
+        (_PORT_ANSWERS, f"import subprocess as sp\n\n\n{_PORT_ANSWERS}"),
+        (_PORT_ANSWERS, f"from subprocess import Popen\n\n\n{_PORT_ANSWERS}"),
+        (_PORT_ANSWERS, f"import os\n\n\n{_PORT_ANSWERS}"),
+        (_IN_PORT_ANSWERS, f"{_IN_PORT_ANSWERS}    asyncio.create_subprocess_exec('x')\n"),
+        (_PORT_ANSWERS, f"_sp = subprocess\n\n\n{_PORT_ANSWERS}"),
+        # The function moved, renamed, or given another way in.
+        ("def spawn_chrome(launch: ChromeLaunch)", "def spawn_any(launch: ChromeLaunch)"),
+        (
+            "def spawn_chrome(launch: ChromeLaunch)",
+            "def spawn_chrome(launch: ChromeLaunch, *x: str)",
+        ),
+        (_PORT_ANSWERS, f"def spawn_chrome(launch):\n    pass\n\n\n{_PORT_ANSWERS}"),
+        (
+            "from netkeeper.chrome_profile",
+            "from netkeeper.linkedin import browser\nfrom netkeeper.chrome_profile",
+        ),
+    ],
+)
+def test_the_chrome_spawn_pin_rejects_every_other_way_to_start_a_process(
+    old: str, new: str
+) -> None:
+    """Each mutation of the launcher's source must fail the pin."""
+    source = CHROME_SPAWN.read_text()
+    assert old in source, old
+    assert chrome_spawn_pin_problems(source.replace(old, new, 1))
 
 
 def test_the_users_browser_context_is_never_mutated() -> None:

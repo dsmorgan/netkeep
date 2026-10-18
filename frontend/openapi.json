@@ -1655,6 +1655,33 @@
         "title": "BrowserLaunchOut",
         "type": "object"
       },
+      "BrowserStartAccepted": {
+        "description": "The ``202`` of ``POST /linkedin/browser/start``: the task running the launch.\n\nHow it went arrives on ``GET /events`` as ``browser.launch`` with the same\n``task_id``: ``status`` (``started``, ``handed_off``, ``refused`` or ``failed``),\n``refusal`` (which check refused, or null), ``message`` and ``pid``.",
+        "properties": {
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "title": "BrowserStartAccepted",
+        "type": "object"
+      },
+      "BrowserStartIn": {
+        "additionalProperties": false,
+        "description": "``POST /linkedin/browser/start``'s body (#636).\n\n``first_run`` is setup's first-run button only (#599): it also opens LinkedIn's\nsign-in page beside the UI's window.",
+        "properties": {
+          "first_run": {
+            "default": false,
+            "title": "First Run",
+            "type": "boolean"
+          }
+        },
+        "title": "BrowserStartIn",
+        "type": "object"
+      },
       "BudgetOut": {
         "description": "One action class's counters against its limits (spec 9.6).",
         "properties": {
@@ -22715,6 +22742,57 @@
           }
         },
         "summary": "Get Browser Health",
+        "tags": [
+          "linkedin"
+        ]
+      }
+    },
+    "/api/v1/linkedin/browser/start": {
+      "post": {
+        "description": "Start netkeeper's Chrome with the UI in an app window, or open the window in it (#636).\n\nYour act, from a button (ADR 0012, rule 5). It submits the launch to the task runner\nand answers ``202`` at once: the checks before a spawn can take seconds, and nothing\nis spawned inside a request. The launch refuses when the port answers as another\nChrome, when the profile is open without the port, or, for a cold start, while a run\nholds the browser; how it went arrives as ``browser.launch`` on ``GET /events``.\n``first_run`` (setup's first-run button) also opens LinkedIn's sign-in page.",
+        "operationId": "start_linkedin_browser",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserStartIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserStartAccepted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Only the local owner account starts netkeeper's Chrome"
+          },
+          "409": {
+            "description": "A launch is already under way"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "This process has no Chrome launcher"
+          }
+        },
+        "summary": "Start Browser",
         "tags": [
           "linkedin"
         ]

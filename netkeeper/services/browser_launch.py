@@ -44,6 +44,15 @@ def cdp_port(cdp_url: str) -> int:
     return DEFAULT_CDP_PORT if port is None else port
 
 
+def chrome_flags(port: int, profile: Path) -> list[str]:
+    """The flags :func:`chrome_launch_command` prints, as arguments: the launcher's (#636).
+
+    ``netkeeper.chrome_spawn`` passes exactly these to Chrome's binary, then ``--app``;
+    ``tests/test_chrome_spawn.py`` checks them against the printed lines, parsed.
+    """
+    return [f"--remote-debugging-port={port}", f"--user-data-dir={profile}"]
+
+
 def chrome_launch_command(port: int, profile: Path) -> list[str]:
     """The platform's Chrome command, as lines a person can paste (spec 9.1).
 
