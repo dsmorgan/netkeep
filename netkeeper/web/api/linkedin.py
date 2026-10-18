@@ -86,7 +86,7 @@ from netkeeper.services.browser_launch import (
     chrome_launch_command,
     remote_host_note,
 )
-from netkeeper.services.chrome_launch import LAUNCH_EVENT, ChromeSpawner
+from netkeeper.services.chrome_launch import LAUNCH_EVENT, ChromeSpawner, LaunchStatus
 from netkeeper.services.events import Event, EventBus
 from netkeeper.services.heat import cooldown_multiplier
 from netkeeper.services.linkedin_accounts import (
@@ -984,8 +984,8 @@ async def start_browser(
     holds the browser; how it went arrives as ``browser.launch`` on ``GET /events``.
     ``first_run`` (setup's first-run button) also opens LinkedIn's sign-in page.
     """
-    launcher = _launcher(request)
     require_owner(session, user, "only the local owner account starts netkeeper's Chrome")
+    launcher = _launcher(request)
     if any(task.name == LAUNCH_TASK for task in tasks.active()):
         raise HTTPException(status_code=409, detail="netkeeper's Chrome is already starting")
     bus: EventBus = request.app.state.bus
@@ -993,20 +993,30 @@ async def start_browser(
     first_run = body.first_run
     task_id = ""
 
+    def publish(status: str, message: str, refusal: str | None, pid: int | None) -> None:
+        data = {
+            "task_id": task_id,
+            "status": status,
+            "refusal": refusal,
+            "message": message,
+            "pid": pid,
+        }
+        bus.publish(Event(type=LAUNCH_EVENT, data=data, user_id=user_id))
+
     async def run_launch() -> None:
-        result = await launcher.start(first_run=first_run)
-        bus.publish(
-            Event(
-                type=LAUNCH_EVENT,
-                data={
-                    "task_id": task_id,
-                    "status": result.status.value,
-                    "refusal": None if result.refusal is None else result.refusal.value,
-                    "message": result.message,
-                    "pid": result.pid,
-                },
-                user_id=user_id,
+        try:
+            result = await launcher.start(first_run=first_run)
+        except Exception as exc:
+            # A button waiting on this event must hear an ending either way.
+            publish(
+                LaunchStatus.FAILED.value, f"the launch failed: {type(exc).__name__}", None, None
             )
+            raise
+        publish(
+            result.status.value,
+            result.message,
+            None if result.refusal is None else result.refusal.value,
+            result.pid,
         )
 
     task_id = tasks.submit(LAUNCH_TASK, run_launch, user_id=user_id).id

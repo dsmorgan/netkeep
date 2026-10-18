@@ -59,7 +59,7 @@ from typing import Any, Final, Protocol
 from fastapi import FastAPI
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.chrome_spawn import ChromeLauncher
+from netkeeper.chrome_spawn import ChromeLauncher, configured_port
 from netkeeper.config import LinkedInSettings, Settings, load_settings
 from netkeeper.crm.inbox_apply import owner_hold
 from netkeeper.db import CancelledWhileFailing, off_loop, session_scope
@@ -773,23 +773,35 @@ def serve_app(settings: Settings, *, ui_base: str | None = None) -> FastAPI:
 # --- the Chrome launcher (#636) ---------------------------------------------------
 
 
+#: How long the launcher's probe waits for the Chrome on the port to answer over CDP,
+#: while it holds the activity lock: a port that accepts but never speaks CDP would
+#: otherwise hold it for Playwright's 30 s and refuse runs as busy meanwhile.
+PROBE_CONNECT_TIMEOUT_S: Final = 5.0
+
+
 async def launcher_probe(
-    cdp_url: str, *, locks: ActivityLocks, account: str, connector: CdpConnector | None = None
+    cdp_url: str,
+    *,
+    locks: ActivityLocks,
+    account: str,
+    connector: CdpConnector | None = None,
+    timeout_s: float = PROBE_CONNECT_TIMEOUT_S,
 ) -> PortProbe:
-    """What the Chrome on ``cdp_url`` names for itself, for the launcher's checks (#636).
+    """What the Chrome on ``cdp_url`` is, for the launcher's checks (#636).
 
     Under ``account``'s activity lock, never waiting: one connection through the attach's
     own connector, which reads the browser's pid (#624) and nothing else, then detaches.
-    A held lock is ``busy``, and nothing connects: a run is attached, and a second CDP
-    client would drop its connection (spec 9.9). A Chrome that can't be reached is no pid,
-    which the launcher refuses.
+    A Chrome that can't be reached within ``timeout_s`` is no pid, which the launcher
+    refuses. A held lock is ``busy``, and nothing connects: a run is attached, and a
+    second CDP client would drop its connection (spec 9.9). Then ``verified_pid`` is the
+    Chrome pid that run's attach verified, from the lock's holder note.
     """
     chosen = PlaywrightCdpConnector() if connector is None else connector
     try:
         async with locks.hold(account):
             try:
-                connection = await chosen.connect(cdp_url)
-            except BrowserUnavailable as exc:
+                connection = await asyncio.wait_for(chosen.connect(cdp_url), timeout_s)
+            except (BrowserUnavailable, TimeoutError) as exc:
                 log.info("the launcher's probe couldn't attach: %s", personal_exc(exc))
                 return PortProbe(busy=False)
             try:
@@ -797,7 +809,8 @@ async def launcher_probe(
             finally:
                 await connection.detach()
     except BrowserBusy:
-        return PortProbe(busy=True)
+        holder = activity_lock.read_holder(account, locks.directory)
+        return PortProbe(busy=True, verified_pid=None if holder is None else holder.browser_pid)
 
 
 def launcher_lock_key(session: Session) -> str:
@@ -835,10 +848,12 @@ def serve_chrome_launcher(app: FastAPI, settings: Settings, ui_base: str) -> Chr
         held: local_api_key.LocalApiKey = app.state.local_api_key
         return local_api_key.connect_url(ui_base, held.key)
 
+    port = configured_port(ui_base)
     return ChromeLauncher(
         cdp_url=cdp_url,
         profile=data_dir() / CHROME_PROFILE_DIRNAME,
         app_url=app_url,
+        ui_port=0 if port is None else port,
         probe=probe,
         run_holds_browser=runs.any_browser_lock_held,
         pid_alive=activity_lock.pid_alive,
