@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 
 import { browserHealthQuery, browserQuery, statusQuery } from './api'
 import { formatWhen } from './fields'
+import { StartChrome } from './start-chrome'
 import type { BrowserHealth } from './types'
 
 const SESSION_CLASSES: Record<string, string> = {
@@ -19,9 +20,10 @@ function message(error: unknown): string {
 }
 
 /**
- * Browser status and launch instructions (spec 9.1, ADR 0002): netkeeper is
- * attach-only and never launches Chrome itself, so this shows the command
- * `netkeeper browser launch` prints rather than a button that would start one.
+ * Browser status and how to start netkeeper's Chrome (spec 9.1, ADR 0012): the
+ * **Start Chrome** button (#599), which runs the one launcher only when you press
+ * it, and the command `netkeeper browser launch` prints, for a terminal. A run
+ * never starts Chrome.
  *
  * "Last known" (#181) is what netkeeper already recorded, never a fresh look:
  * the last `netkeeper preflight` or run that read LinkedIn, the session flag
@@ -41,7 +43,7 @@ export function BrowserCard() {
       <CardHeader>
         <CardTitle level={2}>Browser</CardTitle>
         <CardDescription>
-          netkeeper attaches to a Chrome you start yourself. It never starts one.
+          netkeeper uses its own Chrome. It starts it only when you ask.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
@@ -59,11 +61,13 @@ export function BrowserCard() {
         {health.isError && <p role="alert">{message(health.error)}</p>}
         {health.isSuccess && <LastKnown health={health.data} />}
 
+        <StartChrome />
+
         {browser.isPending && <p role="status">Loading launch instructions…</p>}
         {browser.isError && <p role="alert">{message(browser.error)}</p>}
         {browser.isSuccess && (
           <>
-            <p>Run this in a terminal (again whenever that Chrome is not running):</p>
+            <p>Or run this in a terminal (again whenever that Chrome is not running):</p>
             <pre className="rounded-md bg-muted p-3 font-mono text-xs break-all whitespace-pre-wrap">
               {browser.data.launch_command.join('\n')}
             </pre>
@@ -112,8 +116,8 @@ function LastKnown({ health }: { health: BrowserHealth }) {
       {health.chrome_unreachable_at !== null && (
         <p role="alert" className="text-destructive">
           Run {health.chrome_unreachable_run_id} could not reach Chrome at{' '}
-          {formatWhen(health.chrome_unreachable_at)}. Start it with the command below, then run{' '}
-          <code className="font-mono text-xs">netkeeper preflight</code>.
+          {formatWhen(health.chrome_unreachable_at)}. Start it with Start Chrome or the command
+          below, then run <code className="font-mono text-xs">netkeeper preflight</code>.
         </p>
       )}
       {health.running_run_id !== null && (

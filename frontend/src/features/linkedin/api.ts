@@ -10,6 +10,7 @@ import { api } from '@/api/client'
 import type {
   BrowserHealth,
   BrowserLaunch,
+  BrowserStartAccepted,
   BudgetStatus,
   Heat,
   LinkedInStatus,
@@ -212,6 +213,21 @@ export function runDiagnosticsQuery(runId: number) {
       return data
     },
   })
+}
+
+// --- netkeeper's Chrome (#599) -------------------------------------------------------------
+
+/**
+ * Ask `serve` to start netkeeper's Chrome, or open this page in it when it's running
+ * (#636's launcher). It answers `202` with a task id at once; how the launch went
+ * arrives as `browser.launch` on the event stream. Never `first_run`: that's setup's.
+ */
+export async function startChrome(): Promise<BrowserStartAccepted> {
+  const { data, error, response } = await api.POST('/api/v1/linkedin/browser/start', {
+    body: { first_run: false },
+  })
+  if (data === undefined) throw apiError(error, response, 'POST /api/v1/linkedin/browser/start')
+  return data
 }
 
 // --- runs: start, cancel, pause, resume ----------------------------------------------------

@@ -59,6 +59,7 @@ from typing import Any, Final, Protocol
 from fastapi import FastAPI
 from sqlalchemy.orm import Session, sessionmaker
 
+from netkeeper.chrome_profile import profile_lock_pid
 from netkeeper.chrome_spawn import ChromeLauncher, configured_port
 from netkeeper.config import LinkedInSettings, Settings, load_settings
 from netkeeper.crm.inbox_apply import owner_hold
@@ -110,7 +111,12 @@ from netkeeper.services.budgets import (
     li_message_risk_warning,
     profile_visit_risk_warning,
 )
-from netkeeper.services.chrome_launch import PortProbe
+from netkeeper.services.chrome_launch import (
+    LaunchResult,
+    LaunchUnderWay,
+    PortProbe,
+    submit_launch,
+)
 from netkeeper.services.connections_sync import sync_connections
 from netkeeper.services.enrichment import enrich_contacts
 from netkeeper.services.events import Event, EventBus
@@ -849,6 +855,7 @@ def serve_app(settings: Settings, *, ui_base: str | None = None) -> FastAPI:
     app = create_app(settings, extractor=serve_extractor(settings))
     base = ui_base or local_api_key.base_url(settings.web.host, settings.web.port)
     app.state.chrome_launcher = serve_chrome_launcher(app, settings, base)
+    app.state.after_listening = lambda: _after_listening(app)
     return app
 
 
@@ -945,6 +952,98 @@ def serve_chrome_launcher(app: FastAPI, settings: Settings, ui_base: str) -> Chr
         run_holds_browser=runs.any_browser_lock_held,
         pid_alive=activity_lock.pid_alive,
     )
+
+
+async def _after_listening(app: FastAPI) -> None:
+    """:func:`start_chrome_at_startup`, with anything it raises logged: nobody awaits it."""
+    try:
+        await start_chrome_at_startup(app)
+    except Exception:
+        log.exception("could not start netkeeper's Chrome at startup")
+
+
+#: How long ``serve``'s start at startup waits for the server to listen before it gives up.
+LISTEN_WAIT_S: Final = 60.0
+_LISTEN_POLL_S: Final = 0.1
+
+
+async def start_chrome_at_startup(
+    app: FastAPI,
+    *,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    wait_s: float = LISTEN_WAIT_S,
+    run_holds_browser: Callable[[], bool] = runs.any_browser_lock_held,
+    pid_alive: Callable[[int], bool] = activity_lock.pid_alive,
+) -> str | None:
+    """Start netkeeper's Chrome once ``serve`` is listening, when you turned that on (#599).
+
+    ``serve`` runs this as a task from its lifespan (``app.state.after_listening``), so it
+    never holds up startup. It waits for ``app.state.listening()`` (``serve`` sets it to
+    uvicorn's ``started``), then reads ``linkedin.start_chrome_at_startup`` for the local
+    owner, the file's value over the Settings page's. When that is on, it submits one
+    :meth:`~netkeeper.services.chrome_launch.ChromeSpawner.start` through
+    :func:`~netkeeper.services.chrome_launch.submit_launch`, the same task the **Start
+    Chrome** button's route runs, and logs the outcome. It starts nothing, and says why
+    in the log, while a run holds the browser, while a live process already holds
+    netkeeper's profile (no second Chrome, and no extra window at each restart), or while
+    a launch is under way. Returns the launch's task id, or ``None`` when it started none.
+    """
+    listening: Callable[[], bool] | None = getattr(app.state, "listening", None)
+    if listening is None:
+        # `serve --reload` and test apps have no server to watch.
+        log.debug("no listening signal: netkeeper's Chrome isn't started at startup")
+        return None
+    waited = 0.0
+    while not listening():
+        if waited >= wait_s:
+            log.warning("serve didn't start listening, so netkeeper's Chrome wasn't started")
+            return None
+        await sleep(_LISTEN_POLL_S)
+        waited += _LISTEN_POLL_S
+
+    def read() -> tuple[int, bool] | None:
+        with session_scope(app.state.session_factory) as session:
+            owner = local_owner(session)
+            if owner is None:
+                return None
+            resolved = ui_settings.resolve(session, owner, app.state.settings)
+            return owner.id, resolved.linkedin.start_chrome_at_startup
+
+    found = await off_loop(read)
+    if found is None or not found[1]:
+        log.debug("start netkeeper's Chrome at startup is off")
+        return None
+    owner_id = found[0]
+    launcher = getattr(app.state, "chrome_launcher", None)
+    if launcher is None:
+        log.warning("start at startup is on, but this process has no Chrome launcher")
+        return None
+    if await asyncio.to_thread(run_holds_browser):
+        log.info("not starting netkeeper's Chrome at startup: a run holds the browser")
+        return None
+    holder = profile_lock_pid(data_dir() / CHROME_PROFILE_DIRNAME)
+    if holder is not None and pid_alive(holder):
+        log.info(
+            "not starting netkeeper's Chrome at startup: it's already running (pid %d)", holder
+        )
+        return None
+
+    def logged(result: LaunchResult) -> None:
+        refusal = "" if result.refusal is None else f" ({result.refusal.value})"
+        log.info(
+            "start netkeeper's Chrome at startup: %s%s: %s",
+            result.status.value,
+            refusal,
+            result.message,
+        )
+
+    try:
+        return submit_launch(
+            app.state.tasks, app.state.bus, launcher, user_id=owner_id, on_result=logged
+        )
+    except LaunchUnderWay:
+        log.info("not starting netkeeper's Chrome at startup: a launch is already under way")
+        return None
 
 
 def dev_app() -> FastAPI:

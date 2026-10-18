@@ -14,6 +14,7 @@ import {
   type AutoSendOutlook,
 } from '@/features/linkedin-steps/format'
 import { SchedulePause } from '@/features/linkedin/schedule-pause'
+import { StartChrome } from '@/features/linkedin/start-chrome'
 import { RUN_STATUS_CLASSES, formatWhen, stopReasonLabel } from '@/features/linkedin/fields'
 import {
   RUN_KIND_LABELS,
@@ -326,6 +327,7 @@ export function BrowserHealthCard() {
       ) : (
         <LastRun run={runs.data.items[0]} />
       )}
+      <StartChrome compact />
       {(status.data?.session_flag ?? null) !== null && (
         <div>
           <Button size="sm" variant="outline" render={<Link to="/linkedin" />}>

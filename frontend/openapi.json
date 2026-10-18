@@ -1539,6 +1539,14 @@
       "BrowserHealthOut": {
         "description": "What netkeeper already knows about Chrome and the LinkedIn session (#181).\n\nBuilt only from what was recorded: the last ``netkeeper preflight`` or\n``posture --probe``, the newest run that read LinkedIn, the session flag, and\nthe newest run that could not reach Chrome. Nothing here attaches to the\nbrowser; a request handler never does (spec 9.9, CLAUDE.md).\n\n``session_status`` and ``session_summary`` are the posture report's\n``linkedin session`` row, word for word. ``chrome_unreachable_at`` is set when\nthe newest run that ended ``browser_unavailable`` is newer than the last sign\nof a working session.",
         "properties": {
+          "browser_held": {
+            "title": "Browser Held",
+            "type": "boolean"
+          },
+          "can_start_chrome": {
+            "title": "Can Start Chrome",
+            "type": "boolean"
+          },
           "can_start_runs": {
             "title": "Can Start Runs",
             "type": "boolean"
@@ -1547,6 +1555,21 @@
             "format": "date-time",
             "title": "Checked At",
             "type": "string"
+          },
+          "chrome_pid": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chrome Pid"
+          },
+          "chrome_running": {
+            "title": "Chrome Running",
+            "type": "boolean"
           },
           "chrome_unreachable_at": {
             "anyOf": [
@@ -1606,7 +1629,11 @@
           "session_warnings",
           "chrome_unreachable_at",
           "chrome_unreachable_run_id",
-          "running_run_id"
+          "running_run_id",
+          "chrome_running",
+          "chrome_pid",
+          "browser_held",
+          "can_start_chrome"
         ],
         "title": "BrowserHealthOut",
         "type": "object"
@@ -22759,7 +22786,7 @@
     },
     "/api/v1/linkedin/browser/health": {
       "get": {
-        "description": "What netkeeper already knows about Chrome and the session, never a fresh probe (#181).\n\nThe ``linkedin session`` posture row (the last ``netkeeper preflight`` or\n``posture --probe``, or the newest run that read LinkedIn, under the session\nflag), and the newest run that could not reach Chrome when that is newer.\nNothing here attaches to the browser (spec 9.9, CLAUDE.md); a live check is\nstill ``netkeeper preflight`` in a terminal.",
+        "description": "What netkeeper already knows about Chrome and the session, never a fresh probe (#181).\n\nThe ``linkedin session`` posture row (the last ``netkeeper preflight`` or\n``posture --probe``, or the newest run that read LinkedIn, under the session\nflag), and the newest run that could not reach Chrome when that is newer.\nNothing here attaches to the browser (spec 9.9, CLAUDE.md); a live check is\nstill ``netkeeper preflight`` in a terminal. Whether netkeeper's Chrome is running\nis read from its profile's lock file, and whether a run holds the browser from the\nlock files, for the **Start Chrome** button (#599).",
         "operationId": "get_linkedin_browser_health",
         "responses": {
           "200": {
@@ -22781,7 +22808,7 @@
     },
     "/api/v1/linkedin/browser/start": {
       "post": {
-        "description": "Start netkeeper's Chrome with the UI in an app window, or open the window in it (#636).\n\nYour act, from a button (ADR 0012, rule 5). It submits the launch to the task runner\nand answers ``202`` at once: the checks before a spawn can take seconds, and nothing\nis spawned inside a request. The launch refuses when the port answers as another\nChrome, when the profile is open without the port, or, for a cold start, while a run\nholds the browser; how it went arrives as ``browser.launch`` on ``GET /events``.\n``first_run`` (setup's first-run button) also opens LinkedIn's sign-in page.",
+        "description": "Start netkeeper's Chrome with the UI in an app window, or open the window in it (#636).\n\nYour act, from a button (ADR 0012, rule 5). It submits the launch to the task runner\nand answers ``202`` at once: the checks before a spawn can take seconds, and nothing\nis spawned inside a request. The launch refuses when the port answers as another\nChrome, when the profile is open without the port, or, for a cold start, while a run\nholds the browser; how it went arrives as ``browser.launch`` on ``GET /events``.\n``first_run`` (setup's first-run button) also opens LinkedIn's sign-in page. A launch\nalready under way, this button's or ``serve``'s at startup (#599), answers ``409``.",
         "operationId": "start_linkedin_browser",
         "requestBody": {
           "content": {

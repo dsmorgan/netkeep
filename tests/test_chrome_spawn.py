@@ -499,11 +499,13 @@ def _first_run_keywords() -> dict[str, list[str]]:
 
 
 def test_only_the_routes_first_run_flag_reaches_the_launcher() -> None:
-    """``netkeeper open`` never passes ``first_run``; the route passes the body's flag,
-    which only setup's first-run button sets (#599), and nothing passes a literal True."""
+    """``netkeeper open`` and ``serve``'s start at startup (#599) never pass ``first_run``;
+    the route passes the body's flag, which only setup's first-run button sets, and
+    nothing passes a literal True."""
     assert _first_run_keywords() == {
         "netkeeper/chrome_spawn.py": ["first_run"],  # launch() into its ChromeLaunch
-        "netkeeper/web/api/linkedin.py": ["first_run"],  # the body's flag, into launch()
+        "netkeeper/services/chrome_launch.py": ["first_run"],  # submit_launch() into start()
+        "netkeeper/web/api/linkedin.py": ["body.first_run"],  # the body's flag
     }
     users = [
         str(path.relative_to(PACKAGE.parent))

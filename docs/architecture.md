@@ -1211,6 +1211,8 @@ active_hours = ["08:30", "21:30"]
 weekend_multiplier = 0.5
 enrich_stale_days = 180
 disconnect_after_misses = 2
+# Start netkeeper's Chrome when netkeeper serve starts (#599).
+start_chrome_at_startup = false
 
 [linkedin.budget]
 connection_pages_per_day = 150

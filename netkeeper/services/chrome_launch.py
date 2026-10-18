@@ -8,19 +8,35 @@ so a route can submit a launch to the task runner without importing the module t
 spawns. Without a launcher on ``app.state`` (an app that isn't ``serve``'s), the route
 answers 503.
 
-#599's **Start Chrome** button and start-at-login, and #549's open-at-login, call
-:meth:`ChromeSpawner.start`; only setup's first-run button passes ``first_run=True``.
+#599's **Start Chrome** button (through the route) and ``serve``'s start at startup
+both go through :func:`submit_launch`: one task named :data:`LAUNCH_TASK` at a time,
+whose result is published as :data:`LAUNCH_EVENT`. So a press while the startup launch
+is still settling answers 409, and nothing launches twice. Only setup's first-run button
+passes ``first_run=True``.
 """
 
 from __future__ import annotations
 
 import enum
+import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Final, Protocol
+from typing import TYPE_CHECKING, Final, Protocol
+
+from netkeeper.services.events import Event
+
+if TYPE_CHECKING:
+    from netkeeper.services.events import EventBus
+    from netkeeper.services.tasks import TaskRunner
+
+log = logging.getLogger(__name__)
 
 #: The event a launch submitted from the UI publishes when it's done, for the user who
 #: asked: ``{"task_id", "status", "refusal", "message", "pid"}``.
 LAUNCH_EVENT: Final = "browser.launch"
+
+#: The task name a launch runs under on the task runner; one at a time.
+LAUNCH_TASK: Final = "chrome_launch"
 
 
 class LaunchStatus(enum.StrEnum):
@@ -112,3 +128,64 @@ class ChromeSpawner(Protocol):
     the module that spawns (``tests/test_browser_safety.py``)."""
 
     async def start(self, *, first_run: bool = False) -> LaunchResult: ...
+
+
+class LaunchUnderWay(RuntimeError):
+    """A launch is already running on the task runner; :func:`submit_launch` started none."""
+
+
+def launch_under_way(tasks: TaskRunner) -> bool:
+    """Whether a launch task is pending or running."""
+    return any(task.name == LAUNCH_TASK for task in tasks.active())
+
+
+def submit_launch(
+    tasks: TaskRunner,
+    bus: EventBus,
+    launcher: ChromeSpawner,
+    *,
+    user_id: int,
+    first_run: bool = False,
+    on_result: Callable[[LaunchResult], None] | None = None,
+) -> str:
+    """Submit one :meth:`ChromeSpawner.start` to the task runner and return its task id.
+
+    Raises :class:`LaunchUnderWay` while another launch is pending or running. When it
+    ends, :data:`LAUNCH_EVENT` is published for ``user_id`` with ``{task_id, status,
+    refusal, message, pid}``, a raised launch as ``failed``, and ``on_result`` (``serve``'s
+    startup log line) is called with the result. Call it from the event loop.
+    """
+    if launch_under_way(tasks):
+        raise LaunchUnderWay("netkeeper's Chrome is already starting")
+    task_id = ""
+
+    def publish(status: str, message: str, refusal: str | None, pid: int | None) -> None:
+        data = {
+            "task_id": task_id,
+            "status": status,
+            "refusal": refusal,
+            "message": message,
+            "pid": pid,
+        }
+        bus.publish(Event(type=LAUNCH_EVENT, data=data, user_id=user_id))
+
+    async def run_launch() -> None:
+        try:
+            result = await launcher.start(first_run=first_run)
+        except Exception as exc:
+            # A button waiting on this event must hear an ending either way.
+            publish(
+                LaunchStatus.FAILED.value, f"the launch failed: {type(exc).__name__}", None, None
+            )
+            raise
+        publish(
+            result.status.value,
+            result.message,
+            None if result.refusal is None else result.refusal.value,
+            result.pid,
+        )
+        if on_result is not None:
+            on_result(result)
+
+    task_id = tasks.submit(LAUNCH_TASK, run_launch, user_id=user_id).id
+    return task_id

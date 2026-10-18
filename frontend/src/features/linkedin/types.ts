@@ -39,6 +39,7 @@ export type BrowserLaunch = JsonOf<paths['/api/v1/linkedin/browser']['get']['res
 export type BrowserHealth = JsonOf<
   paths['/api/v1/linkedin/browser/health']['get']['responses'][200]
 >
+export type BrowserStartAccepted = components['schemas']['BrowserStartAccepted']
 
 /** The run kinds the worker can actually run (`RUNNABLE_KINDS`, `netkeeper/services/runs.py`).
  *

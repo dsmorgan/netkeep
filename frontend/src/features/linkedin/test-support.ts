@@ -66,6 +66,10 @@ export const BROWSER_HEALTH: BrowserHealth = {
   chrome_unreachable_at: null,
   chrome_unreachable_run_id: null,
   running_run_id: null,
+  chrome_running: false,
+  chrome_pid: null,
+  browser_held: false,
+  can_start_chrome: true,
 }
 
 type Outlook = NonNullable<Schedule['auto_send']>

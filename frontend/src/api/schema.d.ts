@@ -2249,7 +2249,9 @@ export interface paths {
          *     ``posture --probe``, or the newest run that read LinkedIn, under the session
          *     flag), and the newest run that could not reach Chrome when that is newer.
          *     Nothing here attaches to the browser (spec 9.9, CLAUDE.md); a live check is
-         *     still ``netkeeper preflight`` in a terminal.
+         *     still ``netkeeper preflight`` in a terminal. Whether netkeeper's Chrome is running
+         *     is read from its profile's lock file, and whether a run holds the browser from the
+         *     lock files, for the **Start Chrome** button (#599).
          */
         get: operations["get_linkedin_browser_health"];
         put?: never;
@@ -2278,7 +2280,8 @@ export interface paths {
          *     is spawned inside a request. The launch refuses when the port answers as another
          *     Chrome, when the profile is open without the port, or, for a cold start, while a run
          *     holds the browser; how it went arrives as ``browser.launch`` on ``GET /events``.
-         *     ``first_run`` (setup's first-run button) also opens LinkedIn's sign-in page.
+         *     ``first_run`` (setup's first-run button) also opens LinkedIn's sign-in page. A launch
+         *     already under way, this button's or ``serve``'s at startup (#599), answers ``409``.
          */
         post: operations["start_linkedin_browser"];
         delete?: never;
@@ -4570,6 +4573,10 @@ export interface components {
          *     of a working session.
          */
         BrowserHealthOut: {
+            /** Browser Held */
+            browser_held: boolean;
+            /** Can Start Chrome */
+            can_start_chrome: boolean;
             /** Can Start Runs */
             can_start_runs: boolean;
             /**
@@ -4577,6 +4584,10 @@ export interface components {
              * Format: date-time
              */
             checked_at: string;
+            /** Chrome Pid */
+            chrome_pid: number | null;
+            /** Chrome Running */
+            chrome_running: boolean;
             /** Chrome Unreachable At */
             chrome_unreachable_at: string | null;
             /** Chrome Unreachable Run Id */
