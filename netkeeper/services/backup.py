@@ -10,6 +10,7 @@ nightly (:mod:`netkeeper.services.backup_job`, :func:`nightly_due`), and
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -18,19 +19,17 @@ from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
+from typing import Final
 
 from alembic.script import ScriptDirectory
 from alembic.util.exc import CommandError
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine
 from sqlalchemy.engine import URL, make_url
 
 from netkeeper import migrations
-from netkeeper.db import make_engine, make_session_factory, session_scope
+from netkeeper.db import make_engine
 from netkeeper.localtime import find_zone
 from netkeeper.logging_setup import personal
-from netkeeper.models import User
-from netkeeper.scoping import install_scope_guard
-from netkeeper.services import ui_settings
 
 BACKUPS_DIRNAME = "backups"
 STAMP_FORMAT = "%Y%m%dT%H%M%SZ"
@@ -289,10 +288,13 @@ def restore_backup(
        Because it is the same file, a symlinked database stays a symlink, and a
        process that opened the path while the lock was held reads the restored
        database once it gets in.
+       Before that write, the backup's Settings-page LinkedIn auto-send rows are
+       removed from the copy that is written (:func:`_clear_auto_send`, #598): only a
+       person's confirmation on the page turns auto-send on, and a restore is not that.
+       The clear and the restore land together or not at all, before any migration, so
+       no failure after it can leave the backup's "on" in place. ``config.toml`` still
+       wins where it sets the key.
     4. The migrations run to head (``db upgrade``).
-    5. A Settings-page LinkedIn auto-send the backup had on is turned off, for each
-       user, and logged (#598): only a person's confirmation on the page turns it on,
-       and a restore is not that. ``config.toml`` still wins where it sets the key.
 
     Nothing is pruned: the backup of the database replaced must outlive the restore.
     Between the exclusive connection closing and the migrations, a process that was
@@ -317,7 +319,12 @@ def restore_backup(
             if not created:
                 previous = _pre_restore_backup(connection, target, backups_dir, stamp)
             try:
-                _write_over(connection, source)
+                cleared = _write_over(connection, source)
+            except AutoSendClearError as exc:
+                raise RestoreError(
+                    f"could not turn LinkedIn auto-send off in {source}, so nothing was"
+                    f" restored and {target} holds what it held before: {exc}"
+                ) from exc
             except sqlite3.Error as exc:
                 raise RestoreError(
                     f"restoring {source} failed, and {target} holds what it held before: {exc}"
@@ -331,7 +338,6 @@ def restore_backup(
     try:
         migrations.upgrade(engine)
         revision = migrations.current_revision(engine)
-        cleared = _turn_auto_send_off(engine)
     except Exception as exc:
         before = (
             "" if previous is None else f"; the database it replaced is backed up at {previous}"
@@ -350,24 +356,6 @@ def restore_backup(
         revision=revision,
         auto_send_cleared=cleared,
     )
-
-
-def _turn_auto_send_off(engine: Engine) -> tuple[int, ...]:
-    """Step 5 of :func:`restore_backup`: each user's stored page ``true`` for auto-send,
-    removed. The ids of the users it was on for."""
-    factory = make_session_factory(engine)
-    install_scope_guard(factory)
-    cleared: list[int] = []
-    with session_scope(factory, write=True) as session:
-        for user in session.scalars(select(User).order_by(User.id)):
-            if ui_settings.drop_stored_auto_send(session, user):
-                cleared.append(user.id)
-                log.info(
-                    "restore: turned off user %d's LinkedIn auto-send from the Settings page;"
-                    " turn it on again there, with its confirmation, to use it",
-                    user.id,
-                )
-    return tuple(cleared)
 
 
 IN_USE = "another netkeeper process has the database open; stop it and retry"
@@ -409,11 +397,56 @@ def _lock_exclusively(database: Path) -> sqlite3.Connection:
     return connection
 
 
-def _write_over(connection: sqlite3.Connection, source: Path) -> None:
+#: The ``settings_kv`` key of the Settings page's LinkedIn auto-send (#598). The table and
+#: its ``user_id``, ``key`` and ``value`` columns are unchanged since migration 0001, so
+#: plain SQL reads them in a backup from any netkeeper.
+AUTO_SEND_ROW_KEY: Final = "config.campaigns.linkedin_auto_send"
+
+
+class AutoSendClearError(Exception):
+    """The backup's Settings-page auto-send could not be removed; nothing was written."""
+
+
+def _write_over(connection: sqlite3.Connection, source: Path) -> tuple[int, ...]:
     """Copy ``source`` over the database ``connection`` holds, in one transaction: a
-    failure rolls back to what was there. (``source`` passed the integrity check.)"""
-    with closing(sqlite3.connect(f"{source.as_uri()}?mode=ro", uri=True)) as reader:
-        reader.backup(connection)
+    failure rolls back to what was there. (``source`` passed the integrity check.)
+
+    The copy goes through memory first, where :func:`_clear_auto_send` removes the
+    backup's Settings-page auto-send; only that cleared copy is written, so the restore
+    and the clear happen together or not at all. The ids of the users it was on for."""
+    with closing(sqlite3.connect(":memory:")) as staged:
+        with closing(sqlite3.connect(f"{source.as_uri()}?mode=ro", uri=True)) as reader:
+            reader.backup(staged)
+        try:
+            cleared = _clear_auto_send(staged)
+        except sqlite3.Error as exc:
+            raise AutoSendClearError(str(exc)) from exc
+        staged.backup(connection)
+    for user_id in cleared:
+        log.info(
+            "restore: turned off user %d's LinkedIn auto-send from the Settings page;"
+            " turn it on again there, with its confirmation, to use it",
+            user_id,
+        )
+    return cleared
+
+
+def _clear_auto_send(connection: sqlite3.Connection) -> tuple[int, ...]:
+    """Delete every user's Settings-page auto-send row in ``connection``, committed. The
+    users whose row said on (JSON ``true``)."""
+    rows = connection.execute(
+        "SELECT user_id, value FROM settings_kv WHERE key = ?", (AUTO_SEND_ROW_KEY,)
+    ).fetchall()
+    connection.execute("DELETE FROM settings_kv WHERE key = ?", (AUTO_SEND_ROW_KEY,))
+    connection.commit()
+    return tuple(sorted(int(uid) for uid, value in rows if _is_true(value)))
+
+
+def _is_true(value: object) -> bool:
+    try:
+        return json.loads(value) is True if isinstance(value, str | bytes) else value is True
+    except ValueError:
+        return False
 
 
 def _pre_restore_backup(
