@@ -392,6 +392,77 @@ def test_a_restore_turns_a_page_auto_send_from_the_backup_off(data: Path) -> Non
     assert _marker(data / DATABASE_FILENAME) == "original"  # the rest came back
 
 
+def _stored_auto_send(database: Path) -> list[Any]:
+    """The Settings-page auto-send rows, read with plain SQL: no migration needed."""
+    with closing(sqlite3.connect(database)) as connection:
+        return connection.execute(
+            "SELECT user_id, value FROM settings_kv WHERE key = ?",
+            (backup_service.AUTO_SEND_ROW_KEY,),
+        ).fetchall()
+
+
+def test_a_failed_upgrade_still_leaves_the_backup_s_auto_send_off(
+    data: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#639 re-review: the clear lands with the restore, before any migration, so an
+    upgrade that fails afterwards cannot leave the backup's page "on" in place."""
+    assert _page_auto_send(data, True) is True
+    saved = _backup_now(data, datetime(2026, 10, 1, tzinfo=UTC))
+
+    def broken(engine: Engine) -> None:
+        raise RuntimeError("migration exploded")
+
+    monkeypatch.setattr(migrations, "upgrade", broken)
+    with pytest.raises(RestoreError, match="db upgrade failed"):
+        restore_backup(saved, database_url(data), data / "backups")
+    assert _stored_auto_send(data / DATABASE_FILENAME) == []
+    assert _marker(data / DATABASE_FILENAME) == "original"  # the restore itself landed
+    monkeypatch.undo()
+    assert _page_auto_send(data, None) is False
+
+
+def test_a_failed_clear_restores_nothing_and_says_so(
+    data: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert _page_auto_send(data, True) is True
+    saved = _backup_now(data, datetime(2026, 10, 1, tzinfo=UTC))
+    _mark(data, "changed")
+
+    def broken(connection: sqlite3.Connection) -> tuple[int, ...]:
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(backup_service, "_clear_auto_send", broken)
+    with pytest.raises(RestoreError) as refused:
+        restore_backup(saved, database_url(data), data / "backups")
+    message = str(refused.value)
+    assert "could not turn LinkedIn auto-send off" in message
+    assert "nothing was restored" in message and "db upgrade" not in message
+    assert _marker(data / DATABASE_FILENAME) == "changed"  # what was there before
+
+
+def test_the_clear_reads_a_backup_at_the_first_migration(tmp_path: Path) -> None:
+    """The plain SQL needs only migration 0001's settings_kv."""
+    path = tmp_path / "old.sqlite3"
+    engine = make_engine(f"sqlite:///{path}")
+    try:
+        migrations.upgrade(engine, "0001")
+    finally:
+        engine.dispose()
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute(
+            "INSERT INTO users (id, kind, timezone, created_at)"
+            " VALUES (1, 'local', 'UTC', '2026-01-01 00:00:00')"
+        )
+        connection.execute(
+            "INSERT INTO settings_kv (user_id, key, value, created_at, updated_at)"
+            " VALUES (1, ?, 'true', '2026-01-01 00:00:00', '2026-01-01 00:00:00')",
+            (backup_service.AUTO_SEND_ROW_KEY,),
+        )
+        connection.commit()
+        assert backup_service._clear_auto_send(connection) == (1,)
+    assert _stored_auto_send(path) == []
+
+
 def test_a_restore_with_auto_send_off_says_nothing_about_it(data: Path) -> None:
     saved = _backup_now(data, datetime(2026, 10, 1, tzinfo=UTC))
     result = restore_backup(saved, database_url(data), data / "backups")
