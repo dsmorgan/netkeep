@@ -76,6 +76,7 @@ from netkeeper.campaigns.templates import (
     describe_removed_field_campaigns,
     removed_field_campaigns,
 )
+from netkeeper.chrome_profile import ProfileCheck
 from netkeeper.config import HeatSettings, LinkedInSettings, PacingSettings, Settings
 from netkeeper.crm import inbox_apply
 from netkeeper.crm.inbox_apply import short_first_poll
@@ -259,6 +260,8 @@ class Status(enum.StrEnum):
     UNKNOWN = "unknown"
 
 
+KEY_DEDICATED_PROFILE: Final = "dedicated_profile"
+"""The key of the dedicated Chrome profile row (#624)."""
 KEY_MANUAL_LINKEDIN_SENDS: Final = "manual_linkedin_sends"
 """The key of ADR 0004's row: off means auto-send is on."""
 KEY_GMAIL_REPLY_POLL: Final = "gmail_reply_poll"
@@ -347,6 +350,8 @@ class SessionProbe:
     token, or a message body could be put in, so no future edit to the renderer
     can leak one. ``logged_in`` is ``None`` when the cookie jar could not be
     read at all, which is different from reading it and finding no session.
+    ``profile`` is the attach's dedicated-profile check (#624), or ``None`` when the
+    attach failed before it was made.
     """
 
     attached: bool
@@ -354,6 +359,7 @@ class SessionProbe:
     browser_version: str = ""
     cookie_names: tuple[str, ...] = ()
     problems: tuple[str, ...] = ()
+    profile: ProfileCheck | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -595,6 +601,7 @@ def posture(
 
     protections: list[Protection] = [
         _browser_mode(browser_mode, linkedin.cdp_url),
+        _dedicated_profile(probe),
         _activity_lock(lock, now=now, account=activity_lock.account_key(account_id)),
         _linkedin_session(
             probe,
@@ -823,6 +830,41 @@ def _browser_mode(mode: str, cdp_url: str) -> Protection:
         status=status,
         value=f"{mode} over CDP to {cdp_url}",
         warnings=tuple(warnings),
+    )
+
+
+def _dedicated_profile(probe: SessionProbe | None) -> Protection:
+    """Whether the Chrome on the port is netkeeper's dedicated profile (ADR 0012, #624).
+
+    Every attach checks, and refuses anything else, so the row is on without a probe.
+    A probe that was refused for it says why, as a warning: until that Chrome is quit
+    and netkeeper's is started, no run can attach.
+    """
+    check = None if probe is None else probe.profile
+    if check is None:
+        return Protection(
+            name="dedicated chrome profile",
+            status=Status.ON,
+            value="checked at every attach",
+            key=KEY_DEDICATED_PROFILE,
+        )
+    if check.dedicated:
+        return Protection(
+            name="dedicated chrome profile",
+            status=Status.ON,
+            value=f"netkeeper's profile, pid {check.browser_pid}",
+            key=KEY_DEDICATED_PROFILE,
+        )
+    return Protection(
+        name="dedicated chrome profile",
+        status=Status.ON,
+        value=f"refusing: {check.verdict.value.replace('_', ' ')}",
+        warnings=(
+            f"{check.reason}, so netkeeper refuses to attach and no run can start. It"
+            f" attaches only to its own Chrome profile ({check.profile}). Quit that Chrome,"
+            " then start netkeeper's with the command `netkeeper browser launch` prints",
+        ),
+        key=KEY_DEDICATED_PROFILE,
     )
 
 

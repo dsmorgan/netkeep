@@ -2,7 +2,8 @@
 
 Preflight asks three questions (spec 9.1): can netkeeper attach to the Chrome the
 user started, does that profile still hold a LinkedIn session, and does the profile
-look like an ordinary Chrome rather than an automated one.
+look like an ordinary Chrome rather than an automated one. The attach itself answers a
+fourth: whether that Chrome is netkeeper's dedicated profile at all (#624).
 
 All three are answered locally. The fingerprint comes from a handful of ``navigator``
 properties read on the blank tab the run opens. The login state comes from the
@@ -27,12 +28,14 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, cast
 
+from netkeeper.chrome_profile import ProfileCheck
 from netkeeper.linkedin.browser import (
     SINGLE_ACCOUNT_KEY,
     BrowserBusy,
     BrowserProvider,
     BrowserUnavailable,
     PageLike,
+    ProfileRefused,
     _CdpSessionLike,
     _TapContext,
 )
@@ -111,7 +114,9 @@ class PreflightReport:
     """The answer to "is the sidecar ready", with the reasons.
 
     ``problems`` stop a run and are what the CLI exits non-zero for; ``warnings`` are
-    things worth seeing that do not stop anything.
+    things worth seeing that do not stop anything. ``profile`` is the attach's
+    dedicated-profile check (#624): passed when attached, refused when the attach was
+    refused for it, ``None`` when the attach failed before it could be made.
     """
 
     cdp_url: str
@@ -122,6 +127,7 @@ class PreflightReport:
     session_cookies: tuple[str, ...] = ()
     session_expires_at: datetime | None = None
     fingerprint: Fingerprint | None = None
+    profile: ProfileCheck | None = None
     problems: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
 
@@ -150,9 +156,14 @@ async def preflight(
                 context_count=len(run.browser.contexts),
                 fingerprint=fingerprint,
                 cookies=cookies,
+                profile=run.profile_check,
             )
     except BrowserBusy as exc:
         return PreflightReport(cdp_url=provider.cdp_url, problems=(str(exc),))
+    except ProfileRefused as exc:
+        return PreflightReport(
+            cdp_url=provider.cdp_url, profile=exc.profile_check, problems=(str(exc),)
+        )
     except BrowserUnavailable as exc:
         return PreflightReport(cdp_url=provider.cdp_url, problems=(str(exc),))
 
@@ -242,6 +253,7 @@ def _build_report(
     context_count: int,
     fingerprint: Fingerprint | None,
     cookies: tuple[_SessionCookie, ...] | None,
+    profile: ProfileCheck,
 ) -> PreflightReport:
     """Turn what we saw into a report: state, problems worth stopping for, warnings."""
     problems: list[str] = []
@@ -267,6 +279,7 @@ def _build_report(
         session_cookies=tuple(cookie.name for cookie in cookies or ()),
         session_expires_at=expires_at,
         fingerprint=fingerprint,
+        profile=profile,
         problems=tuple(problems),
         warnings=tuple(warnings),
     )

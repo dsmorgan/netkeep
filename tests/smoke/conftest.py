@@ -29,9 +29,13 @@ import os
 import sys
 import threading
 from collections.abc import Awaitable, Callable, Iterator
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
+
+from netkeeper.paths import data_dir
+from netkeeper.services.browser_launch import CHROME_PROFILE_DIRNAME
 
 if TYPE_CHECKING:
     from _pytest.capture import CaptureManager
@@ -87,6 +91,23 @@ def _blocked(name: str, capture: CaptureManager | None) -> None:
     sys.stderr.flush()
     faulthandler.dump_traceback(all_threads=True)
     os._exit(1)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_profile(_clean_netkeeper_env: None) -> None:
+    """Point each test's dedicated profile at the isolated Chrome's own (#624).
+
+    Every attach refuses a Chrome that doesn't hold ``<data dir>/chrome-profile``, and
+    the data directory is a fresh one per test. ``NETKEEPER_SMOKE_PROFILE`` names the
+    isolated Chrome's ``--user-data-dir``; the test's profile becomes a link to it. Unset,
+    every attach is refused, and the refusal says why.
+    """
+    isolated = os.environ.get("NETKEEPER_SMOKE_PROFILE")
+    if not isolated:
+        return
+    profile = data_dir() / CHROME_PROFILE_DIRNAME
+    profile.parent.mkdir(parents=True, exist_ok=True)
+    profile.symlink_to(Path(isolated).expanduser().resolve(), target_is_directory=True)
 
 
 @pytest.fixture(autouse=True)

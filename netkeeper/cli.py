@@ -30,6 +30,7 @@ from netkeeper import __version__, migrations
 from netkeeper.campaigns import gmail_oauth
 from netkeeper.campaigns import schedule as schedule_module
 from netkeeper.campaigns.spelling import normalize as normalize_word
+from netkeeper.chrome_profile import ProfileCheck
 from netkeeper.config import ConfigError, Settings, load_settings, render_toml
 from netkeeper.crm import do_not_send, import_runs, inbox_apply, new_contact
 from netkeeper.crm.archive import ArchiveImport, import_archive
@@ -1025,6 +1026,9 @@ def _preflight_lines(report: PreflightReport) -> list[str]:
         ("cdp url", report.cdp_url),
         ("attached", "yes" if report.attached else "no"),
     ]
+    if report.profile is not None:
+        # #624: whether the Chrome on the port is netkeeper's own profile.
+        rows.append(("profile", _profile_cell(report.profile)))
     if report.attached:
         rows.append(("browser", report.browser_version or "unknown"))
         rows.append(("contexts", str(report.context_count)))
@@ -1067,6 +1071,13 @@ def _session_cell(report: PreflightReport) -> str:
     return cell
 
 
+def _profile_cell(check: ProfileCheck) -> str:
+    """The dedicated-profile check in a few words, for preflight's table (#624)."""
+    if check.dedicated:
+        return f"netkeeper's ({check.profile}, pid {check.browser_pid})"
+    return f"refused, {check.verdict.value.replace('_', ' ')} ({check.profile})"
+
+
 def _session_probe(report: PreflightReport) -> SessionProbe:
     """A preflight report reduced to what a posture report may say about it.
 
@@ -1090,6 +1101,7 @@ def _session_probe(report: PreflightReport) -> SessionProbe:
         browser_version=report.browser_version,
         cookie_names=report.session_cookies,
         problems=report.problems,
+        profile=report.profile,
     )
 
 

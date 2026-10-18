@@ -42,11 +42,12 @@ import call_targets
 import factories
 import pytest
 import test_browser_safety as browser_safety
-from browser_fakes import FakeBrowser, FakeConnector, FakeContext
+from browser_fakes import FAKE_CHROME_PID, FakeBrowser, FakeConnector, FakeContext, hold_profile
 from campaign_fakes import make_mailbox
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from netkeeper.chrome_profile import ProfileCheck, check_dedicated_profile
 from netkeeper.cli import _session_probe
 from netkeeper.config import Settings
 from netkeeper.db import session_scope
@@ -65,6 +66,7 @@ from netkeeper.services.linkedin_session import flag_session
 from netkeeper.services.posture import (
     ATTACH_ONLY,
     ENFORCED_BY,
+    KEY_DEDICATED_PROFILE,
     LOOPBACK_HOSTS,
     MAX_BLOCKS_BEFORE_SKIP,
     MAX_PLAUSIBLE_HOLD_HOURS,
@@ -223,6 +225,7 @@ def test_the_baseline_covers_every_protection_the_item_asks_for(
 
     assert names == [
         "attach-only browser",
+        "dedicated chrome profile",
         "one browser client",
         "linkedin session",
         "session flag",
@@ -254,6 +257,63 @@ def test_the_baseline_covers_every_protection_the_item_asks_for(
         "network aging",
         "linkedin reply poll",
     ]
+
+
+# --- the dedicated Chrome profile (#624) ---------------------------------------
+
+
+def _profile_probe(check: ProfileCheck) -> SessionProbe:
+    attached = check.dedicated
+    return replace(
+        LOGGED_IN, attached=attached, logged_in=True if attached else None, profile=check
+    )
+
+
+def test_the_profile_row_without_a_probe_says_every_attach_checks(
+    writer: Session, user: User
+) -> None:
+    row = _row(_report(writer, user, probe=None), "dedicated chrome profile")
+
+    assert row.status is Status.ON
+    assert row.warnings == ()
+    assert row.value == "checked at every attach"
+    assert row.key == KEY_DEDICATED_PROFILE == "dedicated_profile"
+
+
+def test_the_profile_row_names_the_dedicated_profile(
+    writer: Session, user: User, tmp_path: Path
+) -> None:
+    hold_profile(tmp_path)
+    probe = _profile_probe(check_dedicated_profile(tmp_path, FAKE_CHROME_PID))
+
+    report = _report(writer, user, probe=probe)
+
+    row = _row(report, "dedicated chrome profile")
+    assert row.status is Status.ON
+    assert row.warnings == ()
+    assert row.value == f"netkeeper's profile, pid {FAKE_CHROME_PID}"
+    assert report.ok
+
+
+@pytest.mark.parametrize(
+    ("lock_pid", "value"),
+    [(5151, "refusing: other profile"), (None, "refusing: undetermined")],
+)
+def test_a_refused_profile_is_a_posture_warning(
+    writer: Session, user: User, tmp_path: Path, lock_pid: int | None, value: str
+) -> None:
+    if lock_pid is not None:
+        hold_profile(tmp_path, pid=lock_pid)
+    probe = _profile_probe(check_dedicated_profile(tmp_path, FAKE_CHROME_PID))
+
+    report = _report(writer, user, probe=probe)
+
+    row = _row(report, "dedicated chrome profile")
+    assert row.value == value
+    (warning,) = row.warnings
+    assert "netkeeper refuses to attach and no run can start" in warning
+    assert str(tmp_path) in warning
+    assert not report.ok
 
 
 # --- one protection off at a time ---------------------------------------------
