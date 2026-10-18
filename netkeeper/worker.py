@@ -92,6 +92,7 @@ from netkeeper.linkedin.page_inbox import PageInbox
 from netkeeper.linkedin.page_messaging import MessageCheckResult as MessageCheckResult
 from netkeeper.linkedin.page_messaging import PageBubbleCheck, PageMessageCheck, PagePrefill
 from netkeeper.linkedin.page_profiles import PageProfiles
+from netkeeper.linkedin.preflight import LoginState, PreflightReport, read_session
 from netkeeper.logging_setup import personal_exc, setup_logging
 from netkeeper.models import SyncRunKind, SyncRunStatus, SyncRunTrigger, User
 from netkeeper.paths import data_dir
@@ -101,6 +102,7 @@ from netkeeper.services import (
     message_send,
     route_breaker,
     runs,
+    session_check,
     ui_settings,
 )
 from netkeeper.services.budgets import (
@@ -114,6 +116,7 @@ from netkeeper.services.enrichment import enrich_contacts
 from netkeeper.services.events import Event, EventBus
 from netkeeper.services.inbox_poll import poll_inbox
 from netkeeper.services.linkedin_accounts import local_account_id, scheduled_runs_armed
+from netkeeper.services.posture import SessionProbe
 from netkeeper.services.scheduled_runs import ServeExtractor
 from netkeeper.services.users import local_owner
 from netkeeper.web.app import create_app
@@ -280,6 +283,8 @@ class BrowserWorker:
 
     async def _execute(self, run_id: int, user_id: int, facts: _RunFacts) -> runs.RunOutcome:
         """:meth:`execute` for a run that is still ``running``, inside its heartbeat."""
+        if facts.kind is SyncRunKind.SESSION_CHECK:
+            return await self._session_check(run_id, user_id, facts)
         # The Settings page's values (#343), read once as the run starts: a change applies
         # from the next run, and this one keeps the limits it started with.
         settings = await off_loop(self._resolved, user_id)
@@ -390,6 +395,55 @@ class BrowserWorker:
         status = await off_loop(self._status, run_id, user_id)
         self._publish("run.finished", run_id, user_id, {"status": status})
         return outcome
+
+    async def _session_check(self, run_id: int, user_id: int, facts: _RunFacts) -> runs.RunOutcome:
+        """Check connection (#652): attach as every run does, read the session the way
+        ``netkeeper preflight`` does (:func:`~netkeeper.linkedin.preflight.read_session`),
+        detach, and record it (:mod:`netkeeper.services.session_check`).
+
+        No navigation, so no budget, and no flag, heat, or active-hours refusal: nothing
+        reaches linkedin.com. A busy, unreachable, or refused Chrome ends the run
+        ``failed`` with the usual stop reason, and is never retried: the outcome is
+        ``DONE`` whatever happened, since a person asked for this one check.
+        """
+        self._publish("run.started", run_id, user_id, {"kind": facts.kind.value})
+        try:
+            async with self.provider.run(activity_lock.account_key(facts.account_id)) as browser:
+                report = await read_session(browser, cdp_url=self.provider.cdp_url)
+            result = session_check.CheckResult(
+                probe=session_probe(report), warnings=report.warnings
+            )
+            await off_loop(
+                session_check.finish, self._factory, user_id, run_id, result, now=self._clock()
+            )
+        except (BrowserBusy, BrowserUnavailable) as exc:
+            log.warning("check run %d could not use the browser: %s", run_id, personal_exc(exc))
+            await off_loop(
+                self._finish,
+                run_id,
+                user_id,
+                SyncRunStatus.FAILED,
+                runs.browser_stop_reason(exc),
+                runs.describe(exc),
+            )
+        except asyncio.CancelledError:
+            await off_loop(
+                self._finish_quietly,
+                run_id,
+                user_id,
+                SyncRunStatus.ABORTED,
+                "interrupted",
+                runs.INTERRUPTED,
+            )
+            raise
+        except Exception as exc:
+            log.exception("check run %d failed", run_id)
+            await off_loop(
+                self._finish, run_id, user_id, SyncRunStatus.FAILED, "error", runs.describe(exc)
+            )
+        status = await off_loop(self._status, run_id, user_id)
+        self._publish("run.finished", run_id, user_id, {"status": status})
+        return runs.RunOutcome.DONE
 
     def _resolved(self, user_id: int) -> Settings:
         """The whole config a run uses: this worker's, with ``user_id``'s Settings-page
@@ -694,6 +748,34 @@ class BrowserWorker:
         if self._bus is None:
             return
         self._bus.publish(Event(type=kind, data={"run_id": run_id, **data}, user_id=user_id))
+
+
+def session_probe(report: PreflightReport) -> SessionProbe:
+    """A preflight report reduced to what a posture report, or a Check connection run's
+    record (#652), may say about it.
+
+    The adapter lives on the browser side of the line because ``services.posture`` may
+    not import ``linkedin.preflight``: a module under ``services/`` that reaches the
+    browser is how browser work ends up inside a request handler, and
+    ``tests/test_browser_safety.py`` fails the build for it.
+
+    Cookie *names* cross this line and cookie values do not -- they cannot,
+    because preflight never read one and :class:`SessionProbe` has no field to
+    put one in (spec 9.1, CLAUDE.md).
+    """
+    logged_in: dict[LoginState, bool | None] = {
+        LoginState.LOGGED_IN: True,
+        LoginState.NO_SESSION: False,
+        LoginState.UNKNOWN: None,
+    }
+    return SessionProbe(
+        attached=report.attached,
+        logged_in=logged_in[report.login],
+        browser_version=report.browser_version,
+        cookie_names=report.session_cookies,
+        problems=report.problems,
+        profile=report.profile,
+    )
 
 
 def _plain(event: object) -> dict[str, Any]:

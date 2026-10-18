@@ -33,6 +33,7 @@ from netkeeper.linkedin.browser import (
     SINGLE_ACCOUNT_KEY,
     BrowserBusy,
     BrowserProvider,
+    BrowserRun,
     BrowserUnavailable,
     PageLike,
     ProfileRefused,
@@ -147,17 +148,7 @@ async def preflight(
     """
     try:
         async with provider.run(account) as run:
-            page = await run.ensure_page()
-            fingerprint = await _read_fingerprint(page)
-            cookies = await _read_session_cookies(run.context, page)
-            return _build_report(
-                cdp_url=provider.cdp_url,
-                browser_version=run.browser.version,
-                context_count=len(run.browser.contexts),
-                fingerprint=fingerprint,
-                cookies=cookies,
-                profile=run.profile_check,
-            )
+            return await read_session(run, cdp_url=provider.cdp_url)
     except BrowserBusy as exc:
         return PreflightReport(cdp_url=provider.cdp_url, problems=(str(exc),))
     except ProfileRefused as exc:
@@ -166,6 +157,27 @@ async def preflight(
         )
     except BrowserUnavailable as exc:
         return PreflightReport(cdp_url=provider.cdp_url, problems=(str(exc),))
+
+
+async def read_session(run: BrowserRun, *, cdp_url: str) -> PreflightReport:
+    """Preflight's look around, on a run that is already attached: the fingerprint and
+    the cookie jar from the run's own blank tab, and the report.
+
+    :func:`preflight` calls it inside its own attach; the browser worker calls it for a
+    Check connection run (#652), whose attach, lock and refusals are the worker's. It
+    navigates nowhere, and raises only what the run's own tab raises when Chrome goes away.
+    """
+    page = await run.ensure_page()
+    fingerprint = await _read_fingerprint(page)
+    cookies = await _read_session_cookies(run.context, page)
+    return _build_report(
+        cdp_url=cdp_url,
+        browser_version=run.browser.version,
+        context_count=len(run.browser.contexts),
+        fingerprint=fingerprint,
+        cookies=cookies,
+        profile=run.profile_check,
+    )
 
 
 async def _read_fingerprint(page: PageLike) -> Fingerprint | None:

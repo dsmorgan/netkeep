@@ -29,7 +29,6 @@ from test_rehearse import ReplayContext
 from typer.testing import CliRunner
 
 from netkeeper import migrations
-from netkeeper.cli import _session_probe
 from netkeeper.cli import app as cli
 from netkeeper.config import Settings
 from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
@@ -42,6 +41,7 @@ from netkeeper.services.linkedin_accounts import ensure_account
 from netkeeper.services.posture import SINGLE_ACCOUNT_ID
 from netkeeper.services.scheduler import sync_account_schedule
 from netkeeper.services.users import ensure_local_user
+from netkeeper.worker import session_probe as _session_probe
 
 
 @pytest.fixture

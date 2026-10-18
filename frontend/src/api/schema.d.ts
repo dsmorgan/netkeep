@@ -2211,6 +2211,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/linkedin/browser/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Browser
+         * @description Start a Check connection run; answers at once, before any browser work.
+         *
+         *     The run visits no page, so it spends no budget, and the session flag, heat, and
+         *     active hours don't stop it, as they don't stop ``netkeeper preflight``.
+         */
+        post: operations["check_linkedin_browser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/linkedin/browser/health": {
         parameters: {
             query?: never;
@@ -9177,10 +9200,11 @@ export interface components {
         };
         /**
          * SyncRunKind
-         * @description Spec 8.4's run kinds. ``message_send`` has no runner yet.
+         * @description Spec 8.4's run kinds, and ``session_check``: the Check connection run (#652),
+         *     which reads the LinkedIn session from Chrome's cookie jar and visits nothing.
          * @enum {string}
          */
-        SyncRunKind: "connections_full" | "connections_incremental" | "enrich" | "inbox" | "message_send";
+        SyncRunKind: "connections_full" | "connections_incremental" | "enrich" | "inbox" | "message_send" | "session_check";
         /**
          * SyncRunStatus
          * @enum {string}
@@ -14632,6 +14656,47 @@ export interface operations {
             };
             /** @description Only the local owner account sees the Chrome profile */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    check_linkedin_browser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunAccepted"];
+                };
+            };
+            /** @description Only the local owner account checks netkeeper's Chrome */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Another run is running, or another process holds the browser */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description This process has no browser worker */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

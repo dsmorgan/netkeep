@@ -86,6 +86,7 @@ _RUN_NAMES: Final = {
     SyncRunKind.ENRICH: "enrichment",
     SyncRunKind.INBOX: "inbox check",
     SyncRunKind.MESSAGE_SEND: "message",
+    SyncRunKind.SESSION_CHECK: "connection check",
 }
 
 

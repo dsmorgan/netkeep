@@ -59,13 +59,15 @@ HEARTBEAT_BY_MAX_LENGTH: Final = 32
 
 
 class SyncRunKind(enum.StrEnum):
-    """Spec 8.4's run kinds. ``message_send`` has no runner yet."""
+    """Spec 8.4's run kinds, and ``session_check``: the Check connection run (#652),
+    which reads the LinkedIn session from Chrome's cookie jar and visits nothing."""
 
     CONNECTIONS_FULL = "connections_full"
     CONNECTIONS_INCREMENTAL = "connections_incremental"
     ENRICH = "enrich"
     INBOX = "inbox"
     MESSAGE_SEND = "message_send"
+    SESSION_CHECK = "session_check"
 
 
 class SyncRunStatus(enum.StrEnum):

@@ -9,6 +9,7 @@ and it reports back through :func:`record_progress` and :func:`finish_run`.
 **Who may start a run.** :func:`create_run` is the one door, and it refuses:
 
 * a kind with no runner (``message_send``);
+* a ``session_check`` run (#652) not recorded by Check connection, with its gate;
 * a **scheduled** ``message_send``, except an auto-send's (ADR 0008): a LinkedIn
   prefill runs only when a person asks for it (P4-09), and the scheduler records a
   ``message_send`` run only through an auto-send claim, with :data:`AUTO_SEND_GATE`;
@@ -127,6 +128,7 @@ RUNNABLE_KINDS: Final = frozenset(
         SyncRunKind.ENRICH,
         SyncRunKind.INBOX,
         SyncRunKind.MESSAGE_SEND,
+        SyncRunKind.SESSION_CHECK,
     }
 )
 
@@ -147,6 +149,12 @@ AUTO_SEND_GATE: Final = object()
 auto-send (ADR 0008). Only :func:`netkeeper.services.linkedin_steps.start_auto_send_run`
 passes it, inside :func:`~netkeeper.services.linkedin_steps.claim_auto_send`, and tests
 that stand in for it."""
+
+SESSION_CHECK_GATE: Final = object()
+"""The token :func:`create_run` needs for a ``session_check`` run: Check connection
+(#652). Only :func:`netkeeper.services.session_check.start` passes it, after its own
+checks, and tests that stand in for it. Never ``POST /linkedin/runs``, which checks what
+a run that visits LinkedIn needs and this one doesn't."""
 
 #: The line an interrupted run's ``error`` carries.
 INTERRUPTED: Final = "interrupted: the netkeeper process running it stopped"
@@ -434,7 +442,9 @@ def create_run(
     :func:`netkeeper.services.linkedin_steps.start_message_send_run` passes, inside a
     prefill claim (P4-09), or :data:`MESSAGE_CHECK_GATE`, for the Message check (#473);
     a scheduled one only with :data:`AUTO_SEND_GATE`, inside an auto-send claim (ADR
-    0008). Never through ``POST /linkedin/runs`` or the CLI's run commands.
+    0008). Never through ``POST /linkedin/runs`` or the CLI's run commands. A
+    ``session_check`` run is recorded only manually and only with
+    :data:`SESSION_CHECK_GATE` (#652).
 
     Refuses (see the module docstring) a kind with no runner
     (:class:`RunError`), a second run while one is running
@@ -467,6 +477,11 @@ def create_run(
         and gate is not MESSAGE_CHECK_GATE
     ):
         raise RunError("a message_send run is started only by a LinkedIn prefill claim")
+    if kind is SyncRunKind.SESSION_CHECK and (
+        trigger is not SyncRunTrigger.MANUAL or gate is not SESSION_CHECK_GATE
+    ):
+        # #652: a person's Check connection only, never scheduled.
+        raise RunError("a session_check run is started only by Check connection")
     if kind not in RUNNABLE_KINDS:
         raise RunError(f"no runner exists for {kind.value} runs yet")
     if max_visits is not None:
@@ -942,6 +957,8 @@ STOP_REASON_TEXT: Final[Mapping[str, str]] = {
     "message_check": "checked the Message control up to the click; nothing was clicked",
     # #495: a bubble check, a read of a message bubble opened by hand
     "bubble_check": "read the open message bubble's close control; nothing was clicked",
+    # #652: Check connection, a read of the session from Chrome's cookie jar
+    "session_check": "read the LinkedIn session from Chrome's cookie jar; visited nothing",
 }
 
 
