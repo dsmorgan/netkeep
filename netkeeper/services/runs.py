@@ -93,7 +93,7 @@ from netkeeper.config import LinkedInSettings
 from netkeeper.db import CancelledWhileFailing, is_writer, off_loop, session_scope
 from netkeeper.linkedin import activity_lock, pacing
 from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.errors import BrowserUnavailable
+from netkeeper.linkedin.errors import BrowserBusy, BrowserUnavailable, ProfileRefused
 from netkeeper.models import (
     JsonValue,
     SyncRun,
@@ -911,6 +911,8 @@ STOP_REASON_TEXT: Final[Mapping[str, str]] = {
     ),
     "browser_busy": "the browser was busy with another run",
     "browser_unavailable": "Chrome was not reachable or went away mid-run",
+    # #624: Chrome answered, but it isn't serving netkeeper's dedicated profile.
+    "profile_refused": "refused: the Chrome on the port isn't netkeeper's own profile",
     "interrupted": "the netkeeper process running it stopped",
     "error": "an error stopped it",
     # #473: a Message check, a dry run of a prefill up to the click
@@ -932,6 +934,19 @@ def describe_stop_reason(reason: str | None) -> str | None:
     return STOP_REASON_TEXT.get(reason, reason)
 
 
+def browser_stop_reason(exc: BaseException) -> str:
+    """The stop reason of a run that couldn't use the browser: busy, refused, or unreachable.
+
+    A refused profile (#624) is its own reason, so the run list and ``/browser/health``
+    never say Chrome was unreachable while it's up.
+    """
+    if isinstance(exc, BrowserBusy):
+        return "browser_busy"
+    if isinstance(exc, ProfileRefused):
+        return "profile_refused"
+    return "browser_unavailable"
+
+
 def stop_reason_of(reason: str, outcome: Outcome | None) -> str:
     """A run's ``stop_reason``: the job's reason, or the outcome that stopped it."""
     return outcome.value if reason == "response" and outcome is not None else reason
@@ -950,7 +965,8 @@ async def recording(
     (:class:`~netkeeper.db.CancelledWhileFailing`, #266), which is ``failed``,
     "error"; any other exception is ``failed``, with the first line of its
     message, except a lost browser (:class:`~netkeeper.linkedin.errors.BrowserUnavailable`),
-    which is ``failed``, "browser_unavailable". A run the block already finished is
+    which is ``failed``, "browser_unavailable" ("profile_refused" for a Chrome that isn't
+    netkeeper's dedicated profile, #624). A run the block already finished is
     left as it is.
 
     The ending is written off the event loop (:func:`netkeeper.db.off_loop`,
@@ -1012,7 +1028,7 @@ async def recording(
             run_id,
             clock,
             SyncRunStatus.FAILED,
-            "browser_unavailable",
+            browser_stop_reason(exc),
             exc,
         )
         raise

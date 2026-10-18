@@ -73,6 +73,7 @@ from netkeeper.linkedin.browser import (
     BrowserUnavailable,
     BubbleCheck,
     BubbleCheckFailed,
+    ProfileRefused,
     ReadFailure,
     classify_read_failure,
 )
@@ -328,7 +329,7 @@ class BrowserWorker:
                 else:
                     await self._run_job(run_id, user_id, facts, browser, settings)
         except (BrowserBusy, BrowserUnavailable) as exc:
-            reason = "browser_busy" if isinstance(exc, BrowserBusy) else "browser_unavailable"
+            reason = runs.browser_stop_reason(exc)
             log.warning("run %d could not use the browser: %s", run_id, personal_exc(exc))
             if prepared is not None:
                 # The runner never ran, so no key was sent: the claim goes back.
@@ -817,12 +818,14 @@ async def run_message_check(
             check = PageMessageCheck(browser, origin=origin, sleep=sleep, rng=rng)
             result = await check.run(target.public_id, target.profile_id, cancelled=cancelled)
     except (BrowserBusy, BrowserUnavailable) as exc:
-        reason = "browser_busy" if isinstance(exc, BrowserBusy) else "browser_unavailable"
+        reason = runs.browser_stop_reason(exc)
         log.warning(
             "message check run %d could not use the browser: %s", target.run_id, personal_exc(exc)
         )
-        await end(SyncRunStatus.FAILED, reason, runs.describe_stop_reason(reason))
-        return MessageCheckResult(stopped=runs.describe_stop_reason(reason))
+        # A refused profile keeps its own words (#624): which profile, and how to fix it.
+        stopped = str(exc) if isinstance(exc, ProfileRefused) else runs.describe_stop_reason(reason)
+        await end(SyncRunStatus.FAILED, reason, stopped)
+        return MessageCheckResult(stopped=stopped)
     except asyncio.CancelledError:
         await end(SyncRunStatus.ABORTED, "interrupted", runs.INTERRUPTED)
         raise
@@ -926,12 +929,14 @@ async def run_bubble_check(
                 await end(SyncRunStatus.ABORTED, runs.CANCELLED)
                 return BubbleCheckResult(check, stopped="cancelled")
     except (BrowserBusy, BrowserUnavailable) as exc:
-        reason = "browser_busy" if isinstance(exc, BrowserBusy) else "browser_unavailable"
+        reason = runs.browser_stop_reason(exc)
         log.warning(
             "bubble check run %d could not use the browser: %s", target.run_id, personal_exc(exc)
         )
-        await end(SyncRunStatus.FAILED, reason, runs.describe_stop_reason(reason))
-        return BubbleCheckResult(stopped=runs.describe_stop_reason(reason))
+        # A refused profile keeps its own words (#624): which profile, and how to fix it.
+        stopped = str(exc) if isinstance(exc, ProfileRefused) else runs.describe_stop_reason(reason)
+        await end(SyncRunStatus.FAILED, reason, stopped)
+        return BubbleCheckResult(stopped=stopped)
     except asyncio.CancelledError:
         await end(SyncRunStatus.ABORTED, "interrupted", runs.INTERRUPTED)
         raise

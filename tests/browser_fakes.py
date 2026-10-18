@@ -21,14 +21,20 @@ from urllib.parse import urlparse
 
 from netkeeper.chrome_profile import SINGLETON_LOCK
 from netkeeper.linkedin.browser import CHROME_PROFILE_DIRNAME, Connection, ContextLike, PageLike
-from netkeeper.paths import data_dir
+from netkeeper.paths import data_dir, default_data_dir
 
 #: The pid every fake Chrome names as its browser process, unless a test says otherwise.
 FAKE_CHROME_PID = 4242
 
 
 def hold_profile(profile: Path, pid: int = FAKE_CHROME_PID) -> None:
-    """Make ``profile`` look held by browser process ``pid``, as Chrome's lock does."""
+    """Make ``profile`` look held by browser process ``pid``, as Chrome's lock does.
+
+    Never under the real data directory: a fake built before a test set
+    ``NETKEEPER_DATA`` would otherwise write a lock into the real profile.
+    """
+    if profile.resolve().is_relative_to(default_data_dir().resolve()):
+        raise AssertionError(f"a fake Chrome tried to hold a real profile: {profile}")
     profile.mkdir(parents=True, exist_ok=True)
     lock = profile / SINGLETON_LOCK
     if lock.is_symlink() or lock.exists():
@@ -361,7 +367,9 @@ class FakeConnector:
         browser_pid: int | Sequence[int | None] | None = FAKE_CHROME_PID,
         profile: Path | None = None,
     ) -> None:
-        self.profile = profile
+        # Fixed now, as the provider fixes its own when it's built: a test that moves
+        # NETKEEPER_DATA while a run is live doesn't move the fake Chrome's profile.
+        self.profile = data_dir() / CHROME_PROFILE_DIRNAME if profile is None else profile
         self.browsers = [FakeBrowser()] if browsers is None else list(browsers)
         self.error = error
         self.browser_pids = (
@@ -381,9 +389,7 @@ class FakeConnector:
         browser = self.browsers[min(self.attaches - 1, len(self.browsers) - 1)]
         pid = self.browser_pids[min(self.attaches - 1, len(self.browser_pids) - 1)]
         if pid is not None:
-            hold_profile(
-                data_dir() / CHROME_PROFILE_DIRNAME if self.profile is None else self.profile, pid
-            )
+            hold_profile(self.profile, pid)
 
         async def detach() -> None:
             self.detaches += 1

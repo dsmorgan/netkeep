@@ -742,6 +742,30 @@ async def test_a_busy_browser_fails_the_run_and_spends_nothing(
     assert _visits(cli_db, ActionClass.PROFILE_VISITS) == 0
 
 
+async def test_a_refused_profile_keeps_its_words_and_spends_nothing(
+    cli_db: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#624: the refusal says which profile and how to fix it, not "not reachable"."""
+    monkeypatch.setattr(runs, "refuse_if_outside_active_hours", lambda *_, **__: None)
+    contact_id = _contact(cli_db)
+    with session_scope(cli_db, write=True) as session:
+        target = message_check.start(
+            session, _user(session), contact_id, now=datetime.now(UTC), settings=Settings()
+        )
+    provider, connector = fake_provider(ScrollingSite())
+    connector.browser_pids = [None]  # a Chrome that doesn't say which process it is
+    result = await run_message_check(
+        provider, cli_db, 1, target, settings=Settings(), sleep=no_sleep
+    )
+    assert result.stopped is not None
+    assert result.stopped.startswith("refusing to attach to the Chrome at ")
+    assert "--user-data-dir=" in result.stopped
+    with session_scope(cli_db) as session:
+        run = runs.get_run(session, _user(session), target.run_id)
+        assert (run.status, run.stop_reason) == (SyncRunStatus.FAILED, "profile_refused")
+    assert _visits(cli_db, ActionClass.PROFILE_VISITS) == 0
+
+
 async def test_a_check_cancelled_before_the_visit_spends_nothing(
     cli_db: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
 ) -> None:
