@@ -2,10 +2,9 @@
 
 This guide takes you from a fresh clone to a database full of your LinkedIn connections, sorted into people you've met and people you haven't. It takes an afternoon, most of it waiting for LinkedIn's data export. When you're done, go on to [your first campaign](first-campaign.md).
 
-You use two Chrome windows, and they are different:
+You use one Chrome for netkeeper: **netkeeper's Chrome**, a Chrome with its own profile and a debug port that you start yourself. It holds LinkedIn and setup steps such as Gmail linkage, and it's where you look for the UI, so you have one place to look ([ADR 0012](../adr/0012-chrome-profiles.md)). netkeeper attaches to it to read LinkedIn and to type LinkedIn messages. A run never starts a browser ([ADR 0002](../adr/0002-attach-only-browser-mode.md)).
 
-- **The UI's Chrome** is your everyday Google Chrome, where you open netkeeper at <http://127.0.0.1:8000>. netkeeper's UI requires Chrome.
-- **netkeeper's Chrome** is a second Chrome, with its own profile and a debug port, that you start yourself. It holds the UI, LinkedIn, and setup steps such as Gmail linkage, so you have one place to look. netkeeper attaches to it to read LinkedIn and to type LinkedIn messages. A run never starts a browser ([ADR 0002](../adr/0002-attach-only-browser-mode.md), [ADR 0012](../adr/0012-chrome-profiles.md)).
+Today you also open the UI at <http://127.0.0.1:8000> yourself, in netkeeper's Chrome or in another Chrome. The UI requires Chrome. A launcher that opens the UI in netkeeper's Chrome for you is planned (#549, #599, #636).
 
 ## 1. Install
 

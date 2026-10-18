@@ -1233,7 +1233,7 @@ def rehearse_command(
 
     It never touches LinkedIn. The site must be a loopback url, a linkedin.com
     host is refused by name, and a rehearsal that somehow reached one raises
-    instead of reporting. Nothing here launches a browser (ADR 0002, ADR 0012).
+    instead of reporting. Nothing here launches a browser (ADR 0002).
     """
     state = ctx.ensure_object(CliState)
     settings = _load_settings_or_exit(state)
@@ -5890,7 +5890,7 @@ def _authorize_or_exit(
 
 
 def _present_authorization_url(url: str) -> None:
-    """Show the URL. Gmail linkage opens it in the UI's own tab or by your hand (ADR 0012)."""
+    """Print the URL for you to open in the browser signed in to Gmail (ADR 0002, ADR 0012)."""
     typer.echo("Open this URL in the browser signed in to the Gmail account, and allow access:")
     typer.echo()
     typer.echo(f"  {url}")
