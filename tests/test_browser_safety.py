@@ -26,6 +26,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
+from typing import TypeGuard
 
 import boundary
 import pytest
@@ -1463,12 +1464,43 @@ def test_the_chrome_spawn_pin_rejects_every_other_way_to_start_a_process(
 
 # --- #599: who may start a launch ------------------------------------------------------
 
-#: The names a launch is reached by: the shared submit (``services/chrome_launch.py``)
-#: and the launcher ``serve`` holds on ``app.state``. Every reach of either, anywhere in
-#: the package, is listed here by file and function (ADR 0012, rule 5: only you trigger
-#: a spawn, from the button or a setting you turn on, never a run or the scheduler).
-LAUNCH_NAMES = ("submit_launch", "chrome_launcher")
+#: The names a launch is reached by: the shared submit (``services/chrome_launch.py``),
+#: the launcher ``serve`` holds on ``app.state``, the entry points of ``serve``'s start at
+#: startup (the function, its hook, and the hook on ``app.state``), the two factories and
+#: the class they build, and the button's route. Every reach of any of them, anywhere in
+#: the package, is listed here by file and function (ADR 0012, rule 5: only you trigger a
+#: spawn, from the button or a setting you turn on, never a run, the scheduler, or a
+#: periodic "start it again" job).
+LAUNCH_NAMES = (
+    "submit_launch",
+    "chrome_launcher",
+    "start_chrome_at_startup",
+    "_after_listening",
+    "after_listening",
+    "serve_chrome_launcher",
+    "ChromeLauncher",
+    "_open_launcher",
+    "start_browser",
+)
 LAUNCH_REACHES = {
+    # serve_app wires the hook; the create_app lifespan reads it (a getattr over two
+    # lines: the call and its literal); the hook calls the start at startup once.
+    (PACKAGE / "worker.py", "serve_app", "after_listening"): 1,
+    (PACKAGE / "worker.py", "serve_app", "_after_listening"): 1,
+    (PACKAGE / "web" / "app.py", "create_app.lifespan", "after_listening"): 2,
+    (PACKAGE / "worker.py", "_after_listening", "start_chrome_at_startup"): 1,
+    # Not the function: the setting of the same name, its config field and its read.
+    (PACKAGE / "config.py", "LinkedInSettings", "start_chrome_at_startup"): 1,
+    (PACKAGE / "worker.py", "start_chrome_at_startup.read", "start_chrome_at_startup"): 1,
+    # The factories: serve's, called once from serve_app, and netkeeper open's, called
+    # once from open_command. Each builds the class once (and names it as its return
+    # type); the class is imported by these two modules only.
+    (PACKAGE / "worker.py", "serve_app", "serve_chrome_launcher"): 1,
+    (PACKAGE / "worker.py", "", "ChromeLauncher"): 1,
+    (PACKAGE / "worker.py", "serve_chrome_launcher", "ChromeLauncher"): 2,
+    (PACKAGE / "cli.py", "", "ChromeLauncher"): 1,
+    (PACKAGE / "cli.py", "_open_launcher", "ChromeLauncher"): 2,
+    (PACKAGE / "cli.py", "open_command", "_open_launcher"): 1,
     # The button's route: its import, then its one call.
     (PACKAGE / "web" / "api" / "linkedin.py", "", "submit_launch"): 1,
     (PACKAGE / "web" / "api" / "linkedin.py", "start_browser", "submit_launch"): 1,
@@ -1630,6 +1662,158 @@ def test_the_launcher_start_pin_catches_another_start(path: Path, anchor: str, l
     assert sources[path].count(anchor) == 1, anchor
     sources[path] = sources[path].replace(anchor, line + anchor, 1)
     assert launcher_start_counts(sources) != LAUNCHER_STARTS
+
+
+def _parents(tree: ast.AST) -> dict[int, ast.AST]:
+    return {id(child): node for node in walk(tree) for child in ast.iter_child_nodes(node)}
+
+
+def _called(node: ast.AST, name: str) -> TypeGuard[ast.Call]:
+    return isinstance(node, ast.Call) and (
+        (isinstance(node.func, ast.Name) and node.func.id == name)
+        or (isinstance(node.func, ast.Attribute) and node.func.attr == name)
+    )
+
+
+def launcher_hold_problems(sources: dict[Path, str]) -> list[str]:
+    """Why a launcher could be held anywhere but ``app.state.chrome_launcher`` (#599).
+
+    ``ChromeLauncher(...)`` is built only as the value of a ``return``, in
+    ``serve_chrome_launcher`` and ``_open_launcher``; ``serve_chrome_launcher(...)`` is
+    only assigned to ``app.state.chrome_launcher``; and ``_open_launcher(...)`` is only
+    the receiver of the one ``.start()`` in ``netkeeper open``. So a launcher is never
+    bound to a local, kept under another attribute, or handed elsewhere."""
+    allowed = {
+        (PACKAGE / "worker.py", "serve_chrome_launcher"),
+        (PACKAGE / "cli.py", "_open_launcher"),
+    }
+    problems: list[str] = []
+    built: list[tuple[Path, str]] = []
+    for path, source in sources.items():
+        tree = parse(source)
+        scopes = _scoped(tree)
+        parents = _parents(tree)
+        for node in walk(tree):
+            where = scopes.get(id(node), "")
+            parent = parents.get(id(node))
+            if _called(node, "ChromeLauncher"):
+                built.append((path, where))
+                if (path, where) not in allowed or not isinstance(parent, ast.Return):
+                    problems.append(f"{path.name}:{node.lineno}: ChromeLauncher() in {where}")
+            elif _called(node, "serve_chrome_launcher") and not (
+                isinstance(parent, ast.Assign)
+                and [ast.unparse(t) for t in parent.targets] == ["app.state.chrome_launcher"]
+            ):
+                problems.append(f"{path.name}:{node.lineno}: serve_chrome_launcher() held")
+            elif _called(node, "_open_launcher"):
+                grand = parents.get(id(parent)) if parent is not None else None
+                if not (
+                    isinstance(parent, ast.Attribute)
+                    and parent.attr == "start"
+                    and isinstance(grand, ast.Call)
+                    and grand.func is parent
+                ):
+                    problems.append(f"{path.name}:{node.lineno}: _open_launcher() held")
+    if sorted(built) != sorted(allowed):
+        problems.append(f"ChromeLauncher is built in {sorted(built)}, not once in each factory")
+    return problems
+
+
+def test_a_launcher_is_held_only_on_app_state_or_started_at_once() -> None:
+    assert launcher_hold_problems(package_sources()) == []
+
+
+#: The re-review's surviving mutations (#664): each passed every pin before.
+_SERVICES_MODULE = PACKAGE / "services" / "chrome_again.py"
+_LAUNCHER_RETURN = "    return ChromeLauncher(\n        cdp_url=cdp_url,\n"
+_LAUNCHER_END = "        pid_alive=activity_lock.pid_alive,\n    )\n"
+
+
+def _worker_with(lines: str) -> dict[Path, str]:
+    sources = package_sources()
+    sources[PACKAGE / "worker.py"] += lines
+    return sources
+
+
+@pytest.mark.parametrize(
+    "lines",
+    [
+        # A periodic "Chrome went away, start it again" job, by either entry point.
+        "\n\nasync def _tick(app):\n    await start_chrome_at_startup(app)\n",
+        "\n\nasync def _tick(app):\n    await _after_listening(app)\n",
+        "\n\nasync def _tick(app):\n    again = start_chrome_at_startup\n    await again(app)\n",
+        "\n\nasync def _tick(app):\n    await app.state.after_listening()\n",
+        # A second launcher, or the factory held.
+        "\n\ndef _spare(app, s):\n    return serve_chrome_launcher(app, s, 'http://127.0.0.1:1')\n",
+    ],
+)
+def test_the_startup_entry_points_have_no_other_caller(lines: str) -> None:
+    sources = _worker_with(lines)
+    assert launch_reach_counts(sources) != LAUNCH_REACHES or launcher_hold_problems(sources) != []
+
+
+@pytest.mark.parametrize(
+    "module",
+    [
+        "async def go(app):\n    await app.state.after_listening()\n",
+        "async def go(app):\n    await getattr(app.state, 'after_listening')()\n",
+        "from netkeeper.worker import start_chrome_at_startup as again\n",
+    ],
+)
+def test_the_startup_hook_is_read_only_by_the_lifespan(module: str) -> None:
+    sources = package_sources()
+    sources[_SERVICES_MODULE] = module
+    found = launch_reach_counts(sources)
+    assert found != LAUNCH_REACHES
+    assert any(path == _SERVICES_MODULE for path, _, _ in found)
+
+
+def test_a_launcher_cant_be_kept_under_another_attribute() -> None:
+    """The re-review's mutation: ``serve_chrome_launcher`` binds its launcher to a local,
+    keeps it as ``app.state.keeper``, and a new services class starts it from there."""
+    sources = package_sources()
+    worker_source = sources[PACKAGE / "worker.py"]
+    assert worker_source.count(_LAUNCHER_RETURN) == 1
+    assert worker_source.count(_LAUNCHER_END) == 1
+    worker_source = worker_source.replace(
+        _LAUNCHER_RETURN, _LAUNCHER_RETURN.replace("return ChromeLauncher", "made = ChromeLauncher")
+    )
+    worker_source = worker_source.replace(
+        _LAUNCHER_END, _LAUNCHER_END + "    app.state.keeper = made\n    return made\n"
+    )
+    sources[PACKAGE / "worker.py"] = worker_source
+    sources[_SERVICES_MODULE] = (
+        "class Again:\n    def __init__(self, app):\n        self.app = app\n\n"
+        "    async def go(self):\n        await self.app.state.keeper.start()\n"
+    )
+    assert launcher_hold_problems(sources) != []
+
+
+@pytest.mark.parametrize(
+    "replace",
+    [
+        # Built outside a factory.
+        (
+            "    port = configured_port(ui_base)\n",
+            "    spare = ChromeLauncher\n    port = configured_port(ui_base)\n",
+        ),
+        # netkeeper open's launcher held before it's started.
+        (
+            "asyncio.run(_open_launcher(cdp_url, base, key).start())",
+            "asyncio.run(held.start()) if (held := _open_launcher(cdp_url, base, key)) else None",
+        ),
+    ],
+)
+def test_the_hold_pin_catches_a_held_launcher(replace: tuple[str, str]) -> None:
+    old, new = replace
+    sources = package_sources()
+    for path in (PACKAGE / "worker.py", PACKAGE / "cli.py"):
+        if old in sources[path]:
+            sources[path] = sources[path].replace(old, new, 1)
+            break
+    else:
+        raise AssertionError(f"anchor not found: {old}")
+    assert launcher_hold_problems(sources) != [] or launch_reach_counts(sources) != LAUNCH_REACHES
 
 
 def test_the_users_browser_context_is_never_mutated() -> None:
