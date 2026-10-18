@@ -10,11 +10,14 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import factories
 import pytest
 from browser_fakes import FAKE_CHROME_PID, FakeBrowser, FakeConnector, FakeContext, hold_profile
+from sqlalchemy.orm import Session, sessionmaker
 
 from netkeeper import chrome_profile
 from netkeeper.chrome_profile import (
@@ -25,17 +28,23 @@ from netkeeper.chrome_profile import (
     profile_lock_pid,
 )
 from netkeeper.cli import _preflight_lines
+from netkeeper.config import Settings
+from netkeeper.db import session_scope
 from netkeeper.linkedin import browser
 from netkeeper.linkedin.browser import (
     CHROME_PROFILE_DIRNAME,
     ActivityLocks,
     AttachBrowserProvider,
+    BrowserBusy,
     BrowserUnavailable,
     ProfileRefused,
     read_browser_pid,
 )
 from netkeeper.linkedin.preflight import preflight
+from netkeeper.models import SyncRunKind, SyncRunStatus, SyncRunTrigger, User
 from netkeeper.paths import data_dir
+from netkeeper.services import runs
+from netkeeper.worker import BrowserWorker
 
 CDP_URL = "http://127.0.0.1:9222"
 OTHER_PID = 5151
@@ -337,3 +346,51 @@ async def test_preflights_table_shows_the_profile_line() -> None:
     line = _profile_line(_preflight_lines(passed))
     assert "netkeeper's (" in line
     assert f"pid {FAKE_CHROME_PID}" in line
+
+
+# --- how a refused run ends ------------------------------------------------------------
+
+
+def test_a_refused_profile_has_its_own_stop_reason(tmp_path: Path) -> None:
+    refused = ProfileRefused(check_dedicated_profile(tmp_path, None), CDP_URL)
+
+    assert runs.browser_stop_reason(refused) == "profile_refused"
+    assert runs.browser_stop_reason(BrowserUnavailable("gone")) == "browser_unavailable"
+    assert runs.browser_stop_reason(BrowserBusy("held")) == "browser_busy"
+    assert runs.STOP_REASON_TEXT["profile_refused"] == (
+        "refused: the Chrome on the port isn't netkeeper's own profile"
+    )
+
+
+def test_the_refusal_says_which_user_data_dir_chrome_needs(tmp_path: Path) -> None:
+    message = check_dedicated_profile(tmp_path, None).refusal(CDP_URL)
+
+    assert f"must run with `--user-data-dir={tmp_path}`" in message
+
+
+async def test_a_refused_run_ends_profile_refused_not_unreachable(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """The run list and ``/browser/health`` don't call a running Chrome unreachable."""
+    now = datetime(2026, 10, 17, 12, 0, tzinfo=UTC)
+    with session_scope(session_factory, write=True) as session:
+        user = factories.make_user(session, timezone="UTC")
+        user_id = user.id
+        run_id = runs.create_run(
+            session, user, SyncRunKind.CONNECTIONS_FULL, trigger=SyncRunTrigger.MANUAL, now=now
+        ).id
+    connector = FakeConnector(browser_pid=None)
+    worker = BrowserWorker(
+        provider_for(connector), session_factory, Settings().linkedin, clock=lambda: now
+    )
+
+    await worker.execute(run_id, user_id)
+
+    with session_scope(session_factory) as session:
+        owner = session.get(User, user_id)
+        assert owner is not None
+        run = runs.get_run(session, owner, run_id)
+        assert (run.status, run.stop_reason) == (SyncRunStatus.FAILED, "profile_refused")
+        assert run.linkedin_account_id is not None
+        assert runs.last_browser_unavailable(session, owner, run.linkedin_account_id) is None
+    assert connector.detaches == 1

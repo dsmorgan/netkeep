@@ -100,11 +100,14 @@ def _isolated_profile(_clean_netkeeper_env: None) -> None:
     Every attach refuses a Chrome that doesn't hold ``<data dir>/chrome-profile``, and
     the data directory is a fresh one per test. ``NETKEEPER_SMOKE_PROFILE`` names the
     isolated Chrome's ``--user-data-dir``; the test's profile becomes a link to it. Unset,
-    every attach is refused, and the refusal says why.
+    the test skips and says so, since every attach would be refused.
     """
     isolated = os.environ.get("NETKEEPER_SMOKE_PROFILE")
     if not isolated:
-        return
+        pytest.skip(
+            "set NETKEEPER_SMOKE_PROFILE to the isolated Chrome's --user-data-dir: every"
+            " attach refuses a Chrome that isn't netkeeper's dedicated profile (#624)"
+        )
     profile = data_dir() / CHROME_PROFILE_DIRNAME
     profile.parent.mkdir(parents=True, exist_ok=True)
     profile.symlink_to(Path(isolated).expanduser().resolve(), target_is_directory=True)

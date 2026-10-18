@@ -47,6 +47,7 @@ from netkeeper.linkedin.body_tap import BodyTap
 from netkeeper.linkedin.errors import BrowserBusy as BrowserBusy
 from netkeeper.linkedin.errors import BrowserError as BrowserError
 from netkeeper.linkedin.errors import BrowserUnavailable as BrowserUnavailable
+from netkeeper.linkedin.errors import ProfileRefused as ProfileRefused
 from netkeeper.linkedin.messaging import (
     SendPermit,
     composer_text,
@@ -2649,19 +2650,6 @@ class Attachment:
     context: ContextLike
     detach: Callable[[], Awaitable[None]]
     profile: ProfileCheck
-
-
-class ProfileRefused(BrowserUnavailable):
-    """The Chrome on the port isn't netkeeper's dedicated profile, or can't be shown to be.
-
-    ADR 0012, rule 6 (#624). A :class:`BrowserUnavailable`, so every caller treats it as
-    a Chrome it can't use: the run aborts and the scheduler tries later. It says
-    what was found (``profile_check``), for preflight and the posture report.
-    """
-
-    def __init__(self, check: ProfileCheck, cdp_url: str) -> None:
-        super().__init__(check.refusal(cdp_url))
-        self.profile_check = check
 
 
 class CdpConnector(Protocol):

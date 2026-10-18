@@ -79,8 +79,9 @@ class ProfileCheck:
         return (
             f"refusing to attach to the Chrome at {cdp_url}: {self.reason}. netkeeper"
             f" attaches only to its own Chrome profile ({self.profile}), so it never drives"
-            " a Chrome you started for something else (ADR 0012). Quit that Chrome, then"
-            " start netkeeper's with the command `netkeeper browser launch` prints"
+            " a Chrome you started for something else (ADR 0012). That Chrome must run with"
+            f" `--user-data-dir={self.profile}`: quit the one on the port, then start"
+            " netkeeper's with the command `netkeeper browser launch` prints"
         )
 
 

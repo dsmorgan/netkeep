@@ -240,6 +240,7 @@ def test_every_reason_a_run_is_given_has_plain_words() -> None:
         "no_runner",
         "browser_busy",
         "browser_unavailable",
+        "profile_refused",
     }
     assert stored - set(runs.STOP_REASON_TEXT) == set()
     assert runs.STOP_REASON_TEXT["inactive"] == "outside active hours"

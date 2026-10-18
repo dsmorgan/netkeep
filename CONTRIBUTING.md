@@ -56,7 +56,7 @@ version you used in the pull request. Run it against an isolated Chrome (its own
 included, because that is where your own netkeeper Chrome listens. Point
 `NETKEEPER_SMOKE_PROFILE` at that Chrome's `--user-data-dir` too: every attach checks
 that the Chrome on the port holds netkeeper's profile (#624), and the suite links each
-test's profile to that directory. Outside
+test's profile to that directory. Without it, the suite skips and names the variable. Outside
 `tests/smoke/`, every test is refused a real Chrome altogether (`tests/conftest.py`,
 `_no_real_browser`); a test that genuinely needs one opts out with
 `@pytest.mark.real_cdp`.
