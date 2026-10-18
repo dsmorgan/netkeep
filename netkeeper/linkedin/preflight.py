@@ -25,15 +25,16 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, cast
 
 from netkeeper.linkedin.browser import (
     SINGLE_ACCOUNT_KEY,
     BrowserBusy,
     BrowserProvider,
     BrowserUnavailable,
-    ContextLike,
     PageLike,
+    _CdpSessionLike,
+    _TapContext,
 )
 from netkeeper.logging_setup import personal_exc
 
@@ -47,10 +48,12 @@ CSRF_COOKIE = "JSESSIONID"
 #: Cookie-jar domain suffix the session is looked for under. This is a string
 #: compared against cookies already in the browser, never a URL anything requests.
 COOKIE_DOMAIN_SUFFIX = "linkedin.com"
-#: The only URLs the cookie read asks for (ADR 0012, #633). The browser returns a cookie
-#: when its domain and path match one of these, so Google's, and every other site's, never
-#: leave the jar. ``www.linkedin.com`` sees cookies set on ``.linkedin.com``,
-#: ``.www.linkedin.com`` and ``www.linkedin.com``, which is where both names below live.
+#: The only URLs the cookie read asks Chrome for (ADR 0012, #633). Chrome returns a
+#: cookie when its domain, path and secure flag fit one of these, so it filters before
+#: anything leaves the browser: no other site's cookie (Google's, once Gmail is linked)
+#: is sent to netkeeper at all. ``www.linkedin.com`` sees cookies set on
+#: ``.linkedin.com``, ``.www.linkedin.com`` and ``www.linkedin.com``, which is where both
+#: names above live. A cookie on another LinkedIn subdomain is not read; nothing here needs one.
 COOKIE_URLS = ("https://www.linkedin.com/",)
 
 # Read on the blank tab the run opens. Nothing here is overridden or spoofed
@@ -140,7 +143,7 @@ async def preflight(
         async with provider.run(account) as run:
             page = await run.ensure_page()
             fingerprint = await _read_fingerprint(page)
-            cookies = await _read_session_cookies(run.context)
+            cookies = await _read_session_cookies(run.context, page)
             return _build_report(
                 cdp_url=provider.cdp_url,
                 browser_version=run.browser.version,
@@ -185,19 +188,37 @@ class _SessionCookie:
     expires_at: datetime | None
 
 
-async def _read_session_cookies(context: ContextLike) -> tuple[_SessionCookie, ...] | None:
+async def _read_session_cookies(
+    context: object, page: PageLike
+) -> tuple[_SessionCookie, ...] | None:
     """The LinkedIn cookies in the user's jar, by name. None when the jar is unreadable.
 
-    ``context.cookies(COOKIE_URLS)`` is a DevTools read of cookies the browser already
-    holds, scoped to LinkedIn so no other site's cookie reaches this process (ADR 0012).
+    Sends one CDP ``Network.getCookies`` with ``urls`` set to :data:`COOKIE_URLS`, on a
+    session for this run's own blank tab (no new tab), so Chrome filters the jar and
+    only LinkedIn's cookies leave the browser (ADR 0012). Playwright's own
+    ``context.cookies`` is not used: its Chromium driver fetches the whole profile's jar
+    first and filters afterward. ``Network.getCookies`` needs no ``Network.enable``, so
+    the session enables nothing and is detached before this returns. A browser that
+    refuses the call reads as an unreadable jar (login state unknown), never as logged out.
     It sends nothing to linkedin.com, and this function copies names and expiry times
     only: no code path here can put a cookie value in a log line or a report.
     """
     try:
-        jar = await context.cookies(COOKIE_URLS)
+        session = cast(_CdpSessionLike, await cast(_TapContext, context).new_cdp_session(page))
     except Exception as exc:
         log.warning("could not read the browser's cookie jar: %s", personal_exc(exc))
         return None
+    try:
+        reply = await session.send("Network.getCookies", {"urls": list(COOKIE_URLS)})
+        jar: Sequence[Mapping[str, Any]] = reply["cookies"]
+    except Exception as exc:
+        log.warning("could not read the browser's cookie jar: %s", personal_exc(exc))
+        return None
+    finally:
+        try:
+            await session.detach()
+        except Exception as exc:
+            log.debug("could not detach the cookie session: %s", personal_exc(exc))
     found: list[_SessionCookie] = []
     for cookie in jar:
         name = str(cookie.get("name", ""))

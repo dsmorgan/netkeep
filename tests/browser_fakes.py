@@ -159,6 +159,62 @@ def _covers(domain: str, host: str) -> bool:
     return host == domain or host.endswith("." + domain)
 
 
+def visible_cookies(
+    jar: Sequence[Mapping[str, Any]], urls: Sequence[str]
+) -> list[Mapping[str, Any]]:
+    """The cookies Chrome would send to at least one of ``urls``; the whole jar for none.
+
+    Domain, path prefix and the secure flag, as Playwright's ``filterCookies`` and
+    Chrome's ``Network.getCookies`` apply them.
+    """
+    if not urls:
+        return list(jar)
+    parsed = [urlparse(url) for url in urls]
+    return [
+        c
+        for c in jar
+        if any(
+            _covers(str(c.get("domain", "")), u.hostname or "")
+            and (u.path or "/").startswith(str(c.get("path", "/")))
+            and (not c.get("secure") or u.scheme == "https")
+            for u in parsed
+        )
+    ]
+
+
+class CookieSession:
+    """A page-level CDP session that answers ``Network.getCookies`` and nothing else.
+
+    Like Chrome, it filters by ``urls`` before replying; an unscoped call (no ``urls``,
+    or an empty list) gets the whole jar, which is the hazard the tests watch for.
+    ``calls`` records every ``(method, params)`` sent.
+    """
+
+    def __init__(self, context: FakeContext) -> None:
+        self._context = context
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.detached = False
+
+    async def send(self, method: str, params: Mapping[str, Any] | None = None) -> Any:
+        self.calls.append((method, dict(params or {})))
+        if method != "Network.getCookies":
+            raise AssertionError(f"the cookie read sends only Network.getCookies, not {method}")
+        context = self._context
+        context.cookie_calls += 1
+        context.last_cookies_urls = (params or {}).get("urls")
+        if context.cookie_error is not None:
+            raise context.cookie_error
+        jar = visible_cookies(context.cookie_jar, list((params or {}).get("urls") or ()))
+        context.last_cookies_returned = [str(c.get("name", "")) for c in jar]
+        return {"cookies": jar}
+
+    def on(self, event: str, handler: Any) -> None:
+        raise AssertionError("the cookie read listens to nothing")
+
+    async def detach(self) -> None:
+        self.detached = True
+
+
 class FakeContext:
     """The context the user's browsing already lives in. Hands out tabs and a cookie jar."""
 
@@ -180,6 +236,7 @@ class FakeContext:
         self.new_page_error = new_page_error
         self.new_page_calls = 0
         self.cookie_calls = 0
+        self.cookie_sessions: list[CookieSession] = []
         #: The ``urls`` argument the most recent ``cookies()`` call passed, for a
         #: test that wants to assert a caller scoped its read (#174 item 7).
         self.last_cookies_urls: str | Sequence[str] | None = None
@@ -201,14 +258,16 @@ class FakeContext:
         self.last_cookies_urls = urls
         if self.cookie_error is not None:
             raise self.cookie_error
-        jar = list(self.cookie_jar)
-        if urls is not None:
-            # Like the browser: a cookie is visible to a URL when its domain covers the host.
-            wanted = [urls] if isinstance(urls, str) else list(urls)
-            hosts = [urlparse(url).hostname or "" for url in wanted]
-            jar = [c for c in jar if any(_covers(str(c.get("domain", "")), h) for h in hosts)]
+        # An empty or missing ``urls`` is no filter, as in Playwright: the whole jar.
+        wanted = [urls] if isinstance(urls, str) else list(urls or ())
+        jar = visible_cookies(self.cookie_jar, wanted)
         self.last_cookies_returned = [str(c.get("name", "")) for c in jar]
         return jar
+
+    async def new_cdp_session(self, page: Any) -> Any:
+        session = CookieSession(self)
+        self.cookie_sessions.append(session)
+        return session
 
     @property
     def open_pages(self) -> list[FakePage]:

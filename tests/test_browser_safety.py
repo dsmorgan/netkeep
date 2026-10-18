@@ -129,6 +129,9 @@ ALLOWED_CONTEXT_MUTATIONS = frozenset(
         # each tab that appears while it waits, the person's included.
         (LINKEDIN / "browser.py", "BrowserRun._open_tab", "new_browser_cdp_session"),
         (LINKEDIN / "browser.py", "BrowserRun._target_id", "new_cdp_session"),
+        # #633: preflight's cookie read, on the run's own blank tab, Chrome-filtered to
+        # LinkedIn's URL.
+        (LINKEDIN / "preflight.py", "_read_session_cookies", "new_cdp_session"),
     }
 )
 #: What the body tap's session may send, each named as a literal at its one call,
@@ -181,7 +184,10 @@ TAB_CDP_METHODS: dict[str, frozenset[str]] = {
     "Target.getTargetInfo": frozenset(),
     "Target.closeTarget": frozenset({"targetId"}),
 }
-ALLOWED_CDP_METHODS = {**READ_ONLY_CDP_METHODS, **TAB_CDP_METHODS}
+#: #633, ADR 0012: preflight's cookie read. ``urls`` is LinkedIn's, so Chrome returns no
+#: other site's cookie (``tests/test_cookie_read_scope.py`` pins the value).
+COOKIE_CDP_METHODS: dict[str, frozenset[str]] = {"Network.getCookies": frozenset({"urls"})}
+ALLOWED_CDP_METHODS = {**READ_ONLY_CDP_METHODS, **TAB_CDP_METHODS, **COOKIE_CDP_METHODS}
 #: The functions whose ``send`` calls reach a CDP session, and how many each makes.
 CDP_SENDERS = {
     (LINKEDIN / "browser.py", "BrowserRun._open_body_tap"): 2,
@@ -194,6 +200,7 @@ CDP_SENDERS = {
     (LINKEDIN / "browser.py", "BrowserRun._open_tab"): 1,
     (LINKEDIN / "browser.py", "BrowserRun._close_unclaimed_tab"): 1,
     (LINKEDIN / "browser.py", "BrowserRun._target_id"): 1,
+    (LINKEDIN / "preflight.py", "_read_session_cookies"): 1,
 }
 #: Which of those methods each function may send: neither borrows the other's.
 CDP_SENDER_METHODS = {
@@ -223,6 +230,7 @@ CDP_SENDER_METHODS = {
     (LINKEDIN / "browser.py", "BrowserRun._open_tab"): frozenset({"Target.createTarget"}),
     (LINKEDIN / "browser.py", "BrowserRun._close_unclaimed_tab"): frozenset({"Target.closeTarget"}),
     (LINKEDIN / "browser.py", "BrowserRun._target_id"): frozenset({"Target.getTargetInfo"}),
+    (LINKEDIN / "preflight.py", "_read_session_cookies"): frozenset({"Network.getCookies"}),
 }
 #: The only observations that open the body tap, each once (ADR 0006's amendment):
 #: the connections sync's (#200) and each enrichment visit's, whose tap streams only
