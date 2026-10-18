@@ -32,12 +32,14 @@ async def test_off_then_on_then_off(
     first = (await client.get(URL)).json()
     assert first["supported"] is True
     assert first["enabled"] is False
+    assert first["state"] == "Off"
     assert first["plist_path"].startswith(str(tmp_path / "LaunchAgents"))
 
     on = await client.put(URL, json={"enabled": True}, headers=HEADERS)
     assert on.status_code == 200
     assert on.json()["enabled"] is True
-    assert "next login" in on.json()["message"]
+    assert on.json()["state"] == "Registered: starts at next login"
+    assert on.json()["message"].startswith("Registered. netkeeper will start by itself")
     assert "bootstrap" not in launchctl.verbs()  # this server is already running
     assert (await client.get(URL)).json()["enabled"] is True
 

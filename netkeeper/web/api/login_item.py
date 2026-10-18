@@ -34,6 +34,10 @@ class LoginItemOut(BaseModel):
     supported: bool
     """False off macOS: the switch is disabled and ``unsupported_reason`` says why."""
     unsupported_reason: str | None
+    state: str
+    """One of "Off", "Registered: starts at next login", "Running from login agent",
+    "Needs repair" or "Points at a different netkeeper"; the same words as
+    ``netkeeper login-item status``."""
     enabled: bool
     """netkeeper starts at login: the plist is there and launchd will load it."""
     running_under_launchd: bool
@@ -58,6 +62,7 @@ def _out(status: Status, message: str | None = None) -> LoginItemOut:
     return LoginItemOut(
         supported=status.supported,
         unsupported_reason=status.reason,
+        state=status.state.value,
         enabled=status.enabled,
         running_under_launchd=status.loaded,
         this_server_is_the_login_item=status.this_serve_is_the_agent,

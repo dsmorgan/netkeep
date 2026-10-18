@@ -8,6 +8,10 @@ import { Label } from '@/components/ui/label'
 
 import { loginItemQuery, repairLoginItem, setLoginItem } from './api'
 
+/** The check steps, on the project's site, since the app serves no docs of its own. */
+export const LOGIN_ITEM_TROUBLESHOOTING_URL =
+  'https://github.com/dsmorgan/netkeeper/blob/main/docs/guide/troubleshooting.md#run-at-login-does-nothing'
+
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -62,9 +66,9 @@ export function LoginItemSection() {
             {!item.supported && item.unsupported_reason && (
               <p className="text-muted-foreground">{item.unsupported_reason}</p>
             )}
-            {item.supported && item.enabled && !item.running_under_launchd && (
-              <p className="text-muted-foreground">
-                On, but not running under launchd yet: it starts at your next login.
+            {item.supported && (
+              <p>
+                State: <strong>{item.state}</strong>
               </p>
             )}
             {item.legacy && (
@@ -96,6 +100,21 @@ export function LoginItemSection() {
             {repair.isError && <p role="alert">{message(repair.error)}</p>}
             {change.isSuccess && change.data.message && <p role="status">{change.data.message}</p>}
             {change.isError && <p role="alert">{message(change.error)}</p>}
+            {item.supported && (
+              <p className="text-muted-foreground">
+                How to check: after your next login, open netkeeper&apos;s bookmark without starting
+                anything.{' '}
+                <a
+                  href={LOGIN_ITEM_TROUBLESHOOTING_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline underline-offset-2"
+                >
+                  If it is not there
+                </a>
+                , the troubleshooting entry shows how to ask launchd.
+              </p>
+            )}
             {item.supported && (
               <p className="text-muted-foreground">
                 Log: <code className="font-mono text-xs break-all">{item.log_path}</code>

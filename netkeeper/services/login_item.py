@@ -36,6 +36,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Final
 
@@ -128,6 +129,17 @@ def _is_macos() -> bool:
     return platform == "darwin"
 
 
+class State(StrEnum):
+    """The login item's state in the words the Settings card and ``login-item status``
+    both show. The value is the text."""
+
+    OFF = "Off"
+    REGISTERED = "Registered: starts at next login"
+    RUNNING = "Running from login agent"
+    NEEDS_REPAIR = "Needs repair"
+    DIFFERENT_NETKEEPER = "Points at a different netkeeper"
+
+
 @dataclass(frozen=True, slots=True)
 class Status:
     supported: bool
@@ -156,6 +168,21 @@ class Status:
     def enabled(self) -> bool:
         """Starts at login: the plist is there and launchd will load it."""
         return self.installed and not self.disabled
+
+    @property
+    def state(self) -> State:
+        """What to tell the person. A leftover old-script agent comes first: it cannot
+        start, so nothing else about it is true. Running means launchd has the job (this
+        ``serve`` is that job, or another copy of it is)."""
+        if self.legacy:
+            return State.NEEDS_REPAIR
+        if not self.enabled:
+            return State.OFF
+        if self.stale:
+            return State.DIFFERENT_NETKEEPER
+        if self.this_serve_is_the_agent or self.loaded:
+            return State.RUNNING
+        return State.REGISTERED
 
 
 @dataclass(frozen=True, slots=True)
@@ -455,23 +482,26 @@ class LoginItem:
             self._wait_until(lambda: not self._lock_held(), _LOCK_WAIT_S)
         if serving_here or self._lock_held():
             if serving_here:
-                why = "netkeeper is running now"
+                why = "netkeeper is already running"
             else:
                 why = "the previous copy of netkeeper has not finished stopping"
             return Outcome(
                 self.status(),
                 started=False,
                 message=(
-                    f"Turned on. {why[0].upper()}{why[1:]}, so launchd will start it at your next"
-                    " login, not before. Starting another copy now would only fail against the"
-                    " serve lock."
+                    "Registered. netkeeper will start by itself the next time you log in to this"
+                    f" Mac. Nothing changes now, because {why}: starting another copy would only"
+                    " fail against the serve lock."
                 ),
             )
         self._launchctl("bootstrap", self._domain, str(self.plist_path))
         return Outcome(
             self.status(),
             started=True,
-            message="Turned on. netkeeper is starting now and at every login.",
+            message=(
+                "Started. netkeeper is starting now, and will start by itself every time you log in"
+                " to this Mac."
+            ),
         )
 
     def _stop(self, service: str) -> bool:

@@ -75,13 +75,33 @@ Each warning starts with the protection it belongs to. These are the ones you're
 | **Arm to send** says "no netkeeper test draft was found in the Drafts of … at the last check" | Make a test draft from a campaign's review (**Send a test of step 1**) while the mailbox is armed for drafts, then **Check now**. The arm steps say "netkeeper found its own draft." when it's found. |
 | A step's email went out as a draft | The mailbox is armed for drafts only. Send the draft yourself, or **Arm to send**. |
 
+## Run at login does nothing
+
+Turning on **Start netkeeper when I log in** while netkeeper is running only registers the login agent. Nothing changes until your next login: netkeeper never starts a second copy next to the one you are using. The card's state says where you are:
+
+| State | Meaning | What to do |
+|---|---|---|
+| Off | No login agent for this data directory. | Turn the switch on. |
+| Registered: starts at next login | The agent is in place but launchd hasn't started it. | Log out and back in, then open netkeeper's bookmark without starting anything. |
+| Running from login agent | launchd started this netkeeper. | Nothing. |
+| Needs repair | An agent from the removed install script serves this data directory and can't start. | **Repair** on the card, or `netkeeper login-item on` in a terminal. |
+| Points at a different netkeeper | The agent runs another copy than the one you are using, such as an old checkout. | **Repair** on the card. |
+
+`netkeeper login-item status` prints the same state names. To ask launchd directly, run this in a terminal. Use the label the status shows; the default data directory's is `fun.tnkr.netkeeper`:
+
+```sh
+launchctl print gui/$(id -u)/fun.tnkr.netkeeper
+```
+
+`state = running` and a `pid` mean launchd started it. "Could not find service" means the agent isn't loaded: log out and back in, or run `netkeeper login-item on` with netkeeper stopped to load it now. `<data dir>/logs/serve.err.log` holds the agent's crashes.
+
 ## Actions that stay on the command line
 
 Everything else is in the UI. These remain in a terminal or a file, most of them by design:
 
 | Action | How |
 |---|---|
-| Start `serve` at login | Settings, Run at login, or `netkeeper login-item on`. See [Run at login](../../README.md#run-at-login-macos). Two data directories each need their own `web.port`: the second `serve` can't bind a port the first holds, and its login item would restart it every 10 seconds. |
+| Start `serve` at login | Settings, Run at login, or `netkeeper login-item on`. See [Run at login](../../README.md#run-at-login-macos), and [if it does nothing](#run-at-login-does-nothing). Two data directories each need their own `web.port`: the second `serve` can't bind a port the first holds, and its login item would restart it every 10 seconds. |
 | Start the LinkedIn Chrome | `make chrome`, or the command `netkeeper browser launch` prints. A run never starts a browser; only you do. |
 | Check the LinkedIn Chrome (optional) | `netkeeper preflight`. |
 | Turn on LinkedIn auto-send | Settings, **Campaign defaults**, **LinkedIn auto-send**, and confirm. It applies from the next auto-send check, within 10 minutes. `config.toml`'s `[campaigns] linkedin_auto_send` still works and wins over the page. Read [ADR 0008](../adr/0008-auto-send.md) first. |

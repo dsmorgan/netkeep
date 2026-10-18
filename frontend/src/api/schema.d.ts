@@ -7128,6 +7128,8 @@ export interface components {
             points_elsewhere: string | null;
             /** Running Under Launchd */
             running_under_launchd: boolean;
+            /** State */
+            state: string;
             /** Supported */
             supported: boolean;
             /** This Server Is The Login Item */
