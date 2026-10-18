@@ -2,9 +2,9 @@
 
 This guide takes you from a fresh clone to a database full of your LinkedIn connections, sorted into people you've met and people you haven't. It takes an afternoon, most of it waiting for LinkedIn's data export. When you're done, go on to [your first campaign](first-campaign.md).
 
-You use one Chrome for netkeeper: **netkeeper's Chrome**, a Chrome with its own profile and a debug port that you start yourself. It holds LinkedIn and setup steps such as Gmail linkage, and it's where you look for the UI, so you have one place to look ([ADR 0012](../adr/0012-chrome-profiles.md)). netkeeper attaches to it to read LinkedIn and to type LinkedIn messages. A run never starts a browser ([ADR 0002](../adr/0002-attach-only-browser-mode.md)).
+You use one Chrome for netkeeper: **netkeeper's Chrome**, a Chrome with its own profile and a debug port. It holds LinkedIn and setup steps such as Gmail linkage, and it's where you look for the UI, so you have one place to look ([ADR 0012](../adr/0012-chrome-profiles.md)). netkeeper attaches to it to read LinkedIn and to type LinkedIn messages. netkeeper starts it only when you ask: with **Start Chrome**, with `netkeeper open`, or at startup if you turn that on. A run never starts a browser ([ADR 0002](../adr/0002-attach-only-browser-mode.md)).
 
-Today you also open the UI at <http://127.0.0.1:8000> yourself, in netkeeper's Chrome or in another Chrome. The UI requires Chrome. A launcher that opens the UI in netkeeper's Chrome for you is planned (#549, #599, #636).
+The first time, you open the UI at <http://127.0.0.1:8000> yourself, in Chrome. The UI requires Chrome.
 
 ## 1. Install
 
@@ -65,11 +65,11 @@ Then use **Contacts** and **Lists** to sort further. A static list holds the peo
 
 ## 6. The LinkedIn Chrome
 
-1. Start it. Either run `make chrome` from the repository, or run `netkeeper browser launch` and copy the command it prints. The **LinkedIn** page's **Browser** card shows the same command.
-2. In that new window, log in to LinkedIn once. Use this window for your own LinkedIn browsing too, so your activity and netkeeper's share one session.
+1. Start it. On the **LinkedIn** page's **Browser** card, choose **Start Chrome**. netkeeper starts its own Chrome, on its own profile and the debug address in Settings, with netkeeper in its own window, and says how it went. It never starts or uses any other Chrome: when another Chrome holds the debug port, or a run is using the browser, it starts nothing and says what to do. From a terminal, `netkeeper open` does the same. You can also run `make chrome` from the repository, or the command `netkeeper browser launch` prints; the card shows that command too.
+2. In that new window, log in to LinkedIn once. netkeeper never types your password; you sign in yourself. Use this window for your own LinkedIn browsing too, so your activity and netkeeper's share one session.
 3. Check it: `netkeeper preflight`. It attaches, opens one blank tab, reads the names of the profile's LinkedIn cookies and a few browser properties, and closes the tab. It visits no website.
 
-Start the LinkedIn Chrome again whenever you restart your Mac or quit it. The dashboard tells you when netkeeper can't reach it.
+Start netkeeper's Chrome again whenever you restart your Mac or quit it. The dashboard tells you when it isn't running, with a **Start Chrome** button. To have it start by itself, turn on **Start netkeeper's Chrome when netkeeper starts** in Settings, under **LinkedIn runs**. It's off by default. With [Run at login](../../README.md#run-at-login-macos) also on, Chrome then starts when you log in. netkeeper still starts nothing when its Chrome is already running or a run is using the browser.
 
 Read [the note about LinkedIn's terms](../../README.md#a-plain-note-about-linkedins-terms) before your first run.
 

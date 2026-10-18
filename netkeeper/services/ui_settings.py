@@ -148,6 +148,9 @@ class FieldSpec:
 
 AUTO_SEND_KEY: Final = "campaigns.linkedin_auto_send"
 
+START_CHROME_KEY: Final = "linkedin.start_chrome_at_startup"
+"""``serve`` starts netkeeper's Chrome once it is listening (#599). Off by default."""
+
 AUTO_SEND_CONFIRM: Final = (
     "With auto-send on, netkeeper clicks Send on LinkedIn by itself for campaign steps set"
     " to Auto-send, with nobody watching. A message it sends can't be taken back."
@@ -363,6 +366,24 @@ FIELDS: Final[tuple[FieldSpec, ...]] = (
         applies_note=(
             "Needs a restart: netkeeper serve connects its browser runs to the address it"
             " started with. Commands you run in a terminal use the new one at once."
+        ),
+    ),
+    FieldSpec(
+        key=START_CHROME_KEY,
+        group="linkedin_runs",
+        label="Start netkeeper's Chrome when netkeeper starts",
+        help=(
+            "When netkeeper serve starts, it starts netkeeper's own Chrome, on its own"
+            " profile and the debug address above, with this page in its own window. It"
+            " never starts a second one: when netkeeper's Chrome is already running, or a"
+            " run is using the browser, it starts nothing. With Run at login on, this means"
+            " Chrome starts when you log in. You still sign in to LinkedIn yourself."
+        ),
+        kind="bool",
+        applies="now",
+        applies_note=(
+            "Applies the next time netkeeper serve starts. Turning it on starts nothing now:"
+            " use Start Chrome on the LinkedIn page for that."
         ),
     ),
     FieldSpec(

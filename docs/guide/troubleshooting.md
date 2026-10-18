@@ -21,7 +21,13 @@ Still stuck? Open an issue with a support bundle and screenshots: see [Reporting
 
 | What you see | What to do |
 |---|---|
-| "Chrome was not reachable or went away mid-run" | Start the LinkedIn Chrome: `make chrome`, or the command `netkeeper browser launch` prints. Then `netkeeper preflight`. |
+| "Chrome was not reachable or went away mid-run" | Start netkeeper's Chrome: **Start Chrome** on the dashboard or the **LinkedIn** page, `netkeeper open`, `make chrome`, or the command `netkeeper browser launch` prints. Then `netkeeper preflight`. |
+| **Start Chrome**: "Another Chrome is using netkeeper's debug port" | A Chrome that isn't netkeeper's answers on the debug address, so netkeeper started nothing. Quit that Chrome, or change **Chrome debug address** in Settings, under **LinkedIn runs**, then try again. |
+| **Start Chrome**: "A Chrome has netkeeper's profile open without the debug port" | netkeeper's profile is open in a Chrome started without the port, so runs couldn't attach to it. Quit that Chrome, then try again. If no Chrome is running, a crash left the profile's lock behind: `make chrome` clears it. |
+| **Start Chrome** is disabled: "A run is using the browser" | A run holds the browser. Try again when it ends. |
+| **Start Chrome**: "points at another computer" or "has no valid port" | Fix **Chrome debug address** in Settings, under **LinkedIn runs**: netkeeper starts Chrome only on this computer, on the port you set. |
+| **Start Chrome**: "Chrome didn't start" | Check that Google Chrome is installed (on macOS, in `/Applications`). The message under it says what Chrome answered. |
+| Chrome doesn't start at login | Check that both **Run at login** and **Start netkeeper's Chrome when netkeeper starts** are on in Settings. netkeeper starts nothing when its Chrome is already running or a run is using the browser; `netkeeper.log` says which. |
 | Chrome ignores the debug port | Chrome 136 and later refuse it on your default profile. Use the command netkeeper prints, which has its own `--user-data-dir`. |
 | Chrome won't start on the profile after a crash | `make chrome` clears the profile lock a crashed Chrome left behind. |
 | "the browser was busy with another run" | One netkeeper process uses the browser at a time. `netkeeper preflight` names the process that holds it. Wait for that run, or stop it. |
@@ -105,7 +111,6 @@ Everything else is in the UI. These remain in a terminal or a file, most of them
 | Action | How |
 |---|---|
 | Start `serve` at login | Settings, Run at login, or `netkeeper login-item on`. See [Run at login](../../README.md#run-at-login-macos), and [if it does nothing](#run-at-login-does-nothing). Two data directories each need their own `web.port`: the second `serve` can't bind a port the first holds, and its login item would restart it every 10 seconds. |
-| Start the LinkedIn Chrome | `make chrome`, or the command `netkeeper browser launch` prints. A run never starts a browser; only you do. |
 | Check the LinkedIn Chrome (optional) | `netkeeper preflight`. |
 | Turn on LinkedIn auto-send | Settings, **Campaign defaults**, **LinkedIn auto-send**, and confirm. It applies from the next auto-send check, within 10 minutes. `config.toml`'s `[campaigns] linkedin_auto_send` still works and wins over the page. Read [ADR 0008](../adr/0008-auto-send.md) first. |
 | Import the old mailing tool's history (optional) | `netkeeper history import` and `netkeeper history scan-gmail`. See [the guide](../history-import.md). |

@@ -19,14 +19,16 @@ never edits this file.
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 import logging
 import pkgutil
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Coroutine
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import time, timedelta
 from types import ModuleType
+from typing import Any
 
 from fastapi import APIRouter, FastAPI
 from sqlalchemy import Engine, select
@@ -196,6 +198,16 @@ def create_app(
                     teardown.push_async_callback(nightly.stop)
                     nightly.start()
                     app.state.nightly_backups = nightly
+                # #599: what ``serve`` does once it is listening (start netkeeper's Chrome,
+                # when you turned that on), as a task: it never holds up startup.
+                after: Callable[[], Coroutine[Any, Any, object]] | None = getattr(
+                    app.state, "after_listening", None
+                )
+                if after is not None:
+                    waiter: asyncio.Task[object] = asyncio.create_task(
+                        after(), name="netkeeper-after-listening"
+                    )
+                    teardown.callback(waiter.cancel)
             yield
 
     app = FastAPI(

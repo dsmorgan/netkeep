@@ -63,8 +63,10 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from netkeeper.chrome_profile import profile_lock_pid
 from netkeeper.config import LinkedInSettings
 from netkeeper.crm.inbox_apply import clear_short_first_poll, forget_owner
+from netkeeper.linkedin.activity_lock import pid_alive
 from netkeeper.models import Contact, SyncRun, SyncRunKind, SyncRunStatus, SyncRunTrigger, User
 from netkeeper.models.base import utcnow
 from netkeeper.paths import data_dir
@@ -86,8 +88,8 @@ from netkeeper.services.browser_launch import (
     chrome_launch_command,
     remote_host_note,
 )
-from netkeeper.services.chrome_launch import LAUNCH_EVENT, ChromeSpawner, LaunchStatus
-from netkeeper.services.events import Event, EventBus
+from netkeeper.services.chrome_launch import ChromeSpawner, LaunchUnderWay, submit_launch
+from netkeeper.services.events import EventBus
 from netkeeper.services.heat import cooldown_multiplier
 from netkeeper.services.linkedin_accounts import (
     account_id_for,
@@ -116,6 +118,7 @@ from netkeeper.web.deps import (
     Tasks,
     effective_settings,
     file_settings,
+    is_owner,
     require_owner,
 )
 from netkeeper.web.schemas import (
@@ -882,7 +885,9 @@ def get_browser_health(
     ``posture --probe``, or the newest run that read LinkedIn, under the session
     flag), and the newest run that could not reach Chrome when that is newer.
     Nothing here attaches to the browser (spec 9.9, CLAUDE.md); a live check is
-    still ``netkeeper preflight`` in a terminal.
+    still ``netkeeper preflight`` in a terminal. Whether netkeeper's Chrome is running
+    is read from its profile's lock file, and whether a run holds the browser from the
+    lock files, for the **Start Chrome** button (#599).
     """
     now = utcnow()
     account = find_account(session, user)
@@ -902,6 +907,7 @@ def get_browser_health(
     ):
         unreachable = None
     running = None if account is None else runs.running_run(session, user, account.id)
+    chrome_pid = _netkeeper_chrome_pid()
     return BrowserHealthOut(
         checked_at=now,
         can_start_runs=request.app.state.executor is not None,
@@ -911,7 +917,23 @@ def get_browser_health(
         chrome_unreachable_at=None if unreachable is None else unreachable.completed_at,
         chrome_unreachable_run_id=None if unreachable is None else unreachable.id,
         running_run_id=None if running is None else running.id,
+        chrome_running=chrome_pid is not None,
+        chrome_pid=chrome_pid,
+        browser_held=runs.any_browser_lock_held(),
+        can_start_chrome=(
+            getattr(request.app.state, "chrome_launcher", None) is not None
+            and is_owner(session, user)
+        ),
     )
+
+
+def _netkeeper_chrome_pid() -> int | None:
+    """The live process holding netkeeper's Chrome profile, from its ``SingletonLock`` (#599).
+
+    A file read and a signal-0 check: it never connects to the port or attaches.
+    """
+    pid = profile_lock_pid(data_dir() / CHROME_PROFILE_DIRNAME)
+    return pid if pid is not None and pid_alive(pid) else None
 
 
 # --- launch instructions ---------------------------------------------------------------
@@ -946,9 +968,6 @@ def get_browser(request: Request, session: SessionDep, user: CurrentUser) -> Bro
 
 # --- starting netkeeper's Chrome (#636) -------------------------------------------------
 
-#: The task name a launch runs under; one at a time.
-LAUNCH_TASK: Final = "chrome_launch"
-
 _NO_LAUNCHER = (
     "this netkeeper process has no Chrome launcher (it was not started by `netkeeper serve`),"
     " so it cannot start Chrome"
@@ -982,42 +1001,14 @@ async def start_browser(
     is spawned inside a request. The launch refuses when the port answers as another
     Chrome, when the profile is open without the port, or, for a cold start, while a run
     holds the browser; how it went arrives as ``browser.launch`` on ``GET /events``.
-    ``first_run`` (setup's first-run button) also opens LinkedIn's sign-in page.
+    ``first_run`` (setup's first-run button) also opens LinkedIn's sign-in page. A launch
+    already under way, this button's or ``serve``'s at startup (#599), answers ``409``.
     """
     require_owner(session, user, "only the local owner account starts netkeeper's Chrome")
     launcher = _launcher(request)
-    if any(task.name == LAUNCH_TASK for task in tasks.active()):
-        raise HTTPException(status_code=409, detail="netkeeper's Chrome is already starting")
     bus: EventBus = request.app.state.bus
-    user_id = user.id
-    first_run = body.first_run
-    task_id = ""
-
-    def publish(status: str, message: str, refusal: str | None, pid: int | None) -> None:
-        data = {
-            "task_id": task_id,
-            "status": status,
-            "refusal": refusal,
-            "message": message,
-            "pid": pid,
-        }
-        bus.publish(Event(type=LAUNCH_EVENT, data=data, user_id=user_id))
-
-    async def run_launch() -> None:
-        try:
-            result = await launcher.start(first_run=first_run)
-        except Exception as exc:
-            # A button waiting on this event must hear an ending either way.
-            publish(
-                LaunchStatus.FAILED.value, f"the launch failed: {type(exc).__name__}", None, None
-            )
-            raise
-        publish(
-            result.status.value,
-            result.message,
-            None if result.refusal is None else result.refusal.value,
-            result.pid,
-        )
-
-    task_id = tasks.submit(LAUNCH_TASK, run_launch, user_id=user_id).id
+    try:
+        task_id = submit_launch(tasks, bus, launcher, user_id=user.id, first_run=body.first_run)
+    except LaunchUnderWay as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return BrowserStartAccepted(task_id=task_id)

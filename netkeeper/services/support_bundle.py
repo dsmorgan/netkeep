@@ -204,6 +204,7 @@ SETTINGS_ALLOWLIST: Final[tuple[str, ...]] = (
     "linkedin.weekend_multiplier",
     "linkedin.enrich_stale_days",
     "linkedin.disconnect_after_misses",
+    "linkedin.start_chrome_at_startup",
     "linkedin.budget.connection_pages_per_day",
     "linkedin.budget.profile_visits_per_day",
     "linkedin.budget.profile_visits_per_week",

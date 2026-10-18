@@ -117,6 +117,9 @@ class LinkedInSettings:
     weekend_multiplier: float = 0.5
     enrich_stale_days: int = 180
     disconnect_after_misses: int = 2
+    # #599: ``serve`` starts netkeeper's Chrome once it is listening. Off by default:
+    # starting a browser stays your choice (ADR 0012, rule 5).
+    start_chrome_at_startup: bool = False
     budget: BudgetSettings = field(default_factory=BudgetSettings)
     pacing: PacingSettings = field(default_factory=PacingSettings)
     heat: HeatSettings = field(default_factory=HeatSettings)

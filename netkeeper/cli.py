@@ -526,6 +526,9 @@ def serve(
     )
     restarter = _restart_hook(server)
     application.state.restarter = restarter
+    # #599: start netkeeper's Chrome at startup only once the socket is listening, so
+    # the UI's window it opens finds a server.
+    application.state.listening = lambda: server.started
     server.run()
     if restarter.requested:
         # The lifespan's teardown has released the serve lock; the next serve claims it.

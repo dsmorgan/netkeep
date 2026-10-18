@@ -2261,6 +2261,16 @@ class BrowserHealthOut(BaseModel):
     chrome_unreachable_at: datetime | None
     chrome_unreachable_run_id: int | None
     running_run_id: int | None
+    chrome_running: bool
+    """A live process holds netkeeper's Chrome profile (its ``SingletonLock``, #599).
+    Read from the file, never the port: it doesn't say the port answers."""
+    chrome_pid: int | None
+    """That process's pid, when ``chrome_running``."""
+    browser_held: bool
+    """A run holds a browser lock: **Start Chrome** waits until it ends (#599)."""
+    can_start_chrome: bool
+    """This process has the Chrome launcher (it is ``serve``) and you are the local
+    owner, so **Start Chrome** can work."""
 
 
 class ProtectionOut(BaseModel):

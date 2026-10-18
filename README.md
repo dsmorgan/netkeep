@@ -50,12 +50,15 @@ The [setup guide](docs/guide/setup.md) takes you from here to your first import 
 
 ### The browser sidecar
 
-The LinkedIn steps attach to a Chrome you start yourself, with its own profile and a
-debug port. netkeeper never launches a browser: a browser it started would be a
-second device on your LinkedIn account, which is the thing accounts get restricted
-for ([ADR 0002](docs/adr/0002-attach-only-browser-mode.md)).
+The LinkedIn steps attach to netkeeper's own Chrome, with its own profile and a
+debug port. A run never launches a browser. You start that Chrome yourself: with
+**Start Chrome** in the UI, `netkeeper open`, or the printed command, or, with the
+setting **Start netkeeper's Chrome when netkeeper starts** on (off by default), when
+`serve` starts. netkeeper never starts or attaches to a Chrome on any other profile
+([ADR 0012](docs/adr/0012-chrome-profiles.md)), and you sign in to LinkedIn yourself.
 
 ```sh
+.venv/bin/netkeeper open             # start netkeeper's Chrome with the UI in its own window
 .venv/bin/netkeeper browser launch   # prints the Chrome command to run yourself
 .venv/bin/netkeeper preflight        # attach, session state, browser fingerprint
 ```
@@ -79,7 +82,7 @@ The agent runs the `netkeeper` you ran this from (the one beside the active Pyth
 
 If a `netkeeper serve` is already running (the switch is always used from one), turning the item on registers it without starting it, so launchd starts it at your next login rather than racing the running copy for the serve lock. From a terminal with nothing running, `login-item on` starts it now. The agent that is serving you stops a moment after you turn the switch off.
 
-Logs live under `<data_dir>/logs/`: `netkeeper.log` is the application log, rotated by size (Settings, Logs), and the agent's `serve.log` and `serve.err.log` hold stdout and stderr's warnings, errors and crashes. Status: `launchctl print gui/$UID/<label>`. Each data directory keeps its Gmail secrets under its own Keychain service: `netkeeper` for the default directory, and `netkeeper@<hash of the path>` for any other, so a second data directory never reads or replaces the first one's Gmail sign-in. Set `NETKEEPER_KEYCHAIN_SERVICE` to choose the service yourself; `netkeeper config show` prints the one in use. Chrome is not managed by launchd; the dashboard tells you when it is not reachable.
+Logs live under `<data_dir>/logs/`: `netkeeper.log` is the application log, rotated by size (Settings, Logs), and the agent's `serve.log` and `serve.err.log` hold stdout and stderr's warnings, errors and crashes. Status: `launchctl print gui/$UID/<label>`. Each data directory keeps its Gmail secrets under its own Keychain service: `netkeeper` for the default directory, and `netkeeper@<hash of the path>` for any other, so a second data directory never reads or replaces the first one's Gmail sign-in. Set `NETKEEPER_KEYCHAIN_SERVICE` to choose the service yourself; `netkeeper config show` prints the one in use. Chrome is not managed by launchd. To start it at login too, turn on **Start netkeeper's Chrome when netkeeper starts** in Settings: `serve` then starts it once it is listening, unless it is already running or a run holds the browser. The dashboard tells you when it isn't running, with a **Start Chrome** button.
 
 ## A plain note about LinkedIn's terms
 
