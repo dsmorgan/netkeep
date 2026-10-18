@@ -198,6 +198,10 @@ class _TargetBrowser(Protocol):
 #: reports it.
 BACKGROUND_TAB_WAIT_S: Final = 5.0
 BACKGROUND_TAB_POLL_S: Final = 0.05
+#: #195, #634: the URL :meth:`BrowserRun._open_tab` creates its tab on, and the only URL
+#: a new tab may have for the wait to open a session on it. A tab you open during the
+#: wait, such as the UI's or a Google page, is on another URL and is never read.
+RUN_TAB_URL: Final = "about:blank"
 
 
 #: The Network buffers the body tap's own session asks Chrome for (#200): one answer
@@ -2565,8 +2569,10 @@ class ContextLike(Protocol):
     a review failure (spec 9.1).
     """
 
-    #: The tabs open in this context, ours and the user's. Read-only: netkeeper
-    #: counts them and closes its own, never anyone else's.
+    #: The tabs open in this context, ours and the user's, the UI's and setup's
+    #: included (ADR 0012). Read-only: netkeeper counts them, reads only LinkedIn's,
+    #: and closes its own, never anyone else's. Every read is pinned in
+    #: ``tests/test_browser_safety.py`` (#634).
     @property
     def pages(self) -> Sequence[PageLike]: ...
 
@@ -4940,21 +4946,27 @@ class BrowserRun:
             ) from exc
 
     async def _open_tab(self) -> PageLike:
-        """Open this run's tab behind the tab you're on, without activating Chrome (#195).
+        """Open this run's tab in a window of its own, in the background, without
+        activating Chrome (#195, #632).
 
         ``context.new_page()`` sends ``Target.createTarget`` without ``background``,
         which opens a foreground tab, and on macOS Chrome then activates its window and
         takes keyboard focus from the app you're using. This sends it with
-        ``background: true`` instead, on a browser-level session, and never sends
-        ``Page.bringToFront`` or ``Target.activateTarget``. Navigating the tab later
+        ``newWindow: true`` and ``background: true`` instead, on a browser-level session,
+        and never sends ``Page.bringToFront`` or ``Target.activateTarget``. The new
+        window keeps the run's tab out of the windows you use, the UI's included
+        (ADR 0012), so :meth:`bring_tab_forward` raises the run's window and no other.
+        Closing the run's tab closes its window too, when it's that window's last tab;
+        netkeeper never closes a window itself. Navigating the tab later
         doesn't activate it either. The tab still renders, scrolls, and paginates:
         Playwright turns on focus emulation for every tab it attaches to, which keeps
         a background tab visible to its page.
 
         The tab is the run's because its target id matches the one Chrome answered,
-        read from each new tab's own ``Target.getTargetInfo``
-        (:meth:`_target_id`), never because it's the newest. A tab you open at the
-        same moment is left alone.
+        read from the new tab's own ``Target.getTargetInfo`` (:meth:`_target_id`),
+        never because it's the newest. Only a new tab still on :data:`RUN_TAB_URL` is
+        read (#634): a tab you open at the same moment, such as the UI's or a Google
+        page, gets no session and is left alone.
 
         When a background tab can't be opened while the browser is still there (a
         browser without the session, or one that never reports the tab), the run
@@ -4983,7 +4995,8 @@ class BrowserRun:
                 await cast(_TargetBrowser, browser).new_browser_cdp_session(),
             )
             created = await session.send(
-                "Target.createTarget", {"url": "about:blank", "background": True}
+                "Target.createTarget",
+                {"url": RUN_TAB_URL, "newWindow": True, "background": True},
             )
             target_id = str(created["targetId"])
             async with asyncio.timeout(BACKGROUND_TAB_WAIT_S):
@@ -4991,6 +5004,8 @@ class BrowserRun:
                     for page in context.pages:
                         if id(page) in before or page.is_closed():
                             continue
+                        if page.url != RUN_TAB_URL:
+                            continue  # not the run's tab: no session on it (#634)
                         found = await self._target_id(page)
                         if found is None:
                             continue  # not attached yet: asked again on the next pass

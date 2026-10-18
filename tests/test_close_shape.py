@@ -818,6 +818,24 @@ async def test_a_second_dialog_in_the_tab_is_counted() -> None:
     assert_untouched(site, [tab])
 
 
+async def test_the_bubble_check_ignores_the_ui_and_google_tabs() -> None:
+    """#634: netkeeper's Chrome holds the UI's window and setup tabs too (ADR 0012). A
+    UI tab, a Google tab, and a look-alike host, each holding the contact's bubble, are
+    never read; only the LinkedIn tab is."""
+    site = MessagingSite(PERSON)
+    others = [
+        _tab(site, _bubble(), url="http://127.0.0.1:8000/contacts/1"),
+        _tab(site, _bubble(), url="https://console.cloud.google.com/apis/credentials"),
+        _tab(site, _bubble(), url="https://www.linkedin.com.example.invalid/feed/"),
+        _tab(site, _bubble(), url="http://www.linkedin.com/feed/"),
+    ]
+    mine = _tab(site, _bubble())
+    found, _ = await bubble_check(site)
+    assert (found.tabs, found.on_origin, found.with_bubble, found.for_contact) == (5, 1, 1, 1)
+    assert all(tab.reads == 0 for tab in others)
+    assert_untouched(site, [*others, mine])
+
+
 def test_the_bubble_check_opens_only_linkedin_or_loopback() -> None:
     with pytest.raises(ValueError, match="never"):
         PageBubbleCheck(object(), origin="https://example.invalid")  # type: ignore[arg-type]

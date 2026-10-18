@@ -1,10 +1,15 @@
-"""#195: a run opens its tab in the background and never takes focus on its own.
+"""#195, #632, #634: a run opens its tab in a window of its own, in the background, never
+takes focus on its own, and touches no tab but its own.
 
 ``context.new_page()`` opens a foreground tab, and Chrome on macOS then activates its
 window, taking keyboard focus from whatever app you're using. ``BrowserRun._open_tab``
 asks Chrome for a background tab instead (``Target.createTarget`` with
 ``background: true``) and finds it by its target id. Only a prefill or an auto-send
 brings its tab forward, once, at its start (ADR 0007, ADR 0008).
+
+netkeeper's Chrome also holds the UI's window and setup tabs (ADR 0012). So the run's
+tab opens in its own window (``newWindow: true``, #632), and the wait for it opens a
+session only on a new tab still on ``about:blank``, never on a UI or Google tab (#634).
 
 These run against fakes of the CDP calls; ``tests/test_browser_safety.py`` pins which
 methods each site may send.
@@ -26,6 +31,12 @@ from netkeeper.linkedin.browser import ActivityLocks, AttachBrowserProvider, Bro
 CDP_URL = "http://127.0.0.1:9222"
 LOCAL_PAGE = "http://127.0.0.1:8123/replica/list.html"
 FOCUS_METHODS = {"Page.bringToFront", "Target.activateTarget"}
+#: What ``Target.createTarget`` asks for, and nothing else (#195, #632).
+CREATE_PARAMS = {"url": "about:blank", "newWindow": True, "background": True}
+#: Tabs that share netkeeper's Chrome with runs (ADR 0012): the UI's app window, and a
+#: Google page the Gmail setup opened. Invented loopback and Google URLs, never visited.
+UI_TAB = "http://127.0.0.1:8000/contacts"
+GOOGLE_TAB = "https://console.cloud.google.com/apis/credentials"
 
 
 class CdpPage(FakePage):
@@ -74,9 +85,11 @@ class CdpContext(FakeContext):
         self.page_sessions: list[PageSession] = []
         self.ids = 0
 
-    def add_tab(self, target_id: str | None = None) -> CdpPage:
+    def add_tab(self, target_id: str | None = None, *, url: str | None = None) -> CdpPage:
         self.ids += 1
         tab = CdpPage(self, target_id or f"TARGET-{self.ids}")
+        if url is not None:
+            tab._url = url
         self.pages.append(tab)
         return tab
 
@@ -89,7 +102,8 @@ class CdpContext(FakeContext):
 
 class BrowserSession:
     """A browser-level CDP session. ``Target.createTarget`` adds the tab to the context
-    (after ``user_tab_first``, a tab the person opened at the same moment), unless
+    (after ``user_tab_first``, a tab the person opened at the same moment, and after a
+    tab on each of ``others_first``, tabs the person opened on those URLs), unless
     ``never_reports`` is set: then Chrome answers but the tab never shows up as a page.
     """
 
@@ -108,6 +122,8 @@ class BrowserSession:
                 raise owner.create_error
             if owner.user_tab_first:
                 context.add_tab("USER-TAB")
+            for url in owner.others_first:
+                context.add_tab(f"OTHER-{url}", url=url)
             context.ids += 1
             target_id = f"CREATED-{context.ids}"
             if not owner.never_reports:
@@ -138,8 +154,10 @@ class CdpBrowser(FakeBrowser):
         create_error: Exception | None = None,
         create_disconnects: bool = True,
         unreadable_reads: int = 0,
+        others_first: tuple[str, ...] = (),
     ) -> None:
         self.cdp_context = context if context is not None else CdpContext()
+        self.others_first = others_first
         super().__init__([self.cdp_context])
         self.user_tab_first = user_tab_first
         self.never_reports = never_reports
@@ -176,7 +194,7 @@ async def test_a_run_opens_its_tab_in_the_background() -> None:
         assert isinstance(page, CdpPage)
         assert page.goto_calls == [LOCAL_PAGE]
         assert page.fronted == 0
-    assert chrome.calls == [("Target.createTarget", {"url": "about:blank", "background": True})]
+    assert chrome.calls == [("Target.createTarget", CREATE_PARAMS)]
     assert context.new_page_calls == 0
     assert not FOCUS_METHODS & set(methods(chrome))
     assert all(session.detached for session in chrome.sessions)
@@ -221,7 +239,7 @@ async def test_a_reopened_tab_opens_in_the_background_too() -> None:
         assert second is not first
         assert isinstance(second, CdpPage) and second.goto_calls == [LOCAL_PAGE]
     assert [m for m, _ in chrome.calls] == ["Target.createTarget", "Target.createTarget"]
-    assert all(params["background"] is True for _, params in chrome.calls)
+    assert all(params == CREATE_PARAMS for _, params in chrome.calls)
     assert context.new_page_calls == 0
 
 
@@ -343,7 +361,7 @@ async def test_a_cancel_between_create_and_match_closes_the_created_tab() -> Non
     with pytest.raises(asyncio.CancelledError):
         await task
     assert chrome.calls == [
-        ("Target.createTarget", {"url": "about:blank", "background": True}),
+        ("Target.createTarget", CREATE_PARAMS),
         ("Target.closeTarget", {"targetId": "CREATED-2"}),
     ]
     assert context.new_page_calls == 0
@@ -382,7 +400,7 @@ async def test_losing_the_browser_while_opening_the_tab_spends_the_reattach() ->
         assert isinstance(page, CdpPage) and page.context is back.cdp_context
     assert connector.attaches == 2
     assert gone.cdp_context.new_page_calls == 0
-    assert back.calls == [("Target.createTarget", {"url": "about:blank", "background": True})]
+    assert back.calls == [("Target.createTarget", CREATE_PARAMS)]
 
 
 async def test_the_second_lost_browser_while_opening_ends_the_run() -> None:
@@ -406,3 +424,84 @@ async def test_a_fallback_that_cannot_open_a_tab_either_is_not_flagged() -> None
         with pytest.raises(RuntimeError, match="no tab"):
             await run._open_tab()
         assert not run.opened_in_front
+
+
+# --- #632: the run's own window ---------------------------------------------------------
+
+
+async def test_a_run_opens_its_tab_in_a_window_of_its_own() -> None:
+    """#632: ``Target.createTarget`` asks for a new window, in the background, and
+    nothing else, so the run's tab never lands among the UI's tabs or yours, and
+    opening it activates no window."""
+    chrome = CdpBrowser()
+    async with provider_for(chrome).run() as run:
+        await run.goto(LOCAL_PAGE)
+    [(method, params)] = chrome.calls
+    assert method == "Target.createTarget"
+    assert params == {"url": "about:blank", "newWindow": True, "background": True}
+    assert not FOCUS_METHODS & set(methods(chrome))
+
+
+# --- #634: the run touches only its own tab --------------------------------------------
+
+
+def _other_tabs(context: CdpContext) -> list[CdpPage]:
+    return [
+        tab
+        for tab in context.pages
+        if isinstance(tab, CdpPage) and not tab.target_id.startswith("CREATED-")
+    ]
+
+
+def assert_untouched(context: CdpContext, tabs: list[CdpPage]) -> None:
+    assert tabs
+    for tab in tabs:
+        assert [s for s in context.page_sessions if s._page is tab] == [], tab.url
+        assert tab.goto_calls == [] and tab.close_calls == 0 and tab.fronted == 0
+        assert not tab.is_closed()
+
+
+async def test_a_ui_or_google_tab_opened_during_the_wait_gets_no_session() -> None:
+    """#634: a UI tab and a Google tab that appear while the run waits for its own are
+    never attached to: the wait opens a session only on a new tab still on
+    ``about:blank``, and claims it only by target id."""
+    chrome = CdpBrowser(others_first=(UI_TAB, GOOGLE_TAB))
+    context = chrome.cdp_context
+    async with provider_for(chrome).run() as run:
+        page = await run.goto(LOCAL_PAGE)
+        assert isinstance(page, CdpPage) and page.target_id.startswith("CREATED-")
+    assert_untouched(context, _other_tabs(context))
+    assert len(context.page_sessions) == 1 and context.page_sessions[0]._page is page
+    assert not run.opened_in_front
+
+
+async def test_a_wait_with_only_other_tabs_closes_its_own_and_reads_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When Chrome never reports the run's tab, the UI and Google tabs that did appear
+    still get no session, and the fallback closes only the created target."""
+    monkeypatch.setattr(browser, "BACKGROUND_TAB_WAIT_S", 0.05)
+    monkeypatch.setattr(browser, "BACKGROUND_TAB_POLL_S", 0.01)
+    chrome = CdpBrowser(never_reports=True, others_first=(UI_TAB, GOOGLE_TAB))
+    context = chrome.cdp_context
+    async with provider_for(chrome).run() as run:
+        await run.goto(LOCAL_PAGE)
+    assert context.page_sessions == []
+    assert chrome.calls[1] == ("Target.closeTarget", {"targetId": "CREATED-3"})
+    assert_untouched(context, _other_tabs(context))
+
+
+async def test_bringing_forward_and_closing_act_only_on_the_runs_tab() -> None:
+    """#634: with the UI's tab and a Google tab open beside it, a run brings forward and
+    closes its own tab and no other."""
+    context = CdpContext()
+    context.add_tab("UI", url=UI_TAB)
+    chrome = CdpBrowser(context, others_first=(GOOGLE_TAB,))
+    async with provider_for(chrome).run() as run:
+        page = await run.ensure_page()
+        await run.bring_tab_forward()
+        assert isinstance(page, CdpPage) and page.fronted == 1
+    assert page.close_calls == 1
+    others = _other_tabs(context)
+    assert {tab.url for tab in others} == {UI_TAB, GOOGLE_TAB}
+    assert_untouched(context, others)
