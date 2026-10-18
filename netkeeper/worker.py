@@ -794,7 +794,8 @@ async def launcher_probe(
     A Chrome that can't be reached within ``timeout_s`` is no pid, which the launcher
     refuses. A held lock is ``busy``, and nothing connects: a run is attached, and a
     second CDP client would drop its connection (spec 9.9). Then ``verified_pid`` is the
-    Chrome pid that run's attach verified, from the lock's holder note.
+    Chrome pid that run's attach verified, from the holder note of ``account``'s own
+    lock, read only while that lock is held.
     """
     chosen = PlaywrightCdpConnector() if connector is None else connector
     try:
@@ -809,6 +810,10 @@ async def launcher_probe(
             finally:
                 await connection.detach()
     except BrowserBusy:
+        # Only the account's own lock's note, and only while it's held: a busy legacy
+        # lock, or a note a crash left on a free lock, verifies nothing.
+        if not activity_lock.inspect(account, locks.directory).held:
+            return PortProbe(busy=True)
         holder = activity_lock.read_holder(account, locks.directory)
         return PortProbe(busy=True, verified_pid=None if holder is None else holder.browser_pid)
 
