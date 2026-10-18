@@ -385,8 +385,15 @@ async def test_a_busy_legacy_lock_never_trusts_a_note_left_on_the_free_account_l
     assert probe == PortProbe(busy=True, verified_pid=None)
 
 
-def test_netkeeper_open_exits_0_for_an_unconfirmed_hand_off(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.mark.parametrize(
+    ("exits", "code", "words"),
+    [
+        (3, 0, "can't confirm the window opened"),
+        (21, 1, "Chrome refused the hand-off: the profile is in use"),
+    ],
+)
+def test_netkeeper_open_exits_by_what_the_hand_off_showed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, exits: int, code: int, words: str
 ) -> None:
     chrome = os.getpid()
     profile = data_dir() / "chrome-profile"
@@ -396,11 +403,11 @@ def test_netkeeper_open_exits_0_for_an_unconfirmed_hand_off(
     async def probe(url: str, **_: object) -> PortProbe:
         return PortProbe(busy=False, browser_pid=chrome)
 
-    spawned = _Spawned(exits=21)
+    spawned = _Spawned(exits=exits)
     monkeypatch.setattr(chrome_spawn, "spawn_chrome", spawned)
     monkeypatch.setattr(chrome_spawn, "port_answers", lambda port: True)
     monkeypatch.setattr(cli_module, "launcher_probe", probe)
     result = CliRunner().invoke(cli, [*_config(tmp_path), "open"])
-    assert result.exit_code == 0, result.output
-    assert "can't confirm the window opened" in result.output
+    assert result.exit_code == code, result.output
+    assert words in result.output
     assert re.findall(r"http://\S+/api/v1/session/connect\S+", result.output)

@@ -2349,7 +2349,8 @@ class BrowserStartAccepted(BaseModel):
     """The ``202`` of ``POST /linkedin/browser/start``: the task running the launch.
 
     How it went arrives on ``GET /events`` as ``browser.launch`` with the same
-    ``task_id``: ``status`` (``started``, ``handed_off``, ``refused`` or ``failed``),
+    ``task_id``: ``status`` (``started``, ``handed_off``, ``handoff_unconfirmed``,
+    ``refused`` or ``failed``),
     ``refusal`` (which check refused, or null), ``message`` and ``pid``.
     """
 
