@@ -15,7 +15,7 @@ A key can't stop a process running as you. That process can read the database fi
 ## Options
 
 - **a. Put the key in `index.html`.** Any local program can read it there, so it only stops cross-site pages, which are already stopped.
-- **b. A one-time link exchanged for a cookie.** Whatever opens the UI (`netkeeper open`, or the launchers in #549 and #599) puts a short-lived, single-use code in the URL. The server swaps the code for an `HttpOnly`, `SameSite=Strict` cookie. The browser sends it on every request, including the event stream and downloads, which can't carry custom headers.
+- **b. A one-time link exchanged for a cookie.** Whatever opens the UI (`netkeeper open`, or ADR 0012's launcher) puts a short-lived, single-use code in the URL. The server swaps the code for an `HttpOnly`, `SameSite=Strict` cookie. The browser sends it on every request, including the event stream and downloads, which can't carry custom headers.
 - **c. Unix-socket peer credentials.** Browsers can't use a socket.
 
 ## Decision
@@ -35,7 +35,7 @@ The mechanics are in [architecture.md, section 14.2](../architecture.md#142-loca
 ## Consequences
 
 - **What you notice:** nothing. After the upgrade, your browser connects itself on its first load. A second browser or cleared cookies show the connect page once.
-- **#549 and #599:** the launchers open `local_api_key.connect_url()` instead of the bare URL, so every window they open is connected. Then the connect page can offer a one-click **Open netkeeper**.
+- **ADR 0012's launcher (#636, #549, #599):** its `--app=` URL is `local_api_key.connect_url()`, so every window it opens is connected. Then the connect page can offer a one-click **Open netkeeper**.
 - **Dev mode:** the Vite proxy forwards `/api`, connect link included, so `pnpm dev` works the same way.
 - **Keep true:** no response carries the key, and no page script can read the cookie. A path joins the open list only when it reads no data and changes nothing, or when it carries its own one-time proof.
 - **Follow-up:** rotating the key, which disconnects every browser, isn't built yet.
