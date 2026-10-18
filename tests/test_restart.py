@@ -15,6 +15,7 @@ import httpx
 import pytest
 import uvicorn
 from fastapi import FastAPI
+from local_api import LocalKey
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
@@ -474,7 +475,9 @@ async def test_a_real_server_stops_on_restart_with_an_event_stream_open(
     with pytest.raises(serve_lock.ServeRunning):
         serve_lock.claim()  # serve holds it while it runs
     async with (
-        httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}", timeout=10) as client,
+        httpx.AsyncClient(
+            base_url=f"http://127.0.0.1:{port}", timeout=10, auth=LocalKey(served)
+        ) as client,
         client.stream("GET", "/api/v1/events") as stream,
     ):
         assert stream.status_code == 200
