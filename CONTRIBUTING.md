@@ -61,6 +61,44 @@ test's profile to that directory. Without it, the suite skips and names the vari
 `_no_real_browser`); a test that genuinely needs one opts out with
 `@pytest.mark.real_cdp`.
 
+## Releasing
+
+Releases are for the maintainer. `.github/workflows/release.yml` publishes them from CI
+([ADR 0011](docs/adr/0011-installation-and-updates.md), rules 1, 2 and 4): nobody
+uploads to PyPI by hand, and no PyPI token exists.
+
+**One-time setup.**
+
+1. On PyPI, under **Your account > Publishing > Add a new pending publisher** (or the
+   `netkeep` project's **Publishing** page once it exists), add a GitHub publisher:
+   PyPI project name `netkeep`, owner `dsmorgan`, repository `netkeep`, workflow
+   `release.yml`, environment `release`.
+2. In the repository's **Settings > Environments**, create `release`. Turn on
+   **Required reviewers** and add yourself, turn on **Prevent self-review** only if a
+   second maintainer exists, and under **Deployment branches and tags** allow only tags
+   matching `v*`.
+3. In **Settings > General > Releases**, turn on **Enable release immutability**, so a
+   published release's files and tag can't change.
+4. In **Settings > Rules > Rulesets**, add a tag ruleset for `v*` that restricts
+   creation, update and deletion to the maintainer.
+
+**Each release.**
+
+1. On a branch, set the version in `pyproject.toml` and `netkeep/__init__.py`, run
+   `uv lock`, and run `.venv/bin/python -m towncrier build --version X.Y.Z`. Merge the
+   pull request.
+2. Optional: **Actions > Release > Run workflow** on `main` for a dry run. It builds,
+   checks and installs everything on both Mac architectures, and publishes nothing.
+3. Tag the merged commit on `main` and push the tag:
+   `git tag -a vX.Y.Z -m "netkeep X.Y.Z" <commit>`, then `git push origin vX.Y.Z`.
+4. In the run, approve the `release` deployment. The workflow publishes to PyPI, then
+   creates the GitHub release with the wheel, the sdist, `constraints.txt` and
+   `SHA256SUMS`.
+
+The workflow refuses a tag that isn't `vX.Y.Z` for the package's version, a commit that
+isn't on `main`, and a version that already has a release. A version is never
+republished: if something is wrong after publishing, release the next patch version.
+
 ## AI-assisted contributions
 
 Contributions written with AI tools are welcome. You are the author: review what you submit, make sure it follows the spec and the ADRs, and be ready to explain it in review. A pull request the submitter cannot explain will be closed.
