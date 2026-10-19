@@ -159,7 +159,7 @@ if [ -z "$port" ] || [ -z "$profile" ]; then
     # A failure stops here with netkeep's own message (#661): guessing the defaults
     # could start Chrome on a new, empty profile, for example while the data folder
     # still waits for its one-time move to netkeep's name.
-    err_file="${TMPDIR:-/tmp}/netkeep-chrome.$$.err"
+    err_file=$(mktemp "${TMPDIR:-/tmp}/netkeep-chrome.XXXXXX") || die "mktemp failed"
     status=0
     if [ -n "$data_dir" ]; then
       answer=$(NETKEEP_DATA="$data_dir" "$netkeep_bin" browser launch --json 2>"$err_file") || status=$?
@@ -213,6 +213,15 @@ esac
 # One spelling of the profile, however it was given. Chrome gets this
 # spelling, and every check compares against it.
 profile=$(canonicalize "$profile")
+
+# Never a profile in the new default folder while the old one still waits for its
+# one-time move (#661): that would start a signed-out Chrome and leave two folders.
+old_default="$HOME/Library/Application Support/netkeeper"
+new_default=$(canonicalize "$HOME/Library/Application Support/netkeep")
+if [ -d "$old_default" ] && [ ! -e "$new_default/migrated-from-netkeeper.json" ] \
+  && [ "$(canonicalize "$(dirname "$profile")")" = "$new_default" ]; then
+  die "netkeeper's data in $old_default hasn't moved to $new_default yet; run netkeep migrate first"
+fi
 
 # --- what is running ------------------------------------------------------------
 

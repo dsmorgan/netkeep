@@ -746,6 +746,7 @@ def test_chrome_script_resolves_an_env_dash_s_shebang_entry_point(tmp_path: Path
         "grep",
         "sh",
         "head",
+        "mktemp",
     ):
         found = shutil.which(tool)
         if found:
@@ -819,6 +820,7 @@ def test_chrome_script_warns_when_no_python_can_parse_a_sh_shim_answer(tmp_path:
         "kill",
         "grep",
         "head",
+        "mktemp",
     ):
         found = shutil.which(tool)
         if found:
@@ -829,6 +831,42 @@ def test_chrome_script_warns_when_no_python_can_parse_a_sh_shim_answer(tmp_path:
     # With no profile named, it never guesses the default data folder (#661).
     assert result.returncode == 1
     assert "pass --profile or --data-dir" in result.stderr
+
+
+def test_chrome_script_never_uses_the_new_default_before_the_move(tmp_path: Path) -> None:
+    """A profile in .../netkeep while .../netkeeper waits to move is refused (#661),
+    whoever named it: --data-dir, NETKEEP_DATA, or a netkeep that answered so."""
+    script = isolated_chrome_script(tmp_path)
+    home = tmp_path / "home"
+    support = home / "Library" / "Application Support"
+    (support / "netkeeper").mkdir(parents=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_netkeep_cli(
+        bin_dir / "netkeep", port=free_port(), profile=support / "netkeep" / "chrome-profile"
+    )
+    path = f"{bin_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
+    result = run_sh(
+        script,
+        "--dry-run",
+        "--port",
+        str(free_port()),
+        env={"PATH": path, "HOME": str(home), "NETKEEP_DATA": str(support / "netkeep")},
+    )
+    assert result.returncode == 1
+    assert "run netkeep migrate first" in result.stderr
+    assert not (support / "netkeep").exists()
+    # After the move (the marker there), the same profile is fine.
+    (support / "netkeep").mkdir()
+    (support / "netkeep" / "migrated-from-netkeeper.json").write_text("{}")
+    again = run_sh(
+        script,
+        "--dry-run",
+        "--port",
+        str(free_port()),
+        env={"PATH": path, "HOME": str(home), "NETKEEP_DATA": str(support / "netkeep")},
+    )
+    assert "run netkeep migrate first" not in again.stderr
 
 
 def test_chrome_script_stops_with_netkeeps_message_and_creates_no_folder(tmp_path: Path) -> None:

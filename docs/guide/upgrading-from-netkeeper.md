@@ -18,7 +18,7 @@ The GitHub repository keeps its old address for now, and GitHub redirects it aft
 | Log file | `logs/netkeeper.log` | `logs/netkeep.log` | New records go to the new file. Old files stay in `logs/`. |
 | Backups | `backups/netkeeper-<time>.sqlite3` | `backups/netkeep-<time>.sqlite3` | Old backups still list, restore and prune. |
 
-Only the default data directory moves, and only the default one migrates by itself. If you set `NETKEEP_DATA` (or `NETKEEPER_DATA`) to another folder, it stays where it is, and nothing happens until you run `netkeep migrate` with that variable set: then its Keychain items and login item move to the new names.
+Only the default data directory moves, and only the default one migrates by itself. A `NETKEEP_DATA` that names the old or the new default folder, however it's spelled, counts as the default. If you set `NETKEEP_DATA` (or `NETKEEPER_DATA`) to another folder, it stays where it is, and nothing happens until you run `netkeep migrate` with that variable set: then its Keychain items and login item move to the new names.
 
 The new login item keeps the old one's settings: a `NETKEEPER_CONFIG` or `NETKEEPER_KEYCHAIN_SERVICE` in the old plist becomes `NETKEEP_CONFIG` or `NETKEEP_KEYCHAIN_SERVICE` in the new one, with a path inside the old folder pointed at the new folder. A config in your checkout stays the one it reads.
 

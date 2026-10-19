@@ -169,11 +169,15 @@ def try_claim(account: str, directory: Path | None = None) -> Claim | None:
     return try_claim_at(lock_path(account, directory), account)
 
 
-def try_claim_at(path: Path, account: str) -> Claim | None:
+def try_claim_at(path: Path, account: str, *, create_parents: bool = True) -> Claim | None:
     """:func:`try_claim` on the lock file at ``path``, for a lock that is not an account's
-    (``netkeep serve``'s, :mod:`netkeep.services.serve_lock`). ``account`` names it."""
+    (``netkeep serve``'s, :mod:`netkeep.services.serve_lock`). ``account`` names it.
+
+    ``create_parents=False`` creates only the lock file's own folder, never one above it,
+    and raises :class:`FileNotFoundError` when that is missing (the rename's migration,
+    #661, which must never recreate a folder another process just moved)."""
     for _ in range(_REOPEN_ATTEMPTS):
-        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        path.parent.mkdir(mode=0o700, parents=create_parents, exist_ok=True)
         fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)

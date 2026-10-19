@@ -832,3 +832,112 @@ def test_copying_a_secret_never_overwrites_the_new_one(memory_keyring: MemoryKey
     keyring.set_password("netkeeper", "1/gmail/oauth_client", "c")
     assert keychain.copy_secret("1/gmail/oauth_client", source="netkeeper", target="netkeep")
     assert keyring.get_password("netkeep", "1/gmail/oauth_client") == "c"
+
+
+# -- the re-review's follow-ups --------------------------------------------------------
+
+
+@pytest.mark.parametrize("spelling", ["exact", "tilde", "dotted"])
+def test_naming_the_new_default_still_moves_the_old_folder(
+    old: Path,
+    new: Path,
+    factory: migrate_name.LoginItemFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    spelling: str,
+) -> None:
+    """``NETKEEP_DATA`` set to .../netkeep before the move is the default, not a custom
+    folder: the move is checked and done, never skipped onto an empty folder."""
+    make_netkeeper_install(old)
+    named = {
+        "exact": str(new),
+        "tilde": "~/Library/Application Support/netkeep",
+        "dotted": str(new.parent / "." / "netkeep"),
+    }[spelling]
+    monkeypatch.setenv("NETKEEP_DATA", named)
+    assert migrate_name.needed()
+    planned = migrate_name.plan(macos=True, login_factory=factory)
+    assert planned.move_from == old
+    assert planned.data == new
+    migrate_name.apply(planned, login_factory=factory)
+    assert new.is_dir() and not old.exists()
+
+
+def test_naming_the_new_default_while_both_exist_is_refused(
+    old: Path, new: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    make_netkeeper_install(old)
+    new.mkdir()
+    monkeypatch.setenv("NETKEEP_DATA", str(new))
+    with pytest.raises(Refused, match="both"):
+        migrate_name.auto("serve")
+
+
+def test_a_migration_that_loses_the_race_never_recreates_the_old_folder(
+    old: Path, new: Path, factory: migrate_name.LoginItemFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Another migration's rename lands between the folder check and the lock claim."""
+    make_netkeeper_install(old)
+    (old / "locks").rmdir()
+    planned = migrate_name.plan(macos=True, login_factory=factory)
+    real_claim = activity_lock.try_claim_at
+
+    def winner_moves_it_first(path: Path, account: str, **kwargs: bool) -> object:
+        old.rename(new)  # the other migration wins
+        return real_claim(path, account, **kwargs)
+
+    monkeypatch.setattr(activity_lock, "try_claim_at", winner_moves_it_first)
+    with pytest.raises(Refused, match="moved while netkeep was migrating"):
+        migrate_name.apply(planned, login_factory=factory)
+    assert not old.exists()  # not even an empty folder holding a lock file
+    assert new.is_dir()
+
+
+def test_the_new_agent_starts_before_the_old_job_stops(
+    agents: Path, launchctl: FakeLaunchctl, new: Path
+) -> None:
+    """Under real launchd, booting out the old job ends this process: the new agent
+    must already be bootstrapped by then."""
+    item = login_factory_for(launchctl, agents, {"XPC_SERVICE_NAME": OLD_LABEL})(new)
+    agents.mkdir(exist_ok=True)
+    item.plist_path.write_bytes(plistlib.dumps({"Label": NEW_LABEL}))
+    launchctl.loaded.add(OLD_LABEL)
+    assert item.replace_old_job() is not None
+    calls = launchctl.calls
+    bootstrap = next(i for i, c in enumerate(calls) if c[0] == "bootstrap")
+    bootout = next(i for i, c in enumerate(calls) if c[0] == "bootout")
+    assert calls[bootstrap][-1] == str(item.plist_path)
+    assert calls[bootout][-1].endswith(f"/{OLD_LABEL}")
+    assert bootstrap < bootout
+    assert launchctl.loaded == {NEW_LABEL}
+
+
+def test_a_failed_bootstrap_never_stops_the_old_job(
+    agents: Path, launchctl: FakeLaunchctl, new: Path
+) -> None:
+    from netkeep.services.login_item import LoginItemError
+
+    item = login_factory_for(launchctl, agents, {"XPC_SERVICE_NAME": OLD_LABEL})(new)
+    item.plist_path.write_bytes(plistlib.dumps({"Label": NEW_LABEL}))
+    launchctl.loaded.add(OLD_LABEL)
+    launchctl.fail = "bootstrap"
+    with pytest.raises(LoginItemError):
+        item.replace_old_job()
+    assert "bootout" not in launchctl.verbs()
+    assert OLD_LABEL in launchctl.loaded
+
+
+def test_a_retry_skips_while_a_serve_holds_the_lock(
+    new: Path, memory_keyring: MemoryKeyring
+) -> None:
+    """The new folder without its marker (a Keychain step left for later) and a serve
+    running: a command started meanwhile neither refuses nor touches the Keychain."""
+    new.mkdir()
+    serve = activity_lock.try_claim_at(new / "locks" / SERVE_LOCK_FILENAME, "serve")
+    assert serve is not None
+    memory_keyring.broken = True
+    try:
+        assert migrate_name.needed()
+        assert migrate_name.auto("status").lines == []
+    finally:
+        serve.release()
+    assert not (new / MARKER_FILENAME).exists()
