@@ -183,3 +183,44 @@ async def test_the_smoke_tests_raw_connects_are_refused_before_any_socket(
     with pytest.raises(RealBrowserBlocked, match="isolated Chrome"):
         await prefill._inspect("http://127.0.0.1:1", prefill.SCENARIOS["existing"])
     assert spies == {"playwright": [], "socket": []}
+
+
+# --- #675 review: no socket reaches a live local port --------------------------------------
+
+
+@pytest.mark.parametrize(
+    "address", [("127.0.0.1", 9222), ("localhost", 9222), ("::1", 9222), ("127.0.0.1", 8000)]
+)
+def test_no_socket_connects_to_a_live_local_port(address: tuple[str, int]) -> None:
+    family = socket.AF_INET6 if ":" in address[0] else socket.AF_INET
+    with socket.socket(family) as sock, pytest.raises(RealBrowserBlocked, match="live service"):
+        sock.connect(address)
+    with socket.socket(family) as sock, pytest.raises(RealBrowserBlocked, match="live service"):
+        sock.connect_ex(address)
+
+
+async def test_the_launchers_real_probe_on_the_default_url_is_refused(
+    tmp_path: Any, spies: dict[str, list[Any]]
+) -> None:
+    """The probe's default reader (#675) is guarded like the connector."""
+    from netkeeper.linkedin.browser import ActivityLocks
+    from netkeeper.worker import launcher_probe
+
+    with pytest.raises(RealBrowserBlocked, match=r"127\.0\.0\.1:9222"):
+        await launcher_probe(
+            DEFAULT_CDP_URL,
+            locks=ActivityLocks(tmp_path),
+            account=activity_lock.SINGLE_ACCOUNT_KEY,
+        )
+    assert spies == {"playwright": [], "socket": []}
+
+
+@pytest.mark.real_cdp
+async def test_opting_out_still_never_reads_the_pid_on_port_9222(
+    spies: dict[str, list[Any]],
+) -> None:
+    from netkeeper.linkedin.browser import CdpIdentityReader
+
+    with pytest.raises(RealBrowserBlocked, match="isolated Chrome"):
+        await CdpIdentityReader().read_pid(DEFAULT_CDP_URL)
+    assert spies == {"playwright": [], "socket": []}

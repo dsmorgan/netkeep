@@ -6,7 +6,7 @@ import factories
 import httpx
 import keyring
 import pytest
-from browser_guard import RealBrowserBlocked, is_personal_cdp
+from browser_guard import RealBrowserBlocked, is_personal_cdp, refuse_live_port
 from fastapi import FastAPI
 from gmail_fakes import FakeGoogle, MemoryKeyring
 from local_api import LocalKey
@@ -89,6 +89,28 @@ def _close_log_file() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def _no_live_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test's socket connects to port 9222 or 8000, on any host, whatever the code
+    under test does (#675 review: a mutant reader reached 9222). Raised before the
+    connect, as a :class:`RealBrowserBlocked`, so nothing catches it as a failed attach."""
+    import socket
+
+    real_connect = socket.socket.connect
+    real_connect_ex = socket.socket.connect_ex
+
+    def connect(self: socket.socket, address: object) -> None:
+        refuse_live_port(address)
+        real_connect(self, address)  # type: ignore[arg-type]
+
+    def connect_ex(self: socket.socket, address: object) -> int:
+        refuse_live_port(address)
+        return real_connect_ex(self, address)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(socket.socket, "connect", connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", connect_ex)
+
+
+@pytest.fixture(autouse=True)
 def _no_real_browser(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """No test reaches a real Chrome unless it opts out, and none ever reaches port 9222.
 
@@ -98,7 +120,8 @@ def _no_real_browser(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyP
     :class:`RealBrowserBlocked` before Playwright starts -- the CDP socket is opened
     by Playwright's driver process, where a Python socket spy could not see it.
     ``playwright.async_api.async_playwright`` is blocked too, for any route that
-    skips the connector.
+    skips the connector. The launcher probe's ``CdpIdentityReader.read_pid`` (#675),
+    which opens its own websocket, is guarded the same way.
 
     A test that must drive a real, isolated Chrome (the opt-in smoke suite under
     ``tests/smoke/``) opts out with ``@pytest.mark.real_cdp``. Even then the connector
@@ -124,6 +147,25 @@ def _no_real_browser(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyP
         return await real_connect(self, cdp_url)  # type: ignore[arg-type]
 
     monkeypatch.setattr(browser.PlaywrightCdpConnector, "connect", guarded_connect)
+
+    # #675: the launcher's probe reads the pid over its own websocket, not Playwright,
+    # so its reader is guarded the same way.
+    real_read_pid = browser.CdpIdentityReader.read_pid
+
+    async def guarded_read_pid(self: object, cdp_url: str) -> int | None:
+        if not opted_out:
+            raise RealBrowserBlocked(
+                f"a test tried to read the pid of a real Chrome at {cdp_url}. Give"
+                " launcher_probe a fake reader"
+            )
+        if is_personal_cdp(cdp_url):
+            raise RealBrowserBlocked(
+                f"a real_cdp test tried to read the pid of {cdp_url}, a personal Chrome's"
+                " debug port. Set NETKEEPER_CDP_URL to an isolated Chrome on another port"
+            )
+        return await real_read_pid(self, cdp_url)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(browser.CdpIdentityReader, "read_pid", guarded_read_pid)
     if not opted_out:
         import playwright.async_api
 

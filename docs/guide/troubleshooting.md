@@ -22,6 +22,7 @@ Still stuck? Open an issue with a support bundle and screenshots: see [Reporting
 | What you see | What to do |
 |---|---|
 | "Chrome was not reachable or went away mid-run" | Start netkeeper's Chrome: **Start Chrome** on the dashboard or the **LinkedIn** page, `netkeeper open`, `make chrome`, or the command `netkeeper browser launch` prints. Then `netkeeper preflight`. |
+| You closed netkeeper's window, and Chrome is still running (on macOS) | On macOS, closing Chrome's last window leaves Chrome running, with no windows. Run `netkeeper open` (or **Start Chrome**) to reopen the window in that same Chrome. A run that starts while it has no windows stops with "Chrome was not reachable", and its detail says "it has no windows open": reopen the window, then run it again. |
 | **Start Chrome**: "Another Chrome is using netkeeper's debug port" | A Chrome that isn't netkeeper's answers on the debug address, so netkeeper started nothing. Quit that Chrome, or change **Chrome debug address** in Settings, under **LinkedIn runs**, then try again. |
 | **Start Chrome**: "A Chrome has netkeeper's profile open without the debug port" | netkeeper's profile is open in a Chrome started without the port, so runs couldn't attach to it. Quit that Chrome, then try again. If no Chrome is running, a crash left the profile's lock behind: `make chrome` clears it. |
 | **Start Chrome** is disabled: "A run is using the browser" | A run holds the browser. Try again when it ends. |

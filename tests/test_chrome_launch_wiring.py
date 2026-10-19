@@ -27,7 +27,7 @@ from netkeeper.cli import app as cli
 from netkeeper.config import Settings
 from netkeeper.db import session_scope
 from netkeeper.linkedin import activity_lock
-from netkeeper.linkedin.browser import ActivityLocks, AttachBrowserProvider, BrowserUnavailable
+from netkeeper.linkedin.browser import ActivityLocks, AttachBrowserProvider
 from netkeeper.models import UserKind
 from netkeeper.paths import data_dir
 from netkeeper.services import runs
@@ -60,23 +60,36 @@ def test_any_browser_lock_held_sees_every_accounts_lock(tmp_path: Path) -> None:
     assert not runs.any_browser_lock_held(tmp_path)  # the file stays; nobody holds it
 
 
-# --- the probe: the attach's connector, under the lock --------------------------------------
+# --- the probe: one pid read, under the lock -----------------------------------------------
 
 
-async def test_the_probe_reads_the_pid_and_detaches(tmp_path: Path) -> None:
-    connector = FakeConnector(browser_pid=4242)
+@dataclass
+class _FakeReader:
+    """Stands in for ``CdpIdentityReader``: the pid the Chrome on the port names."""
+
+    pid: int | None = 4242
+    calls: list[str] = field(default_factory=list)
+
+    async def read_pid(self, cdp_url: str) -> int | None:
+        self.calls.append(cdp_url)
+        return self.pid
+
+
+async def test_the_probe_reads_the_pid(tmp_path: Path) -> None:
+    reader = _FakeReader(pid=4242)
     locks = ActivityLocks(tmp_path)
     probe = await launcher_probe(
-        CDP_URL, locks=locks, account=activity_lock.SINGLE_ACCOUNT_KEY, connector=connector
+        CDP_URL, locks=locks, account=activity_lock.SINGLE_ACCOUNT_KEY, reader=reader
     )
     assert probe == PortProbe(busy=False, browser_pid=4242)
-    assert connector.connect_calls == [CDP_URL] and connector.detaches == 1
+    assert reader.calls == [CDP_URL]
+    assert not activity_lock.inspect(activity_lock.SINGLE_ACCOUNT_KEY, tmp_path).held
 
 
 async def test_the_probe_opens_no_second_client_while_a_run_holds_the_lock(
     tmp_path: Path,
 ) -> None:
-    connector = FakeConnector()
+    reader = _FakeReader()
     held = activity_lock.try_claim(activity_lock.SINGLE_ACCOUNT_KEY, tmp_path)
     assert held is not None
     try:
@@ -84,21 +97,20 @@ async def test_the_probe_opens_no_second_client_while_a_run_holds_the_lock(
             CDP_URL,
             locks=ActivityLocks(tmp_path),
             account=activity_lock.SINGLE_ACCOUNT_KEY,
-            connector=connector,
+            reader=reader,
         )
     finally:
         held.release()
     assert probe == PortProbe(busy=True)
-    assert connector.connect_calls == []
+    assert reader.calls == []
 
 
 async def test_a_port_that_isnt_chrome_names_no_pid(tmp_path: Path) -> None:
-    connector = FakeConnector(error=BrowserUnavailable("not Chrome"))
     probe = await launcher_probe(
         CDP_URL,
         locks=ActivityLocks(tmp_path),
         account=activity_lock.SINGLE_ACCOUNT_KEY,
-        connector=connector,
+        reader=_FakeReader(pid=None),
     )
     assert probe == PortProbe(busy=False, browser_pid=None)
 
@@ -302,17 +314,17 @@ async def test_a_held_lock_before_the_attach_names_no_verified_chrome(tmp_path: 
             CDP_URL,
             locks=ActivityLocks(tmp_path),
             account=activity_lock.SINGLE_ACCOUNT_KEY,
-            connector=FakeConnector(),
+            reader=_FakeReader(),
         )
     finally:
         held.release()
     assert probe == PortProbe(busy=True, verified_pid=None)
 
 
-class _SilentConnector:
+class _SilentReader:
     """A port that accepts but never speaks CDP."""
 
-    async def connect(self, cdp_url: str) -> object:
+    async def read_pid(self, cdp_url: str) -> int | None:
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
 
@@ -323,7 +335,7 @@ async def test_the_probe_gives_up_quickly_and_lets_go_of_the_lock(tmp_path: Path
         CDP_URL,
         locks=ActivityLocks(tmp_path),
         account=key,
-        connector=_SilentConnector(),  # type: ignore[arg-type]
+        reader=_SilentReader(),
         timeout_s=0.05,
     )
     assert probe == PortProbe(busy=False, browser_pid=None)
@@ -378,7 +390,7 @@ async def test_a_busy_legacy_lock_never_trusts_a_note_left_on_the_free_account_l
             CDP_URL,
             locks=ActivityLocks(tmp_path, legacy_partner=key),
             account=key,
-            connector=FakeConnector(),
+            reader=_FakeReader(),
         )
     finally:
         legacy.release()
