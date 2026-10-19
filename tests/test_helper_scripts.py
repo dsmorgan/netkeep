@@ -1375,6 +1375,34 @@ def test_reset_dry_run_changes_nothing(data: Path) -> None:
 
 
 @needs_sqlite3_cli
+def test_reset_never_works_on_the_new_default_before_the_move(tmp_path: Path) -> None:
+    """Restore's mkdir -p must not create .../netkeep while .../netkeeper waits (#661),
+    nor bring .../netkeeper back once it has moved."""
+    home = tmp_path / "home"
+    support = home / "Library" / "Application Support"
+    (support / "netkeeper").mkdir(parents=True)
+    archive = tmp_path / "a.sqlite3"
+    archive.write_bytes(b"")
+    result = run_sh(RESET, "--restore", str(archive), "--yes", env={"HOME": str(home)})
+    assert result.returncode == 1
+    assert "run netkeep migrate first" in result.stderr
+    assert not (support / "netkeep").exists()
+
+    (support / "netkeeper").rmdir()
+    (support / "netkeep").mkdir()
+    (support / "netkeep" / "migrated-from-netkeeper.json").write_text("{}")
+    back = run_sh(
+        RESET,
+        "--restore",
+        str(archive),
+        "--yes",
+        env={"HOME": str(home), "NETKEEPER_DATA": str(support / "netkeeper")},
+    )
+    assert back.returncode == 1
+    assert "data moved to" in back.stderr
+    assert not (support / "netkeeper").exists()
+
+
 def test_reset_archives_then_removes_and_restore_puts_it_back(data: Path) -> None:
     db = make_db(data)
     result = run_sh(RESET, "--data-dir", str(data), "--yes", env={})

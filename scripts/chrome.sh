@@ -222,6 +222,10 @@ if [ -d "$old_default" ] && [ ! -e "$new_default/migrated-from-netkeeper.json" ]
   && [ "$(canonicalize "$(dirname "$profile")")" = "$new_default" ]; then
   die "netkeeper's data in $old_default hasn't moved to $new_default yet; run netkeep migrate first"
 fi
+if [ -e "$new_default/migrated-from-netkeeper.json" ] \
+  && [ "$(canonicalize "$(dirname "$profile")")" = "$(canonicalize "$old_default")" ]; then
+  die "netkeeper's data moved to $new_default; its Chrome profile is $new_default/$PROFILE_DIRNAME"
+fi
 
 # --- what is running ------------------------------------------------------------
 
