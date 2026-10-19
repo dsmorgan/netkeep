@@ -170,7 +170,6 @@ export function FilterBar({ search, onChange, searchRef }: FilterBarProps) {
         <Checkbox
           checked={search.dnc === true}
           onCheckedChange={(checked) => onChange({ dnc: checked === true ? true : undefined })}
-          aria-label="Only do-not-contact"
         />
         Do not contact
       </label>
@@ -178,7 +177,6 @@ export function FilterBar({ search, onChange, searchRef }: FilterBarProps) {
         <Checkbox
           checked={search.archived === true}
           onCheckedChange={(checked) => onChange({ archived: checked === true ? true : undefined })}
-          aria-label="Include archived"
         />
         Include archived
       </label>
