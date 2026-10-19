@@ -2,7 +2,7 @@
 
 netkeep was called netkeeper until October 2026 (#661). The name changed everywhere on your Mac too: the command, the data directory, the Keychain items, the login item and the browser's cookie. The first time the new version opens your data, it moves them once. This page says what moves, how to upgrade safely, and how to undo it.
 
-The GitHub repository keeps its old address for now, and GitHub redirects it after it's renamed, so `git pull` in your checkout keeps working. The checkout's folder can stay `netkeeper`.
+The GitHub repository is now `github.com/dsmorgan/netkeep`, and GitHub redirects the old address, so `git pull` in your checkout keeps working. The checkout's folder can stay `netkeeper`.
 
 ## What happens
 
