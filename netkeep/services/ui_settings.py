@@ -375,9 +375,10 @@ FIELDS: Final[tuple[FieldSpec, ...]] = (
         help=(
             "When netkeep serve starts, it starts netkeep's own Chrome, on its own"
             " profile and the debug address above, with this page in its own window. It"
-            " never starts a second one: when netkeep's Chrome is already running, or a"
-            " run is using the browser, it starts nothing. With Run at login on, this means"
-            " Chrome starts when you log in. You still sign in to LinkedIn yourself."
+            " never starts a second one: when netkeep's Chrome is already running, it"
+            " opens this page in a new window there. While a run is using the browser, it"
+            " starts nothing. With Run at login on, this means Chrome starts when you log"
+            " in. You still sign in to LinkedIn yourself."
         ),
         kind="bool",
         applies="now",

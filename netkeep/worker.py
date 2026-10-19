@@ -982,10 +982,12 @@ async def start_chrome_at_startup(
     owner, the file's value over the Settings page's. When that is on, it submits one
     :meth:`~netkeep.services.chrome_launch.ChromeSpawner.start` through
     :func:`~netkeep.services.chrome_launch.submit_launch`, the same task the **Start
-    Chrome** button's route runs, and logs the outcome. It starts nothing, and says why
-    in the log, while a run holds the browser, while a live process already holds
-    netkeep's profile (no second Chrome, and no extra window at each restart), or while
-    a launch is under way. Returns the launch's task id, or ``None`` when it started none.
+    Chrome** button's route runs, and logs the outcome. When a live process already
+    holds netkeep's profile, that launch hands the UI's window to the running Chrome
+    once the launcher has shown it's netkeep's, so the UI is visible after every start
+    (#679). It starts nothing, and says why in the log, while a run holds the browser or
+    while a launch is under way. Returns the launch's task id, or ``None`` when it
+    started none.
     """
     listening: Callable[[], bool] | None = getattr(app.state, "listening", None)
     if listening is None:
@@ -1022,8 +1024,10 @@ async def start_chrome_at_startup(
         return None
     holder = profile_lock_pid(data_dir() / CHROME_PROFILE_DIRNAME)
     if holder is not None and pid_alive(holder):
-        log.info("not starting netkeep's Chrome at startup: it's already running (pid %d)", holder)
-        return None
+        # A restart while netkeep's Chrome runs (#679): the launcher checks that the
+        # Chrome on the port is this one (#675's identity read), then hands the UI's
+        # window to it. Each hand-off opens a window (#678).
+        log.info("netkeep's Chrome is already running (pid %d): opening the UI in it", holder)
 
     def logged(result: LaunchResult) -> None:
         refusal = "" if result.refusal is None else f" ({result.refusal.value})"
