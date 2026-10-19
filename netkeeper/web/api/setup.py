@@ -5,8 +5,9 @@
 - ``POST /setup/steps/{key}/skip`` and ``DELETE /setup/steps/{key}/skip`` skip and
   un-skip a step, per user. A skip changes neither ``done`` nor ``blocked``.
 
-Every state is a read of netkeeper's database, the Keychain's OAuth client, Chrome's
-profile lock file and the login item's plist (:mod:`netkeeper.services.setup`).
+Every state is a read of netkeeper's database, Chrome's profile lock file, and the login
+item's plist and ``launchctl print`` / ``print-disabled`` (read-only, the same status
+``/login-item`` shows; :mod:`netkeeper.services.setup`). The Keychain is never read.
 Nothing here attaches to Chrome, calls Gmail, or starts a run. The login item belongs
 to the machine's user, so only the local owner account may read setup (403 for any
 other, as with ``/login-item``).
@@ -20,10 +21,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from netkeeper.models import User
-from netkeeper.services import keychain
 from netkeeper.services import setup as service
 from netkeeper.services.login_item import LoginItem, LoginItemError
-from netkeeper.services.mailboxes import load_client
 from netkeeper.services.posture import netkeeper_chrome_pid
 from netkeeper.services.users import local_owner
 from netkeeper.web.deps import CurrentUser, SessionDep
@@ -73,11 +72,7 @@ def _owner(session: SessionDep, user: CurrentUser) -> User:
 Owner = Annotated[User, Depends(_owner)]
 
 
-def _readings(request: Request, user: User) -> service.Readings:
-    try:
-        oauth_client: bool | None = load_client(user.id) is not None
-    except keychain.KeychainUnavailable:
-        oauth_client = None
+def _readings(request: Request) -> service.Readings:
     item: LoginItem | None = getattr(request.app.state, "login_item", None)
     try:
         login_item = (item if item is not None else LoginItem()).status()
@@ -86,14 +81,13 @@ def _readings(request: Request, user: User) -> service.Readings:
         login_item, error = None, str(exc)
     return service.Readings(
         chrome_pid=netkeeper_chrome_pid(),
-        oauth_client=oauth_client,
         login_item=login_item,
         login_item_error=error,
     )
 
 
 def _out(request: Request, session: SessionDep, user: User) -> SetupOut:
-    steps = service.steps(session, user, _readings(request, user))
+    steps = service.steps(session, user, _readings(request))
     return SetupOut(
         complete=service.complete(steps),
         steps=[

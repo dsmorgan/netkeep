@@ -7,6 +7,7 @@ import {
   boxLook,
   defaultTab,
   layoutSteps,
+  needsText,
   stateLabel,
   storeTab,
   storedTab,
@@ -53,11 +54,24 @@ describe('layoutSteps', () => {
   it('draws an arrow from every prerequisite, dashed for a one-of', () => {
     const edges = layoutSteps(GRAPH).edges
     expect(edges).toHaveLength(8)
-    expect(edges.filter((edge) => edge.to === 'campaign')).toEqual([
-      { from: 'import', to: 'campaign', any: false },
-      { from: 'gmail', to: 'campaign', any: true },
-      { from: 'chrome', to: 'campaign', any: true },
+    expect(
+      edges.filter((edge) => edge.to === 'campaign').map(({ from, any }) => ({ from, any })),
+    ).toEqual([
+      { from: 'import', any: false },
+      { from: 'gmail', any: true },
+      { from: 'chrome', any: true },
     ])
+  })
+
+  it('spreads arrows that share a box so none land on the same point', () => {
+    const edges = layoutSteps(GRAPH).edges
+    const into = edges.filter((edge) => edge.to === 'campaign')
+    // Ordered by the row of the box they come from: import, gmail, chrome.
+    expect(into.map((edge) => edge.toAt)).toEqual([0.25, 0.5, 0.75])
+    const fromChrome = edges.filter((edge) => edge.from === 'chrome')
+    expect(new Set(fromChrome.map((edge) => edge.fromAt)).size).toBe(fromChrome.length)
+    const single = edges.find((edge) => edge.to === 'arm_schedule')
+    expect(single).toMatchObject({ fromAt: 0.5, toAt: 0.5 })
   })
 
   it('survives an empty answer and a prerequisite it does not know', () => {
@@ -128,5 +142,30 @@ describe('the default tab', () => {
     })
     expect(storedTab()).toBeNull()
     expect(() => storeTab('steps')).not.toThrow()
+  })
+})
+
+describe('needsText', () => {
+  const titles = new Map([
+    ['import', 'Import contacts'],
+    ['gmail', 'Connect Gmail'],
+    ['chrome', 'Chrome'],
+  ])
+
+  it('keeps "one of" for a one-of prerequisite', () => {
+    const campaign = step('campaign', { needs: ['import'], needs_any: ['gmail', 'chrome'] })
+    expect(needsText(campaign, titles)).toBe(
+      'Needs: Import contacts, and one of Connect Gmail or Chrome',
+    )
+    expect(needsText(step('x', { needs_any: ['gmail', 'chrome'] }), titles)).toBe(
+      'Needs one of: Connect Gmail or Chrome',
+    )
+    expect(needsText(step('x', { needs: ['import'] }), titles)).toBe('Needs: Import contacts')
+  })
+
+  it('says nothing when the reason already does, or there is nothing to need', () => {
+    expect(needsText(step('x', { needs: ['import'], state: 'blocked' }), titles)).toBeNull()
+    expect(needsText(step('x', { needs: ['import'], state: 'done' }), titles)).toBeNull()
+    expect(needsText(step('x'), titles)).toBeNull()
   })
 })

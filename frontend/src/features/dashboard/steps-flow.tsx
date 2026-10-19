@@ -15,6 +15,7 @@ import {
   TARGET_LABELS,
   boxLook,
   layoutSteps,
+  needsText,
   stateLabel,
   type BoxLook,
   type Layout,
@@ -194,6 +195,8 @@ function FlowDiagram({
           if (from === undefined || to === undefined) return null
           return (
             <Arrow
+              fromAt={edge.fromAt}
+              toAt={edge.toAt}
               key={`${edge.from}-${edge.to}`}
               from={from}
               to={to}
@@ -206,7 +209,7 @@ function FlowDiagram({
       <ol
         ref={container}
         aria-label="Setup steps"
-        className="relative grid grid-cols-1 gap-3 md:grid-cols-[repeat(var(--columns),minmax(0,1fr))] md:gap-x-10"
+        className="relative grid grid-cols-1 gap-3 md:grid-cols-[repeat(var(--columns),minmax(0,1fr))] md:gap-x-16"
         style={{ '--columns': layout.columns } as CSSProperties}
       >
         {layout.placed.map(({ step, column, row }) => (
@@ -219,7 +222,7 @@ function FlowDiagram({
           >
             <StepBox
               step={step}
-              needs={[...step.needs, ...step.needs_any].map((key) => titles.get(key) ?? key)}
+              needs={needsText(step, titles)}
               onSkip={onSkip}
               pending={pending === step.key}
             />
@@ -231,11 +234,25 @@ function FlowDiagram({
 }
 
 /** A curve from the right edge of `from` to the left edge of `to`, with an arrowhead. */
-function Arrow({ from, to, lit, dashed }: { from: Box; to: Box; lit: boolean; dashed: boolean }) {
+function Arrow({
+  from,
+  to,
+  fromAt,
+  toAt,
+  lit,
+  dashed,
+}: {
+  from: Box
+  to: Box
+  fromAt: number
+  toAt: number
+  lit: boolean
+  dashed: boolean
+}) {
   const x1 = from.x + from.width
-  const y1 = from.y + from.height / 2
+  const y1 = from.y + from.height * fromAt
   const x2 = to.x - 2
-  const y2 = to.y + to.height / 2
+  const y2 = to.y + to.height * toAt
   const bend = Math.max((x2 - x1) / 2, 12)
   return (
     <g className={lit ? 'text-ok' : 'text-muted-foreground/60'}>
@@ -277,7 +294,7 @@ function StepBox({
   pending,
 }: {
   step: SetupStep
-  needs: string[]
+  needs: string | null
   onSkip: (key: string, skipped: boolean) => void
   pending: boolean
 }) {
@@ -307,11 +324,7 @@ function StepBox({
           {step.title}
         </CardTitle>
         <p className="text-sm text-muted-foreground">{step.reason}</p>
-        {needs.length > 0 && look !== 'done' && (
-          <p className="text-xs text-muted-foreground md:sr-only">
-            Needs: {needs.join(step.needs_any.length > 0 ? ', ' : ' and ')}
-          </p>
-        )}
+        {needs !== null && <p className="text-xs text-muted-foreground md:sr-only">{needs}</p>}
       </CardHeader>
       <CardContent className="mt-auto flex flex-wrap items-center gap-2">
         <TargetLink target={step.target} label={TARGET_LABELS[step.target] ?? 'Open'} />
