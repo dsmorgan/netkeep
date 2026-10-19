@@ -10,7 +10,7 @@ import { loginItemQuery, repairLoginItem, setLoginItem } from './api'
 
 /** The check steps, on the project's site, since the app serves no docs of its own. */
 export const LOGIN_ITEM_TROUBLESHOOTING_URL =
-  'https://github.com/dsmorgan/netkeeper/blob/main/docs/guide/troubleshooting.md#run-at-login-does-nothing'
+  'https://github.com/dsmorgan/netkeep/blob/main/docs/guide/troubleshooting.md#run-at-login-does-nothing'
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
