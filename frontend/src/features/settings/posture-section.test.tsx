@@ -35,6 +35,7 @@ const CLEAN: Posture = {
       value: 'attach only',
       summary: 'attach only',
       actions: [],
+      severity: 'on',
       warnings: [],
       notes: [],
     },
@@ -44,6 +45,7 @@ const CLEAN: Posture = {
       value: 'not probed',
       summary: 'not probed',
       actions: [],
+      severity: 'problem',
       warnings: ['no browser probe was run, so the session is unknown'],
       notes: [],
     },
@@ -101,6 +103,7 @@ describe('PostureSection', () => {
           value: '0/150 today, 0/750 this week (hard max 250/day, 1250/week)',
           summary: '0/150 today, 0/750 this week',
           actions: [],
+          severity: 'on',
           warnings: [],
           notes: [risk],
         },
@@ -180,6 +183,7 @@ describe('PostureSection', () => {
           value: '0/150 today, 0/750 this week (hard max 250/day, 1250/week)',
           summary: '0/150 today, 0/750 this week',
           actions: [],
+          severity: 'on',
           warnings: [],
           notes: ['Profile visits are set to 150 a day, above the 100 a day.'],
         },
@@ -277,6 +281,7 @@ describe('PostureSection: LinkedIn sends and the first inbox poll (#383)', () =>
     value: 'auto-send off',
     summary: 'auto-send off',
     actions: [],
+    severity: 'on',
     warnings: [],
     notes: [],
   }
@@ -295,6 +300,7 @@ describe('PostureSection: LinkedIn sends and the first inbox poll (#383)', () =>
     value: 'last complete poll 2030-01-03 09:00 UTC (1 h ago)',
     summary: 'last complete poll 2030-01-03 09:00 UTC (1 h ago)',
     actions: [],
+    severity: 'warning',
     warnings: [SHORT_POLL_WARNING],
     notes: [],
   }
@@ -346,6 +352,7 @@ describe('PostureSection: LinkedIn sends and the first inbox poll (#383)', () =>
           value: 'auto-send ON',
           summary: 'auto-send ON',
           actions: [],
+          severity: 'problem',
           warnings: [AUTO_SEND_WARNING],
         },
       ]),
@@ -455,6 +462,7 @@ describe('PostureSection: Reset breaker and Forget inbox owner (#583)', () => {
     value: 'tripped: 2 route_changed connections runs in a row',
     summary: 'tripped: 2 route_changed connections runs in a row',
     actions: ['reset_breaker'],
+    severity: 'warning',
     warnings: [ROUTE_WARNING],
     notes: [],
   }
@@ -463,6 +471,7 @@ describe('PostureSection: Reset breaker and Forget inbox owner (#583)', () => {
     value: 'clear: no consecutive connections runs have ended route_changed',
     summary: 'clear: no consecutive connections runs have ended route_changed',
     actions: [],
+    severity: 'warning',
     warnings: [],
   }
   const OWNER_WARNING =
@@ -477,6 +486,7 @@ describe('PostureSection: Reset breaker and Forget inbox owner (#583)', () => {
     value: 'tripped: 2 inbox polls in a row showed another mailbox',
     summary: 'tripped: 2 inbox polls in a row showed another mailbox',
     actions: ['reset_breaker', 'forget_inbox_owner'],
+    severity: 'warning',
     warnings: [OWNER_WARNING],
     notes: [],
   }
@@ -665,6 +675,7 @@ describe('PostureSection: Reset breaker and Forget inbox owner (#583)', () => {
           value: 'no complete poll yet',
           summary: 'no complete poll yet',
           actions: ['forget_inbox_owner'],
+          severity: 'on',
           warnings: [],
           notes: ['the newest poll ended owner_mismatch'],
         },

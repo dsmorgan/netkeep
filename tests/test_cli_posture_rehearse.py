@@ -126,6 +126,19 @@ def test_posture_leads_with_a_summary_and_keeps_the_details_for_the_flag(
     assert len(summary.output.splitlines()) < len(details.output.splitlines())
 
 
+def test_posture_prints_the_fix_for_a_row_that_is_not_in_force(
+    cli_db: sessionmaker[Session],
+) -> None:
+    """#654: with no check of the LinkedIn session yet, that row is unknown, and its fix
+    prints under the warnings in the summary and in the details, before the verdict."""
+    for flags in (["--no-probe"], ["--no-probe", "--details"]):
+        out = CliRunner().invoke(cli, ["posture", *flags]).output
+
+        assert "fix: linkedin session: Run `netkeeper preflight` in a terminal" in out
+        assert out.index("warning: linkedin session") < out.index("fix: linkedin session")
+        assert out.index("fix: linkedin session") < out.index("NOT clear")
+
+
 def test_posture_shows_a_warning_in_the_summary_and_exits_the_same_either_way(
     cli_db: sessionmaker[Session],
 ) -> None:

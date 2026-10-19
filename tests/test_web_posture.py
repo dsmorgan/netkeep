@@ -46,6 +46,30 @@ async def test_the_shape_is_a_full_report(client: httpx.AsyncClient, running_app
     assert report["local_time"]
 
 
+async def test_every_row_has_a_severity_and_the_fix_the_service_builds(
+    client: httpx.AsyncClient, running_app: FastAPI
+) -> None:
+    """#654: ``severity`` and ``fix`` come from the service, so the CLI and the page agree.
+    With no evidence the session is unknown: a problem with a fix. Quiet rows have none."""
+    report = (await client.get("/api/v1/posture")).json()
+    rows = {row["name"]: row for row in report["protections"]}
+
+    assert all(row["severity"] in {"problem", "warning", "on"} for row in rows.values())
+    session_row = rows["linkedin session"]
+    assert session_row["severity"] == "problem"
+    assert session_row["fix"] == (
+        "Run `netkeeper preflight` in a terminal to check the LinkedIn session."
+    )
+    for row in rows.values():
+        assert (row["status"] != "on") == (row["severity"] == "problem")
+        if row["severity"] == "problem":
+            assert row["fix"]
+        if row["severity"] == "on":
+            assert row["fix"] is None
+    assert rows["session flag"]["severity"] == "on" and rows["session flag"]["fix"] is None
+    assert "you are safe" not in report["verdict"].lower()
+
+
 async def test_with_no_evidence_the_browser_session_is_unknown_never_assumed_healthy(
     client: httpx.AsyncClient, running_app: FastAPI
 ) -> None:
