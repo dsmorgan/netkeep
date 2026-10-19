@@ -41,21 +41,28 @@ async def _set_client(client: httpx.AsyncClient) -> None:
     assert response.status_code == 200, response.text
 
 
-async def _start(client: httpx.AsyncClient, mailbox_id: int | None = None) -> str:
-    response = await client.post(
-        "/api/v1/mailboxes/oauth/start", json={"mailbox_id": mailbox_id}, headers=CSRF
-    )
+async def _start(
+    client: httpx.AsyncClient, mailbox_id: int | None = None, return_to: str | None = None
+) -> str:
+    body: dict[str, object] = {"mailbox_id": mailbox_id}
+    if return_to is not None:
+        body["return_to"] = return_to
+    response = await client.post("/api/v1/mailboxes/oauth/start", json=body, headers=CSRF)
     assert response.status_code == 200, response.text
     url: str = response.json()["authorization_url"]
     return url
 
 
-async def _follow(client: httpx.AsyncClient, redirect: str) -> dict[str, str]:
+async def _location(client: httpx.AsyncClient, redirect: str) -> str:
     """Be the browser Google sends back: no CSRF header, just the navigation."""
     parts = urlsplit(redirect)
     response = await client.get(f"{parts.path}?{parts.query}")
     assert response.status_code == 303, response.text
-    location = response.headers["location"]
+    return response.headers["location"]
+
+
+async def _follow(client: httpx.AsyncClient, redirect: str) -> dict[str, str]:
+    location = await _location(client, redirect)
     assert location.startswith("/settings?")
     return _query(location)
 
@@ -207,6 +214,142 @@ async def test_the_daily_cap_comes_from_the_config(
         await _connect(client, fake_google)
         [mailbox] = (await client.get("/api/v1/mailboxes")).json()
     assert mailbox["daily_cap"] == 25
+
+
+# --- where the callback returns (#656) ----------------------------------------------
+
+ALLOWED_RETURNS = [
+    "/",
+    "/settings",
+    "/gmail",
+    "/inbox",
+    "/contacts",
+    "/contacts/42",
+    "/campaigns",
+    "/campaigns/new",
+    "/campaigns/7",
+    "/imports",
+    "/imports/history",
+    "/imports/runs",
+    "/imports/runs/9",
+    "/exports",
+    "/lists",
+    "/linkedin",
+    "/templates",
+    "/triage",
+]
+
+HOSTILE_RETURNS = [
+    "https://evil.example",
+    "https://evil.example/settings",
+    "http://evil.example",
+    "//evil.example",
+    "///evil.example",
+    "/\\evil.example",
+    "/\\\\evil.example",
+    "\\\\evil.example",
+    "\\evil.example",
+    "/%2f%2fevil.example",
+    "/%2F/evil.example",
+    "%2f%2fevil.example",
+    "/%5cevil.example",
+    "/%5Cevil.example",
+    "/settings%2f..%2f..%2fevil",
+    "/%252f%252fevil.example",
+    "/settings/../../evil",
+    "/settings//evil.example",
+    "/settings\r\nLocation: https://evil.example",
+    "/settings%0d%0aLocation:%20https://evil.example",
+    "/settings\t",
+    " /settings",
+    "\t//evil.example",
+    "/\t/evil.example",
+    "/\x00settings",
+    "/settings?next=\\evil",
+    "/settings?x=%0d%0a",
+    "/settings#//evil.example",
+    "/settings#frag",
+    "javascript:alert(1)",
+    "evil.example",
+    "settings",
+    "/outside-the-allow-list",
+    "/api/v1/mailboxes",
+    "/contacts/abc",
+    "/contacts/1/2",
+    "/settings/",
+    "/\u2215evil.example",
+    "/set\u0442ings",
+    "",
+]
+
+
+@pytest.mark.parametrize("path", ALLOWED_RETURNS)
+async def test_each_allowed_page_round_trips(
+    client: httpx.AsyncClient, fake_google: FakeGoogle, path: str
+) -> None:
+    await _set_client(client)
+    url = await _start(client, return_to=path)
+    location = await _location(client, fake_google.consent(url))
+    assert location == f"{path}?gmail=connected"
+
+
+@pytest.mark.parametrize("hostile", HOSTILE_RETURNS)
+async def test_a_hostile_return_to_falls_back_to_settings(
+    client: httpx.AsyncClient, fake_google: FakeGoogle, hostile: str
+) -> None:
+    await _set_client(client)
+    url = await _start(client, return_to=hostile)
+    location = await _location(client, fake_google.consent(url))
+    assert location == "/settings?gmail=connected"
+    # The same on the error path: the cancel button cannot be a way out either.
+    url = await _start(client, return_to=hostile)
+    location = await _location(client, fake_google.deny(url))
+    assert location == "/settings?gmail=error&reason=access_denied"
+
+
+async def test_error_codes_reach_the_return_page(
+    client: httpx.AsyncClient, fake_google: FakeGoogle
+) -> None:
+    await _set_client(client)
+    url = await _start(client, return_to="/gmail")
+    assert await _location(client, fake_google.deny(url)) == (
+        "/gmail?gmail=error&reason=access_denied"
+    )
+
+
+async def test_the_return_page_keeps_its_own_query(
+    client: httpx.AsyncClient, fake_google: FakeGoogle
+) -> None:
+    await _set_client(client)
+    url = await _start(client, return_to="/contacts?q=ada%20x&met=yes")
+    location = await _location(client, fake_google.consent(url))
+    assert urlsplit(location).path == "/contacts"
+    assert parse_qs(urlsplit(location).query) == {
+        "q": ["ada x"],
+        "met": ["yes"],
+        "gmail": ["connected"],
+    }
+
+
+async def test_the_return_page_cannot_forge_the_outcome(
+    client: httpx.AsyncClient, fake_google: FakeGoogle
+) -> None:
+    await _set_client(client)
+    url = await _start(client, return_to="/gmail?gmail=connected&reason=x&keep=1")
+    location = await _location(client, fake_google.deny(url))
+    assert parse_qs(urlsplit(location).query) == {
+        "keep": ["1"],
+        "gmail": ["error"],
+        "reason": ["access_denied"],
+    }
+
+
+async def test_an_oversized_return_to_is_refused_by_the_schema(client: httpx.AsyncClient) -> None:
+    await _set_client(client)
+    response = await client.post(
+        "/api/v1/mailboxes/oauth/start", json={"return_to": "/" + "a" * 600}, headers=CSRF
+    )
+    assert response.status_code == 422
 
 
 async def test_a_state_is_good_for_one_answer(

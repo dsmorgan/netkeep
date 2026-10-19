@@ -10,7 +10,8 @@ The flow, from the Settings page:
    navigation reaches without ``X-Netkeeper-Client`` (spec 14.2). It checks
    ``state`` against an authorization this user started in this process,
    exchanges the code, asks Gmail whose account it is, stores the token, and
-   redirects to ``/settings?gmail=connected`` (or ``gmail=error&reason=<code>``).
+   redirects to ``/settings?gmail=connected`` (or ``gmail=error&reason=<code>``), or to
+   the page named by ``return_to`` at start (#656), when it is one of the app's own pages.
 
 Arming (#277): ``POST /mailboxes/{id}/arm`` with ``draft``, then, as a separate
 step, ``send``, which answers ``409`` until a draft made there has been found by
@@ -27,7 +28,7 @@ import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Annotated, Any
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode
 
 from anyio import from_thread
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -59,7 +60,8 @@ log = logging.getLogger(__name__)
 router = APIRouter(tags=["mailboxes"])
 
 CALLBACK_ROUTE = "mailbox_oauth_callback"
-SETTINGS_PATH = "/settings"
+SETTINGS_PATH = service.DEFAULT_RETURN_TO
+OUTCOME_KEYS = frozenset({"gmail", "reason"})
 
 Responses = dict[int | str, dict[str, Any]]
 NOT_FOUND: Responses = {404: {"description": "No such mailbox for this user"}}
@@ -191,7 +193,7 @@ def start_oauth(
             login_hint=hint,
             endpoints=_endpoints(request),
         )
-    _pending(request).add(user.id, authorization)
+    _pending(request).add(user.id, authorization, body.return_to)
     return OAuthStartOut(authorization_url=authorization.url)
 
 
@@ -200,7 +202,7 @@ def start_oauth(
     name=CALLBACK_ROUTE,
     status_code=303,
     response_class=RedirectResponse,
-    responses={303: {"description": "Back to the Settings page, with the outcome"}},
+    responses={303: {"description": "Back to the page the flow started from, with the outcome"}},
 )
 def oauth_callback(
     request: Request,
@@ -208,19 +210,21 @@ def oauth_callback(
     code: Annotated[str, Query(max_length=2000)] = "",
     error: Annotated[str, Query(max_length=200)] = "",
 ) -> RedirectResponse:
-    """Where Google sends the browser back. Always redirects to the Settings page."""
+    """Where Google sends the browser back. Always redirects to an app page: the one the
+    flow started from (#656), or Settings."""
     factory: sessionmaker[Session] = request.app.state.session_factory
     auth: AuthProvider = request.app.state.auth
     with session_scope(factory) as session:
         user_id = auth.current_user(request, session).id
-    authorization = _pending(request).take(state, user_id) if state else None
-    if authorization is None:
+    taken = _pending(request).take_with_return(state, user_id) if state else None
+    if taken is None:
         return _back("error", "state_mismatch")
+    authorization, return_to = taken
     if error:
         # Google's own code, e.g. access_denied when the person pressed Cancel.
-        return _back("error", error if error.replace("_", "").isalnum() else "denied")
+        return _back("error", error if error.replace("_", "").isalnum() else "denied", return_to)
     if not code:
-        return _back("error", "no_code")
+        return _back("error", "no_code", return_to)
     try:
         client = service.require_client(user_id)
         grant = gmail_oauth.exchange_code(
@@ -228,13 +232,13 @@ def oauth_callback(
         )
         email = gmail_oauth.fetch_email(grant.access_token, endpoints=_endpoints(request))
     except service.ClientNotConfigured:
-        return _back("error", "client_missing")
+        return _back("error", "client_missing", return_to)
     except gmail_oauth.OAuthError as exc:
         log.info("gmail authorization failed: %s", exc.code)
-        return _back("error", exc.code)
+        return _back("error", exc.code, return_to)
     except keychain.KeychainUnavailable as exc:
         log.warning("gmail authorization failed: %s", personal_exc(exc))
-        return _back("error", "keychain")
+        return _back("error", "keychain", return_to)
     try:
         with session_scope(factory, write=True) as session:
             user = auth.current_user(request, session)
@@ -248,12 +252,12 @@ def oauth_callback(
             )
             event = _status_event(mailbox)
     except service.OtherMailboxConnected:
-        return _back("error", "other_mailbox_connected")
+        return _back("error", "other_mailbox_connected", return_to)
     except keychain.KeychainUnavailable as exc:
         log.warning("gmail authorization failed: %s", personal_exc(exc))
-        return _back("error", "keychain")
+        return _back("error", "keychain", return_to)
     _publish(request, event)
-    return _back("connected", None)
+    return _back("connected", None, return_to)
 
 
 @router.post("/mailboxes/{mailbox_id}/check", responses={**NOT_FOUND, **NO_KEYCHAIN})
@@ -323,6 +327,13 @@ def disarm_mailbox(mailbox_id: int, session: SessionDep, user: CurrentUser) -> M
     return MailboxOut.model_validate(mailbox)
 
 
-def _back(outcome: str, reason: str | None) -> RedirectResponse:
-    query = {"gmail": outcome} if reason is None else {"gmail": outcome, "reason": reason}
-    return RedirectResponse(f"{SETTINGS_PATH}?{urlencode(query)}", status_code=303)
+def _back(outcome: str, reason: str | None, return_to: str = SETTINGS_PATH) -> RedirectResponse:
+    """Redirect to ``return_to`` (checked when the flow started) with the outcome in its query.
+
+    An existing query stays, except any ``gmail`` or ``reason`` it carried."""
+    path, _, existing = return_to.partition("?")
+    kept = [(k, v) for k, v in parse_qsl(existing, keep_blank_values=True) if k not in OUTCOME_KEYS]
+    kept.append(("gmail", outcome))
+    if reason is not None:
+        kept.append(("reason", reason))
+    return RedirectResponse(f"{path}?{urlencode(kept)}", status_code=303)

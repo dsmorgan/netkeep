@@ -8413,6 +8413,11 @@
             "title": "Total Rows",
             "type": "integer"
           },
+          "unreachable_contacts": {
+            "default": 0,
+            "title": "Unreachable Contacts",
+            "type": "integer"
+          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -11243,6 +11248,18 @@
               }
             ],
             "title": "Mailbox Id"
+          },
+          "return_to": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return To"
           }
         },
         "title": "OAuthStartIn",
@@ -24296,7 +24313,7 @@
     },
     "/api/v1/mailboxes/oauth/callback": {
       "get": {
-        "description": "Where Google sends the browser back. Always redirects to the Settings page.",
+        "description": "Where Google sends the browser back. Always redirects to an app page: the one the\nflow started from (#656), or Settings.",
         "operationId": "mailbox_oauth_callback_api_v1_mailboxes_oauth_callback_get",
         "parameters": [
           {
@@ -24335,7 +24352,7 @@
         ],
         "responses": {
           "303": {
-            "description": "Back to the Settings page, with the outcome"
+            "description": "Back to the page the flow started from, with the outcome"
           },
           "422": {
             "content": {
