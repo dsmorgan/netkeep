@@ -218,6 +218,44 @@ jobs:
       - run: make build-ui
       - run: uv build
       - run: scripts/smoke-wheel.sh
+      # The same export the release attaches (release.yml), for the install jobs below.
+      - run: uv export --frozen --no-dev --no-hashes --no-emit-project --quiet -o dist/constraints.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wheel
+          path: |
+            dist/*.whl
+            dist/constraints.txt
+          if-no-files-found: error
+          retention-days: 3
+
+  # The built wheel installed the way a user installs it (ADR 0011 rules 1 and 2): a uv
+  # tool with uv's own Python 3.12 and the constraints file, on an Intel and an Apple-
+  # silicon Mac, then `netkeep version`, `config show` and `db upgrade` on scratch data
+  # (scripts/smoke-tool-install.sh). Intel is the one that needs cryptography 48.x.
+  mac-install:
+    name: Install on ${{ matrix.arch }}
+    needs: wheel
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: Intel
+            runner: macos-15-intel
+          - arch: Apple silicon
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: wheel
+          path: wheel
+      - run: scripts/smoke-tool-install.sh wheel
 
   # The client is generated from the backend's schema, so either side can drift it.
   client-drift:
