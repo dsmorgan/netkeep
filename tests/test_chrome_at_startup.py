@@ -9,6 +9,7 @@ no test starts Chrome or knocks on a port.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import socket
@@ -318,10 +319,11 @@ async def test_a_running_chrome_gets_one_hand_off_while_a_launch_is_under_way(
     _hold_profile(os.getpid())
     with caplog.at_level(logging.INFO, logger="netkeep.worker"):
         first = await worker.start_chrome_at_startup(
-            running_app, sleep=_no_sleep, run_holds_browser=lambda: False
+            running_app, sleep=_no_sleep, run_holds_browser=lambda: False, clock=lambda: 1_000.0
         )
+        # Past the cooldown, so only the launch under way stops it.
         second = await worker.start_chrome_at_startup(
-            running_app, sleep=_no_sleep, run_holds_browser=lambda: False
+            running_app, sleep=_no_sleep, run_holds_browser=lambda: False, clock=lambda: 2_000.0
         )
         gate.set()
         await running_app.state.tasks.join()
@@ -574,3 +576,85 @@ async def test_only_the_owner_is_offered_the_button(
         other = factories.make_user(session, kind=UserKind.HOSTED).id
     running_app.state.auth = FixedUser(other)
     assert (await client.get(HEALTH_URL)).json()["can_start_chrome"] is False
+
+
+# --- the hand-off cooldown (#679 review) ---------------------------------------------------
+
+
+def _handoff_record() -> Path:
+    data_dir().mkdir(parents=True, exist_ok=True)
+    return data_dir() / worker.STARTUP_HANDOFF_FILENAME
+
+
+async def test_a_second_hand_off_to_the_same_chrome_within_the_cooldown_is_skipped(
+    running_app: FastAPI, caplog: pytest.LogCaptureFixture
+) -> None:
+    spawner = _FakeSpawner()
+    _ready(running_app, spawner)
+    _hold_profile(os.getpid())
+    assert await _start(running_app, clock=lambda: 1_000.0) is not None
+    with caplog.at_level(logging.INFO, logger="netkeep.worker"):
+        assert await _start(running_app, clock=lambda: 1_299.0) is None
+    assert spawner.calls == [False]
+    assert f"netkeep's Chrome (pid {os.getpid()}) was handed it less than 5 minutes ago" in (
+        caplog.text
+    )
+
+
+async def test_after_the_cooldown_the_same_chrome_is_handed_off_again(
+    running_app: FastAPI,
+) -> None:
+    spawner = _FakeSpawner()
+    _ready(running_app, spawner)
+    _hold_profile(os.getpid())
+    assert await _start(running_app, clock=lambda: 1_000.0) is not None
+    assert await _start(running_app, clock=lambda: 1_300.0) is not None
+    assert spawner.calls == [False, False]
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        '{"pid": 4000001, "at": 1000.0}',  # another Chrome
+        '{"pid": PID, "at": 2000.0}',  # from the future
+        '{"pid": "PID", "at": 1000.0}',
+        '{"pid": PID}',
+        "not json",
+        "[]",
+    ],
+)
+async def test_a_record_for_another_chrome_or_unreadable_doesnt_stop_it(
+    running_app: FastAPI, record: str
+) -> None:
+    spawner = _FakeSpawner()
+    _ready(running_app, spawner)
+    _hold_profile(os.getpid())
+    _handoff_record().write_text(record.replace("PID", str(os.getpid())))
+    assert await _start(running_app, clock=lambda: 1_100.0) is not None
+    assert spawner.calls == [False]
+
+
+async def test_a_hand_off_records_the_pid_and_time(running_app: FastAPI) -> None:
+    _ready(running_app, _FakeSpawner())
+    _hold_profile(os.getpid())
+    await _start(running_app, clock=lambda: 1_000.0)
+    assert json.loads(_handoff_record().read_text()) == {"pid": os.getpid(), "at": 1_000.0}
+
+
+async def test_a_cold_start_records_nothing_and_ignores_the_record(running_app: FastAPI) -> None:
+    spawner = _FakeSpawner()
+    _ready(running_app, spawner)
+    _handoff_record().write_text(json.dumps({"pid": os.getpid(), "at": 1_000.0}))
+    assert await _start(running_app, clock=lambda: 1_010.0) is not None
+    assert spawner.calls == [False]
+    assert json.loads(_handoff_record().read_text())["at"] == 1_000.0
+
+
+async def test_a_skipped_start_doesnt_arm_the_cooldown(running_app: FastAPI) -> None:
+    spawner = _FakeSpawner()
+    _ready(running_app, spawner)
+    _hold_profile(os.getpid())
+    assert await _start(running_app, run_holds_browser=lambda: True) is None
+    assert not _handoff_record().exists()
+    assert await _start(running_app, clock=lambda: 1_000.0) is not None
+    assert spawner.calls == [False]

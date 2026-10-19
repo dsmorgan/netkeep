@@ -49,11 +49,14 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import enum
+import json
 import logging
 import random
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Final, Protocol
 
 from fastapi import FastAPI
@@ -965,6 +968,43 @@ async def _after_listening(app: FastAPI) -> None:
 LISTEN_WAIT_S: Final = 60.0
 _LISTEN_POLL_S: Final = 0.1
 
+#: The file in the data directory that records the start at startup's last hand-off.
+STARTUP_HANDOFF_FILENAME: Final = "chrome-startup-handoff.json"
+#: How long after a hand-off at startup to the same live Chrome a second one is skipped.
+STARTUP_HANDOFF_COOLDOWN_S: Final = 300.0
+
+
+def _startup_handoff_path() -> Path:
+    return data_dir() / STARTUP_HANDOFF_FILENAME
+
+
+def recent_startup_handoff(pid: int, now: float) -> bool:
+    """Whether the start at startup handed off to ``pid`` within the cooldown (#679).
+
+    Defense in depth against a ``serve`` that crashes after listening and is restarted
+    by launchd: each restart would otherwise add a window to the same Chrome. A record
+    that is missing, unreadable, for another pid, or from the future counts as none.
+    """
+    try:
+        record = json.loads(_startup_handoff_path().read_text(encoding="utf-8"))
+        last_pid, at = record["pid"], record["at"]
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
+    if type(last_pid) is not int or not isinstance(at, int | float):
+        return False
+    return last_pid == pid and 0 <= now - at < STARTUP_HANDOFF_COOLDOWN_S
+
+
+def record_startup_handoff(pid: int, now: float) -> None:
+    """Record a hand-off at startup to ``pid`` at ``now``; a failed write is logged only."""
+    path = _startup_handoff_path()
+    partial = path.with_name(f"{path.name}.tmp")
+    try:
+        partial.write_text(json.dumps({"pid": pid, "at": now}), encoding="utf-8")
+        partial.replace(path)
+    except OSError as exc:
+        log.warning("could not record the startup hand-off: %s", personal_exc(exc))
+
 
 async def start_chrome_at_startup(
     app: FastAPI,
@@ -973,6 +1013,7 @@ async def start_chrome_at_startup(
     wait_s: float = LISTEN_WAIT_S,
     run_holds_browser: Callable[[], bool] = runs.any_browser_lock_held,
     pid_alive: Callable[[int], bool] = activity_lock.pid_alive,
+    clock: Callable[[], float] = time.time,
 ) -> str | None:
     """Start netkeep's Chrome once ``serve`` is listening, when you turned that on (#599).
 
@@ -985,8 +1026,11 @@ async def start_chrome_at_startup(
     Chrome** button's route runs, and logs the outcome. When a live process already
     holds netkeep's profile, that launch hands the UI's window to the running Chrome
     once the launcher has shown it's netkeep's, so the UI is visible after every start
-    (#679). It starts nothing, and says why in the log, while a run holds the browser or
-    while a launch is under way. Returns the launch's task id, or ``None`` when it
+    (#679), except within :data:`STARTUP_HANDOFF_COOLDOWN_S` of a hand-off at startup to
+    the same live Chrome. It starts nothing, and says why in the log, when a run holds
+    the browser as it checks, or while a launch is under way. A run that starts after
+    that check can still get the hand-off, as a **Start Chrome** press can (#636): an
+    ``--app`` window, never an attach. Returns the launch's task id, or ``None`` when it
     started none.
     """
     listening: Callable[[], bool] | None = getattr(app.state, "listening", None)
@@ -1023,11 +1067,21 @@ async def start_chrome_at_startup(
         log.info("not starting netkeep's Chrome at startup: a run holds the browser")
         return None
     holder = profile_lock_pid(data_dir() / CHROME_PROFILE_DIRNAME)
-    if holder is not None and pid_alive(holder):
+    running = holder if holder is not None and pid_alive(holder) else None
+    if running is not None:
         # A restart while netkeep's Chrome runs (#679): the launcher checks that the
         # Chrome on the port is this one (#675's identity read), then hands the UI's
-        # window to it. Each hand-off opens a window (#678).
-        log.info("netkeep's Chrome is already running (pid %d): opening the UI in it", holder)
+        # window to it. Each hand-off opens a window (#678), so a second one to the same
+        # Chrome within the cooldown is skipped, in case serve is crash-looping.
+        if await asyncio.to_thread(recent_startup_handoff, running, clock()):
+            log.info(
+                "not opening the UI at startup: netkeep's Chrome (pid %d) was handed it"
+                " less than %d minutes ago",
+                running,
+                int(STARTUP_HANDOFF_COOLDOWN_S // 60),
+            )
+            return None
+        log.info("netkeep's Chrome is already running (pid %d): opening the UI in it", running)
 
     def logged(result: LaunchResult) -> None:
         refusal = "" if result.refusal is None else f" ({result.refusal.value})"
@@ -1039,12 +1093,15 @@ async def start_chrome_at_startup(
         )
 
     try:
-        return submit_launch(
+        task_id = submit_launch(
             app.state.tasks, app.state.bus, launcher, user_id=owner_id, on_result=logged
         )
     except LaunchUnderWay:
         log.info("not starting netkeep's Chrome at startup: a launch is already under way")
         return None
+    if running is not None:
+        await asyncio.to_thread(record_startup_handoff, running, clock())
+    return task_id
 
 
 def dev_app() -> FastAPI:
