@@ -1,6 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { listsQuery } from '@/features/crm/api'
 import { useEventStreamStatus } from '@/features/events/event-stream-context'
 import { useServerEvent } from '@/features/events/use-server-event'
@@ -19,8 +21,11 @@ import {
 } from './glance-cards'
 import { LiveRunCard } from './live-run-card'
 import { MailboxCard } from './mailbox-card'
+import { setupQuery } from './setup-api'
 import { SetupStepCard } from './setup-step-card'
 import { buildSetupSteps } from './setup-steps'
+import { StepsFlow } from './steps-flow'
+import { defaultTab, storeTab, storedTab, type DashboardTab } from './steps-layout'
 
 /**
  * A LinkedIn run starting or ending moves the schedule, the last run, the
@@ -37,7 +42,48 @@ function useLinkedInRefresh(): void {
 }
 
 /**
- * The dashboard: at a glance, what happens next and whether anything is
+ * The dashboard: two tabs (#667). **Steps** is the setup flow from `GET /setup`;
+ * **Overview** is the dashboard as it was. Steps opens until every required step is
+ * done or skipped, then Overview; a pick is remembered in this browser.
+ */
+export function DashboardPage() {
+  const setup = useQuery(setupQuery)
+  const [picked, setPicked] = useState<DashboardTab | null>(storedTab)
+
+  if (picked === null && setup.isPending) {
+    return (
+      <p role="status" className="text-muted-foreground">
+        Checking your setup…
+      </p>
+    )
+  }
+
+  const tab = defaultTab(picked, setup.data, setup.isError)
+  return (
+    <Tabs
+      value={tab}
+      onValueChange={(value: DashboardTab) => {
+        setPicked(value)
+        storeTab(value)
+      }}
+      className="gap-4"
+    >
+      <TabsList aria-label="Dashboard">
+        <TabsTrigger value="steps">Steps</TabsTrigger>
+        <TabsTrigger value="overview">Overview</TabsTrigger>
+      </TabsList>
+      <TabsContent value="steps" className="max-w-6xl">
+        <StepsFlow />
+      </TabsContent>
+      <TabsContent value="overview">
+        <OverviewPanel />
+      </TabsContent>
+    </Tabs>
+  )
+}
+
+/**
+ * The Overview tab: at a glance, what happens next and whether anything is
  * unhealthy (P3-12, `glance-cards.tsx`); below it, not a set of scaffold cards, but the setup path — import,
  * review, triage, build a list, export — with each step's real count and the
  * control that advances it (issue #115, spec 10.1, 14.3).
@@ -48,7 +94,7 @@ function useLinkedInRefresh(): void {
  * draft-imports and lists queries feed one step each; a failure in either
  * degrades that one step (`setup-steps.ts` says how) rather than the page.
  */
-export function DashboardPage() {
+function OverviewPanel() {
   const stats = useQuery(statsQuery)
   const openImports = useQuery(openImportsQuery)
   const lists = useQuery(listsQuery)
