@@ -50,6 +50,23 @@ describe('app shell', () => {
     for (const layer of layers) expect(layer.className).not.toMatch(/(^|\s)bg-/)
   })
 
+  it('scrolls the sidebar on its own, so the theme footer never covers a link (#666)', async () => {
+    await renderApp('/')
+
+    const nav = screen.getByRole('navigation', { name: 'Primary' })
+    const sidebar = nav.closest('aside') as HTMLElement
+    // The drawer and, from `sm` up, a one-screen sticky column: each its own scroll container.
+    expect(sidebar).toHaveClass('overflow-y-auto', 'sm:sticky', 'sm:top-0', 'sm:h-screen')
+    // The nav takes the room between header and footer and scrolls inside it.
+    expect(nav).toHaveClass('min-h-0', 'flex-1', 'overflow-y-auto')
+    const header = sidebar.firstElementChild as HTMLElement
+    expect(header).toHaveClass('h-11', 'shrink-0')
+    const footer = screen.getByTestId('sidebar-footer')
+    expect(footer).toHaveClass('shrink-0')
+    expect(footer).not.toHaveClass('sticky')
+    expect(sidebar.lastElementChild).toBe(footer)
+  })
+
   it('marks the current section active', async () => {
     // Every page has landed: /inbox, in P3-11b, was the last placeholder.
     await renderApp('/inbox')

@@ -455,7 +455,12 @@ describe('the color field', () => {
   // Reduce transparency setting turns on, so the page went flat. It is the page's
   // background, and page text is held to AA on it above.
   it('is never hidden, in any theme or media query', () => {
-    const rules = [...css.matchAll(/\.nk-field\s*\{/g)].map((match) => blockAfter(match.index))
+    // Every rule whose selector list names the field itself, grouped or not (`.nk-field > i` is a blob).
+    const rules = [...css.matchAll(/([^{};]+)\{/g)]
+      .filter((match) =>
+        (match[1] as string).split(',').some((selector) => selector.trim() === '.nk-field'),
+      )
+      .map((match) => blockAfter(match.index))
     expect(rules.length).toBeGreaterThan(0)
     for (const rule of rules) {
       expect(rule).not.toMatch(/display:\s*none|visibility:\s*hidden|opacity:\s*0[;\s]/)
