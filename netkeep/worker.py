@@ -116,6 +116,7 @@ from netkeep.services.budgets import (
 )
 from netkeep.services.chrome_launch import (
     LaunchResult,
+    LaunchStatus,
     LaunchUnderWay,
     PortProbe,
     submit_launch,
@@ -988,7 +989,7 @@ def recent_startup_handoff(pid: int, now: float) -> bool:
     try:
         record = json.loads(_startup_handoff_path().read_text(encoding="utf-8"))
         last_pid, at = record["pid"], record["at"]
-    except (OSError, ValueError, TypeError, KeyError):
+    except (OSError, ValueError, TypeError, KeyError, RecursionError):
         return False
     if type(last_pid) is not int or not isinstance(at, int | float):
         return False
@@ -996,7 +997,10 @@ def recent_startup_handoff(pid: int, now: float) -> bool:
 
 
 def record_startup_handoff(pid: int, now: float) -> None:
-    """Record a hand-off at startup to ``pid`` at ``now``; a failed write is logged only."""
+    """Record a confirmed hand-off at startup to ``pid`` at ``now``.
+
+    Called only for a ``handed_off`` outcome. A failed write is logged only.
+    """
     path = _startup_handoff_path()
     partial = path.with_name(f"{path.name}.tmp")
     try:
@@ -1091,17 +1095,18 @@ async def start_chrome_at_startup(
             refusal,
             result.message,
         )
+        if running is not None and result.status is LaunchStatus.HANDED_OFF:
+            # Only a confirmed hand-off starts the cooldown: a refused, unconfirmed or
+            # failed one leaves the next restart free to try again.
+            record_startup_handoff(running, clock())
 
     try:
-        task_id = submit_launch(
+        return submit_launch(
             app.state.tasks, app.state.bus, launcher, user_id=owner_id, on_result=logged
         )
     except LaunchUnderWay:
         log.info("not starting netkeep's Chrome at startup: a launch is already under way")
         return None
-    if running is not None:
-        await asyncio.to_thread(record_startup_handoff, running, clock())
-    return task_id
 
 
 def dev_app() -> FastAPI:

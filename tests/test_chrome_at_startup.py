@@ -581,6 +581,9 @@ async def test_only_the_owner_is_offered_the_button(
 # --- the hand-off cooldown (#679 review) ---------------------------------------------------
 
 
+_HANDED = LaunchResult(LaunchStatus.HANDED_OFF, "opened the UI", pid=os.getpid())
+
+
 def _handoff_record() -> Path:
     data_dir().mkdir(parents=True, exist_ok=True)
     return data_dir() / worker.STARTUP_HANDOFF_FILENAME
@@ -589,7 +592,7 @@ def _handoff_record() -> Path:
 async def test_a_second_hand_off_to_the_same_chrome_within_the_cooldown_is_skipped(
     running_app: FastAPI, caplog: pytest.LogCaptureFixture
 ) -> None:
-    spawner = _FakeSpawner()
+    spawner = _FakeSpawner(_HANDED)
     _ready(running_app, spawner)
     _hold_profile(os.getpid())
     assert await _start(running_app, clock=lambda: 1_000.0) is not None
@@ -604,7 +607,7 @@ async def test_a_second_hand_off_to_the_same_chrome_within_the_cooldown_is_skipp
 async def test_after_the_cooldown_the_same_chrome_is_handed_off_again(
     running_app: FastAPI,
 ) -> None:
-    spawner = _FakeSpawner()
+    spawner = _FakeSpawner(_HANDED)
     _ready(running_app, spawner)
     _hold_profile(os.getpid())
     assert await _start(running_app, clock=lambda: 1_000.0) is not None
@@ -626,7 +629,7 @@ async def test_after_the_cooldown_the_same_chrome_is_handed_off_again(
 async def test_a_record_for_another_chrome_or_unreadable_doesnt_stop_it(
     running_app: FastAPI, record: str
 ) -> None:
-    spawner = _FakeSpawner()
+    spawner = _FakeSpawner(_HANDED)
     _ready(running_app, spawner)
     _hold_profile(os.getpid())
     _handoff_record().write_text(record.replace("PID", str(os.getpid())))
@@ -635,7 +638,7 @@ async def test_a_record_for_another_chrome_or_unreadable_doesnt_stop_it(
 
 
 async def test_a_hand_off_records_the_pid_and_time(running_app: FastAPI) -> None:
-    _ready(running_app, _FakeSpawner())
+    _ready(running_app, _FakeSpawner(_HANDED))
     _hold_profile(os.getpid())
     await _start(running_app, clock=lambda: 1_000.0)
     assert json.loads(_handoff_record().read_text()) == {"pid": os.getpid(), "at": 1_000.0}
@@ -651,10 +654,42 @@ async def test_a_cold_start_records_nothing_and_ignores_the_record(running_app: 
 
 
 async def test_a_skipped_start_doesnt_arm_the_cooldown(running_app: FastAPI) -> None:
-    spawner = _FakeSpawner()
+    spawner = _FakeSpawner(_HANDED)
     _ready(running_app, spawner)
     _hold_profile(os.getpid())
     assert await _start(running_app, run_holds_browser=lambda: True) is None
     assert not _handoff_record().exists()
+    assert await _start(running_app, clock=lambda: 1_000.0) is not None
+    assert spawner.calls == [False]
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        LaunchResult(LaunchStatus.REFUSED, "not ours", refusal=Refusal.NOT_DEDICATED),
+        LaunchResult(LaunchStatus.REFUSED, "no port", refusal=Refusal.PROFILE_WITHOUT_PORT),
+        LaunchResult(LaunchStatus.HANDOFF_UNCONFIRMED, "exited 1", pid=os.getpid()),
+        LaunchResult(LaunchStatus.FAILED, "didn't confirm the UI's window"),
+    ],
+    ids=lambda result: result.message,
+)
+async def test_only_a_confirmed_hand_off_starts_the_cooldown(
+    running_app: FastAPI, result: LaunchResult
+) -> None:
+    """A refused, unconfirmed or failed hand-off leaves the next restart free to try."""
+    spawner = _FakeSpawner(result)
+    _ready(running_app, spawner)
+    _hold_profile(os.getpid())
+    assert await _start(running_app, clock=lambda: 1_000.0) is not None
+    assert not _handoff_record().exists()
+    assert await _start(running_app, clock=lambda: 1_010.0) is not None
+    assert spawner.calls == [False, False]
+
+
+async def test_a_deeply_nested_record_counts_as_none(running_app: FastAPI) -> None:
+    spawner = _FakeSpawner(_HANDED)
+    _ready(running_app, spawner)
+    _hold_profile(os.getpid())
+    _handoff_record().write_text("[" * 100_000 + "]" * 100_000)
     assert await _start(running_app, clock=lambda: 1_000.0) is not None
     assert spawner.calls == [False]
