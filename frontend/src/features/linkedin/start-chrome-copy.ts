@@ -9,7 +9,7 @@ import { ApiError } from './api'
 /** `browser.launch`'s payload (`netkeep/services/chrome_launch.py`, `submit_launch`). */
 export interface LaunchEvent {
   task_id: string
-  status: 'started' | 'handed_off' | 'handoff_unconfirmed' | 'refused' | 'failed'
+  status: 'started' | 'handed_off' | 'shown' | 'handoff_unconfirmed' | 'refused' | 'failed'
   refusal: string | null
   message: string
   pid: number | null
@@ -52,6 +52,11 @@ export function describeLaunch(event: LaunchEvent): Said {
       return {
         tone: 'ok',
         text: "netkeep's Chrome was already running. It opened netkeep in a new window.",
+      }
+    case 'shown':
+      return {
+        tone: 'ok',
+        text: "netkeep's Chrome was already running with netkeep open. It brought that window to the front.",
       }
     case 'handoff_unconfirmed':
       return {

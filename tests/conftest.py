@@ -1,6 +1,7 @@
 import shutil
 from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 import factories
 import httpx
@@ -155,7 +156,7 @@ def _no_real_browser(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyP
     :class:`RealBrowserBlocked` before Playwright starts -- the CDP socket is opened
     by Playwright's driver process, where a Python socket spy could not see it.
     ``playwright.async_api.async_playwright`` is blocked too, for any route that
-    skips the connector. The launcher probe's ``CdpIdentityReader.read_pid`` (#675),
+    skips the connector. The launcher probe's ``CdpIdentityReader.read`` (#675),
     which opens its own websocket, is guarded the same way.
 
     A test that must drive a real, isolated Chrome (the opt-in smoke suite under
@@ -184,10 +185,11 @@ def _no_real_browser(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(browser.PlaywrightCdpConnector, "connect", guarded_connect)
 
     # #675: the launcher's probe reads the pid over its own websocket, not Playwright,
-    # so its reader is guarded the same way.
-    real_read_pid = browser.CdpIdentityReader.read_pid
+    # so its reader is guarded the same way. ``read_pid`` goes through ``read``, which
+    # also holds #678's front step.
+    real_read = browser.CdpIdentityReader.read
 
-    async def guarded_read_pid(self: object, cdp_url: str) -> int | None:
+    async def guarded_read(self: object, cdp_url: str, **front: Any) -> object:
         if not opted_out:
             raise RealBrowserBlocked(
                 f"a test tried to read the pid of a real Chrome at {cdp_url}. Give"
@@ -198,9 +200,9 @@ def _no_real_browser(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyP
                 f"a real_cdp test tried to read the pid of {cdp_url}, a personal Chrome's"
                 " debug port. Set NETKEEP_CDP_URL to an isolated Chrome on another port"
             )
-        return await real_read_pid(self, cdp_url)  # type: ignore[arg-type]
+        return await real_read(self, cdp_url, **front)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(browser.CdpIdentityReader, "read_pid", guarded_read_pid)
+    monkeypatch.setattr(browser.CdpIdentityReader, "read", guarded_read)
     if not opted_out:
         import playwright.async_api
 

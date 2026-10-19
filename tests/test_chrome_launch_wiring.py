@@ -27,7 +27,7 @@ from netkeep.cli import app as cli
 from netkeep.config import Settings
 from netkeep.db import session_scope
 from netkeep.linkedin import activity_lock
-from netkeep.linkedin.browser import ActivityLocks, AttachBrowserProvider
+from netkeep.linkedin.browser import ActivityLocks, AttachBrowserProvider, IdentityRead
 from netkeep.models import UserKind
 from netkeep.paths import data_dir
 from netkeep.services import runs
@@ -37,6 +37,7 @@ from netkeep.services.chrome_launch import (
     LaunchStatus,
     PortProbe,
     Refusal,
+    UiFront,
 )
 from netkeep.services.events import Event
 from netkeep.worker import launcher_probe, serve_app
@@ -69,10 +70,14 @@ class _FakeReader:
 
     pid: int | None = 4242
     calls: list[str] = field(default_factory=list)
+    #: #678: whether a read asked to front a window does, and what each read was asked.
+    fronts: bool = False
+    asks: list[dict[str, object]] = field(default_factory=list)
 
-    async def read_pid(self, cdp_url: str) -> int | None:
+    async def read(self, cdp_url: str, **front: object) -> IdentityRead:
         self.calls.append(cdp_url)
-        return self.pid
+        self.asks.append(front)
+        return IdentityRead(self.pid, fronted=self.fronts and bool(front))
 
 
 async def test_the_probe_reads_the_pid(tmp_path: Path) -> None:
@@ -102,6 +107,55 @@ async def test_the_probe_opens_no_second_client_while_a_run_holds_the_lock(
     finally:
         held.release()
     assert probe == PortProbe(busy=True)
+    assert reader.calls == []
+
+
+async def test_the_probe_passes_the_front_ask_to_the_read_and_its_answer_back(
+    tmp_path: Path,
+) -> None:
+    """#678: the ask goes to the one read, under the lock; ``fronted`` comes back."""
+    reader = _FakeReader(pid=4242, fronts=True)
+
+    def dedicated(pid: int) -> bool:
+        return pid == 4242
+
+    probe = await launcher_probe(
+        CDP_URL,
+        locks=ActivityLocks(tmp_path),
+        account=activity_lock.SINGLE_ACCOUNT_KEY,
+        reader=reader,
+        front=UiFront(ui_port=8123, dedicated=dedicated),
+    )
+    assert probe == PortProbe(busy=False, browser_pid=4242, fronted=True)
+    assert reader.asks == [{"ui_port": 8123, "dedicated": dedicated}]
+
+
+async def test_without_the_ask_the_probe_asks_the_read_for_no_front(tmp_path: Path) -> None:
+    reader = _FakeReader(pid=4242, fronts=True)
+    probe = await launcher_probe(
+        CDP_URL,
+        locks=ActivityLocks(tmp_path),
+        account=activity_lock.SINGLE_ACCOUNT_KEY,
+        reader=reader,
+    )
+    assert probe == PortProbe(busy=False, browser_pid=4242) and reader.asks == [{}]
+
+
+async def test_a_held_lock_fronts_nothing_and_reads_nothing(tmp_path: Path) -> None:
+    reader = _FakeReader(fronts=True)
+    held = activity_lock.try_claim(activity_lock.SINGLE_ACCOUNT_KEY, tmp_path)
+    assert held is not None
+    try:
+        probe = await launcher_probe(
+            CDP_URL,
+            locks=ActivityLocks(tmp_path),
+            account=activity_lock.SINGLE_ACCOUNT_KEY,
+            reader=reader,
+            front=UiFront(ui_port=8123, dedicated=lambda pid: True),
+        )
+    finally:
+        held.release()
+    assert probe == PortProbe(busy=True) and not probe.fronted
     assert reader.calls == []
 
 
@@ -324,7 +378,7 @@ async def test_a_held_lock_before_the_attach_names_no_verified_chrome(tmp_path: 
 class _SilentReader:
     """A port that accepts but never speaks CDP."""
 
-    async def read_pid(self, cdp_url: str) -> int | None:
+    async def read(self, cdp_url: str, **front: object) -> IdentityRead:
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
 
@@ -344,6 +398,40 @@ async def test_the_probe_gives_up_quickly_and_lets_go_of_the_lock(tmp_path: Path
     )
     assert probe == PortProbe(busy=False, browser_pid=None)
     assert not activity_lock.inspect(key, tmp_path).held
+
+
+@dataclass
+class _SlowReader:
+    """A read that takes ``delay`` seconds, then names the pid and a fronted window."""
+
+    delay: float
+
+    async def read(self, cdp_url: str, **front: object) -> IdentityRead:
+        await asyncio.sleep(self.delay)
+        return IdentityRead(4242, fronted=bool(front))
+
+
+@pytest.mark.wall_clock  # an asyncio timeout bounds the read (#472)
+async def test_the_front_step_gets_its_own_time_on_top(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#678: a read slower than ``timeout_s`` but within the front step's extra time keeps
+    its pid; the same read without the ask doesn't get the extra time."""
+    monkeypatch.setattr(worker, "FRONT_STEP_TIMEOUT_S", 1.0)
+    key = activity_lock.SINGLE_ACCOUNT_KEY
+    asked = await launcher_probe(
+        CDP_URL,
+        locks=ActivityLocks(tmp_path),
+        account=key,
+        reader=_SlowReader(0.1),
+        timeout_s=0.05,
+        front=UiFront(ui_port=8123, dedicated=lambda pid: True),
+    )
+    assert asked == PortProbe(busy=False, browser_pid=4242, fronted=True)
+    unasked = await launcher_probe(
+        CDP_URL, locks=ActivityLocks(tmp_path), account=key, reader=_SlowReader(0.1), timeout_s=0.05
+    )
+    assert unasked == PortProbe(busy=False)
 
 
 def test_the_probes_connect_timeout_is_five_seconds() -> None:

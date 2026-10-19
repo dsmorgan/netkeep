@@ -131,6 +131,7 @@ describe('StartChrome', () => {
 
   it.each([
     ['handed_off', null, 'status', 'ok', 'It opened netkeep in a new window.'],
+    ['shown', null, 'status', 'ok', 'It brought that window to the front.'],
     ['handoff_unconfirmed', null, 'status', 'ok', "couldn't confirm the new window opened"],
     ['failed', null, 'alert', 'bad', "Chrome didn't start. Check that Google Chrome is installed"],
     ['refused', 'not_dedicated', 'alert', 'warn', "Another Chrome is using netkeep's debug port"],
@@ -146,7 +147,7 @@ describe('StartChrome', () => {
       const said = await screen.findByRole(role)
       expect(said).toHaveTextContent(words)
       expect(said).toHaveClass('nk-glass', 'nk-tint', `nk-tone-${tone}`)
-      if (status !== 'handed_off') {
+      if (status !== 'handed_off' && status !== 'shown') {
         expect(said).toHaveTextContent('netkeep said: the launcher’s words')
       }
     },

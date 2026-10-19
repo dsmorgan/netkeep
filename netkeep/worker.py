@@ -71,6 +71,7 @@ from netkeep.linkedin import activity_lock
 from netkeep.linkedin.activity_lock import account_key
 from netkeep.linkedin.browser import (
     CHROME_PROFILE_DIRNAME,
+    FRONT_STEP_TIMEOUT_S,
     ActivityLocks,
     AttachBrowserProvider,
     BrowserBusy,
@@ -119,6 +120,7 @@ from netkeep.services.chrome_launch import (
     LaunchStatus,
     LaunchUnderWay,
     PortProbe,
+    UiFront,
     submit_launch,
 )
 from netkeep.services.connections_sync import sync_connections
@@ -879,6 +881,7 @@ async def launcher_probe(
     account: str,
     reader: PidReader | None = None,
     timeout_s: float = PROBE_CONNECT_TIMEOUT_S,
+    front: UiFront | None = None,
 ) -> PortProbe:
     """What the Chrome on ``cdp_url`` is, for the launcher's checks (#636).
 
@@ -891,16 +894,28 @@ async def launcher_probe(
     connection (spec 9.9). Then ``verified_pid`` is the Chrome pid that run's attach
     verified, from the holder note of ``account``'s own lock, read only while that lock
     is held.
+
+    With ``front`` (#678), the same read, still under the lock and on the same
+    connection, brings an open UI window on ``front.ui_port`` to the front once
+    ``front.dedicated`` accepts the pid; ``fronted`` says whether it did. A held lock
+    fronts nothing, since nothing connects. The front step gets
+    :data:`~netkeep.linkedin.browser.FRONT_STEP_TIMEOUT_S` on top of ``timeout_s``.
     """
     chosen = CdpIdentityReader() if reader is None else reader
     try:
         async with locks.hold(account):
             try:
-                pid = await asyncio.wait_for(chosen.read_pid(cdp_url), timeout_s)
+                if front is None:
+                    found = await asyncio.wait_for(chosen.read(cdp_url), timeout_s)
+                else:
+                    found = await asyncio.wait_for(
+                        chosen.read(cdp_url, ui_port=front.ui_port, dedicated=front.dedicated),
+                        timeout_s + FRONT_STEP_TIMEOUT_S,
+                    )
             except TimeoutError:
                 log.info("the launcher's probe got no answer from %s in time", cdp_url)
                 return PortProbe(busy=False)
-            return PortProbe(busy=False, browser_pid=pid)
+            return PortProbe(busy=False, browser_pid=found.pid, fronted=found.fronted)
     except BrowserBusy:
         # Only the account's own lock's note, and only while it's held: a busy legacy
         # lock, or a note a crash left on a free lock, verifies nothing.
@@ -937,9 +952,11 @@ def serve_chrome_launcher(app: FastAPI, settings: Settings, ui_base: str) -> Chr
     async def cdp_url() -> str:
         return (await off_loop(address))[0]
 
-    async def probe(url: str) -> PortProbe:
+    async def probe(url: str, front: UiFront | None) -> PortProbe:
         key = (await off_loop(address))[1]
-        return await launcher_probe(url, locks=ActivityLocks(legacy_partner=key), account=key)
+        return await launcher_probe(
+            url, locks=ActivityLocks(legacy_partner=key), account=key, front=front
+        )
 
     def app_url() -> str:
         held: local_api_key.LocalApiKey = app.state.local_api_key
@@ -983,7 +1000,8 @@ def recent_startup_handoff(pid: int, now: float) -> bool:
     """Whether the start at startup handed off to ``pid`` within the cooldown (#679).
 
     Defense in depth against a ``serve`` that crashes after listening and is restarted
-    by launchd: each restart would otherwise add a window to the same Chrome. A record
+    by launchd: each restart would otherwise bring the UI's window to the front again,
+    taking focus, or, when that step fails, add a window to the same Chrome (#678). A record
     that is missing, unreadable, for another pid, or from the future counts as none.
     """
     try:
@@ -997,9 +1015,9 @@ def recent_startup_handoff(pid: int, now: float) -> bool:
 
 
 def record_startup_handoff(pid: int, now: float) -> None:
-    """Record a confirmed hand-off at startup to ``pid`` at ``now``.
+    """Record a confirmed hand-off (or front, #678) at startup to ``pid`` at ``now``.
 
-    Called only for a ``handed_off`` outcome. A failed write is logged only.
+    Called only for a ``handed_off`` or ``shown`` outcome. A failed write is logged only.
     """
     path = _startup_handoff_path()
     partial = path.with_name(f"{path.name}.tmp")
@@ -1028,10 +1046,11 @@ async def start_chrome_at_startup(
     :meth:`~netkeep.services.chrome_launch.ChromeSpawner.start` through
     :func:`~netkeep.services.chrome_launch.submit_launch`, the same task the **Start
     Chrome** button's route runs, and logs the outcome. When a live process already
-    holds netkeep's profile, that launch hands the UI's window to the running Chrome
-    once the launcher has shown it's netkeep's, so the UI is visible after every start
-    (#679), except within :data:`STARTUP_HANDOFF_COOLDOWN_S` of a hand-off at startup to
-    the same live Chrome. It starts nothing, and says why in the log, when a run holds
+    holds netkeep's profile, that launch brings the running Chrome's open UI window to
+    the front, or hands it one when none is open (#678), once the launcher has shown
+    it's netkeep's, so the UI is visible after every start (#679), except within
+    :data:`STARTUP_HANDOFF_COOLDOWN_S` of a hand-off or front at startup to the same
+    live Chrome. It starts nothing, and says why in the log, when a run holds
     the browser as it checks, or while a launch is under way. A run that starts after
     that check can still get the hand-off, as a **Start Chrome** press can (#636): an
     ``--app`` window, never an attach. Returns the launch's task id, or ``None`` when it
@@ -1074,9 +1093,11 @@ async def start_chrome_at_startup(
     running = holder if holder is not None and pid_alive(holder) else None
     if running is not None:
         # A restart while netkeep's Chrome runs (#679): the launcher checks that the
-        # Chrome on the port is this one (#675's identity read), then hands the UI's
-        # window to it. Each hand-off opens a window (#678), so a second one to the same
-        # Chrome within the cooldown is skipped, in case serve is crash-looping.
+        # Chrome on the port is this one (#675's identity read), then brings its open UI
+        # window to the front, or hands one to it when none is open (#678). A second
+        # one to the same Chrome within the cooldown is skipped either way, in case
+        # serve is crash-looping: a hand-off whose front step fails adds a window, and
+        # a front each restart would keep taking focus.
         if await asyncio.to_thread(recent_startup_handoff, running, clock()):
             log.info(
                 "not opening the UI at startup: netkeep's Chrome (pid %d) was handed it"
@@ -1095,9 +1116,9 @@ async def start_chrome_at_startup(
             refusal,
             result.message,
         )
-        if running is not None and result.status is LaunchStatus.HANDED_OFF:
-            # Only a confirmed hand-off starts the cooldown: a refused, unconfirmed or
-            # failed one leaves the next restart free to try again.
+        if running is not None and result.status in (LaunchStatus.HANDED_OFF, LaunchStatus.SHOWN):
+            # Only a confirmed hand-off or front starts the cooldown: a refused,
+            # unconfirmed or failed one leaves the next restart free to try again.
             record_startup_handoff(running, clock())
 
     try:

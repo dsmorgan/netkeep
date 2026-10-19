@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import socket
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -27,7 +28,7 @@ from netkeep.chrome_spawn import ChromeLaunch, ChromeLauncher
 from netkeep.config import Settings
 from netkeep.db import session_scope
 from netkeep.linkedin import activity_lock
-from netkeep.linkedin.browser import ActivityLocks
+from netkeep.linkedin.browser import ActivityLocks, IdentityRead
 from netkeep.models import User
 from netkeep.paths import data_dir
 from netkeep.services import ui_settings
@@ -38,6 +39,7 @@ from netkeep.services.chrome_launch import (
     LaunchStatus,
     PortProbe,
     Refusal,
+    UiFront,
 )
 from netkeep.services.events import Event
 from netkeep.services.scheduled_runs import ServeExtractor
@@ -216,10 +218,20 @@ class _Reader:
 
     pid: int | None
     calls: list[str] = field(default_factory=list)
+    #: #678: whether the UI's window is open, so a read asked to front one does.
+    ui_open: bool = False
 
-    async def read_pid(self, cdp_url: str) -> int | None:
+    async def read(
+        self,
+        cdp_url: str,
+        *,
+        ui_port: int | None = None,
+        dedicated: Callable[[int], bool] | None = None,
+    ) -> IdentityRead:
         self.calls.append(cdp_url)
-        return self.pid
+        if self.pid is None or ui_port is None or dedicated is None:
+            return IdentityRead(self.pid)
+        return IdentityRead(self.pid, fronted=self.ui_open and dedicated(self.pid))
 
 
 @dataclass
@@ -243,10 +255,10 @@ def _real_launcher(tmp_path: Path, reader: _Reader, spawned: _Handed) -> ChromeL
     async def address() -> str:
         return "http://127.0.0.1:9333"
 
-    async def probe(url: str) -> PortProbe:
+    async def probe(url: str, front: UiFront | None) -> PortProbe:
         key = activity_lock.SINGLE_ACCOUNT_KEY
         locks = ActivityLocks(tmp_path / "locks")
-        return await launcher_probe(url, locks=locks, account=key, reader=reader)
+        return await launcher_probe(url, locks=locks, account=key, reader=reader, front=front)
 
     async def no_sleep(_s: float) -> None:
         return None
@@ -282,6 +294,24 @@ async def test_the_hand_off_goes_through_the_identity_read(
     assert launch.port == 9333 and not launch.first_run
     assert launch.app_url.startswith("http://127.0.0.1:8123/")
     assert "start netkeep's Chrome at startup: handed_off" in caplog.text
+
+
+async def test_an_open_ui_window_is_fronted_at_startup_and_nothing_spawns(
+    running_app: FastAPI, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#678: a restart while netkeep's Chrome shows the UI brings that window forward."""
+    _hold_profile(os.getpid())
+    reader, spawned = _Reader(pid=os.getpid(), ui_open=True), _Handed()
+    _ready(running_app, _FakeSpawner())
+    running_app.state.chrome_launcher = _real_launcher(tmp_path, reader, spawned)
+    with caplog.at_level(logging.INFO, logger="netkeep.worker"):
+        assert await _start(running_app, clock=lambda: 1_000.0) is not None
+    assert reader.calls == ["http://127.0.0.1:9333"] and spawned.launches == []
+    assert "start netkeep's Chrome at startup: shown: brought netkeep's open window" in (
+        caplog.text
+    )
+    # A front starts the cooldown too, so a crash-looping serve doesn't keep taking focus.
+    assert json.loads(_handoff_record().read_text()) == {"pid": os.getpid(), "at": 1_000.0}
 
 
 @pytest.mark.parametrize("pid", [4_000_001, None])
@@ -637,6 +667,17 @@ async def test_a_record_for_another_chrome_or_unreadable_doesnt_stop_it(
     assert spawner.calls == [False]
 
 
+async def test_a_second_front_within_the_cooldown_is_skipped(running_app: FastAPI) -> None:
+    """#678: the cooldown covers a front as well as a hand-off."""
+    spawner = _FakeSpawner(LaunchResult(LaunchStatus.SHOWN, "to the front", pid=os.getpid()))
+    _ready(running_app, spawner)
+    _hold_profile(os.getpid())
+    assert await _start(running_app, clock=lambda: 1_000.0) is not None
+    assert await _start(running_app, clock=lambda: 1_299.0) is None
+    assert await _start(running_app, clock=lambda: 1_300.0) is not None
+    assert spawner.calls == [False, False]
+
+
 async def test_a_hand_off_records_the_pid_and_time(running_app: FastAPI) -> None:
     _ready(running_app, _FakeSpawner(_HANDED))
     _hold_profile(os.getpid())
@@ -673,7 +714,7 @@ async def test_a_skipped_start_doesnt_arm_the_cooldown(running_app: FastAPI) -> 
     ],
     ids=lambda result: result.message,
 )
-async def test_only_a_confirmed_hand_off_starts_the_cooldown(
+async def test_only_a_confirmed_hand_off_or_front_starts_the_cooldown(
     running_app: FastAPI, result: LaunchResult
 ) -> None:
     """A refused, unconfirmed or failed hand-off leaves the next restart free to try."""

@@ -49,6 +49,10 @@ class LaunchStatus(enum.StrEnum):
     """netkeep's Chrome was running; it opened the UI's app window, and the process
     the launcher started exited."""
 
+    SHOWN = "shown"
+    """netkeep's Chrome was running with the UI open: the launcher brought that window
+    to the front (#678) and started nothing."""
+
     HANDOFF_UNCONFIRMED = "handoff_unconfirmed"
     """netkeep's Chrome was running and still holds the profile, but the process the
     launcher started exited with a positive status other than 21, so the window can't be
@@ -94,7 +98,7 @@ class LaunchResult:
     @property
     def opened(self) -> bool:
         """Whether the UI's window is now open in netkeep's Chrome."""
-        return self.status in (LaunchStatus.STARTED, LaunchStatus.HANDED_OFF)
+        return self.status in (LaunchStatus.STARTED, LaunchStatus.HANDED_OFF, LaunchStatus.SHOWN)
 
     @property
     def reached_chrome(self) -> bool:
@@ -115,11 +119,31 @@ class PortProbe:
     connection, so nothing connects: ``busy`` is true and ``verified_pid`` is the Chrome
     pid that run's attach verified as the dedicated profile (#624), from the lock's
     holder note, or ``None`` when the note has none (the run hasn't attached yet).
+
+    ``fronted`` is true only when the launcher asked for a :class:`UiFront`, the lock was
+    free, and on that same connection Chrome brought an open UI window to the front
+    (#678). Anything else, a failure included, is false, and the launcher hands off.
     """
 
     busy: bool
     browser_pid: int | None = None
     verified_pid: int | None = None
+    fronted: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class UiFront:
+    """The launcher's ask to bring an open UI window to the front, not open another (#678).
+
+    The probe's identity read, after it names the browser's pid and ``dedicated(pid)``
+    says that pid is netkeep's Chrome, lists the browser's targets and activates the
+    first page whose URL is on ``http://127.0.0.1:<ui_port>`` or
+    ``http://localhost:<ui_port>``, on the same connection. ``dedicated`` is the
+    launcher's own check (:func:`netkeep.chrome_profile.check_dedicated_profile`).
+    """
+
+    ui_port: int
+    dedicated: Callable[[int], bool]
 
 
 class ChromeSpawner(Protocol):

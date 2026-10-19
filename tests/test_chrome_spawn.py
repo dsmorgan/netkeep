@@ -32,7 +32,7 @@ from netkeep.chrome_spawn import (
 )
 from netkeep.chrome_spawn import spawn_chrome as real_spawn_chrome
 from netkeep.services.browser_launch import chrome_launch_command
-from netkeep.services.chrome_launch import LaunchStatus, PortProbe, Refusal
+from netkeep.services.chrome_launch import LaunchStatus, PortProbe, Refusal, UiFront
 
 UI_PORT = 8123
 APP_URL = f"http://127.0.0.1:{UI_PORT}/api/v1/session/connect?code=1.ab.cd"
@@ -220,6 +220,8 @@ class _Case:
     spawned: list[ChromeLaunch] = field(default_factory=list)
     asked_ports: list[int] = field(default_factory=list)
     probed: list[str] = field(default_factory=list)
+    #: The :class:`UiFront` ask each probe got (#678), or ``None``.
+    fronts: list[UiFront | None] = field(default_factory=list)
     run_lock_asked: int = 0
 
     def _run_holds(self) -> bool:
@@ -235,8 +237,9 @@ class _Case:
         async def address() -> str:
             return self.cdp_url
 
-        async def probe(url: str) -> PortProbe:
+        async def probe(url: str, front: UiFront | None) -> PortProbe:
             self.probed.append(url)
+            self.fronts.append(front)
             return self.probe
 
         def answers(port: int) -> bool:
@@ -464,7 +467,9 @@ async def test_without_its_check_each_refused_case_would_start_chrome(
     assert len(case.spawned) == 1
 
 
-async def test_a_hand_off_never_asks_about_runs_but_a_cold_start_does(tmp_path: Path) -> None:
+async def test_a_run_never_refuses_a_hand_off_but_does_a_cold_start(tmp_path: Path) -> None:
+    """A hand-off asks about runs only to decide whether to front a window (#678): with
+    a run holding the browser, it asks for no front, and still hands off."""
     hand_off = _Case(
         answers=True,
         probe=PortProbe(busy=False, browser_pid=LOCK_PID),
@@ -473,10 +478,141 @@ async def test_a_hand_off_never_asks_about_runs_but_a_cold_start_does(tmp_path: 
         process=_Process(exits=0),
     )
     assert (await hand_off.launcher(tmp_path / "a").start()).opened
-    assert hand_off.run_lock_asked == 0
+    assert hand_off.run_lock_asked == 1 and hand_off.fronts == [None]
+    assert len(hand_off.spawned) == 1
     cold = _Case()
     assert (await cold.launcher(tmp_path / "b").start()).opened
     assert cold.run_lock_asked == 1
+
+
+# --- #678: an open UI window is brought to the front, not opened again --------------------
+
+
+def _running_with(probe: PortProbe, **kwargs: Any) -> _Case:
+    """netkeep's Chrome on the port, holding the profile; a hand-off would exit 0."""
+    return _Case(answers=True, probe=probe, lock_pid=LOCK_PID, process=_Process(exits=0), **kwargs)
+
+
+_FRONTED = PortProbe(busy=False, browser_pid=LOCK_PID, fronted=True)
+
+
+async def test_an_open_ui_window_is_fronted_and_nothing_spawns(tmp_path: Path) -> None:
+    case = _running_with(_FRONTED)
+    result = await case.launcher(tmp_path).start()
+    assert result.status is LaunchStatus.SHOWN and result.opened and result.reached_chrome
+    assert result.pid == LOCK_PID and "to the front" in result.message
+    assert case.spawned == []
+    [front] = case.fronts
+    assert front is not None and front.ui_port == UI_PORT
+    # The ask's check is #624's: the profile's live holder, and nothing else.
+    assert front.dedicated(LOCK_PID) and not front.dedicated(999)
+
+
+async def test_with_no_ui_window_open_it_hands_off(tmp_path: Path) -> None:
+    case = _running_with(PortProbe(busy=False, browser_pid=LOCK_PID))
+    result = await case.launcher(tmp_path).start()
+    assert result.status is LaunchStatus.HANDED_OFF, result
+    assert len(case.spawned) == 1 and case.fronts[0] is not None
+
+
+async def test_while_a_run_holds_the_browser_nothing_is_fronted(tmp_path: Path) -> None:
+    """No front is asked for (#645), and a probe that says otherwise is not believed."""
+    case = _running_with(_FRONTED, run_holds=True)
+    result = await case.launcher(tmp_path).start()
+    assert result.status is LaunchStatus.HANDED_OFF, result
+    assert case.fronts == [None] and len(case.spawned) == 1
+
+
+async def test_a_busy_probe_is_never_a_front(tmp_path: Path) -> None:
+    # The run's lock was held at the probe, so nothing connected, whatever it says.
+    case = _running_with(PortProbe(busy=True, verified_pid=LOCK_PID, fronted=True))
+    result = await case.launcher(tmp_path).start()
+    assert result.status is LaunchStatus.HANDED_OFF, result
+    assert len(case.spawned) == 1
+
+
+async def test_a_front_from_a_chrome_that_isnt_netkeeps_is_still_refused(tmp_path: Path) -> None:
+    case = _running_with(PortProbe(busy=False, browser_pid=999, fronted=True))
+    result = await case.launcher(tmp_path).start()
+    assert result.status is LaunchStatus.REFUSED and result.refusal is Refusal.NOT_DEDICATED
+    assert case.spawned == []
+
+
+async def test_the_first_run_always_hands_off(tmp_path: Path) -> None:
+    """Its hand-off also opens LinkedIn's sign-in page, which a front would skip."""
+    case = _running_with(_FRONTED)
+    result = await case.launcher(tmp_path).start(first_run=True)
+    assert result.status is LaunchStatus.HANDED_OFF, result
+    assert case.fronts == [None]
+    [launch] = case.spawned
+    assert chrome_argv(launch)[-1] == LINKEDIN_SIGNIN_URL
+
+
+async def test_a_cold_start_asks_for_no_front(tmp_path: Path) -> None:
+    case = _Case()
+    assert (await case.launcher(tmp_path).start()).status is LaunchStatus.STARTED
+    assert case.fronts == [] and case.probed == []
+
+
+#: Each guard of the front, removed, and the case only it stops: the mutant shows the
+#: window (and skips the hand-off) where the real launcher hands off.
+FRONT_GUARDS: dict[str, tuple[str, str, Callable[[], _Case], bool]] = {
+    "never on the first run": (
+        "            front = None if first_run else await self._ui_front()\n",
+        "            front = await self._ui_front()\n",
+        lambda: _running_with(_FRONTED),
+        True,
+    ),
+    "never while a run holds the browser": (
+        "        if await asyncio.to_thread(self._run_holds_browser):\n            return None\n",
+        "",
+        lambda: _running_with(_FRONTED, run_holds=True),
+        False,
+    ),
+    "never from a busy probe": (
+        "            if front is not None and not probe.busy and probe.fronted:\n",
+        "            if front is not None and probe.fronted:\n",
+        lambda: _running_with(PortProbe(busy=True, verified_pid=LOCK_PID, fronted=True)),
+        False,
+    ),
+    "never unasked": (
+        "            if front is not None and not probe.busy and probe.fronted:\n",
+        "            if not probe.busy and probe.fronted:\n",
+        lambda: _running_with(_FRONTED, run_holds=True),
+        False,
+    ),
+}
+
+
+@pytest.mark.parametrize("guard", FRONT_GUARDS.values(), ids=list(FRONT_GUARDS))
+async def test_without_each_front_guard_the_window_would_be_shown(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    guard: tuple[str, str, Callable[[], _Case], bool],
+) -> None:
+    old, new, make, first_run = guard
+    real = make()
+    assert (await real.launcher(tmp_path / "real").start(first_run=first_run)).status is (
+        LaunchStatus.HANDED_OFF
+    )
+    mutated = make()
+    mutant = _without(monkeypatch, old, new)
+    result = await mutated.launcher(tmp_path / "mutant", module=mutant).start(first_run=first_run)
+    assert result.status is LaunchStatus.SHOWN and mutated.spawned == []
+
+
+async def test_without_the_pid_match_the_check_would_take_any_pid(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    case = _running_with(_FRONTED)
+    mutant = _without(
+        monkeypatch,
+        "            return check_dedicated_profile(profile, pid).dedicated\n",
+        "            return True\n",
+    )
+    await case.launcher(tmp_path, module=mutant).start()
+    [front] = case.fronts
+    assert front is not None and front.dedicated(999)
 
 
 # --- only the first-run path passes LinkedIn's URL ----------------------------------------

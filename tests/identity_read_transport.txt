@@ -33,17 +33,56 @@ def _is_browser_websocket(ws_url: str, netloc: str) -> bool:
     parts = urlsplit(ws_url)
     return parts.scheme == 'ws' and parts.netloc == netloc and (re.fullmatch('/devtools/browser/[A-Za-z0-9-]+', parts.path) is not None) and (not parts.query) and (not parts.fragment)
 
-async def _read_process_info(ws_url: str) -> object:
+def ui_window_target(answer: object, ui_port: int) -> str | None:
+    infos = answer.get('targetInfos') if isinstance(answer, Mapping) else None
+    if not isinstance(infos, list) or not 0 < ui_port < 65536:
+        return None
+    origins = {f'127.0.0.1:{ui_port}', f'localhost:{ui_port}'}
+    for info in infos:
+        if not isinstance(info, Mapping) or info.get('type') != 'page':
+            continue
+        url, target_id = (info.get('url'), info.get('targetId'))
+        if not isinstance(url, str) or not isinstance(target_id, str):
+            continue
+        parts = urlsplit(url)
+        if parts.scheme == 'http' and parts.netloc in origins and (re.fullmatch('[A-Za-z0-9-]{1,64}', target_id) is not None):
+            return target_id
+    return None
+
+async def _read_process_info(ws_url: str, ui_port: int | None=None, dedicated: Callable[[int], bool] | None=None) -> tuple[int | None, bool]:
     from websockets.asyncio.client import connect
 
     class NoRedirect(connect):
 
         def process_redirect(self, exc: Exception) -> Exception:
             return exc
-    async with asyncio.timeout(PROBE_STEP_TIMEOUT_S):
+
+    async def answer(ws: Any, number: int) -> Mapping[str, Any]:
+        while True:
+            message = json.loads(await ws.recv())
+            if isinstance(message, dict) and message.get('id') == number:
+                return message
+    async with asyncio.timeout(PROBE_STEP_TIMEOUT_S) as deadline:
         async with NoRedirect(ws_url, proxy=None, compression=None, max_size=IDENTITY_READ_MAX_BYTES) as ws:
             await ws.send(json.dumps({'id': 1, 'method': 'SystemInfo.getProcessInfo'}))
-            while True:
-                message = json.loads(await ws.recv())
-                if isinstance(message, dict) and message.get('id') == 1:
-                    return message.get('result')
+            info = (await answer(ws, 1)).get('result')
+            pid = browser_pid_from_process_info(info) if isinstance(info, Mapping) else None
+            if pid is None or ui_port is None or dedicated is None:
+                return (pid, False)
+            deadline.reschedule(None)
+            try:
+                if not dedicated(pid):
+                    return (pid, False)
+                async with asyncio.timeout(FRONT_STEP_TIMEOUT_S):
+                    await ws.send(json.dumps({'id': 2, 'method': 'Target.getTargets'}))
+                    target_id = ui_window_target((await answer(ws, 2)).get('result'), ui_port)
+                    if target_id is None:
+                        return (pid, False)
+                    await ws.send(json.dumps({'id': 3, 'method': 'Target.activateTarget', 'params': {'targetId': target_id}}))
+                    done = await answer(ws, 3)
+            except Exception as exc:
+                log.info("could not bring netkeep's window to the front: %s", personal_exc(exc))
+                return (pid, False)
+            finally:
+                deadline.reschedule(asyncio.get_running_loop().time() + FRONT_STEP_TIMEOUT_S)
+            return (pid, 'error' not in done and isinstance(done.get('result'), Mapping))
