@@ -992,3 +992,31 @@ def test_migrate_still_explains_how_to_clean_up(old: Path, new: Path) -> None:
     result = CliRunner().invoke(cli.app, ["migrate", "--dry-run"])
     assert result.exit_code == 1
     assert "already moved" in result.output and "don't move the new one" in result.output
+
+
+@pytest.mark.parametrize(
+    "name", ["netkeeper.sqlite3", "netkeeper.sqlite3-wal", "netkeeper.sqlite3-shm"]
+)
+def test_an_old_folder_back_with_a_database_is_refused_not_ignored(
+    old: Path, new: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    """An undo restored a backup there, and the new folder's marker is stale: both hold
+    data, so netkeep refuses rather than run on the wrong one (#661 review)."""
+    migrated_with_the_old_folder_back(old, new)
+    (old / name).write_bytes(b"")
+    monkeypatch.setenv("NETKEEPER_DATA", str(old))  # the old version's plist
+    with pytest.raises(Refused, match=r"both .* hold a database; netkeep won.t pick one"):
+        migrate_name.auto("serve")
+    assert paths.data_dir() == old  # not redirected to the stale copy
+    assert (old / name).exists()
+
+
+def test_a_terminal_command_refuses_when_both_hold_a_database(
+    old: Path, new: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    migrated_with_the_old_folder_back(old, new)
+    (old / "netkeeper.sqlite3").write_bytes(b"")
+    monkeypatch.setattr(cli, "_auto_migrate", REAL_AUTO)
+    result = CliRunner().invoke(cli.app, ["config", "show"])
+    assert result.exit_code == 1
+    assert "Move the one you don't want aside" in result.output

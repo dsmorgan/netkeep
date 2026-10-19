@@ -94,7 +94,13 @@ To go back to netkeeper:
    rm ~/Library/Application\ Support/netkeeper/migrated-from-netkeeper.json
    ```
 
-   Or restore your backup copy in its place.
+   Or restore your backup copy in its place, and then move the new folder aside (or delete it), so the next upgrade finds only one:
+
+   ```sh
+   mv ~/Library/Application\ Support/netkeep ~/netkeep-set-aside-$(date +%Y%m%d)
+   ```
+
+   If both folders hold a database, netkeep refuses to start rather than pick one.
 
 3. Check out the version before the rename, then `make install` and `make build-ui`.
 
