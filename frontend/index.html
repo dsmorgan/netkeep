@@ -7,12 +7,12 @@
     <script>
       // The theme switch's saved choice, before the first paint (#666; src/lib/theme.ts).
       try {
-        var theme = localStorage.getItem('netkeeper.theme')
+        const theme = localStorage.getItem('netkeeper.theme')
         if (theme === 'light' || theme === 'dark') {
           document.documentElement.dataset.theme = theme
           document.querySelector('meta[name="color-scheme"]').content = theme
         }
-      } catch (error) {
+      } catch {
         // Storage is blocked: Auto.
       }
     </script>

@@ -74,12 +74,15 @@ export function Sidebar({ id, open, onClose }: SidebarProps) {
       data-open={open}
       {...(open ? { role: 'dialog', 'aria-modal': true, 'aria-label': 'Navigation' } : {})}
       className={cn(
-        'relative z-[1] flex w-48 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground',
+        // One screen tall with its own scroll, from `sm` up as in the drawer, so the theme
+        // footer stays in view and never covers a link (#666). The nav scrolls between
+        // the header and the footer; the aside scrolls only if those two alone do not fit.
+        'relative z-[1] flex w-48 shrink-0 flex-col overflow-y-auto border-r border-sidebar-border bg-sidebar text-sidebar-foreground sm:sticky sm:top-0 sm:h-screen',
         'max-sm:fixed max-sm:inset-y-0 max-sm:left-0 max-sm:z-40 max-sm:w-64 max-sm:shadow-lg max-sm:transition-transform',
         open ? 'max-sm:translate-x-0' : 'max-sm:invisible max-sm:-translate-x-full',
       )}
     >
-      <div className="flex h-11 items-center justify-between border-b border-sidebar-border px-3 font-heading text-base font-extrabold tracking-heading text-sidebar-accent-foreground">
+      <div className="flex h-11 shrink-0 items-center justify-between border-b border-sidebar-border px-3 font-heading text-base font-extrabold tracking-heading text-sidebar-accent-foreground">
         <span className="flex items-center gap-2">
           <span
             aria-hidden="true"
@@ -97,7 +100,11 @@ export function Sidebar({ id, open, onClose }: SidebarProps) {
           <X aria-hidden="true" />
         </Button>
       </div>
-      <nav ref={nav} aria-label="Primary" className="flex flex-col gap-px p-2">
+      <nav
+        ref={nav}
+        aria-label="Primary"
+        className="flex min-h-0 flex-1 flex-col gap-px overflow-y-auto p-2"
+      >
         {NAV_ITEMS.map((item) => (
           <NavLink
             key={item.to}
@@ -108,8 +115,7 @@ export function Sidebar({ id, open, onClose }: SidebarProps) {
           />
         ))}
       </nav>
-      {/* Sticky, so the switch stays on screen however long the page is. */}
-      <div className="sticky bottom-0 mt-auto border-t border-sidebar-border bg-sidebar p-3">
+      <div data-testid="sidebar-footer" className="shrink-0 border-t border-sidebar-border p-3">
         <ThemeSwitch />
       </div>
     </aside>

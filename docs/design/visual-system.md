@@ -6,10 +6,11 @@ Every token lives in `frontend/src/index.css`: light values in `:root`, dark ove
 
 ## Theme switch
 
-The sidebar footer has an Auto, Light and Dark switch (#666). It's in the sidebar, not the top bar, because the top bar is full of live status, and a sticky footer keeps it on screen on every page. Auto is the default and follows the OS. The choice is saved per browser in `localStorage` (`netkeeper.theme`).
+The sidebar footer has an Auto, Light and Dark switch (#666). It's in the sidebar, not the top bar, because the top bar is full of live status, and the sidebar is one screen tall with its own scroll, so the footer stays on screen on every page and never covers a link. Auto is the default and follows the OS. The choice is saved per browser in `localStorage` (`netkeeper.theme`).
 
 - Light and Dark set `data-theme` on `<html>`; Auto removes it. `@custom-variant dark` in `index.css` matches `[data-theme="dark"]`, or `prefers-color-scheme: dark` without `[data-theme="light"]`. The dark tokens, `color-scheme` and Tailwind's `dark:` utilities all use that one variant.
 - An inline script in `index.html` applies the saved choice before the first paint, and also sets the `color-scheme` meta, so the page never flashes the other theme. `src/lib/theme.ts` does the same when you switch.
+- A theme change in one tab reaches the others through the `storage` event.
 - `theme.test.ts` runs the contrast checks for Auto on each OS scheme and for each forced theme against the OS.
 
 ## Tokens

@@ -10,7 +10,7 @@
  * Every storage read and write is wrapped: `localStorage` throws in a private
  * window with site data blocked, and an unreadable choice is Auto.
  */
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 export const THEME_CHOICES = ['auto', 'light', 'dark'] as const
 export type ThemeChoice = (typeof THEME_CHOICES)[number]
@@ -47,9 +47,23 @@ export function applyTheme(choice: ThemeChoice, root: HTMLElement = document.doc
   if (meta) meta.content = choice === 'auto' ? 'light dark' : choice
 }
 
-/** The current choice and a setter that applies and remembers it. */
+/**
+ * The current choice and a setter that applies and remembers it. A change saved
+ * in another tab arrives as a `storage` event, and this tab follows it.
+ */
 export function useTheme(): [ThemeChoice, (choice: ThemeChoice) => void] {
   const [theme, setTheme] = useState(readTheme)
+  useEffect(() => {
+    const onStorage = (event: StorageEvent): void => {
+      // A null key is `localStorage.clear()`, which also clears the choice.
+      if (event.key !== THEME_KEY && event.key !== null) return
+      const choice = readTheme()
+      setTheme(choice)
+      applyTheme(choice)
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
   const choose = useCallback((choice: ThemeChoice) => {
     setTheme(choice)
     saveTheme(choice)

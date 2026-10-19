@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { THEME_KEY } from '@/lib/theme'
@@ -81,6 +81,33 @@ describe('the theme switch', () => {
     expect(radio('Auto')).toBeChecked()
   })
 
+  it('follows a change saved in another tab', () => {
+    render(<ThemeSwitch />)
+
+    window.localStorage.setItem(THEME_KEY, 'dark')
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: THEME_KEY, newValue: 'dark' }))
+    })
+    expect(radio('Dark')).toBeChecked()
+    expect(root).toHaveAttribute('data-theme', 'dark')
+
+    window.localStorage.removeItem(THEME_KEY)
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: THEME_KEY, newValue: null }))
+    })
+    expect(radio('Auto')).toBeChecked()
+    expect(root).not.toHaveAttribute('data-theme')
+  })
+
+  it('ignores other keys changing in another tab', () => {
+    render(<ThemeSwitch />)
+    window.localStorage.setItem(THEME_KEY, 'dark')
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: 'netkeeper.other' }))
+    })
+    expect(radio('Auto')).toBeChecked()
+  })
+
   it('still switches when storage is blocked', () => {
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new Error('blocked')
@@ -118,6 +145,14 @@ describe("index.html's before-paint script", () => {
     run()
     expect(root).not.toHaveAttribute('data-theme')
     expect(colorSchemeMeta().content).toBe('light dark')
+  })
+
+  it('leaves no global behind', () => {
+    window.localStorage.setItem(THEME_KEY, 'dark')
+    // An indirect eval runs at the top level, as the page's classic script does.
+    ;(0, eval)(script)
+    expect(root).toHaveAttribute('data-theme', 'dark')
+    expect('theme' in globalThis).toBe(false)
   })
 
   it('survives blocked storage', () => {
