@@ -22,9 +22,11 @@ from fastapi import FastAPI
 from sqlalchemy import Engine
 
 from netkeep import worker
+from netkeep.chrome_spawn import ChromeLaunch, ChromeLauncher
 from netkeep.config import Settings
 from netkeep.db import session_scope
 from netkeep.linkedin import activity_lock
+from netkeep.linkedin.browser import ActivityLocks
 from netkeep.models import User
 from netkeep.paths import data_dir
 from netkeep.services import ui_settings
@@ -33,12 +35,14 @@ from netkeep.services.chrome_launch import (
     LAUNCH_TASK,
     LaunchResult,
     LaunchStatus,
+    PortProbe,
     Refusal,
 )
 from netkeep.services.events import Event
 from netkeep.services.scheduled_runs import ServeExtractor
 from netkeep.services.users import local_owner
 from netkeep.web.app import create_app
+from netkeep.worker import launcher_probe
 
 CSRF = {"X-Netkeep-Client": "1"}
 SETTINGS_URL = "/api/v1/settings/config"
@@ -104,6 +108,7 @@ def test_the_setting_is_off_by_default() -> None:
     assert spec.label == "Start netkeep's Chrome when netkeep starts"
     assert "Run at login" in spec.help and "when you log in" in spec.help
     assert "sign in to LinkedIn yourself" in spec.help
+    assert "already running, it opens this page in a new window there" in spec.help
 
 
 async def test_the_setting_is_saved_and_read_back(
@@ -189,16 +194,147 @@ async def test_a_real_run_lock_stops_it_too(running_app: FastAPI, tmp_path: Path
     assert spawner.calls == []
 
 
-async def test_no_second_chrome_when_one_holds_the_profile(
+async def test_a_running_chrome_is_handed_the_ui_window_once(
+    running_app: FastAPI, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A restart while netkeep's Chrome runs still shows the UI (#679)."""
+    handed = LaunchResult(LaunchStatus.HANDED_OFF, "opened the UI", pid=os.getpid())
+    spawner = _FakeSpawner(handed)
+    _ready(running_app, spawner)
+    _hold_profile(os.getpid())  # a live pid
+    with caplog.at_level(logging.INFO, logger="netkeep.worker"):
+        assert await _start(running_app) is not None
+    assert spawner.calls == [False]  # one launcher call, which hands off
+    assert f"already running (pid {os.getpid()}): opening the UI in it" in caplog.text
+    assert "start netkeep's Chrome at startup: handed_off: opened the UI" in caplog.text
+
+
+@dataclass
+class _Reader:
+    """The pid the Chrome on the port names over #675's identity read."""
+
+    pid: int | None
+    calls: list[str] = field(default_factory=list)
+
+    async def read_pid(self, cdp_url: str) -> int | None:
+        self.calls.append(cdp_url)
+        return self.pid
+
+
+@dataclass
+class _Handed:
+    """The launched Chrome passes its arguments to the running one and exits 0."""
+
+    launches: list[ChromeLaunch] = field(default_factory=list)
+    pid: int = 6464
+
+    def poll(self) -> int | None:
+        return 0
+
+    def __call__(self, launch: ChromeLaunch) -> _Handed:
+        self.launches.append(launch)
+        return self
+
+
+def _real_launcher(tmp_path: Path, reader: _Reader, spawned: _Handed) -> ChromeLauncher:
+    """The real launcher on a held profile, with its probe, port check and spawn faked."""
+
+    async def address() -> str:
+        return "http://127.0.0.1:9333"
+
+    async def probe(url: str) -> PortProbe:
+        key = activity_lock.SINGLE_ACCOUNT_KEY
+        locks = ActivityLocks(tmp_path / "locks")
+        return await launcher_probe(url, locks=locks, account=key, reader=reader)
+
+    async def no_sleep(_s: float) -> None:
+        return None
+
+    return ChromeLauncher(
+        cdp_url=address,
+        profile=data_dir() / "chrome-profile",
+        app_url=lambda: "http://127.0.0.1:8123/api/v1/session/connect?code=1.ab.cd",
+        ui_port=8123,
+        probe=probe,
+        run_holds_browser=lambda: False,
+        pid_alive=lambda pid: pid == os.getpid(),
+        spawn=spawned,
+        answers=lambda port: True,
+        sleep=no_sleep,
+        settle_s=0.3,
+        platform="darwin",
+    )
+
+
+async def test_the_hand_off_goes_through_the_identity_read(
+    running_app: FastAPI, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The real launcher reads the pid, matches the profile's lock, then hands off once."""
+    _hold_profile(os.getpid())
+    reader, spawned = _Reader(pid=os.getpid()), _Handed()
+    _ready(running_app, _FakeSpawner())
+    running_app.state.chrome_launcher = _real_launcher(tmp_path, reader, spawned)
+    with caplog.at_level(logging.INFO, logger="netkeep.worker"):
+        assert await _start(running_app) is not None
+    assert reader.calls == ["http://127.0.0.1:9333"]
+    [launch] = spawned.launches
+    assert launch.port == 9333 and not launch.first_run
+    assert launch.app_url.startswith("http://127.0.0.1:8123/")
+    assert "start netkeep's Chrome at startup: handed_off" in caplog.text
+
+
+@pytest.mark.parametrize("pid", [4_000_001, None])
+async def test_a_running_chrome_that_isnt_netkeeps_is_refused_and_logged(
+    running_app: FastAPI, tmp_path: Path, caplog: pytest.LogCaptureFixture, pid: int | None
+) -> None:
+    _hold_profile(os.getpid())
+    reader, spawned = _Reader(pid=pid), _Handed()
+    _ready(running_app, _FakeSpawner())
+    running_app.state.chrome_launcher = _real_launcher(tmp_path, reader, spawned)
+    with caplog.at_level(logging.INFO, logger="netkeep.worker"):
+        assert await _start(running_app) is not None
+    assert spawned.launches == []
+    assert "start netkeep's Chrome at startup: refused (not_dedicated)" in caplog.text
+
+
+async def test_a_running_chrome_gets_nothing_while_a_run_holds_the_browser(
     running_app: FastAPI, caplog: pytest.LogCaptureFixture
 ) -> None:
     spawner = _FakeSpawner()
     _ready(running_app, spawner)
-    _hold_profile(os.getpid())  # a live pid
+    _hold_profile(os.getpid())
     with caplog.at_level(logging.INFO, logger="netkeep.worker"):
-        assert await _start(running_app) is None
+        assert await _start(running_app, run_holds_browser=lambda: True) is None
     assert spawner.calls == []
-    assert f"it's already running (pid {os.getpid()})" in caplog.text
+    assert "a run holds the browser" in caplog.text
+
+
+async def test_a_running_chrome_gets_one_hand_off_while_a_launch_is_under_way(
+    running_app: FastAPI, caplog: pytest.LogCaptureFixture
+) -> None:
+    gate = asyncio.Event()
+    spawner = _FakeSpawner(gate=gate)
+    _ready(running_app, spawner)
+    _hold_profile(os.getpid())
+    with caplog.at_level(logging.INFO, logger="netkeep.worker"):
+        first = await worker.start_chrome_at_startup(
+            running_app, sleep=_no_sleep, run_holds_browser=lambda: False
+        )
+        second = await worker.start_chrome_at_startup(
+            running_app, sleep=_no_sleep, run_holds_browser=lambda: False
+        )
+        gate.set()
+        await running_app.state.tasks.join()
+    assert first is not None and second is None and spawner.calls == [False]
+    assert "a launch is already under way" in caplog.text
+
+
+async def test_off_hands_nothing_to_a_running_chrome(running_app: FastAPI) -> None:
+    spawner = _FakeSpawner()
+    _ready(running_app, spawner, on=False)
+    _hold_profile(os.getpid())
+    assert await _start(running_app) is None
+    assert spawner.calls == []
 
 
 async def test_a_stale_profile_lock_doesnt_stop_it(running_app: FastAPI) -> None:
