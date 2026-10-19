@@ -85,6 +85,7 @@ function draftRun(id: number): ImportRunPage['items'][number] {
     updated_at: '2026-01-01T00:00:00Z',
     committed_at: null,
     rolled_back_at: null,
+    unreachable_contacts: 0,
   }
 }
 

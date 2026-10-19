@@ -44,12 +44,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 import threading
 import time
 from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Final
+from urllib.parse import unquote
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
@@ -150,21 +152,82 @@ PENDING_TTL: Final = timedelta(minutes=10)
 PENDING_MAX: Final = 8
 
 
+#: Where the callback sends the browser when ``return_to`` is absent or refused.
+DEFAULT_RETURN_TO: Final = "/settings"
+
+#: The app pages a Connect Gmail button may return to (#656). Exact paths only.
+RETURN_PATHS: Final = frozenset(
+    {
+        "/",
+        "/settings",
+        "/gmail",
+        "/inbox",
+        "/contacts",
+        "/campaigns",
+        "/campaigns/new",
+        "/imports",
+        "/imports/history",
+        "/imports/runs",
+        "/exports",
+        "/lists",
+        "/linkedin",
+        "/templates",
+        "/triage",
+    }
+)
+
+#: Detail pages: a fixed prefix and a numeric id.
+_RETURN_DETAIL: Final = re.compile(r"/(?:contacts|campaigns|imports/runs)/[0-9]{1,18}")
+
+
+def safe_return_to(value: str | None) -> str:
+    """``value`` when it is a relative app page the callback may redirect to, else ``/settings``.
+
+    This is the open-redirect guard, so it refuses rather than repairs. Only ASCII
+    with no control character or backslash passes; the path must be one of
+    :data:`RETURN_PATHS` (or a detail page) and must not change when percent-decoded,
+    which rules out ``%2f%2f`` and ``/%5c`` and double encoding. The query, if any,
+    is kept; a fragment is not.
+    """
+    if value is None or not value.startswith("/") or len(value) > 500:
+        return DEFAULT_RETURN_TO
+    if not value.isascii() or any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value):
+        return DEFAULT_RETURN_TO
+    if "\\" in value or "#" in value:
+        return DEFAULT_RETURN_TO
+    path, _, query = value.partition("?")
+    if unquote(path) != path or _risky(unquote(query)):
+        return DEFAULT_RETURN_TO
+    if path not in RETURN_PATHS and _RETURN_DETAIL.fullmatch(path) is None:
+        return DEFAULT_RETURN_TO
+    return value
+
+
+def _risky(text: str) -> bool:
+    return "\\" in text or any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in text)
+
+
 class PendingAuthorizations:
-    """Authorizations started from the Settings page, waiting for Google's redirect.
+    """Authorizations started from the app, waiting for Google's redirect.
 
     In memory, per process, never written down: one that outlives a restart is
     simply started again. Keyed by ``state``; :meth:`take` hands one out at most
-    once, and only to the user who started it, within :data:`PENDING_TTL`.
+    once, and only to the user who started it, within :data:`PENDING_TTL`. Each
+    remembers the page it started from (:func:`safe_return_to`).
     Thread-safe, since request handlers run on a thread pool.
     """
 
     def __init__(self, *, clock: Callable[[], datetime] = utcnow) -> None:
         self._clock = clock
         self._lock = threading.Lock()
-        self._pending: dict[str, tuple[int, gmail_oauth.Authorization, datetime]] = {}
+        self._pending: dict[str, tuple[int, gmail_oauth.Authorization, datetime, str]] = {}
 
-    def add(self, user_id: int, authorization: gmail_oauth.Authorization) -> None:
+    def add(
+        self,
+        user_id: int,
+        authorization: gmail_oauth.Authorization,
+        return_to: str | None = None,
+    ) -> None:
         with self._lock:
             self._expire()
             while len(self._pending) >= PENDING_MAX:
@@ -173,20 +236,28 @@ class PendingAuthorizations:
                 user_id,
                 authorization,
                 self._clock() + PENDING_TTL,
+                safe_return_to(return_to),
             )
 
     def take(self, state: str, user_id: int) -> gmail_oauth.Authorization | None:
         """The authorization ``state`` names, removed; None when unknown, expired, or not theirs."""
+        found = self.take_with_return(state, user_id)
+        return None if found is None else found[0]
+
+    def take_with_return(
+        self, state: str, user_id: int
+    ) -> tuple[gmail_oauth.Authorization, str] | None:
+        """Like :meth:`take`, with the (already checked) page to return to."""
         with self._lock:
             self._expire()
             found = self._pending.pop(state, None)
         if found is None or found[0] != user_id:
             return None
-        return found[1]
+        return found[1], found[3]
 
     def _expire(self) -> None:
         now = self._clock()
-        for state in [key for key, (_, _, until) in self._pending.items() if until <= now]:
+        for state in [key for key, (_, _, until, _) in self._pending.items() if until <= now]:
             del self._pending[state]
 
 

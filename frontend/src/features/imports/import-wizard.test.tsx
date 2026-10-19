@@ -232,6 +232,8 @@ describe('import wizard', () => {
     )
     // COMMITTED_RUN carries no duplicate_groups: nothing shares a name and company (#228).
     expect(screen.queryByText(/share a name and company/)).toBeNull()
+    // ...and no contact without a URL or email, so no sentence about them (#656).
+    expect(screen.queryByText(/no profile URL and no email/)).toBeNull()
 
     const committed = calls.find((call) => call.path === '/api/v1/imports/7/commit')
     expect(committed?.body).toEqual({
@@ -277,6 +279,35 @@ describe('import wizard', () => {
     expect(screen.getByText(/this import can no longer be rolled back/)).toBeVisible()
     // The result step's summary, not the run page's per-contact listing.
     expect(screen.queryByText(/row 2/)).toBeNull()
+  })
+
+  it.each([
+    [1, '1 imported contact has no profile URL and no email'],
+    [3, '3 imported contacts have no profile URL and no email'],
+  ])('says how many contacts LinkedIn cannot reach: %i (#656)', async (count, sentence) => {
+    mockFetch(
+      backend({
+        'GET /api/v1/imports/presets': () => jsonResponse(PRESETS),
+        'POST /api/v1/imports/inspect': () => jsonResponse(ARCHIVE_INSPECTION),
+        'POST /api/v1/imports': () => jsonResponse(DRAFT_RUN, 201),
+        'POST /api/v1/imports/7/preview': () => jsonResponse(PREVIEW_ROWS),
+        'GET /api/v1/imports/7/rows': () => jsonResponse({ items: [CANDIDATE_ROW], total: 1 }),
+        'POST /api/v1/imports/7/commit': commitLike([CANDIDATE_ROW.row_number], {
+          ...COMMITTED_RUN,
+          unreachable_contacts: count,
+        }),
+      }),
+    )
+    await renderApp('/imports')
+    await reachCandidates()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create a new contact for the rest' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Go to commit' }))
+    await screen.findByText('Commit the import')
+    fireEvent.click(screen.getByRole('button', { name: 'Commit 4 rows' }))
+
+    await screen.findByText('Imported connections.csv')
+    expect(screen.getByText(new RegExp(sentence))).toBeVisible()
   })
 
   it('lets undecided candidates be skipped on purpose', async () => {

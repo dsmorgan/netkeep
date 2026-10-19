@@ -158,6 +158,7 @@ def run_out(run: ImportRun) -> ImportRunOut:
             else None
         ),
         duplicate_groups=[duplicate_group_out(group) for group in service.duplicate_groups(run)],
+        unreachable_contacts=service.unreachable_contacts(run),
     )
 
 

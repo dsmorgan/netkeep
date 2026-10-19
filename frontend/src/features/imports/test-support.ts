@@ -116,6 +116,7 @@ export const DRAFT_RUN: ImportRun = {
   tagged_contacts: 0,
   tags_added: 0,
   tags_removed: 0,
+  unreachable_contacts: 0,
   committed_at: null,
   rolled_back_at: null,
   created_at: '2026-09-20T10:00:00Z',

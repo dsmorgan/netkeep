@@ -667,6 +667,61 @@ def _duplicate_groups_json(groups: Sequence[DuplicateGroup]) -> list[dict[str, A
     ]
 
 
+REPORT_UNREACHABLE_KEY: Final[str] = "unreachable_contacts"
+"""The key a CSV commit's ``report_json`` keeps :func:`unreachable_contacts`'s count under."""
+
+
+def _unreachable_count(session: Session, user: User, contact_ids: Sequence[int]) -> int:
+    """How many of ``contact_ids`` have no LinkedIn profile and no email, once the commit applied.
+
+    Counted on the contacts as they stand after the rows landed, so a row that
+    brought a URL or an email to a contact that lacked one does not count, and a
+    matched contact that already had one never did. With neither, a sync has
+    nothing to match the contact by and a LinkedIn step has no profile to reach
+    (UX audit 2.1).
+    """
+    total = 0
+    for start in range(0, len(contact_ids), 500):
+        chunk = contact_ids[start : start + 500]
+        has_email = scoped(user, ContactEmail).where(ContactEmail.contact_id == Contact.id).exists()
+        total += (
+            session.scalar(
+                scoped_count(user, Contact).where(
+                    Contact.id.in_(chunk),
+                    Contact.li_urn.is_(None),
+                    Contact.li_public_id.is_(None),
+                    Contact.li_url.is_(None),
+                    ~has_email,
+                )
+            )
+            or 0
+        )
+    return total
+
+
+def unreachable_contacts(run: ImportRun) -> int:
+    """The contacts ``run`` wrote that have no profile URL and no email, if the run is live.
+
+    Zero for a draft, an archive run, and a run since rolled back: the contacts may
+    be gone, so it is no longer a warning worth acting on. ``report_json`` keeps the
+    count either way, as history -- only what this function reports back changes.
+    """
+    if run.source_kind is not ImportSourceKind.CSV or run.status is not ImportStatus.COMMITTED:
+        return 0
+    if run.report_json is None:
+        return 0
+    return int(run.report_json.get(REPORT_UNREACHABLE_KEY, 0))
+
+
+def unreachable_note(count: int) -> str:
+    """The sentence the CLI shows; the wizard and run page word it the same in ``notes.tsx``."""
+    noun = "contact has" if count == 1 else "contacts have"
+    return (
+        f"{count} imported {noun} no profile URL and no email, so a sync can't match "
+        "them and LinkedIn steps can't reach them."
+    )
+
+
 def duplicate_groups(run: ImportRun) -> list[DuplicateGroup]:
     """The name-and-company duplicate groups :func:`commit` recorded on ``run``, if live.
 
@@ -1342,9 +1397,13 @@ def commit(
         raise UndecidedCandidates(waiting)
     _recount(run, outcomes)
     groups = _duplicate_groups(outcomes)
-    run.report_json = (
-        {REPORT_DUPLICATE_GROUPS_KEY: _duplicate_groups_json(groups)} if groups else None
-    )
+    unreachable = _unreachable_count(session, user, _written_contacts(outcomes))
+    report: dict[str, Any] = {}
+    if groups:
+        report[REPORT_DUPLICATE_GROUPS_KEY] = _duplicate_groups_json(groups)
+    if unreachable:
+        report[REPORT_UNREACHABLE_KEY] = unreachable
+    run.report_json = report or None
     run.status = ImportStatus.COMMITTED
     run.committed_at = utcnow()
     # The rules, over the contacts this commit wrote and no others, in the same
@@ -1966,4 +2025,6 @@ __all__ = [
     "saved_presets",
     "set_decisions",
     "snapshot_contact",
+    "unreachable_contacts",
+    "unreachable_note",
 ]

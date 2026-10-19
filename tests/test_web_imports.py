@@ -385,6 +385,56 @@ async def test_duplicate_groups_disappear_once_the_run_is_rolled_back(
     assert reread.json()["duplicate_groups"] == []
 
 
+UNREACHABLE_CSV = (
+    "First Name,Last Name,Company,Profile URL,Email Address\n"
+    "Aldous,Brindlewick,Quorbelle Fictionary,https://www.linkedin.com/in/aldous-brindlewick-qz,\n"
+    "Bettina,Cravenhale,Quorbelle Fictionary,,bettina@quorbelle.example\n"
+    "Corwin,Dunmerrow,Quorbelle Fictionary,,\n"
+    "Delphine,Eversleigh,Quorbelle Fictionary,,\n"
+)
+UNREACHABLE_MAPPING = {
+    "First Name": "first_name",
+    "Last Name": "last_name",
+    "Company": "current_company",
+    "Profile URL": "li_url",
+    "Email Address": "email",
+}
+
+
+async def _commit_unreachable(client: httpx.AsyncClient) -> Any:
+    run = await draft(client, content=UNREACHABLE_CSV, mapping=UNREACHABLE_MAPPING)
+    response = await client.post(f"/api/v1/imports/{run['id']}/commit", headers=CSRF, json={})
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+async def test_a_commit_counts_contacts_with_no_profile_url_and_no_email(
+    client: httpx.AsyncClient,
+) -> None:
+    """#656: of four new contacts, one has a URL, one an email, two neither."""
+    body = await _commit_unreachable(client)
+    assert body["created_count"] == 4
+    assert body["unreachable_contacts"] == 2
+    reread = await client.get(f"/api/v1/imports/{body['id']}")
+    assert reread.json()["unreachable_contacts"] == 2
+
+
+async def test_the_unreachable_count_is_history_once_the_run_is_rolled_back(
+    client: httpx.AsyncClient,
+) -> None:
+    """Like ``duplicate_groups``: kept in ``report_json``, no longer a live warning (#656)."""
+    body = await _commit_unreachable(client)
+    assert (
+        await client.post(f"/api/v1/imports/{body['id']}/rollback", headers=CSRF)
+    ).status_code == 200
+    assert (await client.get(f"/api/v1/imports/{body['id']}")).json()["unreachable_contacts"] == 0
+
+
+async def test_a_draft_has_no_unreachable_count(client: httpx.AsyncClient) -> None:
+    run = await draft(client, content=UNREACHABLE_CSV, mapping=UNREACHABLE_MAPPING)
+    assert run["unreachable_contacts"] == 0
+
+
 async def test_a_merge_decision_without_a_contact_is_a_bad_request(
     client: httpx.AsyncClient, seeded: object
 ) -> None:

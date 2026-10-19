@@ -3287,6 +3287,8 @@ class _RunSnapshot:
     candidate_rows: tuple[int, ...] = ()
     duplicate_groups: tuple[import_runs.DuplicateGroup, ...] = ()
     """New contacts this commit created that share a name and company with another row (#228)."""
+    unreachable_contacts: int = 0
+    """Contacts this commit wrote with no profile URL and no email (#656)."""
 
 
 def _snapshot_of(run: ImportRun, *, candidate_rows: tuple[int, ...] = ()) -> _RunSnapshot:
@@ -3303,6 +3305,7 @@ def _snapshot_of(run: ImportRun, *, candidate_rows: tuple[int, ...] = ()) -> _Ru
         tags_added=run.tags_added,
         candidate_rows=candidate_rows,
         duplicate_groups=tuple(import_runs.duplicate_groups(run)),
+        unreachable_contacts=import_runs.unreachable_contacts(run),
     )
 
 
@@ -3438,6 +3441,8 @@ def _run_report(label: str, run: _RunSnapshot) -> str:
             str(contact.contact_id) for group in run.duplicate_groups for contact in group.contacts
         )
         report += f"\nwarning: {warning} Contacts: {ids}."
+    if run.unreachable_contacts:
+        report += f"\nnote: {import_runs.unreachable_note(run.unreachable_contacts)}"
     return report
 
 

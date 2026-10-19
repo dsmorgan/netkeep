@@ -141,3 +141,23 @@ export function DuplicateGroupsNote({
     </Note>
   )
 }
+
+/**
+ * How many contacts a commit wrote with no profile URL and no email (#656).
+ *
+ * A sync has nothing to match them by and a LinkedIn step has no profile to
+ * reach. Shown only above zero; the backend reports zero for a run that was
+ * rolled back, so an undone import carries no live warning.
+ */
+export function UnreachableContactsNote({ count }: { count: number }) {
+  if (count <= 0) return null
+  return (
+    <Note tone="warn" role="status">
+      <p className="font-medium">
+        {count} imported {count === 1 ? 'contact has' : 'contacts have'} no profile URL and no
+        email, so a sync can&rsquo;t match them and LinkedIn steps can&rsquo;t reach them.
+      </p>
+      <p>Add a profile URL or an email to each to make it reachable.</p>
+    </Note>
+  )
+}

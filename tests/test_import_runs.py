@@ -1133,7 +1133,9 @@ def test_two_rows_with_the_same_name_and_company_warn_as_one_group(
                     {"contact_id": group.contacts[1].contact_id, "row_number": 2},
                 ]
             }
-        ]
+        ],
+        # Neither row has a profile URL or an email (#656).
+        "unreachable_contacts": 2,
     }
 
 
@@ -1276,8 +1278,18 @@ def test_no_groups_leaves_report_json_unset(writer: Session, user: User) -> None
     content = "First Name,Last Name,Company\nJordan,Vance,Acme Inc\n"
     committed = _run_of(writer, user, content)
 
-    assert committed.report_json is None
+    # No group is recorded; the one contact has no URL or email, which the report counts (#656).
+    assert committed.report_json == {"unreachable_contacts": 1}
     assert import_runs.duplicate_groups(committed) == []
+    assert import_runs.unreachable_contacts(committed) == 1
+
+
+def test_a_report_with_nothing_to_say_is_unset(writer: Session, user: User) -> None:
+    content = "First Name,Last Name,Company,Email Address\nJordan,Vance,Acme Inc,jv@acme.example\n"
+    committed = _run_of(writer, user, content)
+
+    assert committed.report_json is None
+    assert import_runs.unreachable_contacts(committed) == 0
 
 
 def test_duplicate_groups_is_empty_for_a_draft_run(writer: Session, user: User) -> None:

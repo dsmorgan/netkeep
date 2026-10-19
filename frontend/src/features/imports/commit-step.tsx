@@ -3,7 +3,7 @@ import { Link } from '@tanstack/react-router'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
-import { DuplicateGroupsNote, ErrorNote, Note } from './notes'
+import { DuplicateGroupsNote, ErrorNote, Note, UnreachableContactsNote } from './notes'
 import { RunCounts } from './run-counts'
 import type { Decision, ImportRun } from './types'
 
@@ -148,6 +148,7 @@ export function CommitResult({ run, onRestart }: { run: ImportRun; onRestart: ()
         </CardContent>
       </Card>
       <DuplicateGroupsNote groups={run.duplicate_groups ?? []} />
+      <UnreachableContactsNote count={run.unreachable_contacts ?? 0} />
       <div className="flex flex-wrap gap-2">
         <Button render={<Link to="/contacts" />}>See your contacts</Button>
         <Button

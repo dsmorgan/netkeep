@@ -2923,7 +2923,8 @@ export interface paths {
         };
         /**
          * Mailbox Oauth Callback
-         * @description Where Google sends the browser back. Always redirects to the Settings page.
+         * @description Where Google sends the browser back. Always redirects to an app page: the one the
+         *     flow started from (#656), or Settings.
          */
         get: operations["mailbox_oauth_callback_api_v1_mailboxes_oauth_callback_get"];
         put?: never;
@@ -6822,6 +6823,11 @@ export interface components {
             /** Total Rows */
             total_rows: number;
             /**
+             * Unreachable Contacts
+             * @default 0
+             */
+            unreachable_contacts: number;
+            /**
              * Updated At
              * Format: date-time
              */
@@ -7902,6 +7908,8 @@ export interface components {
         OAuthStartIn: {
             /** Mailbox Id */
             mailbox_id?: number | null;
+            /** Return To */
+            return_to?: string | null;
         };
         /** OAuthStartOut */
         OAuthStartOut: {
@@ -16049,7 +16057,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Back to the Settings page, with the outcome */
+            /** @description Back to the page the flow started from, with the outcome */
             303: {
                 headers: {
                     [name: string]: unknown;

@@ -1188,6 +1188,11 @@ class ImportRunOut(BaseModel):
     share a name and company (#228). Empty on a draft, on an archive run, and on a commit
     that created no such group.
     """
+    unreachable_contacts: int = 0
+    """For a ``csv`` run, how many contacts its commit wrote that have no profile URL and no
+    email, so a sync cannot match them and LinkedIn steps cannot reach them. Zero on a draft,
+    on an archive run, and on a run since rolled back (its history keeps the count).
+    """
 
 
 class ImportRunPage(BaseModel):
@@ -2593,6 +2598,9 @@ class OAuthClientIn(BaseModel):
 class OAuthStartIn(BaseModel):
     mailbox_id: int | None = None
     """Re-authorizing a known mailbox preselects its account on Google's page."""
+    return_to: str | None = Field(default=None, max_length=500)
+    """The app page to come back to, such as ``/gmail``. Kept only when it is a relative path
+    to one of the app's pages; anything else, or nothing, comes back to ``/settings``."""
 
 
 class OAuthStartOut(BaseModel):
