@@ -73,7 +73,7 @@ Then use **Contacts** and **Lists** to sort further. A static list holds the peo
 2. In that new window, log in to LinkedIn once. netkeep never types your password; you sign in yourself. Use this window for your own LinkedIn browsing too, so your activity and netkeep's share one session.
 3. Check it: `netkeep preflight`. It attaches, opens one blank tab, reads the names of the profile's LinkedIn cookies and a few browser properties, and closes the tab. It visits no website.
 
-Start netkeep's Chrome again whenever you restart your Mac or quit it. The dashboard tells you when it isn't running, with a **Start Chrome** button. To have it start by itself, turn on **Start netkeep's Chrome when netkeep starts** in Settings, under **LinkedIn runs**. It's off by default. With [Run at login](../../README.md#run-at-login-macos) also on, Chrome then starts when you log in. netkeep still starts nothing when its Chrome is already running or a run is using the browser.
+Start netkeep's Chrome again whenever you restart your Mac or quit it. The dashboard tells you when it isn't running, with a **Start Chrome** button. To have it start by itself, turn on **Start netkeep's Chrome when netkeep starts** in Settings, under **LinkedIn runs**. It's off by default. With [Run at login](../../README.md#run-at-login-macos) also on, Chrome then starts when you log in. When its Chrome is already running, restarting `serve` opens netkeep in a new window there, so each restart adds a window, except within 5 minutes of the last one it opened that way. It starts nothing when a run is using the browser as `serve` starts.
 
 Read [the note about LinkedIn's terms](../../README.md#a-plain-note-about-linkedins-terms) before your first run.
 
