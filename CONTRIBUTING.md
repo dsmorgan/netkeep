@@ -79,25 +79,35 @@ uploads to PyPI by hand, and no PyPI token exists.
    matching `v*`.
 3. In **Settings > General > Releases**, turn on **Enable release immutability**, so a
    published release's files and tag can't change.
-4. In **Settings > Rules > Rulesets**, add a tag ruleset for `v*` that restricts
-   creation, update and deletion to the maintainer.
+4. In **Settings > Rules > Rulesets**, add a tag ruleset that targets `v*`, turn on
+   **Restrict creations**, **Restrict updates** and **Restrict deletions**, and add
+   yourself to its **Bypass list**. Only someone on the bypass list can then push,
+   move or delete a release tag.
 
 **Each release.**
 
 1. On a branch, set the version in `pyproject.toml` and `netkeep/__init__.py`, run
-   `uv lock`, and run `.venv/bin/python -m towncrier build --version X.Y.Z`. Merge the
-   pull request.
+   `uv lock`, and run `.venv/bin/python -m towncrier build --yes --version X.Y.Z`.
+   Merge the pull request.
 2. Optional: **Actions > Release > Run workflow** on `main` for a dry run. It builds,
    checks and installs everything on both Mac architectures, and publishes nothing.
 3. Tag the merged commit on `main` and push the tag:
    `git tag -a vX.Y.Z -m "netkeep X.Y.Z" <commit>`, then `git push origin vX.Y.Z`.
-4. In the run, approve the `release` deployment. The workflow publishes to PyPI, then
-   creates the GitHub release with the wheel, the sdist, `constraints.txt` and
-   `SHA256SUMS`.
+4. Before you approve the `release` deployment, check that the run's commit (shown at
+   the top of the run) is the commit you tagged on `main`. Your approval is the check
+   that counts: the workflow's own main-ancestor check lives in the tagged commit's
+   copy of `release.yml`, which a tag on another branch could have edited. Then approve.
+   The workflow publishes to PyPI, then creates the GitHub release with the wheel, the
+   sdist, `constraints.txt` and `SHA256SUMS`.
 
 The workflow refuses a tag that isn't `vX.Y.Z` for the package's version, a commit that
-isn't on `main`, and a version that already has a release. A version is never
-republished: if something is wrong after publishing, release the next patch version.
+isn't on `main`, and a version that already has a release, drafts included.
+
+If only the **GitHub release** job fails, the PyPI upload is good and the version is not
+lost: delete any draft release the job left for the tag (**Releases**, or
+`gh release delete vX.Y.Z`, which keeps the tag), then re-run that failed job. If
+anything else is wrong after the PyPI upload, don't reuse the version: PyPI never
+accepts the same file twice, so release the next patch version.
 
 ## AI-assisted contributions
 

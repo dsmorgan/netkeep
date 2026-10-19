@@ -22,8 +22,9 @@ on:
 permissions: {}
 
 # One release at a time, and a newer tag never cancels one halfway through publishing.
+# Dry runs queue in their own group, so a manual run can't displace a pending tag run.
 concurrency:
-  group: release
+  group: release-${{ github.event_name }}
   cancel-in-progress: false
 
 jobs:
