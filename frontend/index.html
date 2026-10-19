@@ -4,6 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
+    <script>
+      // The theme switch's saved choice, before the first paint (#666; src/lib/theme.ts).
+      try {
+        var theme = localStorage.getItem('netkeeper.theme')
+        if (theme === 'light' || theme === 'dark') {
+          document.documentElement.dataset.theme = theme
+          document.querySelector('meta[name="color-scheme"]').content = theme
+        }
+      } catch (error) {
+        // Storage is blocked: Auto.
+      }
+    </script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>netkeeper</title>
   </head>

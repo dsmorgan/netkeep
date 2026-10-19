@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils'
 
 import { NAV_ITEMS, navStateText, type NavItem } from './nav'
 import { NavBadge } from './nav-badge'
+import { ThemeSwitch } from './theme-switch'
 
 interface SidebarProps {
   id: string
@@ -46,7 +47,9 @@ export function Sidebar({ id, open, onClose }: SidebarProps) {
         return
       }
       if (event.key !== 'Tab' || drawer.current === null) return
-      const focusable = drawer.current.querySelectorAll<HTMLElement>('a[href], button')
+      const focusable = drawer.current.querySelectorAll<HTMLElement>(
+        'a[href], button, input:checked',
+      )
       const first = focusable.item(0)
       const last = focusable.item(focusable.length - 1)
       if (focusable.length === 0) return
@@ -105,6 +108,10 @@ export function Sidebar({ id, open, onClose }: SidebarProps) {
           />
         ))}
       </nav>
+      {/* Sticky, so the switch stays on screen however long the page is. */}
+      <div className="sticky bottom-0 mt-auto border-t border-sidebar-border bg-sidebar p-3">
+        <ThemeSwitch />
+      </div>
     </aside>
   )
 }

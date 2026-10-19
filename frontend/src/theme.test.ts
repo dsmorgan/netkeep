@@ -8,6 +8,11 @@
  * over the page and over the center of each color-field blob, its most
  * saturated spot, and the worst of those has to pass. A tint changes the ink
  * inside it (`.nk-tint`), so text in a tinted pane is checked with those inks.
+ *
+ * The theme switch (#666) picks light or dark through the `dark` variant, so
+ * the checks run once per setting: Auto on each OS scheme, and Light and Dark
+ * each forced against the OS. Which theme a setting lands on comes from
+ * matching the variant's own selectors against <html>.
  */
 import { describe, expect, it } from 'vitest'
 
@@ -30,24 +35,35 @@ function tokensIn(block: string): Tokens {
   return tokens
 }
 
-/** The body of the first `{ ... }` after `start`, matched brace for brace. */
-function blockAfter(start: number): string {
+/** The body of the first `{ ... }` after `start` in `source`, matched brace for brace. */
+function blockAfter(start: number, source = css): string {
   if (start < 0) throw new Error('index.css is missing a block this test reads')
-  const open = css.indexOf('{', start)
+  const open = source.indexOf('{', start)
   let depth = 0
-  for (let index = open; index < css.length; index += 1) {
-    if (css[index] === '{') depth += 1
-    if (css[index] === '}') depth -= 1
-    if (depth === 0) return css.slice(open + 1, index)
+  for (let index = open; index < source.length; index += 1) {
+    if (source[index] === '{') depth += 1
+    if (source[index] === '}') depth -= 1
+    if (depth === 0) return source.slice(open + 1, index)
   }
   throw new Error('unbalanced braces in index.css')
 }
 
-const light = tokensIn(blockAfter(css.indexOf(':root {')))
-const dark = {
-  ...light,
-  ...tokensIn(blockAfter(css.indexOf('@media (prefers-color-scheme: dark)'))),
+/** `block` with the first nested block that starts at `marker` cut out. */
+function without(block: string, marker: string): string {
+  const start = block.indexOf(marker)
+  if (start < 0) return block
+  const inner = blockAfter(start, block)
+  const end = block.indexOf(inner, start) + inner.length + 1
+  return block.slice(0, start) + block.slice(end)
 }
+
+const rootBlock = blockAfter(css.indexOf(':root {'))
+/** What `:root` declares outside its `dark` variant: the light theme. */
+const lightRoot = without(rootBlock, '@variant dark')
+/** What the `dark` variant inside `:root` declares: the dark theme's overrides. */
+const darkRoot = blockAfter(rootBlock.indexOf('@variant dark'), rootBlock)
+const light = tokensIn(lightRoot)
+const dark = { ...light, ...tokensIn(darkRoot) }
 /** What `.nk-tint` redefines inside a tinted pane. */
 const inTint = tokensIn(blockAfter(css.indexOf('.nk-tint {')))
 
@@ -295,10 +311,66 @@ const SOLID_PAIRS: [text: string, surface: string][] = [
   ]),
 ]
 
-describe.each([
-  ['light', light],
-  ['dark', dark],
-] as const)('the %s theme', (_, tokens) => {
+// ---- Which theme each switch setting lands on (#666) ----
+
+type Choice = 'auto' | 'light' | 'dark'
+type Scheme = 'light' | 'dark'
+
+const MEDIA_DARK = '@media (prefers-color-scheme: dark)'
+const variant = blockAfter(css.indexOf('@custom-variant dark'))
+
+/** The selector of the `{ @slot; }` rule in `block`, with `&` as <html>. */
+function slotSelector(block: string): string {
+  const rule = /([^{}]+)\{\s*@slot;\s*\}/.exec(block)
+  if (!rule) throw new Error('the dark variant has no @slot rule')
+  return (rule[1] as string).trim().replace(/&/g, ':root')
+}
+
+const forcedSelector = slotSelector(without(variant, MEDIA_DARK))
+const osSelector = slotSelector(blockAfter(variant.indexOf(MEDIA_DARK), variant))
+
+/** Whether the `dark` variant applies to <html> for `choice` on an OS set to `os`. */
+function landsOnDark(choice: Choice, os: Scheme): boolean {
+  const root = document.documentElement
+  if (choice === 'auto') delete root.dataset.theme
+  else root.dataset.theme = choice
+  try {
+    return root.matches(forcedSelector) || (os === 'dark' && root.matches(osSelector))
+  } finally {
+    delete root.dataset.theme
+  }
+}
+
+const MODES: [name: string, expected: Scheme, choice: Choice, os: Scheme][] = [
+  ['Auto on a light OS', 'light', 'auto', 'light'],
+  ['Auto on a dark OS', 'dark', 'auto', 'dark'],
+  ['Light on a light OS', 'light', 'light', 'light'],
+  ['Light on a dark OS', 'light', 'light', 'dark'],
+  ['Dark on a light OS', 'dark', 'dark', 'light'],
+  ['Dark on a dark OS', 'dark', 'dark', 'dark'],
+]
+
+describe('the dark variant', () => {
+  it.each(MODES)('puts %s on the %s theme', (_, expected, choice, os) => {
+    expect(landsOnDark(choice, os) ? 'dark' : 'light').toBe(expected)
+  })
+
+  it('is the only place the OS scheme is read, so the switch overrides everything', () => {
+    expect(css.split('prefers-color-scheme').length - 1).toBe(1)
+  })
+
+  it('carries the dark tokens and color-scheme, with light on :root', () => {
+    expect(lightRoot).toMatch(/(^|[;{\s])color-scheme: light;/)
+    expect(darkRoot).toMatch(/(^|[;{\s])color-scheme: dark;/)
+    expect(Object.keys(tokensIn(darkRoot)).length).toBeGreaterThan(40)
+  })
+})
+
+/** Light and dark through the OS, and each forced against the OS. */
+const CONTRAST_MODES = MODES.filter(([, , choice, os]) => choice === 'auto' || choice !== os)
+
+describe.each(CONTRAST_MODES)('the theme with %s', (_, __, choice, os) => {
+  const tokens = landsOnDark(choice, os) ? dark : light
   const withTint = insideTint(tokens)
 
   it.each(SOLID_PAIRS)('keeps %s on %s at WCAG AA', (text, surface) => {
@@ -378,6 +450,27 @@ describe.each([
   })
 })
 
+describe('the color field', () => {
+  // #666: the field was hidden under prefers-reduced-transparency, which macOS's
+  // Reduce transparency setting turns on, so the page went flat. It is the page's
+  // background, and page text is held to AA on it above.
+  it('is never hidden, in any theme or media query', () => {
+    const rules = [...css.matchAll(/\.nk-field\s*\{/g)].map((match) => blockAfter(match.index))
+    expect(rules.length).toBeGreaterThan(0)
+    for (const rule of rules) {
+      expect(rule).not.toMatch(/display:\s*none|visibility:\s*hidden|opacity:\s*0[;\s]/)
+    }
+  })
+
+  it.each([
+    ['light', light],
+    ['dark', dark],
+  ] as const)('shows in the %s theme', (_, tokens) => {
+    expect(Number(resolve('var(--field-opacity)', tokens))).toBeGreaterThan(0)
+    expect(percentOf(tokens, 'field-mix')).toBeGreaterThan(0)
+  })
+})
+
 describe.each([
   ['light', light],
   ['dark', dark],
@@ -411,9 +504,7 @@ describe('the accent', () => {
   it('is one hue and one chroma, shared by both schemes', () => {
     expect(light['accent-hue']).toMatch(/^\d+$/)
     expect(light['accent-chroma']).toMatch(/^0\.\d+$/)
-    expect(blockAfter(css.indexOf('@media (prefers-color-scheme: dark)'))).not.toMatch(
-      /--accent-(hue|chroma):/,
-    )
+    expect(darkRoot).not.toMatch(/--accent-(hue|chroma):/)
     expect(light.brand).toBe(
       'oklch(var(--accent-lightness) var(--accent-chroma) var(--accent-hue))',
     )
