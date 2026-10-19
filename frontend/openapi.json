@@ -12203,6 +12203,11 @@
             "type": "array"
           },
           "severity": {
+            "enum": [
+              "problem",
+              "warning",
+              "on"
+            ],
             "title": "Severity",
             "type": "string"
           },

@@ -2537,7 +2537,7 @@ def test_severity_and_fix_hold_in_every_case(writer: Session) -> None:
     rows = _every_row_of_every_case(writer)
     assert {row.severity.value for row in rows} == {"problem", "warning", "on"}
     for row in rows:
-        if row.status is not Status.ON:
+        if row.status is not Status.ON and not row.opted_in:
             assert row.severity.value == "problem", row.name
             assert row.fix, f"{row.name} is {row.status.value} and has no fix"
         elif row.warnings:
@@ -2597,9 +2597,12 @@ def test_every_protection_construction_decides_its_fix() -> None:
     Every ``Protection(...)`` in the module either passes ``fix=`` (a sentence, or an
     explicit ``None`` for a warning that has no useful fix), or is a row built ``ON`` with
     no ``warnings`` at all, which is a row with nothing to say and so no fix. Anything else
-    is a row that can warn or be off and nobody decided what to tell the person. (The type
-    already refuses an off row with no fix and a quiet one with a fix; this catches the
-    warning-only row that has not decided either way, which no state in the cases hits.)
+    is a row that can warn or be off and nobody decided what to tell the person.
+
+    The type already refuses an off row with no fix and a quiet one with a fix; this catches
+    the warning-only row that has not decided either way, which no state in the cases hits.
+    A ``Protection(**kwargs)`` call and an ``X = Protection`` alias fail the test outright
+    rather than slip past it.
     """
     tree = ast.parse(Path(posture_module.__file__).read_text())
     undecided: list[int] = []
@@ -2613,12 +2616,21 @@ def test_every_protection_construction_decides_its_fix() -> None:
             continue
         constructions += 1
         keywords = {kw.arg: kw.value for kw in node.keywords}
+        assert None not in keywords, f"Protection(**...) at line {node.lineno} hides its fix"
         status = keywords.get("status")
         quiet = (
             isinstance(status, ast.Attribute) and status.attr == "ON" and "warnings" not in keywords
         )
         if "fix" not in keywords and not quiet:
             undecided.append(node.lineno)
+    aliases = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "Protection"
+    ]
+    assert aliases == [], f"Protection is aliased at lines {aliases}; the guard cannot follow it"
     assert constructions > 40  # the walk really found the module's rows
     assert undecided == [], f"Protection(...) at lines {undecided} has no fix decision"
 
@@ -2730,10 +2742,43 @@ def test_render_prints_each_fix_under_the_warnings(writer: Session, user: User) 
     out = render(report)
 
     assert row.fix is not None
-    assert "fix: linkedin session: Run `netkeeper preflight`" in out
+    assert "fix: linkedin session: Click Start Chrome on the LinkedIn page" in out
+    fix_lines = [line for line in out.splitlines() if line.startswith("fix:")]
+    assert fix_lines and all("**" not in line for line in fix_lines)  # CLI strips bold
     assert out.index("warning: linkedin session") < out.index("fix: linkedin session")
     assert out.rstrip().endswith(verdict(report))  # the verdict stays last
 
 
 def test_render_prints_no_fix_for_a_clean_report(writer: Session, user: User) -> None:
     assert "fix:" not in render(_report(writer, user))
+
+
+def test_severity_values_match_the_api_type() -> None:
+    from typing import get_args
+
+    from netkeeper.web.schemas import SeverityName
+
+    assert {severity.value for severity in posture_module.Severity} == set(get_args(SeverityName))
+
+
+def test_auto_send_on_by_choice_is_a_warning_but_still_not_in_force(
+    writer: Session, user: User
+) -> None:
+    report = _report(writer, user, settings=_campaigns(linkedin_auto_send=True))
+    row = _row(report, "manual linkedin sends")
+
+    assert row.status is Status.OFF  # ok and the verdict still count it
+    assert row.severity.value == "warning"
+    assert row.fix is not None and "by your choice" in row.fix
+    assert not report.ok
+
+
+def test_the_fixes_for_values_the_settings_page_refuses_name_config_toml(
+    writer: Session, user: User
+) -> None:
+    far = _report(writer, user, settings=_linkedin(cdp_url="http://192.168.1.50:9222"))
+    assert "config.toml" in (_row(far, "attach-only browser").fix or "")
+    hours = _report(writer, user, settings=_linkedin(active_hours=("00:00", "00:00")))
+    assert "config.toml" in (_row(hours, "active hours").fix or "")
+    zone = _report(writer, user, settings=_linkedin(timezone="Mars/Olympus"))
+    assert "config.toml" in (_row(zone, "active hours").fix or "")
