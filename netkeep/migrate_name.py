@@ -177,13 +177,21 @@ def plan(
     env = os.environ if environ is None else environ
     legacy = paths.legacy_default_data_dir()
     named = paths.getenv(paths.DATA_ENV, env)
-    if named and not (legacy is not None and _same(Path(named).expanduser(), legacy)):
-        result = Plan(data=Path(named).expanduser())
+    new_default = paths.default_data_dir()
+    chosen = Path(named).expanduser() if named else None
+    # A name for either default, however spelled, is the default: the move is checked as
+    # for no name (#661). Only another folder is left where it is.
+    is_default = chosen is None or _same(chosen, new_default)
+    if chosen is not None and legacy is not None and _same(chosen, legacy):
+        is_default = True
+    if not is_default and chosen is not None:
+        result = Plan(data=chosen)
     else:
-        result = Plan(data=paths.default_data_dir(), data_from_env=bool(named))
+        named_old = chosen is not None and not _same(chosen, new_default)
+        result = Plan(data=new_default, data_from_env=named_old)
         if legacy is not None:
             path_guard(legacy)
-            path_guard(result.data)
+            path_guard(new_default)
             if legacy.exists():
                 result.move_from = legacy
                 _check_move(result, legacy, env)
@@ -429,7 +437,17 @@ def apply(
     if folder.is_dir():
         # The serve lock, from the checks through the marker: no serve starts on either
         # path meanwhile (the lock file moves with the folder), and no second migration.
-        claim = activity_lock.try_claim_at(folder / "locks" / SERVE_LOCK_FILENAME, "serve")
+        # Never created with its parents: a folder another migration just moved away
+        # must not come back as an empty one holding only a lock file.
+        try:
+            claim = activity_lock.try_claim_at(
+                folder / "locks" / SERVE_LOCK_FILENAME, "serve", create_parents=False
+            )
+        except FileNotFoundError as exc:
+            raise Refused(
+                f"{folder} moved while netkeep was migrating it (another migration?);"
+                " run netkeep migrate again"
+            ) from exc
         if claim is None:
             raise Refused(
                 f"a serve or another migration holds {folder / 'locks' / SERVE_LOCK_FILENAME};"
@@ -602,11 +620,14 @@ def auto(command: str | None, *, serving: bool = False) -> AutoResult:
     _follow_moved_folder(os.environ)
     if not needed():
         return AutoResult()
+    legacy = paths.legacy_default_data_dir()
+    if (legacy is None or not legacy.exists()) and _serve_lock_held(paths.default_data_dir()):
+        # Nothing to move, and a serve runs here: the retry of a step left for later
+        # (the Keychain) waits for the next start, without reading anything now.
+        return AutoResult()
     planned = plan()
     if planned.refusals:
         raise Refused("; ".join(planned.refusals))
-    if planned.move_from is None and _serve_lock_held(planned.data):
-        return AutoResult()  # a serve runs here: the Keychain retry waits for the next start
     if not (planned.has_work or planned.data.is_dir()):
         return AutoResult()
     lines = apply(planned, serving=serving)
