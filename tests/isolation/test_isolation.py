@@ -15,13 +15,13 @@ from fastapi import FastAPI
 from local_api import LocalKey
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.crm import import_runs as import_service
-from netkeeper.crm import lists as list_service
-from netkeeper.crm import tags as tag_service
-from netkeeper.crm.interactions import add_interaction
-from netkeeper.db import session_scope
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.models import (
+from netkeep.crm import import_runs as import_service
+from netkeep.crm import lists as list_service
+from netkeep.crm import tags as tag_service
+from netkeep.crm.interactions import add_interaction
+from netkeep.db import session_scope
+from netkeep.linkedin.classify import Outcome
+from netkeep.models import (
     Campaign,
     Contact,
     ContactTag,
@@ -34,14 +34,14 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.models.base import utcnow
-from netkeeper.scoping import scoped, scoped_count
-from netkeeper.services import mailboxes as mailbox_service
-from netkeeper.services import route_breaker
-from netkeeper.services.linkedin_accounts import ensure_account
-from netkeeper.services.linkedin_session import flag_session
-from netkeeper.web.app import API_PREFIX
-from netkeeper.web.security import CLIENT_HEADER, CLIENT_HEADER_VALUE
+from netkeep.models.base import utcnow
+from netkeep.scoping import scoped, scoped_count
+from netkeep.services import mailboxes as mailbox_service
+from netkeep.services import route_breaker
+from netkeep.services.linkedin_accounts import ensure_account
+from netkeep.services.linkedin_session import flag_session
+from netkeep.web.app import API_PREFIX
+from netkeep.web.security import CLIENT_HEADER, CLIENT_HEADER_VALUE
 
 from .harness import acting_as, assert_isolated
 from .registry import (

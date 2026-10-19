@@ -1,4 +1,4 @@
-"""netkeeper.linkedin.flagship_profile: a profile and its overlay, from flagship-web (#190).
+"""netkeep.linkedin.flagship_profile: a profile and its overlay, from flagship-web (#190).
 
 The payloads are :mod:`flagship_pages`' hand-built ones, with :mod:`voyager_pages`'
 invented people. The rules under test: whose profile it is is read from the page's
@@ -29,8 +29,8 @@ from flagship_pages import (
 )
 from voyager_pages import PEOPLE
 
-from netkeeper.linkedin import flagship_profile
-from netkeeper.linkedin.flagship_profile import (
+from netkeep.linkedin import flagship_profile
+from netkeep.linkedin.flagship_profile import (
     parse_contact_info,
     parse_navigation_request,
     parse_profile,
@@ -38,8 +38,8 @@ from netkeeper.linkedin.flagship_profile import (
     profile_slug,
     same_slug,
 )
-from netkeeper.linkedin.flight import parse_flight
-from netkeeper.linkedin.voyager import (
+from netkeep.linkedin.flight import parse_flight
+from netkeep.linkedin.voyager import (
     ContactInfo,
     EducationEntry,
     PositionEntry,
@@ -660,7 +660,7 @@ def test_a_linkedin_website_is_a_site_and_the_members_own_profile_is_skipped(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """People list LinkedIn pages as websites; LinkedIn does not wrap its own links."""
-    caplog.set_level(logging.DEBUG, logger="netkeeper")
+    caplog.set_level(logging.DEBUG, logger="netkeep")
     company = "https://www.linkedin.com/company/fictional-robotics-co/"
     newsletter = "https://www.linkedin.com/newsletters/fake-notes-0000000000000000000/"
     body = contact_info_payload(
@@ -695,7 +695,7 @@ def test_a_linkedin_website_is_a_site_and_the_members_own_profile_is_skipped(
 
 
 def test_one_skipped_linkedin_website_is_counted(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     body = contact_info_payload(PRIYA, website_urls=[f"https://www.linkedin.com/in/{PRIYA.slug}"])
     assert parse_contact_info(body, slug=PRIYA.slug).websites == ()
     assert "skipped 1 website link(s) to LinkedIn itself" in caplog.text
@@ -723,7 +723,7 @@ def test_an_element_is_never_read_as_runs() -> None:
 
 
 def test_no_linkedin_website_logs_no_count(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.DEBUG, logger="netkeeper")
+    caplog.set_level(logging.DEBUG, logger="netkeep")
     body = contact_info_payload(PRIYA, websites=[Website("https://priya-fake.example.test/")])
     parse_contact_info(body, slug=PRIYA.slug)
     assert "website link" not in caplog.text
@@ -731,7 +731,7 @@ def test_no_linkedin_website_logs_no_count(caplog: pytest.LogCaptureFixture) -> 
 
 def test_the_instant_message_section_is_ignored_quietly(caplog: pytest.LogCaptureFixture) -> None:
     """The CRM has no field for a messaging handle (spec 8.1): known, and not read."""
-    caplog.set_level(logging.DEBUG, logger="netkeeper")
+    caplog.set_level(logging.DEBUG, logger="netkeep")
     body = contact_info_payload(
         PRIYA,
         emails=["priya.fake@example.test"],
@@ -755,7 +755,7 @@ def test_the_degree_rendered_twice_is_not_the_headline() -> None:
 
 
 def test_the_top_card_is_read_once_per_profile(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.DEBUG, logger="netkeeper")
+    caplog.set_level(logging.DEBUG, logger="netkeep")
     body = _profile(extra_top_runs=["Some Short Run"])
     assert parse_profile_urn(body, slug=PRIYA.slug) == PRIYA.urn
     assert caplog.records == []  # the id alone reads nothing it would log
@@ -814,7 +814,7 @@ def test_titles_as_text_runs_still_read(lazy: bool) -> None:
 
 
 def test_every_captured_entry_reads_and_none_is_skipped(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.DEBUG, logger="netkeeper")
+    caplog.set_level(logging.DEBUG, logger="netkeep")
     details = parse_profile(_profile(), slug=PRIYA.slug)
     assert len(details.positions) == 2
     assert "did not read" not in caplog.text
@@ -849,7 +849,7 @@ def test_every_captured_entry_reads_and_none_is_skipped(caplog: pytest.LogCaptur
 def test_only_an_http_or_https_site_with_a_host_is_kept(
     site: str, wrapped: bool, caplog: pytest.LogCaptureFixture
 ) -> None:
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     if any(ch in site for ch in "\t\n\x01"):
         pytest.skip("a control character is refused as a shape: see the test below")
     url = (

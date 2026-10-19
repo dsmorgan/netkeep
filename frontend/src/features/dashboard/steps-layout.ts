@@ -9,7 +9,7 @@ import type { Setup, SetupStep } from './setup-api'
 
 export type DashboardTab = 'steps' | 'overview'
 
-export const TAB_STORAGE_KEY = 'netkeeper.dashboard.tab'
+export const TAB_STORAGE_KEY = 'netkeep.dashboard.tab'
 
 /** The tab picked last in this browser, or null. Storage can be missing or refuse. */
 export function storedTab(): DashboardTab | null {

@@ -534,7 +534,7 @@ describe('BrowserHealthCard', () => {
     })
     const body = await card('LinkedIn browser')
     expect(await body.findByRole('alert')).toHaveTextContent('Logged out of LinkedIn')
-    expect(body.getByRole('alert')).toHaveTextContent('netkeeper preflight')
+    expect(body.getByRole('alert')).toHaveTextContent('netkeep preflight')
   })
 })
 
@@ -756,7 +756,7 @@ describe('ChangedJobsCard', () => {
     renderCard(ChangedJobsCard, { [PATH]: json({ items: [], total: 0, days: 30 }) })
     const body = await card('Changed jobs')
     expect(
-      await body.findByText('netkeeper noticed no position changes in the last 30 days.'),
+      await body.findByText('netkeep noticed no position changes in the last 30 days.'),
     ).toBeInTheDocument()
   })
 
@@ -803,8 +803,6 @@ describe('ChangedJobsCard', () => {
       '/contacts/13',
     )
     expect(body.getByText('and 2 more')).toBeInTheDocument()
-    expect(
-      body.getByText('New positions netkeeper noticed in the last 30 days.'),
-    ).toBeInTheDocument()
+    expect(body.getByText('New positions netkeep noticed in the last 30 days.')).toBeInTheDocument()
   })
 })

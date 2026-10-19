@@ -13,7 +13,7 @@ the choice is marked as invented.
   :func:`pagination_request` are the connections list (#187).
 * :func:`profile_payload`, :func:`experience_payload`, and :func:`contact_info_payload`
   are the profile, a lazy experience card, and the contact-info overlay, which
-  :mod:`netkeeper.linkedin.flagship_profile` reads (#190). Where the capture was silent
+  :mod:`netkeep.linkedin.flagship_profile` reads (#190). Where the capture was silent
   (where the member's id sits on a profile, grouped roles, education, the phone,
   Twitter, birthday, and address sections), the shape is marked as invented. The
   Contact info fixtures follow the CP8c overlay as rendered (#519): the phone as plain
@@ -33,7 +33,7 @@ from urllib.parse import urlencode
 
 from voyager_pages import Person
 
-from netkeeper.linkedin.flagship import (
+from netkeep.linkedin.flagship import (
     CONNECTIONS_PAGER_ID,
     CONTACT_DETAILS_SCREEN_ID,
     HEADLINE_STATE_ID,
@@ -509,7 +509,7 @@ def document_html(payload: bytes, *, chunks: int = 3) -> str:
     array = json.dumps(pieces).replace("</", "<\\/")
     return (
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
-        "<title>netkeeper replica: connections</title></head><body>"
+        "<title>netkeep replica: connections</title></head><body>"
         '<div id="root"><a href="/login">Sign in</a></div>'
         f'<script nonce="fake" type="text/javascript" id="{REHYDRATION_SCRIPT_ID}">'
         f"window.{REHYDRATION_GLOBAL} = {array};</script>"

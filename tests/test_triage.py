@@ -1,4 +1,4 @@
-"""netkeeper.crm.triage (spec 10.2): the queue, evidence, decisions, undo, the suggestion."""
+"""netkeep.crm.triage (spec 10.2): the queue, evidence, decisions, undo, the suggestion."""
 
 from __future__ import annotations
 
@@ -14,11 +14,11 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import ORMExecuteState, Session, sessionmaker
 
-from netkeeper.crm import triage as module
-from netkeeper.crm.identity import IncomingContact, apply, merge, resolve
-from netkeeper.crm.interactions import INVITATION_SUMMARY, add_interaction
-from netkeeper.crm.tags import create_rule, create_tag, run_rules, tag_contact
-from netkeeper.crm.triage import (
+from netkeep.crm import triage as module
+from netkeep.crm.identity import IncomingContact, apply, merge, resolve
+from netkeep.crm.interactions import INVITATION_SUMMARY, add_interaction
+from netkeep.crm.tags import create_rule, create_tag, run_rules, tag_contact
+from netkeep.crm.triage import (
     CountChanged,
     InvalidDecision,
     NotFound,
@@ -27,8 +27,8 @@ from netkeeper.crm.triage import (
     UndoConflict,
     UndoRaced,
 )
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.db import session_scope
+from netkeep.models import (
     Contact,
     ContactMet,
     ContactSource,
@@ -42,7 +42,7 @@ from netkeeper.models import (
     TriageDecisionKind,
     User,
 )
-from netkeeper.scoping import scoped, scoped_update
+from netkeep.scoping import scoped, scoped_update
 
 NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
 EARLIER = NOW - timedelta(days=30)
@@ -1456,7 +1456,7 @@ def test_a_preview_never_reaches_another_user_s_contacts(writer: Session, user: 
     assert ([contact.id for contact in covered], total) == ([mine.id], 1)
 
 
-# --- what netkeeper decided, and reviewing it -------------------------------
+# --- what netkeep decided, and reviewing it -------------------------------
 
 
 def test_a_batch_marks_its_work_automatic_and_says_which_batch_it_was(

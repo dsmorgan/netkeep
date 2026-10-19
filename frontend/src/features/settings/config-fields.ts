@@ -19,17 +19,17 @@ export const GROUPS: { id: ConfigField['group']; title: string; description: str
     id: 'linkedin_budgets',
     title: 'LinkedIn budgets',
     description:
-      'How much netkeeper may do on LinkedIn each day. Each budget has a hard maximum this page never goes past.',
+      'How much netkeep may do on LinkedIn each day. Each budget has a hard maximum this page never goes past.',
   },
   {
     id: 'linkedin_hours',
     title: 'LinkedIn active hours',
-    description: 'When netkeeper may use LinkedIn, and how much less it does on weekends.',
+    description: 'When netkeep may use LinkedIn, and how much less it does on weekends.',
   },
   {
     id: 'linkedin_runs',
     title: 'LinkedIn runs',
-    description: 'How syncs and enrichment treat your contacts, and where netkeeper finds Chrome.',
+    description: 'How syncs and enrichment treat your contacts, and where netkeep finds Chrome.',
   },
   {
     id: 'campaigns',
@@ -39,13 +39,13 @@ export const GROUPS: { id: ConfigField['group']; title: string; description: str
   {
     id: 'backup',
     title: 'Backups',
-    description: 'Whether netkeeper serve backs up the database each night, and how many to keep.',
+    description: 'Whether netkeep serve backs up the database each night, and how many to keep.',
   },
   {
     id: 'logs',
     title: 'Logs',
     description:
-      'netkeeper serve and every command write one log file, which starts over at a set size and keeps a few old files.',
+      'netkeep serve and every command write one log file, which starts over at a set size and keeps a few old files.',
   },
 ]
 

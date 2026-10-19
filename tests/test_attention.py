@@ -22,11 +22,11 @@ from sqlalchemy import event, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.config import Settings
-from netkeeper.crm import import_runs, triage
-from netkeeper.db import session_scope
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.models import (
+from netkeep.config import Settings
+from netkeep.crm import import_runs, triage
+from netkeep.db import session_scope
+from netkeep.linkedin.classify import Outcome
+from netkeep.models import (
     Campaign,
     ContactMet,
     Enrollment,
@@ -44,16 +44,16 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.scoping import get_scoped, scoped
-from netkeeper.services import attention as service
-from netkeeper.services import heat as heat_service
-from netkeeper.services import inbox, linkedin_steps, posture, route_breaker, runs
-from netkeeper.services.linkedin_accounts import (
+from netkeep.scoping import get_scoped, scoped
+from netkeep.services import attention as service
+from netkeep.services import heat as heat_service
+from netkeep.services import inbox, linkedin_steps, posture, route_breaker, runs
+from netkeep.services.linkedin_accounts import (
     arm_scheduled_runs,
     ensure_account,
     pause_schedule,
 )
-from netkeeper.services.linkedin_session import clear_session_flag, flag_session
+from netkeep.services.linkedin_session import clear_session_flag, flag_session
 
 #: 11:00 in New York, inside the default LinkedIn active hours.
 NOW = datetime(2026, 9, 16, 15, 0, tzinfo=UTC)

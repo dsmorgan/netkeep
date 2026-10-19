@@ -1,7 +1,7 @@
 """A campaign's results (#350): sends per local day, replies, bounces and opt-outs per step.
 
 The service is read straight; ``GET /campaigns/{id}/results`` once for its shape and
-once for another user's campaign. ``netkeeper campaigns status`` has its own tests in
+once for another user's campaign. ``netkeep campaigns status`` has its own tests in
 ``test_cli_campaigns.py``.
 """
 
@@ -16,8 +16,8 @@ from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.db import session_scope
+from netkeep.models import (
     Campaign,
     CampaignStatus,
     Enrollment,
@@ -28,8 +28,8 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.services import campaign_results
-from netkeeper.services.campaigns import CampaignNotFound
+from netkeep.services import campaign_results
+from netkeep.services.campaigns import CampaignNotFound
 
 EMAIL3 = (TemplateChannel.EMAIL, TemplateChannel.EMAIL, TemplateChannel.EMAIL)
 T0 = datetime(2030, 6, 3, 14, 0, tzinfo=UTC)  # a Monday, 10:00 in New York

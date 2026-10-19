@@ -1,12 +1,12 @@
 #!/bin/sh
-# Archive the database, then remove it so the next `netkeeper serve` starts clean.
+# Archive the database, then remove it so the next `netkeep serve` starts clean.
 #
 # The server rebuilds everything a fresh install needs on startup: migrations to
 # head, the local user, the default auto-tag rules, and the "Validated" list. So a
 # reset is only ever "put the old file somewhere safe and delete it".
 #
 # Archives live in <data_dir>/archives/ and are never pruned. That is a different
-# directory from <data_dir>/backups/, which `netkeeper backup` prunes to
+# directory from <data_dir>/backups/, which `netkeep backup` prunes to
 # backup.keep; a pre-reset copy has to outlive that.
 set -eu
 # pipefail is not POSIX; turn it on where the shell has it (bash, zsh, newer dash).
@@ -23,11 +23,11 @@ Usage: scripts/reset-data.sh [--data-dir PATH] [--yes] [--dry-run]
        scripts/reset-data.sh --help
 
 Archive the database into <data_dir>/archives/, then delete it. The next
-\`netkeeper serve\` migrates a new one and seeds the defaults.
+\`netkeep serve\` migrates a new one and seeds the defaults.
 
 Options:
-  --data-dir PATH  Data directory to reset. Default: \$NETKEEPER_DATA, else the
-                   app's platform default, ~/Library/Application Support/netkeeper.
+  --data-dir PATH  Data directory to reset. Default: \$NETKEEP_DATA, else the
+                   app's platform default, ~/Library/Application Support/netkeep.
   --list           List the archives, newest first. Changes nothing.
   --restore FILE   Put an archive back. FILE is a name from --list or any path.
                    The database in place is archived first, so this is reversible.
@@ -47,12 +47,14 @@ die() {
   exit 1
 }
 
-# The default data directory, matching netkeeper/paths.py.
+# The default data directory, matching netkeep/paths.py.
 default_data_dir() {
-  if [ -n "${NETKEEPER_DATA:-}" ]; then
+  if [ -n "${NETKEEP_DATA:-}" ]; then
+    printf '%s\n' "$NETKEEP_DATA"
+  elif [ -n "${NETKEEPER_DATA:-}" ]; then  # the name before the rename (#661), for one release
     printf '%s\n' "$NETKEEPER_DATA"
   else
-    printf '%s\n' "$HOME/Library/Application Support/netkeeper"
+    printf '%s\n' "$HOME/Library/Application Support/netkeep"
   fi
 }
 
@@ -92,8 +94,8 @@ run() {
 require_tools() {
   command -v lsof >/dev/null 2>&1 || die "lsof is needed to check that nothing has the database open"
   command -v sqlite3 >/dev/null 2>&1 || die "sqlite3 is needed to archive and verify the database"
-  if [ -n "${NETKEEPER_DATABASE_URL:-}" ]; then
-    die "NETKEEPER_DATABASE_URL is set, so the server does not use $db. This script only resets the SQLite file in the data directory."
+  if [ -n "${NETKEEP_DATABASE_URL:-}${NETKEEPER_DATABASE_URL:-}" ]; then
+    die "NETKEEP_DATABASE_URL (or NETKEEPER_DATABASE_URL) is set, so the server does not use $db. This script only resets the SQLite file in the data directory."
   fi
 }
 
@@ -168,7 +170,7 @@ list_archives() {
   # splits the key from the path even though the data directory's own path can
   # itself contain a space (the macOS default). A glob, not ls, so that path
   # stays one field no matter how it is spelled.
-  for path in "$archives"/netkeeper-*.sqlite3; do
+  for path in "$archives"/netkeep-*.sqlite3; do
     [ -f "$path" ] || continue
     printf '%s\n' "$path"
   done | awk '
@@ -176,7 +178,7 @@ list_archives() {
       path = $0
       name = path
       sub(/^.*\//, "", name)
-      sub(/^netkeeper-/, "", name)
+      sub(/^netkeep-/, "", name)
       sub(/\.sqlite3$/, "", name)
       if (match(name, /-[0-9]+$/)) {
         suffix = substr(name, RSTART + 1, RLENGTH - 1) + 0
@@ -210,10 +212,10 @@ confirm() {
 # guessing the same stamp is also why the loop checks at all -- one run in a
 # second is the common case, but never assume it is the only one.
 archive_path() {
-  candidate="$archives/netkeeper-$stamp.sqlite3"
+  candidate="$archives/netkeep-$stamp.sqlite3"
   n=1
   while [ -e "$candidate" ] || [ -e "$candidate-wal" ]; do
-    candidate="$archives/netkeeper-$stamp-$n.sqlite3"
+    candidate="$archives/netkeep-$stamp-$n.sqlite3"
     n=$((n + 1))
   done
   printf '%s\n' "$candidate"
@@ -236,10 +238,10 @@ quarantine_partial() {
   tmp=$1
   quarantined=
   [ -e "$tmp/db" ] || return 0
-  quarantined="$archives/netkeeper-$stamp.sqlite3.failed"
+  quarantined="$archives/netkeep-$stamp.sqlite3.failed"
   n=1
   while [ -e "$quarantined" ]; do
-    quarantined="$archives/netkeeper-$stamp-$n.sqlite3.failed"
+    quarantined="$archives/netkeep-$stamp-$n.sqlite3.failed"
     n=$((n + 1))
   done
   mv -- "$tmp/db" "$quarantined" ||
@@ -323,7 +325,7 @@ archive_db() {
     fi
     die "the archive did not pass SQLite's quick_check; nothing published. The database was left in place."
   fi
-  candidate="$archives/netkeeper-$stamp.sqlite3"
+  candidate="$archives/netkeep-$stamp.sqlite3"
   n=1
   while ! ln -- "$work" "$candidate" 2>/dev/null; do
     # -e alone misses a dangling symlink (its target does not exist, so -e
@@ -333,7 +335,7 @@ archive_db() {
     if [ -e "$candidate" ] || [ -L "$candidate" ]; then
       # Another run published this name first (or, non-concurrently, an
       # earlier reset this same second already has it): try the next one.
-      candidate="$archives/netkeeper-$stamp-$n.sqlite3"
+      candidate="$archives/netkeep-$stamp-$n.sqlite3"
       n=$((n + 1))
       continue
     fi

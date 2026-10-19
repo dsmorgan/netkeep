@@ -1,4 +1,4 @@
-"""netkeeper.linkedin.flagship: the connections list as flagship-web serves it (#187).
+"""netkeep.linkedin.flagship: the connections list as flagship-web serves it (#187).
 
 The payloads are :mod:`flagship_pages`' hand-built ones, with :mod:`voyager_pages`'
 invented people. The rule under test throughout: a page is read whole or refused
@@ -27,16 +27,16 @@ from flagship_pages import (
 )
 from voyager_pages import PEOPLE, Person
 
-from netkeeper.linkedin import flagship
-from netkeeper.linkedin.flagship import (
+from netkeep.linkedin import flagship
+from netkeep.linkedin.flagship import (
     ConnectionsChunk,
     parse_connections_chunk,
     parse_pagination_request,
     rehydration_payload,
     split_display_name,
 )
-from netkeeper.linkedin.flight import element_props, parse_flight
-from netkeeper.linkedin.voyager import RouteChanged
+from netkeep.linkedin.flight import element_props, parse_flight
+from netkeep.linkedin.voyager import RouteChanged
 
 E = "test/flagship"
 

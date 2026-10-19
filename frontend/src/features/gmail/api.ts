@@ -39,7 +39,7 @@ export const gmailActivityQuery = queryOptions({
 })
 
 /**
- * The drafts netkeeper left in Gmail, for you to clean up by hand
+ * The drafts netkeep left in Gmail, for you to clean up by hand
  * (`GET /gmail/leftover-drafts`, #543). Read-only, from the database alone; the drafts
  * poll moves them (a draft you send or delete drops off), so this refetches every minute.
  */
@@ -71,7 +71,7 @@ export function gmailDraftUrl(mailbox: string | null, messageId: string | null):
 
 /**
  * The posture rows that concern Gmail and campaign sending, by their stable `key`
- * (`netkeeper/services/posture.py`). The rest of the report is the LinkedIn
+ * (`netkeep/services/posture.py`). The rest of the report is the LinkedIn
  * extractor's, and stays on Settings, which shows every row.
  */
 export const GMAIL_POSTURE_KEYS: readonly string[] = [

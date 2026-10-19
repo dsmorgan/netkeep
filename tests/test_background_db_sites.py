@@ -1,7 +1,7 @@
 """#266: a regression test per background database site #265 moved off the event loop.
 
 #265 moved every session the browser worker, both runners, the scheduler, and the
-served job handlers open onto :func:`netkeeper.db.off_loop`'s thread. Its review put
+served job handlers open onto :func:`netkeep.db.off_loop`'s thread. Its review put
 each one back on the loop, one at a time, and ten of those mutations survived the
 suite. Each test here runs one background path under
 :func:`db_loop_guard.request_holding_the_write_lock` -- a request holding the write
@@ -39,24 +39,24 @@ from test_enrichment import SEED, Sleeps, _people, _setup
 from test_runs_serve import START, heartbeat, served
 from voyager_pages import FakeConnectionsSource
 
-from netkeeper.config import Settings
-from netkeeper.db import CancelledWhileFailing, off_loop, session_scope
-from netkeeper.linkedin.browser import BrowserUnavailable
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.inbox import InboxReadStopped
-from netkeeper.models import SyncRun, SyncRunKind, SyncRunStatus, SyncRunTrigger, User
-from netkeeper.scoping import scoped
-from netkeeper.services import enrich_plan, runs, scheduler
-from netkeeper.services import heat as heat_service
-from netkeeper.services.connections_sync import SessionFlagged
-from netkeeper.services.enrichment import enrich_contacts
-from netkeeper.services.events import EventBus
-from netkeeper.services.inbox_poll import poll_inbox
-from netkeeper.services.linkedin_accounts import arm_scheduled_runs, ensure_account
-from netkeeper.services.linkedin_session import flag_session
-from netkeeper.services.scheduled_runs import serve_registry
-from netkeeper.services.tasks import TaskRunner
-from netkeeper.worker import BrowserWorker
+from netkeep.config import Settings
+from netkeep.db import CancelledWhileFailing, off_loop, session_scope
+from netkeep.linkedin.browser import BrowserUnavailable
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.inbox import InboxReadStopped
+from netkeep.models import SyncRun, SyncRunKind, SyncRunStatus, SyncRunTrigger, User
+from netkeep.scoping import scoped
+from netkeep.services import enrich_plan, runs, scheduler
+from netkeep.services import heat as heat_service
+from netkeep.services.connections_sync import SessionFlagged
+from netkeep.services.enrichment import enrich_contacts
+from netkeep.services.events import EventBus
+from netkeep.services.inbox_poll import poll_inbox
+from netkeep.services.linkedin_accounts import arm_scheduled_runs, ensure_account
+from netkeep.services.linkedin_session import flag_session
+from netkeep.services.scheduled_runs import serve_registry
+from netkeep.services.tasks import TaskRunner
+from netkeep.worker import BrowserWorker
 
 #: Wednesday 14:00 in New York: inside the default active window.
 INSIDE = datetime(2026, 9, 23, 18, 0, tzinfo=UTC)
@@ -72,7 +72,7 @@ pytestmark = pytest.mark.wall_clock
 @pytest.fixture(autouse=True)
 def _short_busy_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     """Set before any engine here connects, so a write stuck on the loop fails fast."""
-    monkeypatch.setattr("netkeeper.db.SQLITE_BUSY_TIMEOUT_MS", BUSY_TIMEOUT_MS)
+    monkeypatch.setattr("netkeep.db.SQLITE_BUSY_TIMEOUT_MS", BUSY_TIMEOUT_MS)
 
 
 @asynccontextmanager
@@ -604,7 +604,7 @@ async def test_the_heartbeat_reads_its_accounts_off_the_loop(
     bare_engine: Engine, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """M25: the served heartbeat's account list, then its (disarmed) poll."""
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", str(tmp_path / "no-dist"))
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", str(tmp_path / "no-dist"))
     provider, connector = fake_provider()
     async with (
         served(bare_engine, SETTINGS, provider, Clock(START)) as app,

@@ -17,12 +17,12 @@ from isolation.harness import acting_as
 from sqlalchemy import select
 from test_runs_serve import HEADERS
 
-from netkeeper.config import Settings
-from netkeeper.db import session_scope
-from netkeeper.models import User, UserKind
-from netkeeper.paths import DATA_ENV
-from netkeeper.services import ui_settings
-from netkeeper.services.backup import backup_name
+from netkeep.config import Settings
+from netkeep.db import session_scope
+from netkeep.models import User, UserKind
+from netkeep.paths import DATA_ENV
+from netkeep.services import ui_settings
+from netkeep.services.backup import backup_name
 
 URL = "/api/v1/backups"
 OLD = datetime(2020, 1, 1, tzinfo=UTC)

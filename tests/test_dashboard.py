@@ -16,10 +16,10 @@ from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.crm.filters import compile_filter, parse_filter
-from netkeeper.crm.interactions import add_interaction
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.crm.filters import compile_filter, parse_filter
+from netkeep.crm.interactions import add_interaction
+from netkeep.db import session_scope
+from netkeep.models import (
     CampaignStatus,
     Contact,
     ContactSnapshot,
@@ -30,9 +30,9 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.models.base import utcnow
-from netkeeper.services import campaign_engine
-from netkeeper.services import dashboard as service
+from netkeep.models.base import utcnow
+from netkeep.services import campaign_engine
+from netkeep.services import dashboard as service
 
 NOW = datetime(2026, 9, 16, 15, 0, tzinfo=UTC)
 TODAY = date(2026, 9, 16)
@@ -198,7 +198,7 @@ def _noticed(
     source: ContactSource = ContactSource.SYNC,
     **overrides: Any,
 ) -> int:
-    """A contact (or ``contact_id``) with a snapshot netkeeper wrote at ``at``."""
+    """A contact (or ``contact_id``) with a snapshot netkeep wrote at ``at``."""
     contact = (
         factories.make_contact(session, user, **overrides)
         if contact_id is None
@@ -232,7 +232,7 @@ def test_a_position_change_noticed_in_the_last_30_days_is_a_changed_job(
 
 
 def test_a_profile_start_date_alone_is_not_a_changed_job(session: Session) -> None:
-    """#286: the card counts what netkeeper noticed, not the dates on the profile."""
+    """#286: the card counts what netkeep noticed, not the dates on the profile."""
     user = factories.make_user(session)
     factories.make_contact(session, user, positions=[{"started_on": TODAY - timedelta(days=3)}])
     factories.make_contact(
@@ -330,7 +330,7 @@ def _inbound(session: Session) -> None:
     add(InteractionKind.EMAIL_OUT, NOW - timedelta(days=1))
     add(InteractionKind.LI_OUT, NOW - timedelta(days=1))
     add(InteractionKind.NOTE, NOW - timedelta(days=1))
-    # A response recorded from outside netkeeper counts too (#512); a logged call does not.
+    # A response recorded from outside netkeep counts too (#512); a logged call does not.
     add(InteractionKind.CALL_IN, NOW - timedelta(days=2))
     add(InteractionKind.MEETING_IN, NOW - timedelta(days=3))
     add(InteractionKind.OTHER_IN, NOW - timedelta(days=4))

@@ -1,4 +1,4 @@
-"""netkeeper.crm.apply: connections pages onto contacts, and the edge lifecycle (spec 9.8, 9.10).
+"""netkeep.crm.apply: connections pages onto contacts, and the edge lifecycle (spec 9.8, 9.10).
 
 Pages here are built directly from :data:`voyager_pages.PEOPLE`, invented
 people at invented companies. The runner that feeds these functions from a
@@ -16,15 +16,15 @@ import pytest
 from sqlalchemy.orm import Session, sessionmaker
 from voyager_pages import PEOPLE, Person
 
-from netkeeper.crm import apply as mapping
-from netkeeper.crm.identity import IncomingContact, New
-from netkeeper.crm.identity import apply as identity_apply
-from netkeeper.crm.provenance import set_manual_field
-from netkeeper.db import session_scope
-from netkeeper.linkedin.connections import ConnectionsPage, SyncMode
-from netkeeper.linkedin.voyager import ConnectionSummary
-from netkeeper.models import Contact, ContactSource, User
-from netkeeper.scoping import scoped
+from netkeep.crm import apply as mapping
+from netkeep.crm.identity import IncomingContact, New
+from netkeep.crm.identity import apply as identity_apply
+from netkeep.crm.provenance import set_manual_field
+from netkeep.db import session_scope
+from netkeep.linkedin.connections import ConnectionsPage, SyncMode
+from netkeep.linkedin.voyager import ConnectionSummary
+from netkeep.models import Contact, ContactSource, User
+from netkeep.scoping import scoped
 
 NOW = datetime(2026, 9, 23, 15, 0, tzinfo=UTC)
 LATER = NOW + timedelta(days=7)

@@ -6,7 +6,7 @@ connections page that "receives" its first screen when a tab navigates to it and
 the tab's ``response`` listeners (P2-17, ADR 0006). Nothing opens a socket; a
 linkedin.com url here is a string a fake tab records, never fetched.
 
-:func:`worker_extractor` builds the same ``ServeExtractor`` ``netkeeper serve``
+:func:`worker_extractor` builds the same ``ServeExtractor`` ``netkeep serve``
 builds, on this fake instead of the attach provider, so a test drives the real
 app lifespan, the real scheduler, and the real worker.
 """
@@ -25,16 +25,16 @@ from flagship_site import CHECKPOINT_URL, FlagshipSite
 from sqlalchemy.orm import Session, sessionmaker
 from voyager_pages import PEOPLE, Person
 
-from netkeeper.config import Settings
-from netkeeper.linkedin.browser import ActivityLocks, AttachBrowserProvider, BrowserRun
-from netkeeper.linkedin.enrich import ProfileSource
-from netkeeper.linkedin.inbox import InboxSource
-from netkeeper.linkedin.page_inbox import PageInbox
-from netkeeper.linkedin.page_profiles import PageProfiles
-from netkeeper.services import runs
-from netkeeper.services.events import EventBus
-from netkeeper.services.scheduled_runs import ServeExtractor
-from netkeeper.worker import BrowserWorker
+from netkeep.config import Settings
+from netkeep.linkedin.browser import ActivityLocks, AttachBrowserProvider, BrowserRun
+from netkeep.linkedin.enrich import ProfileSource
+from netkeep.linkedin.inbox import InboxSource
+from netkeep.linkedin.page_inbox import PageInbox
+from netkeep.linkedin.page_profiles import PageProfiles
+from netkeep.services import runs
+from netkeep.services.events import EventBus
+from netkeep.services.scheduled_runs import ServeExtractor
+from netkeep.worker import BrowserWorker
 
 CDP_URL = UNREACHABLE_CDP_URL  # never a real Chrome, even without the guard (#294)
 
@@ -87,12 +87,12 @@ FAKE_LANDING_WAIT_S = 0.05
 
 
 def fast_profiles(run: BrowserRun, *, sleep: Callable[[float], Awaitable[None]]) -> ProfileSource:
-    """``netkeeper.worker.profile_source`` with :data:`FAKE_LANDING_WAIT_S`."""
+    """``netkeep.worker.profile_source`` with :data:`FAKE_LANDING_WAIT_S`."""
     return PageProfiles(run, sleep=sleep, landing_wait_s=FAKE_LANDING_WAIT_S)
 
 
 def fast_inbox(run: BrowserRun, *, sleep: Callable[[float], Awaitable[None]]) -> InboxSource:
-    """``netkeeper.worker.inbox_source`` with the fake waits (#380)."""
+    """``netkeep.worker.inbox_source`` with the fake waits (#380)."""
     return PageInbox(
         run,
         sleep=sleep,
@@ -111,7 +111,7 @@ def worker_extractor(
     rng: random.Random | None = None,
     inbox_sources: Callable[..., InboxSource] = fast_inbox,
 ) -> ServeExtractor:
-    """What ``netkeeper.worker.serve_extractor`` builds, on ``provider`` and ``clock``.
+    """What ``netkeep.worker.serve_extractor`` builds, on ``provider`` and ``clock``.
     ``inbox_sources`` replaces the page source an inbox poll reads through."""
 
     def executor(factory: sessionmaker[Session], bus: EventBus) -> runs.RunExecutor:

@@ -1,10 +1,10 @@
-"""netkeeper.services.pacing: ``[linkedin.pacing]`` as the extractor's profiles (P2-11).
+"""netkeep.services.pacing: ``[linkedin.pacing]`` as the extractor's profiles (P2-11).
 
 The module exists because ``plan_enrichment`` defaults every knob to the pacing
 module's constants, and those constants equal ``PacingSettings``' defaults field
 for field. A caller that forgets to pass the owner's settings therefore looks
 correct in every test written against the defaults and diverges silently the
-moment somebody edits ``config.toml`` -- which is exactly what `netkeeper
+moment somebody edits ``config.toml`` -- which is exactly what `netkeep
 rehearse` did. So the first test here is the one that would have caught it: the
 two sets of defaults agreeing is asserted rather than relied on, and every
 field is checked against a value that is *not* the default.
@@ -14,21 +14,21 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from netkeeper.config import PacingSettings
-from netkeeper.linkedin.pacing import (
+from netkeep.config import PacingSettings
+from netkeep.linkedin.pacing import (
     DEFAULT_BURST_PROFILE,
     DEFAULT_DELAY_PROFILE,
     BurstProfile,
     DelayProfile,
 )
-from netkeeper.services.pacing import profiles
+from netkeep.services.pacing import profiles
 
 
 def test_the_defaults_of_both_sides_agree() -> None:
     """Appendix C is written down twice, and the two copies have to say the same thing.
 
     ``config.example.toml``'s ``[linkedin.pacing]`` and the constants in
-    ``netkeeper.linkedin.pacing`` are independent transcriptions of Appendix C.
+    ``netkeep.linkedin.pacing`` are independent transcriptions of Appendix C.
     If they ever disagree, a caller that passes the config and one that does
     not would pace differently, and only one of them would be what the owner
     configured.

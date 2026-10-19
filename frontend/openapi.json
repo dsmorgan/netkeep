@@ -337,7 +337,7 @@
         "type": "object"
       },
       "ArchiveConnectionCountsOut": {
-        "description": "What ``Connections.csv`` did (:class:`netkeeper.crm.archive.ConnectionCounts`).",
+        "description": "What ``Connections.csv`` did (:class:`netkeep.crm.archive.ConnectionCounts`).",
         "properties": {
           "created": {
             "title": "Created",
@@ -465,7 +465,7 @@
         "type": "object"
       },
       "ArchiveInvitationCountsOut": {
-        "description": "What ``Invitations.csv`` did (:class:`netkeeper.crm.archive.InvitationCounts`).",
+        "description": "What ``Invitations.csv`` did (:class:`netkeep.crm.archive.InvitationCounts`).",
         "properties": {
           "added": {
             "title": "Added",
@@ -509,7 +509,7 @@
         "type": "object"
       },
       "ArchiveMessageCountsOut": {
-        "description": "What ``messages.csv`` did (:class:`netkeeper.crm.archive.MessageCounts`).",
+        "description": "What ``messages.csv`` did (:class:`netkeep.crm.archive.MessageCounts`).",
         "properties": {
           "added": {
             "title": "Added",
@@ -595,7 +595,7 @@
         "type": "string"
       },
       "ArchiveRefusalOut": {
-        "description": "The ``422`` body of a refused archive upload.\n\n``detail`` is the human-readable reason, free to reword; ``code`` is what\na client should actually switch on (:class:`~netkeeper.linkedin.archive.ArchiveRefusalCode`),\npresent on every refusal this endpoint can produce, and stable across a\nreword of ``detail`` — the wizard this feeds (P1-21) keys off it rather\nthan matching words in the message.",
+        "description": "The ``422`` body of a refused archive upload.\n\n``detail`` is the human-readable reason, free to reword; ``code`` is what\na client should actually switch on (:class:`~netkeep.linkedin.archive.ArchiveRefusalCode`),\npresent on every refusal this endpoint can produce, and stable across a\nreword of ``detail`` — the wizard this feeds (P1-21) keys off it rather\nthan matching words in the message.",
         "properties": {
           "code": {
             "$ref": "#/components/schemas/ArchiveRefusalCode"
@@ -1494,7 +1494,7 @@
       },
       "BreakerResetIn": {
         "additionalProperties": false,
-        "description": "Reset the tripped LinkedIn breakers (#583): ``netkeeper linkedin schedule\nreset-breaker``, which clears all five at once.\n\n``confirm`` must be true, and ``tripped`` is the keys of the tripped breaker rows the\nperson saw (the posture rows offering ``reset_breaker``): a breaker that tripped or\ncleared in between refuses the reset, so it never clears one nobody was shown.",
+        "description": "Reset the tripped LinkedIn breakers (#583): ``netkeep linkedin schedule\nreset-breaker``, which clears all five at once.\n\n``confirm`` must be true, and ``tripped`` is the keys of the tripped breaker rows the\nperson saw (the posture rows offering ``reset_breaker``): a breaker that tripped or\ncleared in between refuses the reset, so it never clears one nobody was shown.",
         "properties": {
           "confirm": {
             "title": "Confirm",
@@ -1537,7 +1537,7 @@
         "type": "object"
       },
       "BrowserHealthOut": {
-        "description": "What netkeeper already knows about Chrome and the LinkedIn session (#181).\n\nBuilt only from what was recorded: the last ``netkeeper preflight`` or\n``posture --probe``, the newest run that read LinkedIn, the session flag, and\nthe newest run that could not reach Chrome. Nothing here attaches to the\nbrowser; a request handler never does (spec 9.9, CLAUDE.md).\n\n``session_status`` and ``session_summary`` are the posture report's\n``linkedin session`` row, word for word. ``chrome_unreachable_at`` is set when\nthe newest run that ended ``browser_unavailable`` is newer than the last sign\nof a working session.",
+        "description": "What netkeep already knows about Chrome and the LinkedIn session (#181).\n\nBuilt only from what was recorded: the last ``netkeep preflight`` or\n``posture --probe``, the newest run that read LinkedIn, the session flag, and\nthe newest run that could not reach Chrome. Nothing here attaches to the\nbrowser; a request handler never does (spec 9.9, CLAUDE.md).\n\n``session_status`` and ``session_summary`` are the posture report's\n``linkedin session`` row, word for word. ``chrome_unreachable_at`` is set when\nthe newest run that ended ``browser_unavailable`` is newer than the last sign\nof a working session.",
         "properties": {
           "browser_held": {
             "title": "Browser Held",
@@ -1639,7 +1639,7 @@
         "type": "object"
       },
       "BrowserLaunchOut": {
-        "description": "``netkeeper browser launch``'s instructions, for the page (spec 9.1, ADR 0002).\n\nRead-only and built from config alone -- no attach, no CDP connection, nothing\nawaited. Whether Chrome is actually reachable, and whether the session it holds\nis healthy, is what ``netkeeper preflight`` checks; that attaches, so it cannot\nrun inside a request handler. ``GET /linkedin/browser/health`` reports what the\nlast preflight or run recorded instead (#181).",
+        "description": "``netkeep browser launch``'s instructions, for the page (spec 9.1, ADR 0002).\n\nRead-only and built from config alone -- no attach, no CDP connection, nothing\nawaited. Whether Chrome is actually reachable, and whether the session it holds\nis healthy, is what ``netkeep preflight`` checks; that attaches, so it cannot\nrun inside a request handler. ``GET /linkedin/browser/health`` reports what the\nlast preflight or run recorded instead (#181).",
         "properties": {
           "cdp_url": {
             "title": "Cdp Url",
@@ -1739,7 +1739,7 @@
         "type": "object"
       },
       "BudgetStatusOut": {
-        "description": "Every action class's counters, today's profile-visit chain, and any risk warning.\n\n``risk_warning`` is set when the daily profile-visit limit is above the 100\na day netkeeper was designed around (#318): one plain sentence for the page\nto show as it is. It never blocks anything.\n\n``profile_view_notice`` is always set (#325): the one sentence saying that\nenrichment can show up in the contact's *Who viewed your profile*. Pages show\nit wherever enrichment starts or is enabled; it never blocks anything either.",
+        "description": "Every action class's counters, today's profile-visit chain, and any risk warning.\n\n``risk_warning`` is set when the daily profile-visit limit is above the 100\na day netkeep was designed around (#318): one plain sentence for the page\nto show as it is. It never blocks anything.\n\n``profile_view_notice`` is always set (#325): the one sentence saying that\nenrichment can show up in the contact's *Who viewed your profile*. Pages show\nit wherever enrichment starts or is enabled; it never blocks anything either.",
         "properties": {
           "budgets": {
             "items": {
@@ -2435,7 +2435,7 @@
         "type": "object"
       },
       "ChangedJobOut": {
-        "description": "A live contact netkeeper saw change position recently: a reason to reconnect (spec 9.8).\n\n``current_title`` and ``current_company`` are the contact's now, after the change.",
+        "description": "A live contact netkeep saw change position recently: a reason to reconnect (spec 9.8).\n\n``current_title`` and ``current_company`` are the contact's now, after the change.",
         "properties": {
           "contact_id": {
             "title": "Contact Id",
@@ -4528,7 +4528,7 @@
         "type": "string"
       },
       "ContactStatsOut": {
-        "description": "Counts and triage progress over the user's live contacts (spec 10.1).\n\n``netkeeper.crm.contacts.contact_stats()`` backs this, ``netkeeper contacts\nstats``, and ``netkeeper.crm.triage.progress()`` all at once, so the CLI,\nthis endpoint, and the triage queue's progress bar cannot quietly disagree\non what \"how many contacts\" means (#90; they once did).",
+        "description": "Counts and triage progress over the user's live contacts (spec 10.1).\n\n``netkeep.crm.contacts.contact_stats()`` backs this, ``netkeep contacts\nstats``, and ``netkeep.crm.triage.progress()`` all at once, so the CLI,\nthis endpoint, and the triage queue's progress bar cannot quietly disagree\non what \"how many contacts\" means (#90; they once did).",
         "properties": {
           "archived": {
             "title": "Archived",
@@ -5869,7 +5869,7 @@
       },
       "FilterTree-Input": {
         "additionalProperties": false,
-        "description": "The root: a predicate (or none) and the archived-contacts switch.\n\nThe JSON schema carries ``x-netkeeper-fields``: each field's kind, label,\nthe ops it takes, and the values of an enum, for the builder.",
+        "description": "The root: a predicate (or none) and the archived-contacts switch.\n\nThe JSON schema carries ``x-netkeep-fields``: each field's kind, label,\nthe ops it takes, and the values of an enum, for the builder.",
         "properties": {
           "include_archived": {
             "default": false,
@@ -5889,7 +5889,7 @@
         },
         "title": "FilterTree",
         "type": "object",
-        "x-netkeeper-fields": {
+        "x-netkeep-fields": {
           "archived_at": {
             "kind": "datetime",
             "label": "archived",
@@ -6169,7 +6169,7 @@
       },
       "FilterTree-Output": {
         "additionalProperties": false,
-        "description": "The root: a predicate (or none) and the archived-contacts switch.\n\nThe JSON schema carries ``x-netkeeper-fields``: each field's kind, label,\nthe ops it takes, and the values of an enum, for the builder.",
+        "description": "The root: a predicate (or none) and the archived-contacts switch.\n\nThe JSON schema carries ``x-netkeep-fields``: each field's kind, label,\nthe ops it takes, and the values of an enum, for the builder.",
         "properties": {
           "include_archived": {
             "default": false,
@@ -6189,7 +6189,7 @@
         },
         "title": "FilterTree",
         "type": "object",
-        "x-netkeeper-fields": {
+        "x-netkeep-fields": {
           "archived_at": {
             "kind": "datetime",
             "label": "archived",
@@ -7729,7 +7729,7 @@
         "type": "object"
       },
       "ImportDecisionKind": {
-        "description": "What a person decided about a candidate row (:mod:`netkeeper.crm.identity`).",
+        "description": "What a person decided about a candidate row (:mod:`netkeep.crm.identity`).",
         "enum": [
           "merge_into",
           "create_new"
@@ -7762,7 +7762,7 @@
         "type": "object"
       },
       "ImportField": {
-        "description": "What a column may feed.\n\nThe first ten are the scalar columns of ``contacts`` that carry per-field\nprovenance (:data:`netkeeper.crm.provenance.PROVENANCE_ORDER`); the last\nthree add child rows, which provenance does not rank. A field a person owns\n(``preferred_name``, ``notes``, ``met``, tags) is deliberately absent: no\nimport touches those (spec 10.5).",
+        "description": "What a column may feed.\n\nThe first ten are the scalar columns of ``contacts`` that carry per-field\nprovenance (:data:`netkeep.crm.provenance.PROVENANCE_ORDER`); the last\nthree add child rows, which provenance does not rank. A field a person owns\n(``preferred_name``, ``notes``, ``met``, tags) is deliberately absent: no\nimport touches those (spec 10.5).",
         "enum": [
           "li_urn",
           "li_public_id",
@@ -8668,7 +8668,7 @@
       },
       "InboxOwnerForgetIn": {
         "additionalProperties": false,
-        "description": "Forget the recorded LinkedIn mailbox (#583): ``netkeeper linkedin\ninbox-forget-owner``. ``confirm`` must be true.",
+        "description": "Forget the recorded LinkedIn mailbox (#583): ``netkeep linkedin\ninbox-forget-owner``. ``confirm`` must be true.",
         "properties": {
           "confirm": {
             "title": "Confirm",
@@ -8762,7 +8762,7 @@
         "type": "object"
       },
       "InteractionKind": {
-        "description": "What happened between you and a contact. ``*_out`` is you reaching out, ``*_in``\nthem reaching you. ``call`` and ``meeting`` are ones you logged, either way;\n``call_in``, ``meeting_in`` and ``other_in`` are a response to a campaign that came\noutside netkeeper (#512; 0042): a call, meeting them in person, or a text or another\napp. One by email from another address is ``email_in``.",
+        "description": "What happened between you and a contact. ``*_out`` is you reaching out, ``*_in``\nthem reaching you. ``call`` and ``meeting`` are ones you logged, either way;\n``call_in``, ``meeting_in`` and ``other_in`` are a response to a campaign that came\noutside netkeep (#512; 0042): a call, meeting them in person, or a text or another\napp. One by email from another address is ``email_in``.",
         "enum": [
           "note",
           "call",
@@ -9861,7 +9861,7 @@
         "type": "object"
       },
       "MailboxArmStepsOut": {
-        "description": "Where a mailbox is on the way to arming to send (#510): armed for drafts, then\nnetkeeper finding its own draft by Message-ID, then a person arming it to send.",
+        "description": "Where a mailbox is on the way to arming to send (#510): armed for drafts, then\nnetkeep finding its own draft by Message-ID, then a person arming it to send.",
         "properties": {
           "armed_for_drafts": {
             "title": "Armed For Drafts",
@@ -10677,7 +10677,7 @@
         "type": "object"
       },
       "MetSource": {
-        "description": "Who decided ``met``: the person, or netkeeper on their behalf (spec 10.2).\n\n``manual`` is the resting state and covers a contact nobody has decided yet.\n``automatic`` is set only by a triage batch the person accepted\n(:func:`netkeeper.crm.triage.apply_suggestion`), so a decision netkeeper made\nnever reads as one the person made by hand, and the review queue can serve\nexactly those contacts back for checking. No import writes either: ``met``\nstays a field the person owns.",
+        "description": "Who decided ``met``: the person, or netkeep on their behalf (spec 10.2).\n\n``manual`` is the resting state and covers a contact nobody has decided yet.\n``automatic`` is set only by a triage batch the person accepted\n(:func:`netkeep.crm.triage.apply_suggestion`), so a decision netkeep made\nnever reads as one the person made by hand, and the review queue can serve\nexactly those contacts back for checking. No import writes either: ``met``\nstays a field the person owns.",
         "enum": [
           "manual",
           "automatic"
@@ -11478,7 +11478,7 @@
         "type": "object"
       },
       "OutsideResponseIn": {
-        "description": "A response outside netkeeper. ``at`` must carry a timezone, and be neither in the\nfuture nor before the first message of an enrollment it ends went out. ``outcome``\nis optional; ``do_not_contact`` goes with ``opt_out`` only. Without\n``enrollment_id``, every enrollment of the contact that could still send ends; with\nit, that one only (a ``completed`` one may be picked too, and stays ``completed``).",
+        "description": "A response outside netkeep. ``at`` must carry a timezone, and be neither in the\nfuture nor before the first message of an enrollment it ends went out. ``outcome``\nis optional; ``do_not_contact`` goes with ``opt_out`` only. Without\n``enrollment_id``, every enrollment of the contact that could still send ends; with\nit, that one only (a ``completed`` one may be picked too, and stays ``completed``).",
         "properties": {
           "at": {
             "format": "date-time",
@@ -11950,7 +11950,7 @@
         "type": "object"
       },
       "PostureOut": {
-        "description": "Every protection the LinkedIn extractor has, read-only (P2-11, P2-12, CP3).\n\nBuilt from `netkeeper.services.posture.posture()` with no browser probe: a\nlive attach-and-read-the-session check has to await browser work, which may\nnot happen inside a request handler (CLAUDE.md), so the session protection\nhere answers from the last recorded evidence rather than a live check. The live\nchecks are `netkeeper preflight` in a terminal and a Check connection run\n(`POST /linkedin/browser/check`, #652), which the task runner runs.\n\n``gaps`` are known limits of what this report can see, not warnings; they\nnever affect ``ok``. Neither do ``notes``: a choice the user is entitled to\nmake, such as profile visits above 100 a day (#318).\n``verdict`` is `netkeeper.services.posture.verdict()`'s\nown sentence, exactly as `netkeeper posture` prints it -- \"nothing is\nmisconfigured\" on a clean report, never \"you are safe\" (that module's own\ndocstring says why: this reads configuration and counters, not whether the\ncode that would enforce them actually runs).",
+        "description": "Every protection the LinkedIn extractor has, read-only (P2-11, P2-12, CP3).\n\nBuilt from `netkeep.services.posture.posture()` with no browser probe: a\nlive attach-and-read-the-session check has to await browser work, which may\nnot happen inside a request handler (CLAUDE.md), so the session protection\nhere answers from the last recorded evidence rather than a live check. The live\nchecks are `netkeep preflight` in a terminal and a Check connection run\n(`POST /linkedin/browser/check`, #652), which the task runner runs.\n\n``gaps`` are known limits of what this report can see, not warnings; they\nnever affect ``ok``. Neither do ``notes``: a choice the user is entitled to\nmake, such as profile visits above 100 a day (#318).\n``verdict`` is `netkeep.services.posture.verdict()`'s\nown sentence, exactly as `netkeep posture` prints it -- \"nothing is\nmisconfigured\" on a clean report, never \"you are safe\" (that module's own\ndocstring says why: this reads configuration and counters, not whether the\ncode that would enforce them actually runs).",
         "properties": {
           "checked_at": {
             "format": "date-time",
@@ -12159,7 +12159,7 @@
         "type": "object"
       },
       "ProtectionOut": {
-        "description": "One row of the posture report (spec section 9): what it is, whether it is in\nforce, and anything wrong with it. ``status`` is `netkeeper.services.posture.Status`'s\nvalue (``on``, ``off``, ``unknown``); ``off``/``unknown`` always carry a warning.\n``notes`` describe a choice the user made, not a fault, and never affect ``ok``.\n``summary`` is the row in a few words, for the collapsed view (#340): the same\nas ``value`` for most rows, a one-line form of it for the long ones. ``value``\nkeeps the full detail.",
+        "description": "One row of the posture report (spec section 9): what it is, whether it is in\nforce, and anything wrong with it. ``status`` is `netkeep.services.posture.Status`'s\nvalue (``on``, ``off``, ``unknown``); ``off``/``unknown`` always carry a warning.\n``notes`` describe a choice the user made, not a fault, and never affect ``ok``.\n``summary`` is the row in a few words, for the collapsed view (#340): the same\nas ``value`` for most rows, a one-line form of it for the long ones. ``value``\nkeeps the full detail.",
         "properties": {
           "actions": {
             "default": [],
@@ -12491,7 +12491,7 @@
         "type": "object"
       },
       "ResponseOutcome": {
-        "description": "What a response outside netkeeper said, when the person records it (#512).\n``opt_out`` ends the enrollments ``opted_out``; the rest end them ``replied``.",
+        "description": "What a response outside netkeep said, when the person records it (#512).\n``opt_out`` ends the enrollments ``opted_out``; the rest end them ``replied``.",
         "enum": [
           "positive",
           "neutral",
@@ -12502,7 +12502,7 @@
         "type": "string"
       },
       "ResponseVia": {
-        "description": "How a contact responded outside netkeeper (#512): a person records it, since\nneither poll can see it.",
+        "description": "How a contact responded outside netkeep (#512): a person records it, since\nneither poll can see it.",
         "enum": [
           "call",
           "text",
@@ -12966,7 +12966,7 @@
         "type": "object"
       },
       "RunOut": {
-        "description": "One run: what it is, how far it got, and how it ended. Never a name, slug, or URN:\n``progress`` and ``counts`` hold numbers, reason words, and an enrichment's per-visit\nreason record (contact ids and fixed codes, #405).\n\n``planned``/``completed`` are an enrichment plan's size and progress.\n``aging_refused`` is why a complete full sync aged nobody (#169 E), or null.\n``resumed_by`` is the id of the run that already took over this one's\nremaining plan, or null when it has not been (and so still may be, spec 9.9).\n``stop_reason_text`` is ``stop_reason`` in plain words (\"outside active\nhours\" for ``inactive``, #213), or null while the run is running.\n``pause_requested`` is true while a running enrichment is stopping to pause\n(#324); it ends ``aborted`` with ``stop_reason`` ``paused``, and resumable.\n``elsewhere_note`` is set while the run is running in another data directory\non this database (#467): a cancel or pause here only sets a flag, so the note\nsays to stop that directory's netkeeper process if the run doesn't stop.\nIt is null otherwise.",
+        "description": "One run: what it is, how far it got, and how it ended. Never a name, slug, or URN:\n``progress`` and ``counts`` hold numbers, reason words, and an enrichment's per-visit\nreason record (contact ids and fixed codes, #405).\n\n``planned``/``completed`` are an enrichment plan's size and progress.\n``aging_refused`` is why a complete full sync aged nobody (#169 E), or null.\n``resumed_by`` is the id of the run that already took over this one's\nremaining plan, or null when it has not been (and so still may be, spec 9.9).\n``stop_reason_text`` is ``stop_reason`` in plain words (\"outside active\nhours\" for ``inactive``, #213), or null while the run is running.\n``pause_requested`` is true while a running enrichment is stopping to pause\n(#324); it ends ``aborted`` with ``stop_reason`` ``paused``, and resumable.\n``elsewhere_note`` is set while the run is running in another data directory\non this database (#467): a cancel or pause here only sets a flag, so the note\nsays to stop that directory's netkeep process if the run doesn't stop.\nIt is null otherwise.",
         "properties": {
           "aging_refused": {
             "anyOf": [
@@ -13258,7 +13258,7 @@
         "type": "object"
       },
       "RunVisitReasonOut": {
-        "description": "One enrichment visit that counted toward the unreadable limits (#405).\n\n``visit`` is its number in the run, from 1; ``reason`` a fixed code and\n``reason_text`` the same in plain words. The name is the contact's in\nnetkeeper, ``None`` for a contact deleted since (``contact_exists`` false).",
+        "description": "One enrichment visit that counted toward the unreadable limits (#405).\n\n``visit`` is its number in the run, from 1; ``reason`` a fixed code and\n``reason_text`` the same in plain words. The name is the contact's in\nnetkeep, ``None`` for a contact deleted since (``contact_exists`` false).",
         "properties": {
           "contact_exists": {
             "title": "Contact Exists",
@@ -13478,7 +13478,7 @@
       },
       "ScheduleArmIn": {
         "additionalProperties": false,
-        "description": "Arming needs ``confirm: true``: it lets netkeeper visit LinkedIn on its own.",
+        "description": "Arming needs ``confirm: true``: it lets netkeep visit LinkedIn on its own.",
         "properties": {
           "confirm": {
             "title": "Confirm",
@@ -13775,7 +13775,7 @@
       },
       "SessionFlagClearIn": {
         "additionalProperties": false,
-        "description": "Clear the session flag by hand (#181), what ``netkeeper linkedin clear-flag`` does.\n\n``confirm`` must be true, and ``outcome`` and ``flagged_at`` name the flag the\nperson saw when they confirmed: the route clears only that exact flag, the same\nre-read the command makes after its prompt, so a flag raised again in between\nis never cleared by an answer given about an older one.",
+        "description": "Clear the session flag by hand (#181), what ``netkeep linkedin clear-flag`` does.\n\n``confirm`` must be true, and ``outcome`` and ``flagged_at`` name the flag the\nperson saw when they confirmed: the route clears only that exact flag, the same\nre-read the command makes after its prompt, so a flag raised again in between\nis never cleared by an answer given about an older one.",
         "properties": {
           "confirm": {
             "title": "Confirm",
@@ -13800,7 +13800,7 @@
         "type": "object"
       },
       "SessionOut": {
-        "description": "Whether this browser is connected to the local API (#618).\n\n``claimable``: the first-browser claim is still open, so ``POST /session/claim``\nconnects this browser without a link. ``persisted``: the key is in the Keychain;\nFalse when the Keychain refused it and it lives in memory until ``serve`` stops.\n``open_command``: the ``netkeeper open`` command line that makes a link this server\naccepts, for the connect page to show.",
+        "description": "Whether this browser is connected to the local API (#618).\n\n``claimable``: the first-browser claim is still open, so ``POST /session/claim``\nconnects this browser without a link. ``persisted``: the key is in the Keychain;\nFalse when the Keychain refused it and it lives in memory until ``serve`` stops.\n``open_command``: the ``netkeep open`` command line that makes a link this server\naccepts, for the connect page to show.",
         "properties": {
           "claimable": {
             "title": "Claimable",
@@ -16920,7 +16920,7 @@
   },
   "info": {
     "description": "Keep your professional network warm.",
-    "title": "netkeeper",
+    "title": "netkeep",
     "version": "0.0.1"
   },
   "openapi": "3.1.0",
@@ -17790,7 +17790,7 @@
     },
     "/api/v1/campaigns/{campaign_id}": {
       "delete": {
-        "description": "Delete a campaign never activated and with no messages (#345), with its steps and\nenrollments. ``409``, with the reason, for any other: archive one that sent. The\nanswer lists the Gmail drafts left behind: netkeeper never deletes one (ADR 0003).",
+        "description": "Delete a campaign never activated and with no messages (#345), with its steps and\nenrollments. ``409``, with the reason, for any other: archive one that sent. The\nanswer lists the Gmail drafts left behind: netkeep never deletes one (ADR 0003).",
         "operationId": "delete_campaign",
         "parameters": [
           {
@@ -19729,7 +19729,7 @@
     },
     "/api/v1/contacts/stats": {
       "get": {
-        "description": "Counts and triage progress over the user's contacts, for a dashboard (spec 10.1).\n\n``netkeeper.crm.contacts.contact_stats()`` backs this, ``netkeeper contacts\nstats``, and the triage queue's progress bar alike, so the three numbers\ncannot quietly disagree (#90).\n\nDeclared before ``/contacts/{contact_id}``, which would otherwise try to\nread ``stats`` as a contact id and answer ``422`` (see the same note on\n``/imports/presets`` in ``web/api/imports.py``).",
+        "description": "Counts and triage progress over the user's contacts, for a dashboard (spec 10.1).\n\n``netkeep.crm.contacts.contact_stats()`` backs this, ``netkeep contacts\nstats``, and the triage queue's progress bar alike, so the three numbers\ncannot quietly disagree (#90).\n\nDeclared before ``/contacts/{contact_id}``, which would otherwise try to\nread ``stats`` as a contact id and answer ``422`` (see the same note on\n``/imports/presets`` in ``web/api/imports.py``).",
         "operationId": "get_contact_stats",
         "responses": {
           "200": {
@@ -19917,7 +19917,7 @@
     },
     "/api/v1/contacts/{contact_id}/confirm": {
       "post": {
-        "description": "Confirm a contact netkeeper read off a connections-page card (#184).\n\nClears `needs_review_at`. A contact not waiting for review is returned as it\nis. Until confirmed, or until a sync attaches a URN, such a contact is never\nenriched, enrolled, or aged.",
+        "description": "Confirm a contact netkeep read off a connections-page card (#184).\n\nClears `needs_review_at`. A contact not waiting for review is returned as it\nis. Until confirmed, or until a sync attaches a URN, such a contact is never\nenriched, enrolled, or aged.",
         "operationId": "confirm_contact",
         "parameters": [
           {
@@ -20736,7 +20736,7 @@
     },
     "/api/v1/contacts/{contact_id}/outside-response": {
       "post": {
-        "description": "Record a response that came outside netkeeper, and end the enrollments it answers\n``replied`` (``opted_out`` for an opt-out), as a detected reply does. No later step\nsends. ``422``, with the reason, for a time in the future or before the first send of\nan enrollment it would end, or ``do_not_contact`` without an opt-out.",
+        "description": "Record a response that came outside netkeep, and end the enrollments it answers\n``replied`` (``opted_out`` for an opt-out), as a detected reply does. No later step\nsends. ``422``, with the reason, for a time in the future or before the first send of\nan enrollment it would end, or ``do_not_contact`` without an opt-out.",
         "operationId": "record_outside_response",
         "parameters": [
           {
@@ -20976,7 +20976,7 @@
     },
     "/api/v1/contacts/{contact_id}/reject": {
       "post": {
-        "description": "Reject a contact netkeeper read off a connections-page card: archive it (#184).\n\nNever a delete. `needs_review_at` stays set, so unarchiving brings back an\nunconfirmed contact. `409` for a contact that is not waiting for review.",
+        "description": "Reject a contact netkeep read off a connections-page card: archive it (#184).\n\nNever a delete. `needs_review_at` stays set, so unarchiving brings back an\nunconfirmed contact. `409` for a contact that is not waiting for review.",
         "operationId": "reject_contact",
         "parameters": [
           {
@@ -21377,7 +21377,7 @@
     },
     "/api/v1/dashboard/changed-jobs": {
       "get": {
-        "description": "Live contacts netkeeper saw change position in the last 30 days, newest first (spec 9.8).\n\nA change is one an enrichment visit noticed (a contact snapshot), dated when\nit was noticed, not the start date on the profile (#286).",
+        "description": "Live contacts netkeep saw change position in the last 30 days, newest first (spec 9.8).\n\nA change is one an enrichment visit noticed (a contact snapshot), dated when\nit was noticed, not the start date on the profile (#286).",
         "operationId": "list_changed_jobs",
         "parameters": [
           {
@@ -21815,7 +21815,7 @@
     },
     "/api/v1/gmail/leftover-drafts": {
       "get": {
-        "description": "Drafts netkeeper left in Gmail, for you to clean up by hand. Read-only: it never\ncalls Gmail, and netkeeper deletes nothing there.",
+        "description": "Drafts netkeep left in Gmail, for you to clean up by hand. Read-only: it never\ncalls Gmail, and netkeep deletes nothing there.",
         "operationId": "get_gmail_leftover_drafts",
         "responses": {
           "200": {
@@ -21858,7 +21858,7 @@
     },
     "/api/v1/history/import": {
       "post": {
-        "description": "Import the old tool's campaigns and the people its workbook names, as\n``netkeeper history import`` does. A dry run rolls the transaction back.",
+        "description": "Import the old tool's campaigns and the people its workbook names, as\n``netkeep history import`` does. A dry run rolls the transaction back.",
         "operationId": "import_history",
         "parameters": [
           {
@@ -21919,7 +21919,7 @@
     },
     "/api/v1/history/scan-gmail": {
       "post": {
-        "description": "Search Gmail, read-only, for what the imported recipients sent back, as\n``netkeeper history scan-gmail`` does. A scan Gmail stops saves what it finished and\nanswers with ``stopped``; run it again to continue.",
+        "description": "Search Gmail, read-only, for what the imported recipients sent back, as\n``netkeep history scan-gmail`` does. A scan Gmail stops saves what it finished and\nanswers with ``stopped``; run it again to continue.",
         "operationId": "scan_history_gmail",
         "requestBody": {
           "content": {
@@ -22073,7 +22073,7 @@
     },
     "/api/v1/imports/archive": {
       "post": {
-        "description": "Import a LinkedIn export zip: connections, messages, and invitations (P1-20).\n\nRead straight from the upload FastAPI has already received — ``file.file``\nis the ``SpooledTemporaryFile`` the multipart parser wrote it to, and\n:func:`netkeeper.linkedin.archive.open_archive` reads any seekable binary\nstream, so nothing here copies it into a second in-memory buffer. That\nparsing happens before this handler ever runs, on every upload regardless\nof size, since neither this app nor its FastAPI defaults put a limit on a\nmultipart file part; whether that upload is one this importer can even use\nis what is checked here, not whether it was safe to receive. This is a\nplain (not ``async``) handler, like the rest of this router, so FastAPI\nruns it in a worker thread rather than blocking the event loop on it.\n\nRun through the same :func:`netkeeper.crm.archive.import_archive` that\n``netkeeper import archive`` uses on a path, so the two report the same\ncounts for the same archive. Re-uploading the same export adds nothing\n(see that function's idempotence). A zip that is not a LinkedIn export, or\none that fails a guard (its total size, member count, compression ratio,\na member's path, or being password-protected), answers 422 naming what\nwas wrong — including one merely damaged in transit, never a 500 — and\nnothing is decompressed before those checks pass. The body\n(:class:`~netkeeper.web.schemas.ArchiveRefusalOut`) carries a ``code``\n(:class:`~netkeeper.linkedin.archive.ArchiveRefusalCode`) alongside the\nmessage on every refusal, so a client can act on why without parsing it.",
+        "description": "Import a LinkedIn export zip: connections, messages, and invitations (P1-20).\n\nRead straight from the upload FastAPI has already received — ``file.file``\nis the ``SpooledTemporaryFile`` the multipart parser wrote it to, and\n:func:`netkeep.linkedin.archive.open_archive` reads any seekable binary\nstream, so nothing here copies it into a second in-memory buffer. That\nparsing happens before this handler ever runs, on every upload regardless\nof size, since neither this app nor its FastAPI defaults put a limit on a\nmultipart file part; whether that upload is one this importer can even use\nis what is checked here, not whether it was safe to receive. This is a\nplain (not ``async``) handler, like the rest of this router, so FastAPI\nruns it in a worker thread rather than blocking the event loop on it.\n\nRun through the same :func:`netkeep.crm.archive.import_archive` that\n``netkeep import archive`` uses on a path, so the two report the same\ncounts for the same archive. Re-uploading the same export adds nothing\n(see that function's idempotence). A zip that is not a LinkedIn export, or\none that fails a guard (its total size, member count, compression ratio,\na member's path, or being password-protected), answers 422 naming what\nwas wrong — including one merely damaged in transit, never a 500 — and\nnothing is decompressed before those checks pass. The body\n(:class:`~netkeep.web.schemas.ArchiveRefusalOut`) carries a ``code``\n(:class:`~netkeep.linkedin.archive.ArchiveRefusalCode`) alongside the\nmessage on every refusal, so a client can act on why without parsing it.",
         "operationId": "import_archive",
         "requestBody": {
           "content": {
@@ -22863,7 +22863,7 @@
     },
     "/api/v1/linkedin/browser": {
       "get": {
-        "description": "``netkeeper browser launch``'s instructions, as data (spec 9.1, ADR 0002).\n\nOnly a person starts netkeeper's Chrome, and a run never does (ADR 0012); this\nshows the command for a person to run themselves. Everything below comes from config -- no\nattach, so this never awaits browser work (CLAUDE.md). The address is the one in\nforce (the file, then the Settings page, #597): after a change Chrome is started\non the new port, then serve restarted to attach there. Owner only: the profile\ndirectory belongs to the install, not to one user.",
+        "description": "``netkeep browser launch``'s instructions, as data (spec 9.1, ADR 0002).\n\nOnly a person starts netkeep's Chrome, and a run never does (ADR 0012); this\nshows the command for a person to run themselves. Everything below comes from config -- no\nattach, so this never awaits browser work (CLAUDE.md). The address is the one in\nforce (the file, then the Settings page, #597): after a change Chrome is started\non the new port, then serve restarted to attach there. Owner only: the profile\ndirectory belongs to the install, not to one user.",
         "operationId": "get_linkedin_browser",
         "responses": {
           "200": {
@@ -22888,7 +22888,7 @@
     },
     "/api/v1/linkedin/browser/check": {
       "post": {
-        "description": "Start a Check connection run; answers at once, before any browser work.\n\nThe run visits no page, so it spends no budget, and the session flag, heat, and\nactive hours don't stop it, as they don't stop ``netkeeper preflight``.",
+        "description": "Start a Check connection run; answers at once, before any browser work.\n\nThe run visits no page, so it spends no budget, and the session flag, heat, and\nactive hours don't stop it, as they don't stop ``netkeep preflight``.",
         "operationId": "check_linkedin_browser",
         "responses": {
           "202": {
@@ -22902,7 +22902,7 @@
             "description": "Successful Response"
           },
           "403": {
-            "description": "Only the local owner account checks netkeeper's Chrome"
+            "description": "Only the local owner account checks netkeep's Chrome"
           },
           "409": {
             "description": "Another run is running, or another process holds the browser"
@@ -22919,7 +22919,7 @@
     },
     "/api/v1/linkedin/browser/health": {
       "get": {
-        "description": "What netkeeper already knows about Chrome and the session, never a fresh probe (#181).\n\nThe ``linkedin session`` posture row (the last ``netkeeper preflight`` or\n``posture --probe``, or the newest run that read LinkedIn, under the session\nflag), and the newest run that could not reach Chrome when that is newer.\nNothing here attaches to the browser (spec 9.9, CLAUDE.md); that takes a live\ncheck (``netkeeper preflight`` or a Check connection run). For the **Start Chrome**\nbutton (#599), whether netkeeper's Chrome is running is read from its profile's\nlock file, the same reading as the posture report's dedicated-profile row, and\nwhether a run holds the browser from the browser lock files.",
+        "description": "What netkeep already knows about Chrome and the session, never a fresh probe (#181).\n\nThe ``linkedin session`` posture row (the last ``netkeep preflight`` or\n``posture --probe``, or the newest run that read LinkedIn, under the session\nflag), and the newest run that could not reach Chrome when that is newer.\nNothing here attaches to the browser (spec 9.9, CLAUDE.md); that takes a live\ncheck (``netkeep preflight`` or a Check connection run). For the **Start Chrome**\nbutton (#599), whether netkeep's Chrome is running is read from its profile's\nlock file, the same reading as the posture report's dedicated-profile row, and\nwhether a run holds the browser from the browser lock files.",
         "operationId": "get_linkedin_browser_health",
         "responses": {
           "200": {
@@ -22941,7 +22941,7 @@
     },
     "/api/v1/linkedin/browser/start": {
       "post": {
-        "description": "Start netkeeper's Chrome with the UI in an app window, or open the window in it (#636).\n\nYour act, from a button (ADR 0012, rule 5). It submits the launch to the task runner\nand answers ``202`` at once: the checks before a spawn can take seconds, and nothing\nis spawned inside a request. The launch refuses when the port answers as another\nChrome, when the profile is open without the port, or, for a cold start, while a run\nholds the browser; how it went arrives as ``browser.launch`` on ``GET /events``.\n``first_run`` (setup's first-run button) also opens LinkedIn's sign-in page. A launch\nalready under way, this button's or ``serve``'s at startup (#599), answers ``409``.",
+        "description": "Start netkeep's Chrome with the UI in an app window, or open the window in it (#636).\n\nYour act, from a button (ADR 0012, rule 5). It submits the launch to the task runner\nand answers ``202`` at once: the checks before a spawn can take seconds, and nothing\nis spawned inside a request. The launch refuses when the port answers as another\nChrome, when the profile is open without the port, or, for a cold start, while a run\nholds the browser; how it went arrives as ``browser.launch`` on ``GET /events``.\n``first_run`` (setup's first-run button) also opens LinkedIn's sign-in page. A launch\nalready under way, this button's or ``serve``'s at startup (#599), answers ``409``.",
         "operationId": "start_linkedin_browser",
         "requestBody": {
           "content": {
@@ -22965,7 +22965,7 @@
             "description": "Successful Response"
           },
           "403": {
-            "description": "Only the local owner account starts netkeeper's Chrome"
+            "description": "Only the local owner account starts netkeep's Chrome"
           },
           "409": {
             "description": "A launch is already under way"
@@ -23073,7 +23073,7 @@
     },
     "/api/v1/linkedin/inbox/acknowledge": {
       "post": {
-        "description": "You checked older LinkedIn replies by hand: clear the posture warning that the first\ninbox poll could not read back far enough. ``netkeeper linkedin inbox-acknowledge``.\nTouches no browser and visits nothing.",
+        "description": "You checked older LinkedIn replies by hand: clear the posture warning that the first\ninbox poll could not read back far enough. ``netkeep linkedin inbox-acknowledge``.\nTouches no browser and visits nothing.",
         "operationId": "acknowledge_linkedin_inbox_first_poll",
         "responses": {
           "200": {
@@ -23095,7 +23095,7 @@
     },
     "/api/v1/linkedin/inbox/forget-owner": {
       "post": {
-        "description": "Forget which LinkedIn mailbox the inbox poll recorded, after you changed accounts\n(#583): ``netkeeper linkedin inbox-forget-owner``. The next poll records whichever\nmailbox the page shows, so scheduled polls wait until a person runs one (#592).\nTouches no browser and visits nothing, and leaves your own\ncontact's LinkedIn ID as it is.",
+        "description": "Forget which LinkedIn mailbox the inbox poll recorded, after you changed accounts\n(#583): ``netkeep linkedin inbox-forget-owner``. The next poll records whichever\nmailbox the page shows, so scheduled polls wait until a person runs one (#592).\nTouches no browser and visits nothing, and leaves your own\ncontact's LinkedIn ID as it is.",
         "operationId": "forget_linkedin_inbox_owner",
         "requestBody": {
           "content": {
@@ -23756,7 +23756,7 @@
     },
     "/api/v1/linkedin/schedule/pause": {
       "post": {
-        "description": "Hold scheduled runs without disarming (#324): no new one starts until unpaused.\n\nA run already going is not stopped (cancel does that). Due fires met while\npaused are skipped and their cadence moves on, so unpausing starts nothing at\nonce. The pause survives a restart of ``netkeeper serve``.",
+        "description": "Hold scheduled runs without disarming (#324): no new one starts until unpaused.\n\nA run already going is not stopped (cancel does that). Due fires met while\npaused are skipped and their cadence moves on, so unpausing starts nothing at\nonce. The pause survives a restart of ``netkeep serve``.",
         "operationId": "pause_linkedin_schedule",
         "responses": {
           "200": {
@@ -23778,7 +23778,7 @@
     },
     "/api/v1/linkedin/schedule/reset-breaker": {
       "post": {
-        "description": "Reset the tripped LinkedIn breakers (#583): ``netkeeper linkedin schedule\nreset-breaker``, so scheduled connections, enrichment, and inbox runs may fire again\nwhen due. Like the command, it clears all five breakers at once.\n\nNeeds ``confirm: true`` and the keys of the tripped breaker rows the person was shown\n(``tripped``). With none tripped, or a different set tripped now, it refuses with\n``409`` and writes nothing. A count below its threshold skips nothing, so it is not a\nreason to reset here; the command still clears one.",
+        "description": "Reset the tripped LinkedIn breakers (#583): ``netkeep linkedin schedule\nreset-breaker``, so scheduled connections, enrichment, and inbox runs may fire again\nwhen due. Like the command, it clears all five breakers at once.\n\nNeeds ``confirm: true`` and the keys of the tripped breaker rows the person was shown\n(``tripped``). With none tripped, or a different set tripped now, it refuses with\n``409`` and writes nothing. A count below its threshold skips nothing, so it is not a\nreason to reset here; the command still clears one.",
         "operationId": "reset_linkedin_breaker",
         "requestBody": {
           "content": {
@@ -23838,7 +23838,7 @@
     },
     "/api/v1/linkedin/session-flag/clear": {
       "post": {
-        "description": "Clear the session flag by hand: ``netkeeper linkedin clear-flag`` (#181).\n\nNeeds ``confirm: true`` and the flag the person was shown (``outcome``,\n``flagged_at``). The command's refusals apply as they are: no flag set is\n``409``, and so is a flag that is not the one confirmed, so a flag raised\nagain in between is never cleared by an answer about an older one.",
+        "description": "Clear the session flag by hand: ``netkeep linkedin clear-flag`` (#181).\n\nNeeds ``confirm: true`` and the flag the person was shown (``outcome``,\n``flagged_at``). The command's refusals apply as they are: no flag set is\n``409``, and so is a flag that is not the one confirmed, so a flag raised\nagain in between is never cleared by an answer about an older one.",
         "operationId": "clear_linkedin_session_flag",
         "requestBody": {
           "content": {
@@ -23897,7 +23897,7 @@
     },
     "/api/v1/lists": {
       "get": {
-        "description": "Every list, static and smart, with how many contacts are in it right now.\n\nA list whose filter does not compile is listed like any other, with\n``broken`` saying why and no count, rather than failing the request: this\nis the page someone would use to find and fix it, so one bad list may not\nhide the rest (:func:`netkeeper.crm.lists.member_counts`).",
+        "description": "Every list, static and smart, with how many contacts are in it right now.\n\nA list whose filter does not compile is listed like any other, with\n``broken`` saying why and no count, rather than failing the request: this\nis the page someone would use to find and fix it, so one bad list may not\nhide the rest (:func:`netkeep.crm.lists.member_counts`).",
         "operationId": "list_lists",
         "responses": {
           "200": {
@@ -24212,7 +24212,7 @@
     },
     "/api/v1/login-item": {
       "get": {
-        "description": "Whether netkeeper starts at login, from the plist and launchctl.",
+        "description": "Whether netkeep starts at login, from the plist and launchctl.",
         "operationId": "get_login_item",
         "responses": {
           "200": {
@@ -24280,7 +24280,7 @@
     },
     "/api/v1/login-item/repair": {
       "post": {
-        "description": "Rewrite the plist for this netkeeper and adopt an old script's agent.",
+        "description": "Rewrite the plist for this netkeep and adopt an old script's agent.",
         "operationId": "repair_login_item",
         "responses": {
           "200": {
@@ -24974,7 +24974,7 @@
             "description": "Successful Response"
           },
           "403": {
-            "description": "A browser already claimed it; use `netkeeper open`"
+            "description": "A browser already claimed it; use `netkeep open`"
           },
           "503": {
             "description": "The Keychain refused to record the claim"
@@ -25107,7 +25107,7 @@
         ]
       },
       "post": {
-        "description": "Restart ``netkeeper serve`` so settings it reads at startup apply, never in the\nmiddle of work: ``409`` names what is running, unless ``when_idle`` asks to wait for\nit. ``user`` is unused; every route resolves the current user.",
+        "description": "Restart ``netkeep serve`` so settings it reads at startup apply, never in the\nmiddle of work: ``409`` names what is running, unless ``when_idle`` asks to wait for\nit. ``user`` is unused; every route resolves the current user.",
         "operationId": "restart_serve",
         "requestBody": {
           "content": {
@@ -25269,7 +25269,7 @@
     },
     "/api/v1/setup": {
       "get": {
-        "description": "Every setup step in order, with its state, from what netkeeper already stores.",
+        "description": "Every setup step in order, with its state, from what netkeep already stores.",
         "operationId": "get_setup",
         "responses": {
           "200": {
@@ -25444,7 +25444,7 @@
             "description": "The support bundle, a .zip file."
           },
           "403": {
-            "description": "Only the local owner account makes a support bundle, and only from this site's own page or a request with X-Netkeeper-Client"
+            "description": "Only the local owner account makes a support bundle, and only from this site's own page or a request with X-Netkeep-Client"
           },
           "409": {
             "description": "The full level without confirm_full=true"
@@ -26288,7 +26288,7 @@
             }
           },
           {
-            "description": "Narrow the queue to the contacts whose current `met` was decided this way. `automatic` is the review pass: what netkeeper decided for you, on the same cards, so you can check it. Deciding one by hand makes it `manual` and takes it out of that queue.",
+            "description": "Narrow the queue to the contacts whose current `met` was decided this way. `automatic` is the review pass: what netkeep decided for you, on the same cards, so you can check it. Deciding one by hand makes it `manual` and takes it out of that queue.",
             "in": "query",
             "name": "decided_by",
             "required": false,
@@ -26301,7 +26301,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Narrow the queue to the contacts whose current `met` was decided this way. `automatic` is the review pass: what netkeeper decided for you, on the same cards, so you can check it. Deciding one by hand makes it `manual` and takes it out of that queue.",
+              "description": "Narrow the queue to the contacts whose current `met` was decided this way. `automatic` is the review pass: what netkeep decided for you, on the same cards, so you can check it. Deciding one by hand makes it `manual` and takes it out of that queue.",
               "title": "Decided By"
             }
           }
@@ -26423,7 +26423,7 @@
             }
           },
           {
-            "description": "Narrow the queue to the contacts whose current `met` was decided this way. `automatic` is the review pass: what netkeeper decided for you, on the same cards, so you can check it. Deciding one by hand makes it `manual` and takes it out of that queue.",
+            "description": "Narrow the queue to the contacts whose current `met` was decided this way. `automatic` is the review pass: what netkeep decided for you, on the same cards, so you can check it. Deciding one by hand makes it `manual` and takes it out of that queue.",
             "in": "query",
             "name": "decided_by",
             "required": false,
@@ -26436,7 +26436,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Narrow the queue to the contacts whose current `met` was decided this way. `automatic` is the review pass: what netkeeper decided for you, on the same cards, so you can check it. Deciding one by hand makes it `manual` and takes it out of that queue.",
+              "description": "Narrow the queue to the contacts whose current `met` was decided this way. `automatic` is the review pass: what netkeep decided for you, on the same cards, so you can check it. Deciding one by hand makes it `manual` and takes it out of that queue.",
               "title": "Decided By"
             }
           }
@@ -26543,7 +26543,7 @@
             }
           },
           {
-            "description": "Narrow the queue to the contacts whose current `met` was decided this way. `automatic` is the review pass: what netkeeper decided for you, on the same cards, so you can check it. Deciding one by hand makes it `manual` and takes it out of that queue.",
+            "description": "Narrow the queue to the contacts whose current `met` was decided this way. `automatic` is the review pass: what netkeep decided for you, on the same cards, so you can check it. Deciding one by hand makes it `manual` and takes it out of that queue.",
             "in": "query",
             "name": "decided_by",
             "required": false,
@@ -26556,7 +26556,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Narrow the queue to the contacts whose current `met` was decided this way. `automatic` is the review pass: what netkeeper decided for you, on the same cards, so you can check it. Deciding one by hand makes it `manual` and takes it out of that queue.",
+              "description": "Narrow the queue to the contacts whose current `met` was decided this way. `automatic` is the review pass: what netkeep decided for you, on the same cards, so you can check it. Deciding one by hand makes it `manual` and takes it out of that queue.",
               "title": "Decided By"
             }
           }
@@ -26835,7 +26835,7 @@
             }
           },
           {
-            "description": "Narrow the queue to the contacts whose current `met` was decided this way. `automatic` is the review pass: what netkeeper decided for you, on the same cards, so you can check it. Deciding one by hand makes it `manual` and takes it out of that queue.",
+            "description": "Narrow the queue to the contacts whose current `met` was decided this way. `automatic` is the review pass: what netkeep decided for you, on the same cards, so you can check it. Deciding one by hand makes it `manual` and takes it out of that queue.",
             "in": "query",
             "name": "decided_by",
             "required": false,
@@ -26848,7 +26848,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Narrow the queue to the contacts whose current `met` was decided this way. `automatic` is the review pass: what netkeeper decided for you, on the same cards, so you can check it. Deciding one by hand makes it `manual` and takes it out of that queue.",
+              "description": "Narrow the queue to the contacts whose current `met` was decided this way. `automatic` is the review pass: what netkeep decided for you, on the same cards, so you can check it. Deciding one by hand makes it `manual` and takes it out of that queue.",
               "title": "Decided By"
             }
           }

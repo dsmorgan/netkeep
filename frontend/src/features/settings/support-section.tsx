@@ -21,7 +21,7 @@ function message(error: unknown): string {
 
 /**
  * Settings, Support (#603): pick a level, see what it includes and leaves out, and
- * download the `.zip`. netkeeper never uploads it; you attach it to an issue (standard,
+ * download the `.zip`. netkeep never uploads it; you attach it to an issue (standard,
  * detailed) or send it privately (full). The full level needs its box ticked first.
  */
 export function SupportSection() {
@@ -38,8 +38,8 @@ export function SupportSection() {
         <h2 className="font-heading text-sm leading-snug font-bold">Support</h2>
         <CardDescription>
           A support bundle collects versions, settings, posture, breakers, recent runs and logs into
-          one .zip file, so someone helping you can see what happened. netkeeper never uploads it:
-          you download it and send it yourself, with screenshots. No level ever includes a secret.
+          one .zip file, so someone helping you can see what happened. netkeep never uploads it: you
+          download it and send it yourself, with screenshots. No level ever includes a secret.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">

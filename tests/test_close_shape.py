@@ -3,7 +3,7 @@
 CP8b's first scheduled auto-send (#479) clicked Send, and the message landed. Then
 ``close_sent_bubble`` refused: the bubble "does not have one close control for this
 person". The diagnostic says which way the lookup missed, without a name, URL, href,
-or page text, in the run's note and through ``netkeeper linkedin message-check
+or page text, in the run's note and through ``netkeep linkedin message-check
 --bubble``. These tests drive it on invented bubbles (``messaging_dom``'s fake DOM),
 one per relation the report must tell apart.
 
@@ -30,15 +30,15 @@ from run_fakes import fake_provider
 from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
 
-from netkeeper import cli as cli_module
-from netkeeper import migrations
-from netkeeper.cli import _bubble_check_lines
-from netkeeper.cli import app as cli
-from netkeeper.config import Settings
-from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.linkedin import browser
-from netkeeper.linkedin.activity_lock import account_key
-from netkeeper.linkedin.browser import (
+from netkeep import cli as cli_module
+from netkeep import migrations
+from netkeep.cli import _bubble_check_lines
+from netkeep.cli import app as cli
+from netkeep.config import Settings
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+from netkeep.linkedin import browser
+from netkeep.linkedin.activity_lock import account_key
+from netkeep.linkedin.browser import (
     NAME_APOSTROPHES,
     NAME_JOINER_CATEGORIES,
     NO_ONE_CLOSE_CONTROL,
@@ -55,18 +55,18 @@ from netkeeper.linkedin.browser import (
     name_relation,
     read_close_shape,
 )
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.enrich import LINKEDIN_ORIGIN
-from netkeeper.linkedin.page_messaging import PageBubbleCheck
-from netkeeper.models import SyncRunKind, SyncRunStatus, SyncRunTrigger, User
-from netkeeper.scoping import install_scope_guard
-from netkeeper.services import budgets, message_check, runs
-from netkeeper.services.budgets import ActionClass
-from netkeeper.services.linkedin_accounts import ensure_account
-from netkeeper.services.linkedin_session import flag_session
-from netkeeper.services.linkedin_steps import BUBBLE_LEFT_OPEN_NOTE
-from netkeeper.services.users import ensure_local_user
-from netkeeper.worker import BubbleCheckResult, run_bubble_check
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.enrich import LINKEDIN_ORIGIN
+from netkeep.linkedin.page_messaging import PageBubbleCheck
+from netkeep.models import SyncRunKind, SyncRunStatus, SyncRunTrigger, User
+from netkeep.scoping import install_scope_guard
+from netkeep.services import budgets, message_check, runs
+from netkeep.services.budgets import ActionClass
+from netkeep.services.linkedin_accounts import ensure_account
+from netkeep.services.linkedin_session import flag_session
+from netkeep.services.linkedin_steps import BUBBLE_LEFT_OPEN_NOTE
+from netkeep.services.users import ensure_local_user
+from netkeep.worker import BubbleCheckResult, run_bubble_check
 
 #: An invented member, used only here: the no-PII checks look for every part of it.
 PERSON = Member(495, "Quorbelle", "Fictionary", "Invented headline for #495")
@@ -286,7 +286,7 @@ def test_the_close_rule_s_edges_and_normalization(header: str, suffix: str, hold
             "Odalys Inventova and Quorbelle Fictionary",
             CloseForm.HEADER_LAST,
         ),
-        # Any non-empty other name: netkeeper doesn't compare the owner's name.
+        # Any non-empty other name: netkeep doesn't compare the owner's name.
         ("Ann", "Ann and B", CloseForm.HEADER_FIRST),
         ("Ann", "B and Ann", CloseForm.HEADER_LAST),
         ("Ann", "Ann and Ann", CloseForm.HEADER_FIRST),
@@ -791,7 +791,7 @@ async def test_no_tab_with_the_contact_s_bubble_reports_counts_only() -> None:
     assert_untouched(site, tabs)
     report = "\n".join(_bubble_check_lines(9, BubbleCheckResult(found)))
     assert "If the tab auto-send left open is still open, run this against it" in report
-    assert "open the bubble by hand in the netkeeper Chrome window" in report
+    assert "open the bubble by hand in the netkeep Chrome window" in report
     assert_no_pii(report)
 
 
@@ -819,7 +819,7 @@ async def test_a_second_dialog_in_the_tab_is_counted() -> None:
 
 
 async def test_the_bubble_check_ignores_the_ui_and_google_tabs() -> None:
-    """#634: netkeeper's Chrome holds the UI's window and setup tabs too (ADR 0012). A
+    """#634: netkeep's Chrome holds the UI's window and setup tabs too (ADR 0012). A
     UI tab, a Google tab, and a look-alike host, each holding the contact's bubble, are
     never read; only the LinkedIn tab is."""
     site = MessagingSite(PERSON)
@@ -863,7 +863,7 @@ def test_the_bubble_check_opens_only_linkedin_or_loopback() -> None:
 @pytest.fixture
 def cli_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[sessionmaker[Session]]:
     url = database_url(tmp_path)
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     engine = make_engine(url)
     migrations.upgrade(engine)
     factory = make_session_factory(engine)

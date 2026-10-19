@@ -15,13 +15,13 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.config import Settings
-from netkeeper.db import session_scope
-from netkeeper.models import User
-from netkeeper.services import scheduler
-from netkeeper.services.linkedin_accounts import arm_scheduled_runs, ensure_account
-from netkeeper.services.scheduled_runs import _local_accounts, seed_served_schedule
-from netkeeper.services.scheduler import (
+from netkeep.config import Settings
+from netkeep.db import session_scope
+from netkeep.models import User
+from netkeep.services import scheduler
+from netkeep.services.linkedin_accounts import arm_scheduled_runs, ensure_account
+from netkeep.services.scheduled_runs import _local_accounts, seed_served_schedule
+from netkeep.services.scheduler import (
     DEFAULT_SCHEDULES,
     MIN_JOB_KIND_GAP,
     SERVED_SCHEDULES,
@@ -29,7 +29,7 @@ from netkeeper.services.scheduler import (
     JobSchedule,
     stored_due,
 )
-from netkeeper.services.users import ensure_local_user
+from netkeep.services.users import ensure_local_user
 
 #: A Wednesday, 14:00 in New York (the default zone), inside the default active hours.
 NOW = datetime(2026, 9, 23, 18, 0, tzinfo=UTC)

@@ -14,18 +14,18 @@ from history_fixtures import Tab, workbook_bytes
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.crm import do_not_send
-from netkeeper.crm.history import (
+from netkeep.crm import do_not_send
+from netkeep.crm.history import (
     HISTORY_SUMMARY,
     awaiting_reply_triage,
     campaign_start,
     import_workbook,
     prior_contact,
 )
-from netkeeper.crm.history_workbook import read_workbook
-from netkeeper.crm.interactions import timeline
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.crm.history_workbook import read_workbook
+from netkeep.crm.interactions import timeline
+from netkeep.db import session_scope
+from netkeep.models import (
     Contact,
     ContactSource,
     DoNotSendReason,
@@ -36,8 +36,8 @@ from netkeeper.models import (
     InteractionKind,
     User,
 )
-from netkeeper.scoping import scoped, scoped_count
-from netkeeper.services.campaign_guards import Reason, check_enrollment
+from netkeep.scoping import scoped, scoped_count
+from netkeep.services.campaign_guards import Reason, check_enrollment
 
 FOLLOW_UP = Tab(
     title="Follow-up",

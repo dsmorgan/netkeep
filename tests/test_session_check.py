@@ -1,6 +1,6 @@
 """Check connection: ``POST /linkedin/browser/check`` and its ``session_check`` run (#652).
 
-A safety change: a new path that attaches to netkeeper's Chrome and reads the LinkedIn
+A safety change: a new path that attaches to netkeep's Chrome and reads the LinkedIn
 session. Every test drives the real app lifespan and the real worker on a fake Chrome
 (``browser_fakes``), so nothing here reaches a browser, a port, or linkedin.com. Each
 guard the check keeps has a test that fails without it: the browser lock, one run at a
@@ -27,17 +27,17 @@ from sqlalchemy.orm import Session
 from test_preflight import FAKE_SESSION_VALUE, cookie, make_context
 from test_runs_serve import HEADERS, client_for, serving
 
-from netkeeper.config import Settings
-from netkeeper.db import session_scope
-from netkeeper.linkedin import activity_lock
-from netkeeper.linkedin.browser import ActivityLocks, AttachBrowserProvider, BrowserUnavailable
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.preflight import COOKIE_URLS
-from netkeeper.models import SyncRunKind, SyncRunStatus, SyncRunTrigger, User, UserKind
-from netkeeper.models.base import utcnow
-from netkeeper.services import budgets, runs, session_check
-from netkeeper.services.linkedin_accounts import ensure_account
-from netkeeper.services.linkedin_session import flag_session, recorded_evidence, session_flag
+from netkeep.config import Settings
+from netkeep.db import session_scope
+from netkeep.linkedin import activity_lock
+from netkeep.linkedin.browser import ActivityLocks, AttachBrowserProvider, BrowserUnavailable
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.preflight import COOKIE_URLS
+from netkeep.models import SyncRunKind, SyncRunStatus, SyncRunTrigger, User, UserKind
+from netkeep.models.base import utcnow
+from netkeep.services import budgets, runs, session_check
+from netkeep.services.linkedin_accounts import ensure_account
+from netkeep.services.linkedin_session import flag_session, recorded_evidence, session_flag
 
 CHECK = "/api/v1/linkedin/browser/check"
 HEALTH = "/api/v1/linkedin/browser/health"
@@ -77,7 +77,7 @@ async def _check(app: FastAPI) -> tuple[httpx.Response, dict[str, Any], dict[str
 
 @pytest.fixture
 def _no_frontend(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> Iterator[None]:
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", str(tmp_path / "no-dist"))
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", str(tmp_path / "no-dist"))
     yield
 
 
@@ -124,7 +124,7 @@ async def test_a_signed_out_check_shows_no_session(bare_engine: Engine) -> None:
 
 
 async def test_an_unreadable_jar_records_unknown_and_no_evidence(bare_engine: Engine) -> None:
-    """An unreadable jar says nothing about the session, as for `netkeeper preflight`."""
+    """An unreadable jar says nothing about the session, as for `netkeep preflight`."""
     context = make_context()
     context.cookie_error = RuntimeError("Protocol error")
     provider, _, _ = _provider(context)
@@ -161,7 +161,7 @@ async def test_another_profile_is_refused_before_any_tab_or_cookie(bare_engine: 
     assert context.new_page_calls == 0
     assert context.cookie_calls == 0
     assert connector.detaches == 1
-    assert health["chrome_unreachable_run_id"] is None, "Chrome is up, just not netkeeper's"
+    assert health["chrome_unreachable_run_id"] is None, "Chrome is up, just not netkeep's"
 
 
 async def test_the_check_reads_cookies_scoped_on_its_own_tab_and_navigates_nowhere(
@@ -304,7 +304,7 @@ async def test_a_flag_and_closed_hours_dont_stop_it_and_it_never_clears_the_flag
     bare_engine: Engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """No request reaches linkedin.com, so the flag and active hours don't gate it, as
-    they don't gate `netkeeper preflight`. Clearing the flag stays a person's act."""
+    they don't gate `netkeep preflight`. Clearing the flag stays a person's act."""
 
     def closed(*_: Any, **__: Any) -> None:
         raise runs.OutsideActiveHours("outside active hours")
@@ -398,7 +398,7 @@ async def test_a_session_check_run_has_one_door(bare_engine: Engine) -> None:
 def test_the_check_records_evidence_with_its_run_as_the_source(
     session_factory: Any,
 ) -> None:
-    from netkeeper.services.posture import SessionProbe
+    from netkeep.services.posture import SessionProbe
 
     now = utcnow()
     with session_scope(session_factory, write=True) as session:

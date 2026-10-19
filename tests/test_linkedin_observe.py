@@ -1,6 +1,6 @@
 """The observation seam: read what the page loads, alter nothing, log no body (ADR 0006).
 
-:class:`netkeeper.linkedin.observe.Observation` against :mod:`flagship_site`'s
+:class:`netkeep.linkedin.observe.Observation` against :mod:`flagship_site`'s
 listening tab, whose responses have a request side that can only be read. Nothing
 here opens a socket.
 """
@@ -16,8 +16,8 @@ import pytest
 from flagship_site import FakeRequest, FakeResponse, FlagshipSite, ListeningTab
 from run_fakes import fake_provider
 
-from netkeeper.linkedin import observe
-from netkeeper.linkedin.observe import (
+from netkeep.linkedin import observe
+from netkeep.linkedin.observe import (
     FAILURE_REDIRECT,
     FAILURE_TIMEOUT,
     FAILURE_TOO_LARGE,
@@ -368,7 +368,7 @@ async def test_the_remembered_request_ends_are_bounded() -> None:
 
 
 async def test_close_logs_one_summary_in_fixed_words(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     tab = _tab()
     observation = await _started(tab)
     request = _ended(failure="net::ERR_ABORTED https://www.linkedin.com/in/fake-slug/")
@@ -405,7 +405,7 @@ async def test_close_logs_one_summary_in_fixed_words(caplog: pytest.LogCaptureFi
 async def test_an_observation_that_kept_nothing_logs_no_summary(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     observation = await _started(_tab())
     await observation.close()
     assert "answers_kept" not in caplog.text

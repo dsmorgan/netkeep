@@ -1,4 +1,4 @@
-"""netkeeper.linkedin.flight: the RSC flight grammar, read defensively (#187).
+"""netkeep.linkedin.flight: the RSC flight grammar, read defensively (#187).
 
 Every malformed payload is ``RouteChanged`` -- never ``KeyError``, ``ValueError``, or a
 ``JSONDecodeError`` -- and every error names a shape, never a value. The payloads here
@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import pytest
 
-from netkeeper.linkedin import flight
-from netkeeper.linkedin.flight import element_props, is_element, is_whole, parse_flight
-from netkeeper.linkedin.voyager import RouteChanged
+from netkeep.linkedin import flight
+from netkeep.linkedin.flight import element_props, is_element, is_whole, parse_flight
+from netkeep.linkedin.voyager import RouteChanged
 
 E = "test/flight"
 

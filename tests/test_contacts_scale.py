@@ -6,7 +6,7 @@ has to pay for the count, the sort, the page, and the children of the rows on it
 
 A page is a fixed cost plus the count, so the ways this regresses are few and
 known: an index the filter or the sort stops using, and a child relationship
-loaded per row instead of per page (:func:`netkeeper.crm.contacts.query` uses
+loaded per row instead of per page (:func:`netkeep.crm.contacts.query` uses
 ``selectinload``, two queries for the whole page). ``test_a_page_is_a_fixed
 _number_of_queries`` fails on the second one directly, so a regression names
 itself rather than showing up as a slow clock on a busy machine.
@@ -28,9 +28,9 @@ from sqlalchemy import Engine, event, insert, select
 from sqlalchemy.orm import Session, sessionmaker
 from time_limit import Stopwatch, scaled
 
-from netkeeper.crm.filters import parse_filter
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.crm.filters import parse_filter
+from netkeep.db import session_scope
+from netkeep.models import (
     Contact,
     ContactEmail,
     ContactList,
@@ -41,9 +41,9 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.scoping import scoped_contacts
+from netkeep.scoping import scoped_contacts
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 CONTACTS = 10_000
 #: The best of RUNS pages, for this machine (#472).
 BUDGET_MS = scaled(300.0)

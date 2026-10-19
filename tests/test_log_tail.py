@@ -1,7 +1,7 @@
 """The recent-log-lines endpoint (#655): the cap, the filters, the redaction, the owner.
 
 Log files are written under the test's scratch data directory (conftest points
-``NETKEEPER_DATA`` there), never the real one. The redaction tests write through the
+``NETKEEP_DATA`` there), never the real one. The redaction tests write through the
 real logging setup, so the markers are the ones the code puts in.
 """
 
@@ -19,8 +19,8 @@ from fastapi import FastAPI
 from isolation.harness import acting_as
 from test_runs_serve import HEADERS
 
-from netkeeper.db import session_scope
-from netkeeper.logging_setup import (
+from netkeep.db import session_scope
+from netkeep.logging_setup import (
     LOG_DIRNAME,
     LOG_FILENAME,
     personal,
@@ -28,16 +28,16 @@ from netkeeper.logging_setup import (
     remove_file_handler,
     setup_logging,
 )
-from netkeeper.models import UserKind
-from netkeeper.paths import data_dir
-from netkeeper.redaction import Redactor
-from netkeeper.services import local_api_key, log_tail
+from netkeep.models import UserKind
+from netkeep.paths import data_dir
+from netkeep.redaction import Redactor
+from netkeep.services import local_api_key, log_tail
 
 URL = "/api/v1/support/logs"
 START = datetime(2026, 10, 1, 12, 0, 0)
 
 
-def _record(when: datetime, level: str, message: str, logger: str = "netkeeper.test") -> str:
+def _record(when: datetime, level: str, message: str, logger: str = "netkeep.test") -> str:
     return f"{when:%Y-%m-%d %H:%M:%S} {level} {logger} {message}\n"
 
 
@@ -78,7 +78,7 @@ async def test_the_newest_lines_come_back_oldest_first(client: httpx.AsyncClient
     assert _messages(few) == ["record 297", "record 298", "record 299"]
     first = few["lines"][0]  # type: ignore[index]
     assert first["level"] == "INFO"
-    assert first["logger"] == "netkeeper.test"
+    assert first["logger"] == "netkeep.test"
     assert first["at"].startswith("2026-10-01T12:04:57")
 
 
@@ -230,7 +230,7 @@ def written_log(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Non
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: user_dir))
     setup_logging()
     try:
-        log = logging.getLogger("netkeeper.test_log_tail")
+        log = logging.getLogger("netkeep.test_log_tail")
         log.warning("saved contact %s %s", personal(NAME), personal(EMAIL))
         log.warning(
             "visiting %s (%s)", personal(f"https://www.linkedin.com/in/{SLUG}/"), personal(URN)
@@ -296,7 +296,7 @@ async def test_a_session_cookie_value_in_a_header_line_is_removed(
     client: httpx.AsyncClient, running_app: FastAPI
 ) -> None:
     cookie = running_app.state.local_api_key.session_value()
-    _write(_record(START, "INFO", f"Cookie: netkeeper_session_8000={cookie}"))
+    _write(_record(START, "INFO", f"Cookie: netkeep_session_8000={cookie}"))
     response = await client.get(URL, headers=HEADERS)
     assert cookie not in response.text
 
@@ -334,9 +334,9 @@ async def test_only_the_owner_reads_the_logs(
 SPAN_SECRET = ("Jane", "Doe-Secret", "jane.private")
 FORGED = (
     "2026-10-18 09:00:01 Jane Doe-Secret jane.private\u27e7 done\n",  # unknown level
-    "2026-10-18 09:00:01 ERROR netkeeper.forged Jane Doe-Secret jane.private\u27e7 done\n",
+    "2026-10-18 09:00:01 ERROR netkeep.forged Jane Doe-Secret jane.private\u27e7 done\n",
 )
-OPENER = "2026-10-18 09:00:00 INFO netkeeper.x saved \u27e6line one\n"
+OPENER = "2026-10-18 09:00:00 INFO netkeep.x saved \u27e6line one\n"
 
 
 @pytest.mark.parametrize("forged", FORGED)
@@ -373,10 +373,10 @@ def test_the_span_limits_are_pinned() -> None:
 
 def _unterminated(count: int, *, forged: bool = False) -> list[str]:
     """A cut-short span, then ``count`` ordinary records."""
-    cut = "2026-10-18 09:00:00 INFO netkeeper.x cut \u27e6Jane Doe-Secret\n"
+    cut = "2026-10-18 09:00:00 INFO netkeep.x cut \u27e6Jane Doe-Secret\n"
     more = []
     for n in range(count):
-        who = "ERROR netkeeper.forged Jane Doe-Secret" if forged and n == 5 else "INFO netkeeper.y"
+        who = "ERROR netkeep.forged Jane Doe-Secret" if forged and n == 5 else "INFO netkeep.y"
         more.append(f"2026-10-18 09:01:{n % 60:02d} {who} swallowed {n}\n")
     return [cut + "".join(more)]
 
@@ -400,7 +400,7 @@ async def test_an_unterminated_span_ends_its_record_and_drops_the_rest(
 async def test_a_span_just_under_the_line_cap_is_kept_whole(client: httpx.AsyncClient) -> None:
     middle = "".join(f"line {n}\n" for n in range(log_tail.SPAN_MAX_LINES - 3))
     _write(
-        "2026-10-18 09:00:00 INFO netkeeper.x a \u27e6b\n" + middle + "c\u27e7 end\n",
+        "2026-10-18 09:00:00 INFO netkeep.x a \u27e6b\n" + middle + "c\u27e7 end\n",
         _record(START, "INFO", "later"),
     )
     body = await _get(client)
@@ -411,7 +411,7 @@ async def test_a_span_just_under_the_line_cap_is_kept_whole(client: httpx.AsyncC
 async def test_a_span_past_the_byte_cap_is_cut(client: httpx.AsyncClient) -> None:
     big = "x" * 1000 + "\n"
     _write(
-        "2026-10-18 09:00:00 INFO netkeeper.x a \u27e6b\n" + big * 70 + "c\u27e7 end\n",
+        "2026-10-18 09:00:00 INFO netkeep.x a \u27e6b\n" + big * 70 + "c\u27e7 end\n",
         _record(START, "INFO", "later"),
     )
     body = await _get(client)
@@ -430,9 +430,9 @@ async def test_a_normal_record_after_an_unterminated_marker_still_comes_back(
 def test_a_huge_unterminated_log_stays_small(tmp_path: Path) -> None:
     import tracemalloc
 
-    line = "2026-10-18 09:01:00 INFO netkeeper.y " + "a" * 80 + "\n"
+    line = "2026-10-18 09:01:00 INFO netkeep.y " + "a" * 80 + "\n"
     (tmp_path / LOG_FILENAME).write_text(
-        "2026-10-18 09:00:00 INFO netkeeper.x cut \u27e6Jane\n" + line * (10_000_000 // len(line))
+        "2026-10-18 09:00:00 INFO netkeep.x cut \u27e6Jane\n" + line * (10_000_000 // len(line))
     )
     tracemalloc.start()
     tail = log_tail.recent_lines(directory=tmp_path)
@@ -455,4 +455,4 @@ async def test_a_dated_line_with_no_known_level_or_logger_is_not_a_record(
     assert len(body["lines"]) == 1  # type: ignore[arg-type]
     for line in body["lines"]:  # type: ignore[attr-defined]
         assert line["level"] == "INFO"
-        assert line["logger"] == "netkeeper.test"
+        assert line["logger"] == "netkeep.test"

@@ -1,4 +1,4 @@
-# netkeeper implementation guide
+# netkeep implementation guide
 
 | | |
 |---|---|
@@ -114,7 +114,7 @@ Drift signals to watch for at every checkpoint:
 
 ### CP0: scaffold review
 
-- **Demo:** `netkeeper serve` on a clean checkout; the dashboard renders; `make test` and CI are green; `netkeeper db upgrade` from empty.
+- **Demo:** `netkeep serve` on a clean checkout; the dashboard renders; `make test` and CI are green; `netkeep db upgrade` from empty.
 - **Questions:** Does every API route go through `CurrentUser`? Does the two-user test harness exist even though it has nothing to test yet? Is the frontend client generated, not hand-written? Are secrets in Keychain, never in the data directory?
 - **Re-read:** spec section 5 (process model, multi-user readiness), section 14.2.
 
@@ -141,14 +141,14 @@ Drift signals to watch for at every checkpoint:
 
 ### CP3: extractor safety review, before the first live run
 
-- **Demo:** `netkeeper preflight` against your Chrome; `netkeeper rehearse` against the neutral site with the request log; `netkeeper simulate --days 14 --throttles 2` showing budgets, warm-up, heat; `netkeeper posture` with every protection on (the Settings page that shows the same report arrives with P2-12); the browser smoke suite passing on your Chrome (`NETKEEPER_BROWSER_TESTS=1`).
+- **Demo:** `netkeep preflight` against your Chrome; `netkeep rehearse` against the neutral site with the request log; `netkeep simulate --days 14 --throttles 2` showing budgets, warm-up, heat; `netkeep posture` with every protection on (the Settings page that shows the same report arrives with P2-12); the browser smoke suite passing on your Chrome (`NETKEEP_BROWSER_TESTS=1`).
 - **Questions:** Are the defaults in Appendix C what the code does? Is there any path that launches a browser other than the one launcher you start (ADR 0012)? Does a checkpoint response stop the run with no retry? Does the budget stop between profiles, never mid-profile? Does `linkedin/` import nothing from `models/`?
 - **Re-read:** ADR 0002, spec sections 9.5 to 9.7, 9.10.
-- **Outcome:** a safety review only. Nothing here contacts LinkedIn beyond logging in to the netkeeper Chrome profile. The first supervised live run moved to CP4 (CP3 decision), because it needs connections sync (P2-06), which is not one of this checkpoint's items.
+- **Outcome:** a safety review only. Nothing here contacts LinkedIn beyond logging in to the netkeep Chrome profile. The first supervised live run moved to CP4 (CP3 decision), because it needs connections sync (P2-06), which is not one of this checkpoint's items.
 
 ### CP4: a week of scheduled runs
 
-- **First:** one supervised live incremental sync with `profile_visits_per_day = 5`, watching the tab. Before it, confirm only one browser client per account across processes (#153). The capture #149 asked for is done: it showed the connections list moved to `flagship-web`, and P2-17 (#187) reads it from what the page loads. During this run, check the three things the capture could not: which answer ends the list (P2-17 reads an empty answer, or a short one that asks for no next page), whether the first screen's total counts anyone the list never shows (then no full sync completes, and nobody ages), and whether the page answers a wall in place of the document. Enrichment reads profiles the same way since P2-18 (#190), with one Contact info click per visit: during `netkeeper linkedin enrich --max-visits 5`, check the rows the shape note marks assumed (where the profile's own id sits, the document form of a profile, the Contact info control's `href`, how a missing profile answers, education and the phone, birthday, and address sections), and whether the profile's headline agrees with the connections card's (#149 item 5). Moved here from CP3. Scheduled runs ship disarmed (P2-10), so this run is by hand: `netkeeper linkedin sync` (incremental), then `netkeeper linkedin enrich --max-visits 5`. Arm scheduled runs with `netkeeper linkedin schedule arm` only after it.
+- **First:** one supervised live incremental sync with `profile_visits_per_day = 5`, watching the tab. Before it, confirm only one browser client per account across processes (#153). The capture #149 asked for is done: it showed the connections list moved to `flagship-web`, and P2-17 (#187) reads it from what the page loads. During this run, check the three things the capture could not: which answer ends the list (P2-17 reads an empty answer, or a short one that asks for no next page), whether the first screen's total counts anyone the list never shows (then no full sync completes, and nobody ages), and whether the page answers a wall in place of the document. Enrichment reads profiles the same way since P2-18 (#190), with one Contact info click per visit: during `netkeep linkedin enrich --max-visits 5`, check the rows the shape note marks assumed (where the profile's own id sits, the document form of a profile, the Contact info control's `href`, how a missing profile answers, education and the phone, birthday, and address sections), and whether the profile's headline agrees with the connections card's (#149 item 5). Moved here from CP3. Scheduled runs ship disarmed (P2-10), so this run is by hand: `netkeep linkedin sync` (incremental), then `netkeep linkedin enrich --max-visits 5`. Arm scheduled runs with `netkeep linkedin schedule arm` only after it.
 - **Demo:** Runs page for the week: every run, its counts, budget spend per day, heat history, any `Throttled` or `Checkpoint`.
 - **Questions:** Any throttle at all? If so, on which endpoint, and did the probes pass? Did the warm-up ramp as designed? Did contacts you pinned get enriched first? Did any contact get a wrong email (spot-check ten against the overlay by hand)?
 - **Re-read:** spec section 9.8, the igtracker lesson about 429s that are not rate limits.
@@ -205,17 +205,17 @@ Drift signals to watch for at every checkpoint:
 ### Phase 0: scaffold
 
 **P0-01 Python project tooling** · lane core · S
-Goal: `pyproject.toml` with the `netkeeper` package and console script, `uv.lock`, `ruff`, `mypy`, `pytest` config, a `Makefile` with `dev`, `test`, `lint`, `serve`, `build-ui`.
+Goal: `pyproject.toml` with the `netkeep` package and console script, `uv.lock`, `ruff`, `mypy`, `pytest` config, a `Makefile` with `dev`, `test`, `lint`, `serve`, `build-ui`.
 Depends on: nothing.
 Done when: `uv venv && uv pip install -e '.[dev]'` works on a clean clone; `make lint test` passes with one placeholder test.
 
 **P0-02 Configuration, paths, logging** · lane core · S
-Goal: TOML `Settings` with the resolution order in spec section 15; data-dir resolution per platform; structured logging with `NETKEEPER_LOG_LEVEL` and a bad value that logs and falls back.
+Goal: TOML `Settings` with the resolution order in spec section 15; data-dir resolution per platform; structured logging with `NETKEEP_LOG_LEVEL` and a bad value that logs and falls back.
 Depends on: P0-01.
-Done when: `netkeeper config show` prints the resolved settings and paths; tests cover each resolution step.
+Done when: `netkeep config show` prints the resolved settings and paths; tests cover each resolution step.
 
 **P0-03 Database core and first migration** · lane core · M
-Goal: engine with WAL, `session_scope()`, `UTCDateTime`, Alembic wired, the `user` table, the migration-diff test, `netkeeper db upgrade`.
+Goal: engine with WAL, `session_scope()`, `UTCDateTime`, Alembic wired, the `user` table, the migration-diff test, `netkeep db upgrade`.
 Depends on: P0-02.
 Done when: a fresh database migrates from empty; the diff test passes; the `user` row is created at first start.
 
@@ -240,7 +240,7 @@ Depends on: P0-01, P0-06.
 Done when: CI is green on `main` and a deliberate client drift fails it.
 
 **P0-08 launchd agent script** · lane infra · S
-Goal: `scripts/install-launchd.sh` installing a user agent for `netkeeper serve`, with logs under the data directory.
+Goal: `scripts/install-launchd.sh` installing a user agent for `netkeep serve`, with logs under the data directory.
 Depends on: P0-05.
 Done when: `serve` starts at login and restarts after a kill.
 
@@ -330,7 +330,7 @@ Depends on: P1-06, P1-07, P1-08, P1-11.
 Done when: every predicate in the filter language is reachable from the builder.
 
 **P1-16 CLI: import, export, triage stats** · lane core · S
-Goal: `netkeeper import archive|csv`, `netkeeper export`, `netkeeper contacts stats`.
+Goal: `netkeep import archive|csv`, `netkeep export`, `netkeep contacts stats`.
 Depends on: P1-03, P1-04, P1-11.
 Done when: each command mirrors its API counterpart.
 
@@ -359,7 +359,7 @@ Goal: the wizard takes the downloaded zip with no extraction step; it recognises
 Depends on: P1-20.
 Done when: CP2.5's import runs from the downloaded zip without a terminal, an extraction, or a guess about which CSV to choose.
 
-**P1-22 Triage starts from what netkeeper already decided** · lane core · M
+**P1-22 Triage starts from what netkeep already decided** · lane core · M
 Goal: auto-tag rules run on the contacts an import touched, inside the same writer transaction, with the counts in the run summary (#64). The suggestion catalogue grows past the single message-history batch — an invitation with a note, a tag a rule applied, no evidence at all — each with a preview of who it covers, a count checked before it applies, and one batch id undo takes back. A queue filter serves the contacts whose latest decision was automatic, so the manual pass reviews that work instead of starting cold.
 Depends on: P1-07, P1-09.
 Done when: importing the real archive tags contacts with no button press, every offered batch can be previewed before it applies, and the queue can serve exactly the contacts a batch decided.
@@ -373,7 +373,7 @@ Done when: fifty contacts can be triaged with the mouse alone as well as the key
 **P1-24 Frontend: the dashboard says where you are** · lane frontend · S
 Goal: the scaffold cards give way to the setup path — import your data, review what was tagged, triage, build a list, export — each step with its real count, its state, and the control that advances it. Later phases add their own steps (LinkedIn, Gmail) to the same list.
 Depends on: P1-25.
-Done when: someone opening netkeeper for the first time is told what to do next without reading this guide, and every number on the page comes from the API.
+Done when: someone opening netkeep for the first time is told what to do next without reading this guide, and every number on the page comes from the API.
 
 **P1-25 Contact stats endpoint, and the import drafts nobody can see** · lane core · S
 Goal: `GET /api/v1/contacts/stats` over `contact_stats()`, with a parity test against the CLI and the triage progress counters; a way to list and remove orphaned draft import runs, and a resume by run id so a refused commit is finished rather than re-read (#90).
@@ -402,7 +402,7 @@ Done when: the first thing a person sees after an import is the work already don
 ### Phase 2: LinkedIn extractor
 
 **P2-01 Browser attach provider** · lane extractor · L · `safety`
-Goal: `BrowserProvider` with only `attach`; connect over CDP, reuse `contexts[0]`, one tab per run, `_ensure_page`, one reattach per run, `BrowserUnavailable`; the activity lock keyed by `linkedin_account`; `netkeeper browser launch` and `netkeeper preflight`.
+Goal: `BrowserProvider` with only `attach`; connect over CDP, reuse `contexts[0]`, one tab per run, `_ensure_page`, one reattach per run, `BrowserUnavailable`; the activity lock keyed by `linkedin_account`; `netkeep browser launch` and `netkeep preflight`.
 Depends on: P0-04, P0-09.
 Done when: the smoke suite verifies attach, headers, tab recovery, and that no code path launches a browser except the one launcher (ADR 0012); preflight reports login state and fingerprint.
 
@@ -452,7 +452,7 @@ Depends on: P2-06, P2-07, P0-04.
 Done when: the UI can start a run, watch it, and stop it; the isolation test covers runs.
 
 **P2-11 Rehearse, simulate, posture** · lane extractor · M
-Goal: `netkeeper rehearse` against a neutral site with a page-level request log; `netkeeper simulate` with virtual clock and injected throttles; `services/posture.py` summarizing every protection with warnings for anything off.
+Goal: `netkeep rehearse` against a neutral site with a page-level request log; `netkeep simulate` with virtual clock and injected throttles; `services/posture.py` summarizing every protection with warnings for anything off.
 Depends on: P2-04, P2-05, P2-09.
 Done when: CP3's demo can be run from these three commands.
 
@@ -462,7 +462,7 @@ Depends on: P2-10.
 Done when: everything on the page updates over SSE without reload.
 
 **P2-13 Browser smoke suite** · lane extractor · M
-Goal: `NETKEEPER_BROWSER_TESTS=1` suite: attach, headers and client hints, scroll events observed, tab close and recovery, no launch.
+Goal: `NETKEEP_BROWSER_TESTS=1` suite: attach, headers and client hints, scroll events observed, tab close and recovery, no launch.
 Depends on: P2-01.
 Done when: it passes on Chrome stable on macOS and is documented in CONTRIBUTING.
 
@@ -473,13 +473,13 @@ Done when: the test exists and passes; `crm/apply.py` is the only module that ma
 
 **P2-15 Prior campaign history import** · lane core · M · `safety`
 Deferred to phase 3 (maintainer, 2026-09-23): the opens and clicks shape is decided with the campaign schema (P3-05) rather than ahead of it. It no longer gates CP4. Issue #65.
-Goal: import the outreach history from the previous mailing tool so netkeeper knows who was already contacted before it sends anything. The export is one `.xlsx` workbook, one tab per campaign, laid out as a report rather than a table: a campaign summary row, then side-by-side blocks of openers, clickers, and bounced addresses at column offsets that differ between tabs. Match recipients through `crm/identity.py` on email address, write one `email_out` interaction per recipient per campaign dated from the campaign start so `last_contacted_at` becomes correct, mark bounced addresses so the phase 3 enrollment guard in F18 has something to read, and decide where opens and clicks live alongside the phase 3 campaign tables rather than ahead of them. The source records delivery only: replies, positive responses, and unsubscribes are not in it and come from the phase 3 Gmail reply detection run backwards over the historical threads. Do not infer a decline from a non-open.
+Goal: import the outreach history from the previous mailing tool so netkeep knows who was already contacted before it sends anything. The export is one `.xlsx` workbook, one tab per campaign, laid out as a report rather than a table: a campaign summary row, then side-by-side blocks of openers, clickers, and bounced addresses at column offsets that differ between tabs. Match recipients through `crm/identity.py` on email address, write one `email_out` interaction per recipient per campaign dated from the campaign start so `last_contacted_at` becomes correct, mark bounced addresses so the phase 3 enrollment guard in F18 has something to read, and decide where opens and clicks live alongside the phase 3 campaign tables rather than ahead of them. The source records delivery only: replies, positive responses, and unsubscribes are not in it and come from the phase 3 Gmail reply detection run backwards over the historical threads. Do not infer a decline from a non-open.
 Depends on: P1-03, P1-04, P1-10. Decide the opens and clicks shape with P3-05.
 Done when: the import is idempotent, unmatched addresses are reported rather than dropped, bounces show on the contact, and the fixtures are hand-built and sanitized. Real exports stay in `~/code/netkeeper-private`, never in the repo.
 
 **P2-16 Request the archive for the user** · lane extractor · M · `safety`
 Deferred (maintainer, 2026-09-23): manual archive import already works, and automating a LinkedIn settings flow waits until scheduled runs have a clean record. It no longer gates CP4. Moved to phase 7 (maintainer, 2026-10-03). Issue #120.
-Goal: netkeeper asks LinkedIn for the data export in the attached session, then waits — the export takes 1 to 24 hours and arrives as a notification. The run records which step it is on, the dashboard shows it, and when the file is ready netkeeper downloads and imports it. Manual mode stays first-class — request it yourself, download it yourself, drop the zip in — and one status list covers both.
+Goal: netkeep asks LinkedIn for the data export in the attached session, then waits — the export takes 1 to 24 hours and arrives as a notification. The run records which step it is on, the dashboard shows it, and when the file is ready netkeep downloads and imports it. Manual mode stays first-class — request it yourself, download it yourself, drop the zip in — and one status list covers both.
 Depends on: P2-01, P1-20.
 Done when: both modes reach an imported archive from the same screen, the automated one survives a restart mid-wait, and a changed LinkedIn page stops the run with `RouteChanged` rather than a guess.
 
@@ -579,7 +579,7 @@ Phase 4 has two prerequisites before any prefill code: a live capture of LinkedI
 - **Budget:** a new action class `li_prefills`, 10 a day with a hard maximum of 20 (*amended 2026-10-07, #447: 15 and 50, warning above 20*). Each prefill also spends one `profile_visits` unit.
 - **Inbox poll:** every 3 hours within active hours while any live enrollment has a contact with a URN, plus on demand. It records `li_in` and `li_out` interactions for every one-to-one conversation with a known contact, with a snippet of at most 200 characters that is never logged.
 - **Replies and sends:** a LinkedIn reply is an inbound one-to-one message from the contact after the enrollment's first sent outbound on any channel. The email unsubscribe phrases apply, plus "stop messaging". Your first outbound message in the conversation after the prefill confirms the send, whatever its text.
-- **Stale and discard:** a prefill goes `stale` after 3 days; netkeeper never closes the tab it handed over, and a stale message seen sent later becomes `sent`. Discarding counts the step as fired.
+- **Stale and discard:** a prefill goes `stale` after 3 days; netkeep never closes the tab it handed over, and a stale message seen sent later becomes `sent`. Discarding counts the step as fired.
 - **Guard:** a LinkedIn step requires `li_urn`. Contacts with only a slug get raised enrichment priority and wait.
 - **Typing:** lognormal, median 140 ms a character, no typos, a 300-second ceiling. Newlines are typed as Shift+Enter only if P4-06 shows that Shift+Enter never sends; otherwise lint refuses multi-line LinkedIn templates.
 - **Hand-over:** the prefill releases the browser lock after typing and brings the tab to the front. The next inbox poll, or an "I sent it, check now" button, confirms the send.
@@ -706,7 +706,7 @@ Depends on: P0-06, P0-05.
 Done when: the image builds in CI and serves the UI on a Linux host.
 
 **P6-04 Backups UI and restore** · lane core · S
-Goal: nightly backup job, retention, `netkeeper restore`, a Settings panel listing backups.
+Goal: nightly backup job, retention, `netkeep restore`, a Settings panel listing backups.
 Depends on: P0-05.
 Done when: a restore from backup yields a database that passes the migration diff.
 
@@ -716,7 +716,7 @@ Depends on: everything above.
 Done when: CP10's clean-install demo needs no help beyond the docs.
 
 **P6-06 Hosted-mode ADR and spike** · lane core · M
-Goal: a written spike answering open question 6: what a `netkeeper agent` split, a second auth provider, and a PostgreSQL deployment would each take, given the readiness constraints; a proposed ADR, not an implementation.
+Goal: a written spike answering open question 6: what a `netkeep agent` split, a second auth provider, and a PostgreSQL deployment would each take, given the readiness constraints; a proposed ADR, not an implementation.
 Depends on: P2-14, P0-09, P1-17.
 Done when: the ADR is proposed with an estimate for each path and a recommendation.
 

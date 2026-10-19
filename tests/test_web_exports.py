@@ -23,10 +23,10 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import QueuePool
 
-from netkeeper.crm.lists import add_members, create_list
-from netkeeper.crm.tags import create_tag, tag_contact
-from netkeeper.db import session_scope
-from netkeeper.models import ListKind, User, UserKind
+from netkeep.crm.lists import add_members, create_list
+from netkeep.crm.tags import create_tag, tag_contact
+from netkeep.db import session_scope
+from netkeep.models import ListKind, User, UserKind
 
 LOCAL_USER_ID = 1
 
@@ -67,7 +67,7 @@ async def test_export_does_not_leak_a_pooled_connection(
 
 
 async def test_get_needs_no_csrf_header(client: httpx.AsyncClient, running_app: FastAPI) -> None:
-    """Exports are a read (spec 14.2): no ``X-Netkeeper-Client`` header required."""
+    """Exports are a read (spec 14.2): no ``X-Netkeep-Client`` header required."""
     with session_scope(_factory(running_app), write=True) as session:
         factories.make_contact(session, _local_user(session))
     response = await client.get("/api/v1/exports")

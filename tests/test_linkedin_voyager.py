@@ -1,11 +1,11 @@
-"""netkeeper.linkedin.voyager: headers, endpoint constants, and Voyager parsers.
+"""netkeep.linkedin.voyager: headers, endpoint constants, and Voyager parsers.
 
 The fixtures under ``tests/fixtures/voyager`` are hand-written and entirely
 invented, as every fixture in this repository is (CLAUDE.md): fake names,
 fake URNs, fake companies, no real email addresses or phone numbers, and none
 of it copied from ``~/code/netkeeper-private`` or fetched from linkedin.com —
 see the "Capturing and sanitizing fixtures" section of
-``netkeeper/linkedin/voyager.py``'s module docstring for the procedure they
+``netkeep/linkedin/voyager.py``'s module docstring for the procedure they
 follow.
 
 This item's "done when" (issue #98) is that every parser has fixture tests
@@ -28,7 +28,7 @@ from typing import Any
 
 import pytest
 
-from netkeeper.linkedin.voyager import (
+from netkeep.linkedin.voyager import (
     CONNECTIONS_DEFAULT_COUNT,
     CONNECTIONS_ENDPOINT,
     RESTLI_PROTOCOL_VERSION,
@@ -45,7 +45,7 @@ from netkeeper.linkedin.voyager import (
 
 FIXTURES = Path(__file__).parent / "fixtures" / "voyager"
 # ADR 0005's rule for this module is checked by the shared sweep in
-# tests/boundary.py, which walks every module under netkeeper/linkedin/ in its
+# tests/boundary.py, which walks every module under netkeep/linkedin/ in its
 # own subprocess. The list it reads lives there; this module used to carry a copy.
 
 

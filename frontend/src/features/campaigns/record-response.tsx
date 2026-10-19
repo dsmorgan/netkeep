@@ -1,5 +1,5 @@
 /**
- * Record a response that came outside netkeeper (#512): a call, a text, an email from
+ * Record a response that came outside netkeep (#512): a call, a text, an email from
  * another address, another app, or in person. Neither poll sees one, so you record it,
  * and it ends the enrollments it answers as a detected reply does: no later step sends.
  *
@@ -91,7 +91,7 @@ export function RecordResponseButton({
         <DialogHeader>
           <DialogTitle>Record a response from {contactName || 'this contact'}</DialogTitle>
           <DialogDescription>
-            For a response netkeeper cannot see: a call, a text, in person, or another app. It ends
+            For a response netkeep cannot see: a call, a text, in person, or another app. It ends
             their campaigns as a reply does, so no later step sends.
           </DialogDescription>
         </DialogHeader>

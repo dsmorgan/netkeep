@@ -448,8 +448,8 @@ function DeleteDialog({
           {plan.data.leftover_drafts.length > 0 && (
             <>
               <p className="text-foreground">
-                netkeeper never deletes a Gmail draft. These test drafts stay in Gmail; delete them
-                by hand:
+                netkeep never deletes a Gmail draft. These test drafts stay in Gmail; delete them by
+                hand:
               </p>
               <ul aria-label="Gmail drafts left behind" className="list-disc pl-5">
                 {plan.data.leftover_drafts.map((d) => (
@@ -720,7 +720,7 @@ function AutoSendStepState() {
   if (!options.isSuccess) return null
   return options.data.auto_send ? (
     <span className="block text-xs font-medium text-destructive">
-      Sends on its own. netkeeper clicks Send itself.
+      Sends on its own. netkeep clicks Send itself.
     </span>
   ) : (
     <span className="block text-xs">{AUTO_SEND_STEP_OFF}</span>

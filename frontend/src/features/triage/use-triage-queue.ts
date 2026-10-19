@@ -1037,7 +1037,7 @@ export function useTriageQueue(filter: QueueFilter): TriageQueue {
               ...patched,
               notice:
                 verdict === 'confirm'
-                  ? 'Confirmed. netkeeper treats this contact like any other now.'
+                  ? 'Confirmed. netkeep treats this contact like any other now.'
                   : 'Rejected and archived, so this contact leaves the queue. → moves on; Unarchive on its page brings it back.',
             }
           })

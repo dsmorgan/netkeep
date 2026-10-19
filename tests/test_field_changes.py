@@ -19,22 +19,22 @@ from profile_fakes import Profile, contact_info_of, details_of
 from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
 
-from netkeeper import migrations
-from netkeeper.cli import app as cli
-from netkeeper.config import Settings
-from netkeeper.crm import apply as mapping
-from netkeeper.crm import identity
-from netkeeper.crm.contacts import revert_field
-from netkeeper.crm.identity import IncomingContact
-from netkeeper.crm.provenance import set_manual_field
-from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.connections import ConnectionsPage, SyncMode, SyncResult
-from netkeeper.linkedin.connections import StopReason as SyncStop
-from netkeeper.linkedin.enrich import EnrichResult, ProfileHarvest
-from netkeeper.linkedin.enrich import StopReason as EnrichStop
-from netkeeper.linkedin.voyager import ConnectionSummary
-from netkeeper.models import (
+from netkeep import migrations
+from netkeep.cli import app as cli
+from netkeep.config import Settings
+from netkeep.crm import apply as mapping
+from netkeep.crm import identity
+from netkeep.crm.contacts import revert_field
+from netkeep.crm.identity import IncomingContact
+from netkeep.crm.provenance import set_manual_field
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.connections import ConnectionsPage, SyncMode, SyncResult
+from netkeep.linkedin.connections import StopReason as SyncStop
+from netkeep.linkedin.enrich import EnrichResult, ProfileHarvest
+from netkeep.linkedin.enrich import StopReason as EnrichStop
+from netkeep.linkedin.voyager import ConnectionSummary
+from netkeep.models import (
     Contact,
     ContactSnapshot,
     ContactSource,
@@ -43,12 +43,12 @@ from netkeeper.models import (
     SyncRunTrigger,
     User,
 )
-from netkeeper.scoping import install_scope_guard, scoped
-from netkeeper.services import field_changes, runs
-from netkeeper.services.connections_sync import SyncRunReport
-from netkeeper.services.enrichment import EnrichRunReport
-from netkeeper.services.users import ensure_local_user
-from netkeeper.services.visit_budget import TodaysVisits
+from netkeep.scoping import install_scope_guard, scoped
+from netkeep.services import field_changes, runs
+from netkeep.services.connections_sync import SyncRunReport
+from netkeep.services.enrichment import EnrichRunReport
+from netkeep.services.users import ensure_local_user
+from netkeep.services.visit_budget import TodaysVisits
 
 NOW = datetime(2026, 9, 23, 15, 0, tzinfo=UTC)
 QUORBELLE = Profile(n=9518, first="Quorbelle", last="Fictionary", headline="Profile text")
@@ -249,7 +249,7 @@ def test_an_enrichment_runs_counts_json_carries_field_changes_beside_its_harvest
 def cli_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[sessionmaker[Session]]:
     """A migrated database with the local user, under tmp_path only."""
     url = database_url(tmp_path)
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     engine = make_engine(url)
     migrations.upgrade(engine)
     factory = make_session_factory(engine)

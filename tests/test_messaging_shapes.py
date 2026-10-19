@@ -16,10 +16,10 @@ from typing import Any
 import messaging_pages as mp
 import pytest
 
-from netkeeper.linkedin import messaging_shapes as shapes
-from netkeeper.linkedin.inbox import SNIPPET_MAX
-from netkeeper.linkedin.messaging_shapes import Kind
-from netkeeper.linkedin.voyager import RouteChanged
+from netkeep.linkedin import messaging_shapes as shapes
+from netkeep.linkedin.inbox import SNIPPET_MAX
+from netkeep.linkedin.messaging_shapes import Kind
+from netkeep.linkedin.voyager import RouteChanged
 
 
 def _first() -> shapes.ListAnswer:

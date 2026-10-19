@@ -1,4 +1,4 @@
-"""netkeeper.crm.archive: the sample archive becoming contacts and interactions (P1-03).
+"""netkeep.crm.archive: the sample archive becoming contacts and interactions (P1-03).
 
 The counts asserted here are the sample's, counted by hand from the fixture
 files, which is what "imports with correct counts" means for this item. The
@@ -17,8 +17,8 @@ import factories
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.crm import import_runs
-from netkeeper.crm.archive import (
+from netkeep.crm import import_runs
+from netkeep.crm.archive import (
     SUMMARY_MAX_CHARS,
     ArchiveImport,
     _html_to_text,
@@ -26,12 +26,12 @@ from netkeeper.crm.archive import (
     import_archive,
     report_json,
 )
-from netkeeper.crm.interactions import INVITATION_SUMMARY, add_interaction
-from netkeeper.crm.provenance import SOURCE_RANK, revert_to_synced, set_manual_field
-from netkeeper.crm.tags import contact_tags, create_rule, create_tag, list_rules
-from netkeeper.db import session_scope
-from netkeeper.linkedin.archive import Archive, open_archive
-from netkeeper.models import (
+from netkeep.crm.interactions import INVITATION_SUMMARY, add_interaction
+from netkeep.crm.provenance import SOURCE_RANK, revert_to_synced, set_manual_field
+from netkeep.crm.tags import contact_tags, create_rule, create_tag, list_rules
+from netkeep.db import session_scope
+from netkeep.linkedin.archive import Archive, open_archive
+from netkeep.models import (
     Contact,
     ContactPosition,
     ContactSource,
@@ -45,7 +45,7 @@ from netkeeper.models import (
     User,
     UserPosition,
 )
-from netkeeper.scoping import scoped
+from netkeep.scoping import scoped
 
 FIXTURES = Path(__file__).parent / "fixtures" / "archive"
 OBSERVED = datetime(2024, 6, 1, 12, 0, tzinfo=UTC)
@@ -177,7 +177,7 @@ def test_the_rules_run_over_what_the_import_touched(
 def test_an_import_seeds_the_default_rules_before_it_runs_them(
     writer: Session, user: User, archive: Archive
 ) -> None:
-    """`netkeeper import archive` on a database the server has never started on.
+    """`netkeep import archive` on a database the server has never started on.
 
     Nothing else seeds the defaults on that path, and rules nobody has seeded
     tag nobody, which is the cold-start this item exists to prevent (#64).
@@ -925,7 +925,7 @@ def test_an_unknown_assistant_log_is_imported_but_named(
     """
     root = _sample_with(tmp_path, {"interview_prep_messages.csv": FIXTURES / "guide_messages.csv"})
     with (
-        caplog.at_level(logging.WARNING, logger="netkeeper.crm.archive"),
+        caplog.at_level(logging.WARNING, logger="netkeep.crm.archive"),
         open_archive(root) as opened,
     ):
         report = _run(writer, user, opened)

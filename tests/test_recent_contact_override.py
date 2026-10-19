@@ -1,6 +1,6 @@
 """Overriding the recent-contact guard for chosen contacts at enrollment (#446).
 
-The override sets aside :func:`~netkeeper.services.campaign_guards.not_contacted_recently`
+The override sets aside :func:`~netkeep.services.campaign_guards.not_contacted_recently`
 for exactly the contacts a person names, and for contact made before the override only.
 Every other guard still decides, and every contact not named is still skipped. The web
 and CLI ends are in ``test_web_campaigns.py`` and ``test_cli_campaigns.py``.
@@ -18,13 +18,13 @@ import factories
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.crm import do_not_send
-from netkeeper.crm import lists as list_service
-from netkeeper.crm.contacts import merge_contacts
-from netkeeper.crm.interactions import add_interaction
-from netkeeper.crm.self_contact import ensure_self_contact
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.crm import do_not_send
+from netkeep.crm import lists as list_service
+from netkeep.crm.contacts import merge_contacts
+from netkeep.crm.interactions import add_interaction
+from netkeep.crm.self_contact import ensure_self_contact
+from netkeep.db import session_scope
+from netkeep.models import (
     Campaign,
     CampaignStatus,
     Contact,
@@ -38,10 +38,10 @@ from netkeeper.models import (
     TemplateChannel,
     User,
 )
-from netkeeper.scoping import scoped
-from netkeeper.services import campaign_engine, campaign_review
-from netkeeper.services import campaigns as campaign_service
-from netkeeper.services.campaign_guards import (
+from netkeep.scoping import scoped
+from netkeep.services import campaign_engine, campaign_review
+from netkeep.services import campaigns as campaign_service
+from netkeep.services.campaign_guards import (
     OVERRIDE_FUTURE,
     OVERRIDE_STALE,
     ContactFacts,

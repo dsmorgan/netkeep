@@ -29,19 +29,19 @@ from test_enrichment import _enrich, _last_run, _people, _setup
 from test_runs_serve import HEADERS, START, _rows, client_for, served
 from typer.testing import CliRunner
 
-from netkeeper import migrations
-from netkeeper.cli import _stopped_by
-from netkeeper.cli import app as cli
-from netkeeper.config import Settings, load_settings
-from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.linkedin.enrich import StopReason
-from netkeeper.linkedin.pacing import outside_window_message
-from netkeeper.models import SyncRunKind, SyncRunStatus, SyncRunTrigger
-from netkeeper.scoping import install_scope_guard
-from netkeeper.services import enrich_plan, runs
-from netkeeper.services.posture import active_hours_source, describe_active_hours
-from netkeeper.services.runs import OutsideActiveHours
-from netkeeper.services.users import ensure_local_user
+from netkeep import migrations
+from netkeep.cli import _stopped_by
+from netkeep.cli import app as cli
+from netkeep.config import Settings, load_settings
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+from netkeep.linkedin.enrich import StopReason
+from netkeep.linkedin.pacing import outside_window_message
+from netkeep.models import SyncRunKind, SyncRunStatus, SyncRunTrigger
+from netkeep.scoping import install_scope_guard
+from netkeep.services import enrich_plan, runs
+from netkeep.services.posture import active_hours_source, describe_active_hours
+from netkeep.services.runs import OutsideActiveHours
+from netkeep.services.users import ensure_local_user
 
 #: Every CLI command here runs with a provider that fails the test if a run reaches it
 #: (#293 review): the refusal under test must hold without any browser behind it.
@@ -101,7 +101,7 @@ async def test_the_api_refuses_a_manual_run_outside_the_window_and_records_nothi
     monkeypatch: pytest.MonkeyPatch,
     kind: str,
 ) -> None:
-    monkeypatch.setattr("netkeeper.web.api.linkedin.utcnow", lambda: TEN_PM)
+    monkeypatch.setattr("netkeep.web.api.linkedin.utcnow", lambda: TEN_PM)
     provider, connector = fake_provider()
     async with (
         served(bare_engine, Settings(), provider, Clock(START)) as app,
@@ -119,7 +119,7 @@ async def test_the_api_refuses_a_resume_outside_the_window_and_records_nothing(
     bare_engine: Engine, no_frontend: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Review mutant M3c: a resume is a manual run too, refused before its row exists."""
-    monkeypatch.setattr("netkeeper.web.api.linkedin.utcnow", lambda: TEN_PM)
+    monkeypatch.setattr("netkeep.web.api.linkedin.utcnow", lambda: TEN_PM)
     provider, connector = fake_provider()
     async with served(bare_engine, Settings(), provider, Clock(START)) as app:
         with session_scope(app.state.session_factory, write=True) as session:
@@ -144,13 +144,13 @@ async def test_the_api_refuses_a_resume_outside_the_window_and_records_nothing(
 
 @pytest.fixture
 def no_frontend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", str(tmp_path / "no-dist"))
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", str(tmp_path / "no-dist"))
 
 
 @pytest.fixture
 def cli_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[sessionmaker[Session]]:
     url = database_url(tmp_path)
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     engine = make_engine(url)
     migrations.upgrade(engine)
     factory = make_session_factory(engine)
@@ -197,7 +197,7 @@ def test_the_cli_refuses_a_manual_run_outside_the_window_and_records_nothing(
 async def test_a_run_the_window_stops_says_which_window_and_when_it_opens(
     session_factory: sessionmaker[Session], caplog: pytest.LogCaptureFixture
 ) -> None:
-    caplog.set_level(logging.INFO, logger="netkeeper.services.enrichment")
+    caplog.set_level(logging.INFO, logger="netkeep.services.enrichment")
     user_id, _ = _setup(session_factory, _people(3))
 
     report = await _enrich(
@@ -217,9 +217,9 @@ async def test_a_run_the_window_stops_says_which_window_and_when_it_opens(
 
 
 def test_every_reason_a_run_is_given_has_plain_words() -> None:
-    from netkeeper.linkedin.classify import Outcome
-    from netkeeper.linkedin.connections import StopReason as SyncStop
-    from netkeeper.linkedin.enrich import StopReason as EnrichStop
+    from netkeep.linkedin.classify import Outcome
+    from netkeep.linkedin.connections import StopReason as SyncStop
+    from netkeep.linkedin.enrich import StopReason as EnrichStop
 
     stored = {
         *(reason.value for reason in EnrichStop if reason is not EnrichStop.RESPONSE),

@@ -5,9 +5,12 @@ import { createRoot } from 'react-dom/client'
 
 import { createQueryClient } from './api/query-client'
 import { SessionGate } from './features/session/session-gate'
+import { migrateStorageKeys } from './lib/storage-keys'
 import { createAppRouter } from './router'
 
 import './index.css'
+
+migrateStorageKeys() // before anything reads a saved choice (#661)
 
 const queryClient = createQueryClient()
 const router = createAppRouter()

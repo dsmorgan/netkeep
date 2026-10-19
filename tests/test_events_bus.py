@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from netkeeper.services.events import Event, EventBus, Subscription
+from netkeep.services.events import Event, EventBus, Subscription
 
 
 async def _drain(bus: EventBus, subscription: Subscription) -> list[Event]:

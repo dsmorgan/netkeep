@@ -26,7 +26,7 @@ function plural(count: number, one: string, many = `${one}s`): string {
 }
 
 /**
- * The old mailing tool's history (#601): the same two steps as `netkeeper history import`
+ * The old mailing tool's history (#601): the same two steps as `netkeep history import`
  * and `history scan-gmail` (docs/history-import.md), each a preview first and then a
  * write. There is no undo, because the command line has none: running an import again
  * adds nothing twice.
@@ -38,7 +38,7 @@ export function HistoryImportPage() {
         <CardHeader>
           <CardTitle level={2}>History from your old mailing tool</CardTitle>
           <CardDescription>
-            Optional. Before netkeeper sends its first campaign, tell it whom your old tool already
+            Optional. Before netkeep sends its first campaign, tell it whom your old tool already
             emailed and what they said back. Without this, someone the old tool emailed, even
             someone who asked to be left alone, passes every campaign check. Do both steps in order.
             Each starts as a preview that writes nothing.
@@ -69,7 +69,7 @@ function ImportSection() {
         <CardTitle level={2}>Step 1: import the workbook</CardTitle>
         <CardDescription>
           Export the old tool&apos;s report from Google Sheets as an .xlsx workbook, one tab per
-          campaign. netkeeper records who each campaign reached and when.
+          campaign. netkeep records who each campaign reached and when.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -215,7 +215,7 @@ function ImportResult({ report }: { report: HistoryImport }) {
       {report.unlisted > 0 && (
         <Note>
           The workbook names only the people who opened, clicked, or bounced. {report.unlisted}{' '}
-          recipient(s) across these campaigns are not named in it, so netkeeper cannot know the old
+          recipient(s) across these campaigns are not named in it, so netkeep cannot know the old
           tool emailed them. Check your first batch by hand.
         </Note>
       )}
@@ -272,7 +272,7 @@ function ScanSection() {
       <CardHeader>
         <CardTitle level={2}>Step 2: scan Gmail for replies</CardTitle>
         <CardDescription>
-          For each imported recipient, netkeeper searches your Gmail for replies, unsubscribe
+          For each imported recipient, netkeep searches your Gmail for replies, unsubscribe
           requests, automatic answers, and bounces. It reads only headers and Gmail&apos;s short
           preview, and changes nothing in Gmail: no labels, no read state, no deletes. Connect Gmail
           first on the Gmail page.

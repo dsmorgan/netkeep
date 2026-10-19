@@ -1,4 +1,4 @@
-"""The campaign engine inside ``netkeeper serve`` (P3-06): its lifespan, and #259's deadlock."""
+"""The campaign engine inside ``netkeep serve`` (P3-06): its lifespan, and #259's deadlock."""
 
 from __future__ import annotations
 
@@ -16,19 +16,19 @@ from fastapi import FastAPI
 from sqlalchemy import Connection, Engine, event, select
 from time_limit import Stopwatch
 
-from netkeeper.campaigns.gmail_fake import FakeGmail
-from netkeeper.config import Settings
-from netkeeper.db import SQLITE_BUSY_TIMEOUT_MS, session_scope
-from netkeeper.models import Mailbox, Message, MessageStatus, StepMode, User, UserKind
-from netkeeper.scoping import unscoped
-from netkeeper.services.campaign_engine import CampaignEngine, SendOutcome, Skip, run_tick
-from netkeeper.services.campaign_sender import GmailSender
-from netkeeper.services.mailboxes import MailboxMonitor
-from netkeeper.services.scheduled_runs import ServeExtractor, ServeScheduler
-from netkeeper.services.tasks import TaskRunner
-from netkeeper.web.app import create_app
+from netkeep.campaigns.gmail_fake import FakeGmail
+from netkeep.config import Settings
+from netkeep.db import SQLITE_BUSY_TIMEOUT_MS, session_scope
+from netkeep.models import Mailbox, Message, MessageStatus, StepMode, User, UserKind
+from netkeep.scoping import unscoped
+from netkeep.services.campaign_engine import CampaignEngine, SendOutcome, Skip, run_tick
+from netkeep.services.campaign_sender import GmailSender
+from netkeep.services.mailboxes import MailboxMonitor
+from netkeep.services.scheduled_runs import ServeExtractor, ServeScheduler
+from netkeep.services.tasks import TaskRunner
+from netkeep.web.app import create_app
 
-CLIENT = {"X-Netkeeper-Client": "1"}
+CLIENT = {"X-Netkeep-Client": "1"}
 
 
 async def test_the_engine_ticks_only_under_serve(
@@ -47,7 +47,7 @@ async def test_serve_starts_and_stops_the_engine_with_its_sender(
     import conftest
 
     conftest._copy_template(_migrated_template, tmp_path / "bare")
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", str(tmp_path / "no-dist"))
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", str(tmp_path / "no-dist"))
     extractor = ServeExtractor(executor=lambda factory, bus: object())  # type: ignore[arg-type,return-value]
     sender = FakeSender()
     served = create_app(Settings(), engine=bare_engine, extractor=extractor, campaign_sender=sender)
@@ -75,9 +75,9 @@ async def test_every_teardown_runs_when_the_engine_stop_fails(
     import conftest
 
     conftest._copy_template(_migrated_template, tmp_path / "bare")
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", str(tmp_path / "no-dist"))
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", str(tmp_path / "no-dist"))
     # No engine passed in: the lifespan builds one (this one) and must dispose of it.
-    monkeypatch.setattr("netkeeper.web.app.make_engine", lambda url: bare_engine)
+    monkeypatch.setattr("netkeep.web.app.make_engine", lambda url: bare_engine)
     stopped: list[str] = []
     dispose = bare_engine.dispose
 
@@ -200,7 +200,7 @@ async def test_serve_sends_nothing_and_never_calls_gmail_until_a_mailbox_is_arme
     import conftest
 
     conftest._copy_template(_migrated_template, tmp_path / "bare")
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", str(tmp_path / "no-dist"))
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", str(tmp_path / "no-dist"))
     opened: list[int] = []
     gmail = FakeGmail("me1@example.test", clock=lambda: NOW)
 
@@ -208,7 +208,7 @@ async def test_serve_sends_nothing_and_never_calls_gmail_until_a_mailbox_is_arme
         opened.append(mailbox_id)
         return gmail
 
-    monkeypatch.setattr("netkeeper.web.app.open_gmail", open_gmail)
+    monkeypatch.setattr("netkeep.web.app.open_gmail", open_gmail)
     extractor = ServeExtractor(executor=lambda factory, bus: object())  # type: ignore[arg-type,return-value]
     served = create_app(SETTINGS, engine=bare_engine, extractor=extractor)
     async with served.router.lifespan_context(served):

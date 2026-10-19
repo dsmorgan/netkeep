@@ -1,4 +1,4 @@
-"""``netkeeper campaigns`` and ``netkeeper simulate --campaign`` (#291, P3-13).
+"""``netkeep campaigns`` and ``netkeep simulate --campaign`` (#291, P3-13).
 
 Every command runs against a migrated scratch database under ``tmp_path``. Nothing
 here reaches Gmail: the review's test send is recorded straight through the service,
@@ -24,14 +24,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
 
-from netkeeper import cli as cli_module
-from netkeeper import migrations
-from netkeeper.campaigns import templates as template_service
-from netkeeper.cli import app as cli
-from netkeeper.crm import lists as list_service
-from netkeeper.crm.interactions import add_interaction
-from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.models import (
+from netkeep import cli as cli_module
+from netkeep import migrations
+from netkeep.campaigns import templates as template_service
+from netkeep.cli import app as cli
+from netkeep.crm import lists as list_service
+from netkeep.crm.interactions import add_interaction
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+from netkeep.models import (
     Campaign,
     CampaignStatus,
     CampaignStep,
@@ -51,12 +51,12 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.scoping import get_scoped, install_scope_guard, scoped
-from netkeeper.services import campaign_engine, campaign_results, campaign_review, sending_hours
-from netkeeper.services import campaigns as campaign_service
-from netkeeper.services.settings_kv import set_setting
-from netkeeper.services.users import ensure_local_user
-from netkeeper.web.api.campaigns import CampaignResultsOut, results_out
+from netkeep.scoping import get_scoped, install_scope_guard, scoped
+from netkeep.services import campaign_engine, campaign_results, campaign_review, sending_hours
+from netkeep.services import campaigns as campaign_service
+from netkeep.services.settings_kv import set_setting
+from netkeep.services.users import ensure_local_user
+from netkeep.web.api.campaigns import CampaignResultsOut, results_out
 
 runner = CliRunner()
 BODY = "Hi {{ first_name }}, it has been a while."
@@ -64,9 +64,9 @@ BODY = "Hi {{ first_name }}, it has been a while."
 
 @pytest.fixture
 def cli_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[sessionmaker[Session]]:
-    """A migrated database with the local user, pointed to by ``NETKEEPER_DATABASE_URL``."""
+    """A migrated database with the local user, pointed to by ``NETKEEP_DATABASE_URL``."""
     url = database_url(tmp_path)
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     engine = make_engine(url)
     migrations.upgrade(engine)
     factory = make_session_factory(engine)
@@ -756,7 +756,7 @@ def test_the_cli_never_names_the_engine_gate() -> None:
 
 
 def _api_module() -> Any:
-    from netkeeper.web.api import campaigns
+    from netkeep.web.api import campaigns
 
     return campaigns
 
@@ -832,7 +832,7 @@ def test_activate_defaults_to_the_next_tuesday_at_nine_and_says_so(world: World)
     assert starts_at - before <= timedelta(days=7)
     assert "starts: Tue" in output
     assert "Most effective: Tue–Thu mornings." in output  # noqa: RUF001
-    assert "netkeeper sends only while `serve` is running and this Mac is awake." in output
+    assert "netkeep sends only while `serve` is running and this Mac is awake." in output
     assert "warning:" not in output
 
 

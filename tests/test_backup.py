@@ -11,11 +11,11 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
-from netkeeper import migrations
-from netkeeper.cli import app
-from netkeeper.db import DATABASE_FILENAME, database_url, make_engine, make_session_factory
-from netkeeper.models import SettingKV
-from netkeeper.services.backup import (
+from netkeep import migrations
+from netkeep.cli import app
+from netkeep.db import DATABASE_FILENAME, database_url, make_engine, make_session_factory
+from netkeep.models import SettingKV
+from netkeep.services.backup import (
     BackupError,
     BackupInfo,
     backup_name,
@@ -24,10 +24,10 @@ from netkeeper.services.backup import (
     parse_backup_name,
     prune_backups,
 )
-from netkeeper.services.users import ensure_local_user
+from netkeep.services.users import ensure_local_user
 
 STAMP = datetime(2026, 9, 20, 14, 30, 12, tzinfo=UTC)
-STAMP_NAME = "netkeeper-20260920T143012Z.sqlite3"
+STAMP_NAME = "netkeep-20260920T143012Z.sqlite3"
 # Safely in the past, so seeded files never sort after one the CLI creates now.
 OLD = datetime(2025, 1, 1, tzinfo=UTC)
 
@@ -53,7 +53,7 @@ def cli_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     cwd = tmp_path / "cwd"
     cwd.mkdir()
     monkeypatch.chdir(cwd)
-    monkeypatch.setenv("NETKEEPER_DATA", str(tmp_path / "data"))
+    monkeypatch.setenv("NETKEEP_DATA", str(tmp_path / "data"))
     return tmp_path / "data"
 
 
@@ -143,7 +143,20 @@ def test_default_timestamp_is_the_current_utc_time(data: Path) -> None:
     created_at = parse_backup_name(written.name)
     assert created_at is not None
     assert before <= created_at <= after
-    assert re.fullmatch(r"netkeeper-\d{8}T\d{6}Z\.sqlite3", written.name)
+    assert re.fullmatch(r"netkeep-\d{8}T\d{6}Z\.sqlite3", written.name)
+
+
+def test_a_backup_from_before_the_rename_is_still_one(tmp_path: Path) -> None:
+    """``netkeeper-<stamp>.sqlite3`` lists, restores and prunes like a new one (#661)."""
+    assert parse_backup_name("netkeeper-20260920T143012Z.sqlite3") == STAMP
+    assert parse_backup_name("netkeeper-20260920T143012Z-pre-restore.sqlite3") == STAMP
+    assert parse_backup_name("netkeeperx-20260920T143012Z.sqlite3") is None
+    backups = tmp_path / "backups"
+    backups.mkdir()
+    (backups / "netkeeper-20260920T143012Z.sqlite3").write_bytes(b"x")
+    assert [info.path.name for info in list_backups(backups)] == [
+        "netkeeper-20260920T143012Z.sqlite3"
+    ]
 
 
 def test_naive_timestamp_is_refused(data: Path) -> None:
@@ -163,11 +176,11 @@ def test_same_second_twice_is_an_error_not_an_overwrite(data: Path) -> None:
     "name",
     [
         "netkeeper.sqlite3",
-        "netkeeper-latest.sqlite3",
-        "netkeeper-20260920T143012Z.sqlite3.bak",
+        "netkeep-latest.sqlite3",
+        "netkeep-20260920T143012Z.sqlite3.bak",
         "backup-20260920T143012Z.sqlite3",
-        "netkeeper-2026-09-20T14:30:12Z.sqlite3",
-        "netkeeper-20260920T143012.sqlite3",
+        "netkeep-2026-09-20T14:30:12Z.sqlite3",
+        "netkeep-20260920T143012.sqlite3",
     ],
 )
 def test_parse_backup_name_rejects_other_files(name: str) -> None:
@@ -212,7 +225,7 @@ def test_prune_keeps_the_newest_by_name_and_leaves_other_files_alone(tmp_path: P
         os.utime(path, (stamp, stamp))
     foreign = [
         directory / "notes.txt",
-        directory / "netkeeper-latest.sqlite3",
+        directory / "netkeep-latest.sqlite3",
         directory / "netkeeper.sqlite3",
     ]
     for path in foreign:

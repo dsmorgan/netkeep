@@ -3,13 +3,13 @@
 Once #514 reads LinkedIn's missing-profile page as ``NotFound``, a soft block that
 serves that page for every profile would make every visit ``NotFound``, and three
 weekly runs would mark every contact in their plans gone. So ``run_enrichment`` stops
-as ``many_not_found`` at :data:`~netkeeper.linkedin.enrich.MAX_NOT_FOUND_IN_A_ROW` in a
-row, or once more than half of :data:`~netkeeper.linkedin.enrich.NOT_FOUND_SHARE_AFTER`
+as ``many_not_found`` at :data:`~netkeep.linkedin.enrich.MAX_NOT_FOUND_IN_A_ROW` in a
+row, or once more than half of :data:`~netkeep.linkedin.enrich.NOT_FOUND_SHARE_AFTER`
 or more visits are not found. A run that stops that way records none of its not-found
 answers as not found: each is an unreadable visit, ``not_found_discounted``.
 
-Driven through the real :func:`~netkeeper.services.enrichment.enrich_contacts` and
-:func:`~netkeeper.crm.apply.apply_harvest` over :class:`profile_fakes.FakeBrowser`'s
+Driven through the real :func:`~netkeep.services.enrichment.enrich_contacts` and
+:func:`~netkeep.crm.apply.apply_harvest` over :class:`profile_fakes.FakeBrowser`'s
 invented people. No socket, no browser.
 """
 
@@ -42,18 +42,18 @@ from test_enrichment import (
     _setup,
 )
 
-from netkeeper.config import BudgetSettings, LinkedInSettings
-from netkeeper.crm import apply as mapping
-from netkeeper.crm.apply import HarvestResult
-from netkeeper.db import session_scope
-from netkeeper.linkedin import enrich
-from netkeeper.linkedin.browser import BrowserUnavailable
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.enrich import StopReason, UnreadableCause, UnreadableVisit
-from netkeeper.models import Contact, SyncRunStatus, User
-from netkeeper.scoping import get_scoped
-from netkeeper.services import enrich_plan, route_breaker, runs
-from netkeeper.services.enrichment import STREAK_STOPS, EnrichRunReport
+from netkeep.config import BudgetSettings, LinkedInSettings
+from netkeep.crm import apply as mapping
+from netkeep.crm.apply import HarvestResult
+from netkeep.db import session_scope
+from netkeep.linkedin import enrich
+from netkeep.linkedin.browser import BrowserUnavailable
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.enrich import StopReason, UnreadableCause, UnreadableVisit
+from netkeep.models import Contact, SyncRunStatus, User
+from netkeep.scoping import get_scoped
+from netkeep.services import enrich_plan, route_breaker, runs
+from netkeep.services.enrichment import STREAK_STOPS, EnrichRunReport
 
 
 def test_the_not_found_limits_are_pinned() -> None:
@@ -501,7 +501,7 @@ async def test_a_stop_linkedin_caused_adds_no_streak(
 
 
 async def test_a_budget_stop_adds_the_streaks(session_factory: sessionmaker[Session]) -> None:
-    """A limit of netkeeper's own says nothing about LinkedIn's pages: the streak is added."""
+    """A limit of netkeep's own says nothing about LinkedIn's pages: the streak is added."""
     people = _people(4)
     user_id, ids = _setup(session_factory, people)
     report = await _enrich(

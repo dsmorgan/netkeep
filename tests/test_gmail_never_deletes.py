@@ -1,18 +1,18 @@
-"""netkeeper deletes and trashes nothing in Gmail (ADR 0003, ADR 0009; #279).
+"""netkeep deletes and trashes nothing in Gmail (ADR 0003, ADR 0009; #279).
 
 The OAuth scope does not enforce this: ``gmail.modify`` allows ``drafts.delete``, and
 ``messages.modify`` could add ``TRASH``. The code does, so these tests pin it:
 
-- **Statically**, over ``netkeeper/``: no call to a delete, trash, or untrash method of
+- **Statically**, over ``netkeep/``: no call to a delete, trash, or untrash method of
   the Gmail API (or a batch or thread modify, which could trash in bulk), no string naming
   one, and every ``modify_labels`` call adds only, never ``TRASH`` or ``SPAM``, from the one
   call site reviewed for it.
-- **At run time**, through :class:`~netkeeper.campaigns.gmail_fake.FakeGmail`: a draft
+- **At run time**, through :class:`~netkeep.campaigns.gmail_fake.FakeGmail`: a draft
   campaign's life (drafted, sent by hand, replied to, a draft discarded by hand) makes no
   such call, and each label change only adds.
 
 The fake's helpers that act as the person (sending, scheduling, or discarding a draft in
-Gmail) are excluded by name: they stand for what you do in Gmail, not what netkeeper does.
+Gmail) are excluded by name: they stand for what you do in Gmail, not what netkeep does.
 Each scanner is shown a snippet it must catch, so a scanner that matches nothing fails.
 """
 
@@ -31,15 +31,15 @@ import factories
 from campaign_fakes import ARMED_FOR_SEND, NOW, SETTINGS, make_mailbox
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.campaigns import gmail as gmail_module
-from netkeeper.campaigns.gmail_fake import FakeGmail
-from netkeeper.db import session_scope
-from netkeeper.models import Message, MessageStatus, StepMode, TemplateChannel, User
-from netkeeper.scoping import scoped
-from netkeeper.services.campaign_engine import run_tick
-from netkeeper.services.campaign_sender import GmailSender
+from netkeep.campaigns import gmail as gmail_module
+from netkeep.campaigns.gmail_fake import FakeGmail
+from netkeep.db import session_scope
+from netkeep.models import Message, MessageStatus, StepMode, TemplateChannel, User
+from netkeep.scoping import scoped
+from netkeep.services.campaign_engine import run_tick
+from netkeep.services.campaign_sender import GmailSender
 
-PACKAGE = Path(__file__).resolve().parents[1] / "netkeeper"
+PACKAGE = Path(__file__).resolve().parents[1] / "netkeep"
 FAKE = PACKAGE / "campaigns" / "gmail_fake.py"
 MEMORY = Path("<memory>")
 
@@ -205,12 +205,12 @@ def test_the_fake_scan_is_not_vacuous() -> None:
     assert scan_deletes(snippet, FAKE)
 
 
-# --- the rules over netkeeper/ -----------------------------------------------------
+# --- the rules over netkeep/ -----------------------------------------------------
 
 
-def test_nothing_in_netkeeper_deletes_or_trashes_in_gmail() -> None:
+def test_nothing_in_netkeep_deletes_or_trashes_in_gmail() -> None:
     findings = [str(f) for f in all_findings()]
-    assert findings == [], "netkeeper deletes nothing in Gmail (ADR 0009):\n" + "\n".join(findings)
+    assert findings == [], "netkeep deletes nothing in Gmail (ADR 0009):\n" + "\n".join(findings)
 
 
 def test_modify_labels_only_adds_and_only_from_its_reviewed_caller() -> None:
@@ -267,7 +267,7 @@ class LabelChange:
 
 
 class Watched(FakeGmail):
-    """A FakeGmail that keeps each label change netkeeper asks for."""
+    """A FakeGmail that keeps each label change netkeep asks for."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)

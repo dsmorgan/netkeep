@@ -54,15 +54,15 @@ export function SessionGate({ children }: { children: ReactNode }) {
 }
 
 const KEYCHAIN_FIX =
-  'To fix it, unlock your login keychain in Keychain Access, or allow netkeeper when macOS asks, then restart netkeeper.'
+  'To fix it, unlock your login keychain in Keychain Access, or allow netkeep when macOS asks, then restart netkeep.'
 
 /** Shown above the app while the local API key lives in memory only. */
 export function KeyInMemoryBanner() {
   return (
     <div role="status" className="border-b bg-muted px-4 py-2 text-sm">
-      The Keychain refused netkeeper&apos;s local API key, so it&apos;s kept in memory until
-      netkeeper stops. After a restart, the first browser to load netkeeper connects itself, and any
-      other browser can&apos;t connect until the next restart. {KEYCHAIN_FIX}
+      The Keychain refused netkeep&apos;s local API key, so it&apos;s kept in memory until netkeep
+      stops. After a restart, the first browser to load netkeep connects itself, and any other
+      browser can&apos;t connect until the next restart. {KEYCHAIN_FIX}
     </div>
   )
 }
@@ -79,12 +79,12 @@ export function ConnectPage({
 }) {
   return (
     <main className="mx-auto grid max-w-xl gap-4 p-8">
-      <h1 className="font-heading text-xl font-bold">netkeeper</h1>
+      <h1 className="font-heading text-xl font-bold">netkeep</h1>
       <Card>
         <CardHeader>
           <CardTitle level={2}>Connect this browser</CardTitle>
           <CardDescription>
-            netkeeper only answers browsers you&apos;ve connected, so other programs on this Mac
+            netkeep only answers browsers you&apos;ve connected, so other programs on this Mac
             can&apos;t use it.
           </CardDescription>
         </CardHeader>
@@ -94,7 +94,7 @@ export function ConnectPage({
           ) : null}
           {info.claimedElsewhere ? (
             <p>
-              Another browser or program has already connected to netkeeper, so this browser needs a
+              Another browser or program has already connected to netkeep, so this browser needs a
               link.
             </p>
           ) : null}
@@ -108,9 +108,9 @@ export function ConnectPage({
             </>
           ) : (
             <p>
-              The Keychain refused netkeeper&apos;s local API key, so it&apos;s kept in memory and{' '}
-              <code className="font-mono">netkeeper open</code> can&apos;t make a link. Restart
-              netkeeper, then load this page first: the first browser to load it after a restart
+              The Keychain refused netkeep&apos;s local API key, so it&apos;s kept in memory and{' '}
+              <code className="font-mono">netkeep open</code> can&apos;t make a link. Restart
+              netkeep, then load this page first: the first browser to load it after a restart
               connects itself. {KEYCHAIN_FIX}
             </p>
           )}

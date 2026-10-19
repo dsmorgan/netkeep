@@ -1,18 +1,18 @@
 # Draft templates with your AI assistant
 
-You can use an AI chat assistant you already pay for, such as one in your browser, to draft and improve your campaign templates. netkeeper helps you write the prompt and read the reply back, but it never talks to an AI service itself.
+You can use an AI chat assistant you already pay for, such as one in your browser, to draft and improve your campaign templates. netkeep helps you write the prompt and read the reply back, but it never talks to an AI service itself.
 
-Before the 1.0 release, netkeeper has no AI integration. It makes no AI API calls, stores no AI keys, and sends nothing to any AI provider. You carry the text both ways by copy and paste. An in-app AI module may come after 1.0 (see section 12 of [the spec](architecture.md#12-llm-module-optional)).
+Before the 1.0 release, netkeep has no AI integration. It makes no AI API calls, stores no AI keys, and sends nothing to any AI provider. You carry the text both ways by copy and paste. An in-app AI module may come after 1.0 (see section 12 of [the spec](architecture.md#12-llm-module-optional)).
 
 ## Privacy: what never goes into the prompt
 
 Whatever you paste into an AI chat assistant goes to that provider, under its terms. Read them, and assume what you paste may be stored or used to train its models unless your plan says otherwise.
 
 - **Never paste your contacts' personal data.** No names, email addresses, phone numbers, companies, LinkedIn URLs, notes, or exports. A template doesn't need them.
-- **Use merge-field placeholders.** The prompt asks for `{{ first_name }}`, `{{ company }}`, and the other fields netkeeper fills in for each contact at send time. The assistant writes one message for everybody, and netkeeper personalizes it on your own machine.
+- **Use merge-field placeholders.** The prompt asks for `{{ first_name }}`, `{{ company }}`, and the other fields netkeep fills in for each contact at send time. The assistant writes one message for everybody, and netkeep personalizes it on your own machine.
 - **Describe the audience as a group.** "Former colleagues in engineering" is enough. "Robin at Example Co" is personal data.
 
-The helper in the template editor builds its prompt from the form you fill in, the list of merge fields, and netkeeper's lint rules. It never includes a contact's data, even when you've picked a contact in the preview.
+The helper in the template editor builds its prompt from the form you fill in, the list of merge fields, and netkeep's lint rules. It never includes a contact's data, even when you've picked a contact in the preview.
 
 - **What you type in the form goes into the prompt word for word.** Describe the campaign and the audience in general terms, and never type a contact's name or details there.
 - **The current text goes in only when you ask.** **Include the current text** is off by default. When you tick it, the prompt carries the template's subject and body. They hold only merge-field placeholders unless you typed real names or details into them, so read them before you copy.
@@ -32,11 +32,11 @@ The helper in the template editor builds its prompt from the form you fill in, t
 5. Paste the prompt into your AI chat assistant and send it.
 6. Copy the assistant's whole reply, paste it into **Assistant's reply**, and choose **Paste result**.
 
-netkeeper reads the reply's `Subject:` and `Body:` labels and fills in the subject and body. Then it lints the text at once. If an email step has no `Subject:`, the subject you had stays. If the reply doesn't have the labels, all of it goes into the body for you to edit. Lines outside the labeled format, like the assistant's "Here's a draft", are left out, and the helper says how many. One exception: chatter after the last body, such as "Let me know if you want changes", stays at the end of that body when the reply has no `End of step` line, because nothing marks where the body stops. Delete it from the body before you save.
+netkeep reads the reply's `Subject:` and `Body:` labels and fills in the subject and body. Then it lints the text at once. If an email step has no `Subject:`, the subject you had stays. If the reply doesn't have the labels, all of it goes into the body for you to edit. Lines outside the labeled format, like the assistant's "Here's a draft", are left out, and the helper says how many. One exception: chatter after the last body, such as "Let me know if you want changes", stays at the end of that body when the reply has no `End of step` line, because nothing marks where the body stops. Delete it from the body before you save.
 
 If the paste replaced a subject or body you had, **Undo paste** puts your text back. It stays available until you edit the template or paste again.
 
-A template holds one step. When the reply has several steps, netkeeper fills the template from step 1 and lists the others under **Other steps**:
+A template holds one step. When the reply has several steps, netkeep fills the template from step 1 and lists the others under **Other steps**:
 
 - **Use step N here** puts that step in this template instead. The step it replaces moves to the list, so you can switch back.
 - **Copy step N** copies the step in the labeled format. Save this template, start a new template for the step, and paste it into the new template's helper.
@@ -71,14 +71,14 @@ Body:
 End of step 1
 ```
 
-The helper's prompt lists every merge field netkeeper allows, from the same list the editor's **Merge fields** panel shows, and every lint rule for the channel.
+The helper's prompt lists every merge field netkeep allows, from the same list the editor's **Merge fields** panel shows, and every lint rule for the channel.
 
 ## Tips for a good draft
 
 - **Keep it short and personal.** The first message is a few sentences; a follow-up is shorter. Your name in their inbox matters more than polished copy ([the reconnect method](networking-workflow.md)).
-- **Use only netkeeper's merge fields.** A field netkeeper doesn't know would render blank, so lint refuses it. The **Merge fields** panel lists them all.
+- **Use only netkeep's merge fields.** A field netkeep doesn't know would render blank, so lint refuses it. The **Merge fields** panel lists them all.
 - **Name the recipient.** Every body needs at least one per-contact field, like `{{ first_name }}`. Identical bulk mail is a spam signal, and lint refuses it.
-- **Plain text only.** No attachments, no images, no HTML or Markdown formatting. netkeeper sends plain text.
+- **Plain text only.** No attachments, no images, no HTML or Markdown formatting. netkeep sends plain text.
 - **Ask for changes in the chat.** "Make step 2 shorter" or "less formal" works well; paste the new reply when you're happy with it.
 
 ## Check the result before you use it

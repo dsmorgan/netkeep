@@ -233,7 +233,7 @@ export function MetEditor({
         {contact.met === 'skip' && 'Skipped in Triage. '}
         {answered
           ? contact.met_source === 'automatic'
-            ? 'Suggested by netkeeper, waiting for your review.'
+            ? 'Suggested by netkeep, waiting for your review.'
             : 'Set by you.'
           : 'Not triaged yet.'}
       </span>

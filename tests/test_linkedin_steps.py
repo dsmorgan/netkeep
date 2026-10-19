@@ -1,4 +1,4 @@
-"""netkeeper.services.linkedin_steps (P4-09, #379): a LinkedIn step, prefilled by a person.
+"""netkeep.services.linkedin_steps (P4-09, #379): a LinkedIn step, prefilled by a person.
 
 The engine marks LinkedIn steps ready; only :func:`claim_prefill`, which a person
 triggers, claims one, with every check an email fire runs and the LinkedIn ones
@@ -26,15 +26,15 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.campaigns.render import LintIssue, LintRule, Part, Rendered, Severity
-from netkeeper.campaigns.templates import REMOVED_FIELD_BLOCK, TEMPLATE_ERRORS_BLOCK, block_reason
-from netkeeper.config import BudgetSettings, LinkedInSettings, Settings
-from netkeeper.crm import identity
-from netkeeper.crm.self_contact import ensure_self_contact
-from netkeeper.db import session_scope
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.messaging import MessageOutcome, MessageOutcomeKind
-from netkeeper.models import (
+from netkeep.campaigns.render import LintIssue, LintRule, Part, Rendered, Severity
+from netkeep.campaigns.templates import REMOVED_FIELD_BLOCK, TEMPLATE_ERRORS_BLOCK, block_reason
+from netkeep.config import BudgetSettings, LinkedInSettings, Settings
+from netkeep.crm import identity
+from netkeep.crm.self_contact import ensure_self_contact
+from netkeep.db import session_scope
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.messaging import MessageOutcome, MessageOutcomeKind
+from netkeep.models import (
     Campaign,
     CampaignStatus,
     Enrollment,
@@ -50,14 +50,14 @@ from netkeeper.models import (
     TemplateChannel,
     User,
 )
-from netkeeper.scoping import get_scoped, scoped, unscoped
-from netkeeper.services import budgets, heat, linkedin_steps, runs, sending_hours
-from netkeeper.services import campaign_engine as engine
-from netkeeper.services.campaign_engine import Skip, enroll, run_tick
-from netkeeper.services.campaign_guards import Reason, Verdict, check_step
-from netkeeper.services.linkedin_accounts import ensure_account
-from netkeeper.services.linkedin_session import flag_session, record_session_evidence
-from netkeeper.services.linkedin_steps import (
+from netkeep.scoping import get_scoped, scoped, unscoped
+from netkeep.services import budgets, heat, linkedin_steps, runs, sending_hours
+from netkeep.services import campaign_engine as engine
+from netkeep.services.campaign_engine import Skip, enroll, run_tick
+from netkeep.services.campaign_guards import Reason, Verdict, check_step
+from netkeep.services.linkedin_accounts import ensure_account
+from netkeep.services.linkedin_session import flag_session, record_session_evidence
+from netkeep.services.linkedin_steps import (
     PrefillClaim,
     Refusal,
     claim_next,
@@ -1089,9 +1089,9 @@ def test_the_engine_imports_nothing_of_the_browser_or_the_prefill() -> None:
         elif isinstance(node, ast.ImportFrom) and node.module is not None:
             imported.add(node.module)
             imported.update(f"{node.module}.{alias.name}" for alias in node.names)
-    assert not [name for name in imported if name.startswith("netkeeper.linkedin")]
+    assert not [name for name in imported if name.startswith("netkeep.linkedin")]
     assert not [name for name in imported if "linkedin_steps" in name]
-    assert "netkeeper.services.runs" not in imported
+    assert "netkeep.services.runs" not in imported
 
 
 def test_the_dashboard_lists_linkedin_rows_and_posture_does_not(lane: Lane) -> None:
@@ -1161,7 +1161,7 @@ _SIX_COMPANIES: Final = "Hi {{ first_name }}, " + " ".join(["{{ company }}"] * 6
 def newlines_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     """The newline flag as it was before P4-03 (#382), and as it goes back to if a later
     capture shows Shift+Enter sending: the tests that use it pin the refusing branch."""
-    from netkeeper.campaigns import render as render_module
+    from netkeep.campaigns import render as render_module
 
     monkeypatch.setattr(render_module, "SHIFT_ENTER_NEWLINES_ALLOWED", False)
 

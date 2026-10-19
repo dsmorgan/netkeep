@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from netkeeper.linkedin import activity_lock
-from netkeeper.linkedin.browser import ActivityLocks, BrowserBusy
+from netkeep.linkedin import activity_lock
+from netkeep.linkedin.browser import ActivityLocks, BrowserBusy
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="flock(2) is POSIX")
 

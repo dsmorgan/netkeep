@@ -1,6 +1,6 @@
 """The inbox poll's contract and its core mapping (P4-08, #378).
 
-A :class:`inbox_fakes` delta, applied by :mod:`netkeeper.crm.inbox_apply`, produces
+A :class:`inbox_fakes` delta, applied by :mod:`netkeep.crm.inbox_apply`, produces
 the expected interactions and conversation rows, idempotently; nobody unknown is
 created; a group thread is never attributed; an archive import and a poll never
 record the same message twice; a merge moves conversations. Every URN and message
@@ -20,21 +20,21 @@ from inbox_fakes import OWNER_URN, a_thread_with, conversation, delta, message, 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.crm import archive as archive_module
-from netkeeper.crm import inbox_apply
-from netkeeper.crm.archive import import_archive
-from netkeeper.crm.identity import merge
-from netkeeper.crm.interactions import (
+from netkeep.crm import archive as archive_module
+from netkeep.crm import inbox_apply
+from netkeep.crm.archive import import_archive
+from netkeep.crm.identity import merge
+from netkeep.crm.interactions import (
     INVITATION_SUMMARY,
     add_interaction,
     is_invitation,
     summary_is_invitation,
 )
-from netkeeper.db import session_scope
-from netkeeper.linkedin import inbox
-from netkeeper.linkedin.archive import open_archive
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.models import (
+from netkeep.db import session_scope
+from netkeep.linkedin import inbox
+from netkeep.linkedin.archive import open_archive
+from netkeep.linkedin.classify import Outcome
+from netkeep.models import (
     CampaignStatus,
     Contact,
     ContactSource,
@@ -47,9 +47,9 @@ from netkeeper.models import (
     TemplateChannel,
     User,
 )
-from netkeeper.scoping import scoped
-from netkeeper.services import campaign_guards
-from netkeeper.services.campaign_replies import WATCH_AFTER_COMPLETED
+from netkeep.scoping import scoped
+from netkeep.services import campaign_guards
+from netkeep.services.campaign_replies import WATCH_AFTER_COMPLETED
 
 NOW = datetime(2026, 9, 23, 15, 0, tzinfo=UTC)
 THEN = datetime(2026, 9, 22, 14, 22, 10, 750_000, tzinfo=UTC)  # a fraction of a second on

@@ -30,7 +30,7 @@ function when(value: string | null): string {
 
 /**
  * The Gmail connection (spec 11.5): whether an OAuth client is stored, which
- * account is connected and in what state, whether `netkeeper serve` may use it, and
+ * account is connected and in what state, whether `netkeep serve` may use it, and
  * how to connect or reconnect. Setting up, arming and disconnecting stay on Settings;
  * the one action here is **Re-authorize**, the same one the app-wide banner has.
  *
@@ -124,11 +124,11 @@ export function ConnectionCard() {
                 In a terminal, run{' '}
                 {!status.data.client_configured && (
                   <>
-                    <code className="font-mono text-xs">netkeeper gmail client &lt;file&gt;</code>{' '}
+                    <code className="font-mono text-xs">netkeep gmail client &lt;file&gt;</code>{' '}
                     with the client JSON from Google Cloud, then{' '}
                   </>
                 )}
-                <code className="font-mono text-xs">netkeeper gmail login</code>: it prints Google’s
+                <code className="font-mono text-xs">netkeep gmail login</code>: it prints Google’s
                 page, waits for the redirect, and stores the token. Or use the guided setup on{' '}
                 <Link to="/settings" className="underline underline-offset-4">
                   Settings

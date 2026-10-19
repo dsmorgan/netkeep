@@ -15,7 +15,7 @@ import { useCallback, useEffect, useState } from 'react'
 export const THEME_CHOICES = ['auto', 'light', 'dark'] as const
 export type ThemeChoice = (typeof THEME_CHOICES)[number]
 
-export const THEME_KEY = 'netkeeper.theme'
+export const THEME_KEY = 'netkeep.theme'
 
 const isChoice = (value: unknown): value is ThemeChoice =>
   THEME_CHOICES.includes(value as ThemeChoice)

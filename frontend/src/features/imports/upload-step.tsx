@@ -41,7 +41,7 @@ export function UploadStep({ onSelect, pending, pendingName, error }: UploadStep
           <CardDescription>
             The zip LinkedIn emails you, one of its files on its own (Connections.csv, messages.csv,
             Invitations.csv), or any other CSV with a header row. The next screen says which one
-            netkeeper found before anything is imported.
+            netkeep found before anything is imported.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -139,8 +139,8 @@ function GettingYourData() {
               <strong className="text-foreground">Get a copy of your data</strong>.
             </li>
             <li>
-              Ask for your full data archive, not just Connections — netkeeper also reads your
-              message and invitation history, and a connections-only export leaves both out.
+              Ask for your full data archive, not just Connections — netkeep also reads your message
+              and invitation history, and a connections-only export leaves both out.
             </li>
             <li>
               Request it and wait. LinkedIn emails you a download link — usually well under a day;
@@ -155,7 +155,7 @@ function GettingYourData() {
         <div className="space-y-1.5">
           <p className="font-medium text-foreground">Already unzipped it by hand?</p>
           <p>
-            Choose the whole zip if you still have it — netkeeper reads connections, messages, and
+            Choose the whole zip if you still have it — netkeep reads connections, messages, and
             invitations from it in one step. Picking through the extracted files yourself works too:{' '}
             <strong className="text-foreground">Connections.csv</strong> imports your contact list,
             and <strong className="text-foreground">messages.csv</strong> or{' '}

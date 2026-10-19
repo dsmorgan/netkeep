@@ -2,14 +2,14 @@
  * The guided Gmail setup (#302): its stored progress, the console pages it
  * links to, the `gcloud` commands it shows, and which step is which.
  *
- * Most steps happen in Google's console, where netkeeper can't look, so the
+ * Most steps happen in Google's console, where netkeep can't look, so the
  * person marks those done and `/gmail-setup` keeps what they said. The steps
- * netkeeper can check come from `/mailboxes/status` instead: whether the OAuth
+ * netkeep can check come from `/mailboxes/status` instead: whether the OAuth
  * client is saved, and whether a mailbox is connected, which also proves the
  * Gmail API is on (the callback asks Gmail for the address before it stores
  * anything, and answers `gmail_api_refused` when the API is off).
  *
- * netkeeper never runs `gcloud` and never drives a browser: every console page
+ * netkeep never runs `gcloud` and never drives a browser: every console page
  * is a plain link the person opens, and every command is text they copy.
  */
 import { queryOptions } from '@tanstack/react-query'
@@ -77,7 +77,7 @@ export function suggestProjectId(random: () => number = Math.random): string {
   const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789'
   let suffix = ''
   for (let i = 0; i < 6; i++) suffix += alphabet[Math.floor(random() * alphabet.length)]
-  return `netkeeper-${suffix}`
+  return `netkeep-${suffix}`
 }
 
 const CONSOLE = 'https://console.cloud.google.com'
@@ -102,11 +102,11 @@ export function consoleLinks(projectId: string | null) {
   }
 }
 
-/** The two steps `gcloud` can do, as commands to copy. netkeeper never runs them. */
+/** The two steps `gcloud` can do, as commands to copy. netkeep never runs them. */
 export function gcloudCommands(projectId: string) {
   return {
     login: 'gcloud auth login',
-    createProject: `gcloud projects create ${projectId} --name=netkeeper`,
+    createProject: `gcloud projects create ${projectId} --name=netkeep`,
     enableGmail: `gcloud services enable gmail.googleapis.com --project=${projectId}`,
   }
 }
@@ -127,7 +127,7 @@ export interface WizardStep {
   key: StepKey
   title: string
   state: StepState
-  /** How the state is known: `checked` by netkeeper, or `marked` by you. */
+  /** How the state is known: `checked` by netkeep, or `marked` by you. */
   source: 'checked' | 'marked'
   optional: boolean
 }
@@ -138,7 +138,7 @@ const TITLES: Record<StepKey, string> = {
   branding: 'Set up the consent screen',
   test_user: 'Add yourself as a test user',
   client_created: 'Create a Desktop OAuth client',
-  client: 'Save the client in netkeeper',
+  client: 'Save the client in netkeep',
   connect: 'Connect your mailbox',
   published: 'Publish the app (optional, later)',
 }

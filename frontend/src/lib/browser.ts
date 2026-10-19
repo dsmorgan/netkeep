@@ -14,7 +14,7 @@ const CHROME_FORKS =
   /\b(Edg|EdgA|EdgiOS|OPR|OPT|Opera|Vivaldi|YaBrowser|SamsungBrowser|Brave|Arc)\b/
 
 /**
- * Tells Google Chrome from other browsers, for the "netkeeper needs Chrome" banner.
+ * Tells Google Chrome from other browsers, for the "netkeep needs Chrome" banner.
  *
  * `unknown` means "can't tell", and the banner stays quiet then: a false warning
  * costs more than a missed one. The structured brands list comes first because it

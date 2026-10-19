@@ -44,7 +44,7 @@ from collections.abc import Iterator
 import pytest
 from fastapi.dependencies import models as fastapi_dependency_models
 
-from netkeeper.models import Base
+from netkeep.models import Base
 
 
 def pytest_collection_finish(session: pytest.Session) -> None:

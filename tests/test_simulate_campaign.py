@@ -17,9 +17,9 @@ import pytest
 from campaign_fakes import make_mailbox
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.config import CampaignSettings, Settings
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.config import CampaignSettings, Settings
+from netkeep.db import session_scope
+from netkeep.models import (
     Campaign,
     CampaignStatus,
     CampaignStep,
@@ -31,9 +31,9 @@ from netkeeper.models import (
     TemplateChannel,
     User,
 )
-from netkeeper.scoping import scoped
-from netkeeper.services.campaign_engine import REVIEW_GATE, activate
-from netkeeper.services.simulate_campaign import simulate_campaign
+from netkeep.scoping import scoped
+from netkeep.services.campaign_engine import REVIEW_GATE, activate
+from netkeep.services.simulate_campaign import simulate_campaign
 
 ZONE = ZoneInfo("America/New_York")
 NOW = datetime(2026, 9, 28, 8, 0, tzinfo=ZONE).astimezone(UTC)  # a Monday morning

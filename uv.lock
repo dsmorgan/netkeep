@@ -1038,7 +1038,7 @@ wheels = [
 ]
 
 [[package]]
-name = "netkeeper"
+name = "netkeep"
 version = "0.0.1"
 source = { editable = "." }
 dependencies = [

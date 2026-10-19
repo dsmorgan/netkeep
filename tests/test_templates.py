@@ -1,4 +1,4 @@
-"""netkeeper.campaigns.templates (spec 8.5, 11.1; item P3-03): storage, versions, the gate."""
+"""netkeep.campaigns.templates (spec 8.5, 11.1; item P3-03): storage, versions, the gate."""
 
 from __future__ import annotations
 
@@ -10,18 +10,18 @@ import factories
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.campaigns import templates as service
-from netkeeper.campaigns.render import (
+from netkeep.campaigns import templates as service
+from netkeep.campaigns.render import (
     CONTACT_FIELDS,
     LintIssue,
     LintRule,
     Severity,
     TemplateRenderError,
 )
-from netkeeper.campaigns.render import (
+from netkeep.campaigns.render import (
     lint as render_lint,
 )
-from netkeeper.campaigns.templates import (
+from netkeep.campaigns.templates import (
     UNSET,
     DuplicateTemplateName,
     InvalidTemplateValue,
@@ -43,8 +43,8 @@ from netkeeper.campaigns.templates import (
     update_template,
     versions,
 )
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.db import session_scope
+from netkeep.models import (
     Campaign,
     CampaignStatus,
     CampaignStep,
@@ -53,8 +53,8 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.scoping import scoped
-from netkeeper.services import campaign_review
+from netkeep.scoping import scoped
+from netkeep.services import campaign_review
 
 EMAIL = TemplateChannel.EMAIL
 LINKEDIN = TemplateChannel.LINKEDIN

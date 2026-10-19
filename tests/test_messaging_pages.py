@@ -1,12 +1,12 @@
 """The messaging fixtures (#374): invented, consistent with the shape note, and not copied.
 
 The last test checks that no fixture value appears anywhere in the maintainer's
-private capture. It is opt-in: it runs only when ``NETKEEPER_CAPTURE_DIR`` names the
+private capture. It is opt-in: it runs only when ``NETKEEP_CAPTURE_DIR`` names the
 capture folder, and skips otherwise, even on a machine that has the folder. It never
 looks at a default path, so an ordinary ``make check`` never reads the private folder.
 Only the maintainer, or an analysis session he approves, sets the variable::
 
-    NETKEEPER_CAPTURE_DIR=~/code/netkeeper-private/messaging-capture \
+    NETKEEP_CAPTURE_DIR=~/code/netkeeper-private/messaging-capture \
         .venv/bin/python -m pytest tests/test_messaging_pages.py
 
 A failure names where the fixture value sits, never the value: if it matched, it is
@@ -30,7 +30,7 @@ import messaging_pages as mp
 import pytest
 
 #: The opt-in: the capture folder to check against (#374). Unset, the check skips.
-CAPTURE_ENV = "NETKEEPER_CAPTURE_DIR"
+CAPTURE_ENV = "NETKEEP_CAPTURE_DIR"
 
 
 def _capture_dir() -> Path | None:

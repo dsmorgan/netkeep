@@ -1,9 +1,9 @@
-"""``netkeeper serve`` never contacts LinkedIn on its own until a person arms it (P2-10).
+"""``netkeep serve`` never contacts LinkedIn on its own until a person arms it (P2-10).
 
-The maintainer runs ``netkeeper serve`` against their real, logged-in Chrome
+The maintainer runs ``netkeep serve`` against their real, logged-in Chrome
 every day. Scheduled LinkedIn runs therefore ship disarmed, and this module
-drives the real ``serve`` startup path -- :func:`netkeeper.web.app.create_app`'s
-lifespan with the extractor ``netkeeper serve`` hands it, the real scheduler,
+drives the real ``serve`` startup path -- :func:`netkeep.web.app.create_app`'s
+lifespan with the extractor ``netkeep serve`` hands it, the real scheduler,
 the real worker, on a fake Chrome and a fake clock -- across every due time a
 week holds (the first-setup full sync, the daily incremental, enrichment every
 three hours, a catch-up after downtime) and asserts the browser is never
@@ -34,24 +34,24 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 from test_web_events import WAIT_S, SSEClient
 
-from netkeeper.config import Settings
-from netkeeper.db import make_session_factory, session_scope
-from netkeeper.linkedin import activity_lock
-from netkeeper.linkedin.browser import AttachBrowserProvider, BrowserUnavailable
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.models import SyncRun, SyncRunKind, SyncRunStatus, SyncRunTrigger, User, UserKind
-from netkeeper.scoping import install_scope_guard, scoped
-from netkeeper.services import heat, route_breaker, runs, scheduler
-from netkeeper.services.linkedin_accounts import (
+from netkeep.config import Settings
+from netkeep.db import make_session_factory, session_scope
+from netkeep.linkedin import activity_lock
+from netkeep.linkedin.browser import AttachBrowserProvider, BrowserUnavailable
+from netkeep.linkedin.classify import Outcome
+from netkeep.models import SyncRun, SyncRunKind, SyncRunStatus, SyncRunTrigger, User, UserKind
+from netkeep.scoping import install_scope_guard, scoped
+from netkeep.services import heat, route_breaker, runs, scheduler
+from netkeep.services.linkedin_accounts import (
     arm_scheduled_runs,
     ensure_account,
     scheduled_runs_armed,
 )
-from netkeeper.services.linkedin_session import flag_session
-from netkeeper.services.scheduled_runs import ServeExtractor, serve_registry
-from netkeeper.services.settings_kv import delete_setting
-from netkeeper.web.app import create_app
-from netkeeper.web.security import CLIENT_HEADER, CLIENT_HEADER_VALUE
+from netkeep.services.linkedin_session import flag_session
+from netkeep.services.scheduled_runs import ServeExtractor, serve_registry
+from netkeep.services.settings_kv import delete_setting
+from netkeep.web.app import create_app
+from netkeep.web.security import CLIENT_HEADER, CLIENT_HEADER_VALUE
 
 #: These tests start runs by hand at whatever time the suite runs (#213).
 pytestmark = pytest.mark.usefixtures("inside_active_hours")
@@ -72,7 +72,7 @@ def settings() -> Settings:
 async def serving(
     engine: Engine, settings: Settings, extractor: ServeExtractor
 ) -> AsyncIterator[FastAPI]:
-    """The app ``netkeeper serve`` runs, inside its lifespan, on ``engine``."""
+    """The app ``netkeep serve`` runs, inside its lifespan, on ``engine``."""
     app = create_app(settings, engine=engine, extractor=extractor)
     async with app.router.lifespan_context(app):
         yield app
@@ -81,7 +81,7 @@ async def serving(
 def served(
     engine: Engine, settings: Settings, provider: AttachBrowserProvider, clock: Clock
 ) -> Any:
-    """:func:`serving` with the worker ``netkeeper serve`` builds, on ``provider``."""
+    """:func:`serving` with the worker ``netkeep serve`` builds, on ``provider``."""
     return serving(engine, settings, worker_extractor(provider, settings, clock=clock))
 
 
@@ -124,7 +124,7 @@ def _local(session: Session) -> User:
 
 @pytest.fixture
 def no_frontend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", str(tmp_path / "no-dist"))
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", str(tmp_path / "no-dist"))
 
 
 # --- THE property ------------------------------------------------------------------
@@ -334,7 +334,7 @@ async def test_a_run_left_running_is_failed_at_start_and_never_replayed(
 async def test_a_run_whose_browser_lock_is_held_is_left_running_at_start(
     bare_engine: Engine, settings: Settings, no_frontend: None
 ) -> None:
-    """A `netkeeper linkedin sync` in a terminal holds the lock; serve starting must not
+    """A `netkeep linkedin sync` in a terminal holds the lock; serve starting must not
     mark its run failed under it."""
     provider, _ = fake_provider()
     clock = Clock(START)
@@ -487,7 +487,7 @@ async def test_the_ui_can_start_a_run_watch_it_and_stop_it(
             watching = (await client.get(f"/api/v1/linkedin/runs/{run_id}")).json()
             assert watching["status"] == "running" and watching["progress"]["pages"] == 1
             # #169 F: the run holds its own account's lock file, and every other
-            # netkeeper process on this data directory would be told it is busy.
+            # netkeep process on this data directory would be told it is busy.
             with session_scope(app.state.session_factory) as session:
                 account = ensure_account(session, _local(session)).id
             assert activity_lock.inspect(activity_lock.account_key(account)).held
@@ -571,7 +571,7 @@ async def test_a_start_is_refused_while_flagged_or_hot_and_records_nothing(
                 "/api/v1/linkedin/runs", json={"kind": "connections_full"}, headers=HEADERS
             )
         with session_scope(factory, write=True) as session:
-            from netkeeper.services.linkedin_session import clear_session_flag
+            from netkeep.services.linkedin_session import clear_session_flag
 
             user = _local(session)
             clear_session_flag(session, user)
@@ -640,7 +640,7 @@ async def test_the_worker_refuses_a_scheduled_run_on_a_disarmed_account(
     """Even a scheduled run someone recorded by going around ``create_run`` never attaches."""
     import factories
 
-    from netkeeper.worker import BrowserWorker
+    from netkeep.worker import BrowserWorker
 
     provider, connector = fake_provider()
     with session_scope(session_factory, write=True) as session:
@@ -678,7 +678,7 @@ async def test_the_worker_refuses_a_scheduled_connections_run_with_the_breaker_t
     never attaches."""
     import factories
 
-    from netkeeper.worker import BrowserWorker
+    from netkeep.worker import BrowserWorker
 
     provider, connector = fake_provider()
     with session_scope(session_factory, write=True) as session:
@@ -721,7 +721,7 @@ async def test_the_worker_refuses_a_scheduled_connections_run_with_the_answer_lo
     """#199: the same second, independent check for the answer-lost limit."""
     import factories
 
-    from netkeeper.worker import BrowserWorker
+    from netkeep.worker import BrowserWorker
 
     provider, connector = fake_provider()
     with session_scope(session_factory, write=True) as session:
@@ -770,8 +770,8 @@ async def test_the_worker_refuses_a_scheduled_run_with_a_corrupt_answer_lost_row
     """#199 review, L4: the worker asks ``answer_lost_tripped``, which fails closed."""
     import factories
 
-    from netkeeper.services.settings_kv import set_setting
-    from netkeeper.worker import BrowserWorker
+    from netkeep.services.settings_kv import set_setting
+    from netkeep.worker import BrowserWorker
 
     provider, connector = fake_provider()
     with session_scope(session_factory, write=True) as session:
@@ -813,8 +813,8 @@ async def test_the_worker_attaches_a_manual_run_with_the_answer_lost_limit_tripp
     """Manual runs are never refused for it: a run by hand is how a person checks."""
     import factories
 
-    from netkeeper.linkedin.browser import BrowserUnavailable
-    from netkeeper.worker import BrowserWorker
+    from netkeep.linkedin.browser import BrowserUnavailable
+    from netkeep.worker import BrowserWorker
 
     provider, connector = fake_provider(error=BrowserUnavailable("Chrome is not running"))
     with session_scope(session_factory, write=True) as session:
@@ -856,8 +856,8 @@ async def test_the_worker_does_not_refuse_a_tripped_breaker_for_enrichment(
     enrichment run from attaching."""
     import factories
 
-    from netkeeper.linkedin.browser import BrowserUnavailable
-    from netkeeper.worker import BrowserWorker
+    from netkeep.linkedin.browser import BrowserUnavailable
+    from netkeep.worker import BrowserWorker
 
     provider, connector = fake_provider(error=BrowserUnavailable("Chrome is not running"))
     with session_scope(session_factory, write=True) as session:
@@ -896,14 +896,14 @@ async def test_the_worker_does_not_refuse_a_tripped_breaker_for_enrichment(
 def test_the_real_serve_builds_its_extractor_on_the_attach_provider(
     session_factory: Any, settings: Settings
 ) -> None:
-    """``netkeeper serve``'s app gets the worker on the one attach provider, building it
+    """``netkeep serve``'s app gets the worker on the one attach provider, building it
     attaches to nothing, and the legacy-lock co-claim goes with the local user's
     account whatever its id (#175 review, F10)."""
     import factories
 
-    from netkeeper.linkedin.activity_lock import account_key
-    from netkeeper.models import UserKind
-    from netkeeper.worker import BrowserWorker, serve_extractor
+    from netkeep.linkedin.activity_lock import account_key
+    from netkeep.models import UserKind
+    from netkeep.worker import BrowserWorker, serve_extractor
 
     with session_scope(session_factory, write=True) as session:
         hosted = factories.make_user(session, kind=UserKind.HOSTED)
@@ -953,9 +953,9 @@ async def test_a_live_sync_reads_what_the_connections_page_loads() -> None:
     """#187: the worker hands the connections runner one PageConnections per run, on
     LinkedIn's own connections page, with no fallback behind it; building one loads
     nothing. An incremental sync requires the list newest first; a full sync does not."""
-    from netkeeper.linkedin.connections import SyncMode
-    from netkeeper.linkedin.page_connections import PageConnections
-    from netkeeper.worker import connections_source
+    from netkeep.linkedin.connections import SyncMode
+    from netkeep.linkedin.page_connections import PageConnections
+    from netkeep.worker import connections_source
 
     provider, connector = fake_provider()
     async with provider.run("account-9") as run:
@@ -991,8 +991,8 @@ async def test_a_connections_page_that_lands_on_a_checkpoint_fetches_nothing(
     never scrolled, so it asks for nothing."""
     from run_fakes import CheckpointContext
 
-    from netkeeper.services.linkedin_session import session_flag
-    from netkeeper.worker import BrowserWorker
+    from netkeep.services.linkedin_session import session_flag
+    from netkeep.worker import BrowserWorker
 
     context = CheckpointContext()
     provider, connector = fake_provider(context)
@@ -1020,7 +1020,7 @@ async def test_a_run_whose_tab_opened_in_front_says_so_in_its_notes(
     run's notes say Chrome may have taken focus."""
     from run_fakes import CheckpointContext
 
-    from netkeeper.worker import BrowserWorker
+    from netkeep.worker import BrowserWorker
 
     provider, _ = fake_provider(CheckpointContext())  # no browser-level CDP session
     run_id, user_id = _manual_run(session_factory, SyncRunKind.CONNECTIONS_FULL)
@@ -1042,7 +1042,7 @@ async def test_a_note_that_cannot_be_written_changes_nothing_else(
     ended, ``execute`` returns, and ``run.finished`` is still published."""
     from run_fakes import CheckpointContext
 
-    from netkeeper.worker import BrowserWorker
+    from netkeep.worker import BrowserWorker
 
     def broken(*args: Any, **kwargs: Any) -> None:
         raise RuntimeError("database is locked")
@@ -1101,7 +1101,7 @@ async def test_the_worker_refuses_a_flagged_session_before_it_attaches(
     session_factory: Any, settings: Settings
 ) -> None:
     """A run recorded before the flag was raised still never reaches the browser."""
-    from netkeeper.worker import BrowserWorker
+    from netkeep.worker import BrowserWorker
 
     provider, connector = fake_provider()
     run_id, user_id = _manual_run(session_factory, SyncRunKind.ENRICH)
@@ -1125,7 +1125,7 @@ async def test_the_worker_refuses_a_flagged_session_before_it_attaches(
 async def test_the_worker_refuses_heat_before_it_attaches(
     session_factory: Any, settings: Settings
 ) -> None:
-    from netkeeper.worker import BrowserWorker
+    from netkeep.worker import BrowserWorker
 
     provider, connector = fake_provider()
     run_id, user_id = _manual_run(session_factory, SyncRunKind.CONNECTIONS_INCREMENTAL)
@@ -1168,9 +1168,9 @@ async def test_a_lost_answer_the_page_moves_past_is_an_aborted_run_the_breaker_i
     breaker does not move."""
     from flagship_site import Lost
 
-    from netkeeper.worker import BrowserWorker
+    from netkeep.worker import BrowserWorker
 
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     context = ConnectionsContext(_many(90), lost={40: Lost("move_on")})
     provider, _ = fake_provider(context)
     run_id, user_id = _manual_run(session_factory, SyncRunKind.CONNECTIONS_FULL)
@@ -1200,7 +1200,7 @@ async def test_a_run_that_fails_inside_its_runner_is_recorded_once(
     failed")."""
     from flagship_site import Answer
 
-    from netkeeper.worker import BrowserWorker
+    from netkeep.worker import BrowserWorker
 
     huge = Answer(status=200, body=b"0" * (8 * 1024 * 1024 + 1))
     provider, _ = fake_provider(ConnectionsContext(_many(90), answers={20: huge}))
@@ -1226,8 +1226,8 @@ def test_a_live_worker_reads_profiles_through_the_live_source() -> None:
     landing wait is PageProfiles' live 20 s."""
     import inspect
 
-    from netkeeper.linkedin.page_profiles import LANDING_WAIT_S
-    from netkeeper.worker import BrowserWorker, profile_source
+    from netkeep.linkedin.page_profiles import LANDING_WAIT_S
+    from netkeep.worker import BrowserWorker, profile_source
 
     assert inspect.signature(BrowserWorker).parameters["profiles"].default is profile_source
     assert inspect.signature(profile_source).parameters.keys() == {"run", "sleep"}
@@ -1257,8 +1257,8 @@ async def test_the_worker_refuses_only_a_scheduled_enrichment_run_for_the_contac
 ) -> None:
     import factories
 
-    from netkeeper.linkedin.browser import BrowserUnavailable
-    from netkeeper.worker import BrowserWorker
+    from netkeep.linkedin.browser import BrowserUnavailable
+    from netkeep.worker import BrowserWorker
 
     provider, connector = fake_provider(error=BrowserUnavailable("Chrome is not running"))
     with session_scope(session_factory, write=True) as session:
@@ -1324,8 +1324,8 @@ async def test_the_worker_refuses_only_a_scheduled_inbox_run_for_the_inbox_break
 ) -> None:
     import factories
 
-    from netkeeper.linkedin.browser import BrowserUnavailable
-    from netkeeper.worker import BrowserWorker
+    from netkeep.linkedin.browser import BrowserUnavailable
+    from netkeep.worker import BrowserWorker
 
     provider, connector = fake_provider(error=BrowserUnavailable("Chrome is not running"))
     with session_scope(session_factory, write=True) as session:
@@ -1388,8 +1388,8 @@ async def test_the_worker_refuses_only_a_scheduled_inbox_run_for_the_owner_break
 ) -> None:
     import factories
 
-    from netkeeper.linkedin.browser import BrowserUnavailable
-    from netkeeper.worker import BrowserWorker
+    from netkeep.linkedin.browser import BrowserUnavailable
+    from netkeep.worker import BrowserWorker
 
     provider, connector = fake_provider(error=BrowserUnavailable("Chrome is not running"))
     with session_scope(session_factory, write=True) as session:
@@ -1437,8 +1437,8 @@ async def test_a_tripped_connections_breaker_does_not_refuse_a_scheduled_inbox_r
     any connections or enrichment streak."""
     import factories
 
-    from netkeeper.linkedin.browser import BrowserUnavailable
-    from netkeeper.worker import BrowserWorker
+    from netkeep.linkedin.browser import BrowserUnavailable
+    from netkeep.worker import BrowserWorker
 
     provider, connector = fake_provider(error=BrowserUnavailable("Chrome is not running"))
     with session_scope(session_factory, write=True) as session:

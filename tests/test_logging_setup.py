@@ -4,7 +4,7 @@ from collections.abc import Iterator
 
 import pytest
 
-from netkeeper.logging_setup import HANDLER_NAME, RedactQueryFilter, setup_logging
+from netkeep.logging_setup import HANDLER_NAME, RedactQueryFilter, setup_logging
 
 
 @pytest.fixture(autouse=True)
@@ -31,31 +31,31 @@ def test_defaults_to_info() -> None:
 
 
 def test_env_var_level_name(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("NETKEEPER_LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("NETKEEP_LOG_LEVEL", "DEBUG")
     setup_logging()
     assert logging.getLogger().level == logging.DEBUG
 
 
 def test_env_var_is_case_insensitive_and_stripped(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("NETKEEPER_LOG_LEVEL", " warning ")
+    monkeypatch.setenv("NETKEEP_LOG_LEVEL", " warning ")
     setup_logging()
     assert logging.getLogger().level == logging.WARNING
 
 
 def test_env_var_numeric_string(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("NETKEEPER_LOG_LEVEL", "10")
+    monkeypatch.setenv("NETKEEP_LOG_LEVEL", "10")
     setup_logging()
     assert logging.getLogger().level == logging.DEBUG
 
 
 def test_empty_env_var_means_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("NETKEEPER_LOG_LEVEL", "")
+    monkeypatch.setenv("NETKEEP_LOG_LEVEL", "")
     setup_logging()
     assert logging.getLogger().level == logging.INFO
 
 
 def test_argument_overrides_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("NETKEEPER_LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("NETKEEP_LOG_LEVEL", "DEBUG")
     setup_logging("ERROR")
     assert logging.getLogger().level == logging.ERROR
 
@@ -68,25 +68,25 @@ def test_int_argument() -> None:
 def test_bad_env_value_warns_and_falls_back(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    monkeypatch.setenv("NETKEEPER_LOG_LEVEL", "LOUD")
-    with caplog.at_level(logging.WARNING, logger="netkeeper.logging_setup"):
+    monkeypatch.setenv("NETKEEP_LOG_LEVEL", "LOUD")
+    with caplog.at_level(logging.WARNING, logger="netkeep.logging_setup"):
         setup_logging()
     assert logging.getLogger().level == logging.INFO
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 1
     assert "LOUD" in warnings[0].getMessage()
-    assert "NETKEEPER_LOG_LEVEL" in warnings[0].getMessage()
+    assert "NETKEEP_LOG_LEVEL" in warnings[0].getMessage()
 
 
 def test_bad_argument_warns_and_falls_back(caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level(logging.WARNING, logger="netkeeper.logging_setup"):
+    with caplog.at_level(logging.WARNING, logger="netkeep.logging_setup"):
         setup_logging("nonsense")
     assert logging.getLogger().level == logging.INFO
     assert any("nonsense" in r.getMessage() for r in caplog.records)
 
 
 def test_negative_int_warns_and_falls_back(caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level(logging.WARNING, logger="netkeeper.logging_setup"):
+    with caplog.at_level(logging.WARNING, logger="netkeep.logging_setup"):
         setup_logging(-5)
     assert logging.getLogger().level == logging.INFO
     assert any("-5" in r.getMessage() for r in caplog.records)
@@ -104,17 +104,17 @@ def test_one_line_per_record_with_timestamp_level_name_message(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     setup_logging("INFO")
-    logging.getLogger("netkeeper.example").info("hello %s", "world")
+    logging.getLogger("netkeep.example").info("hello %s", "world")
     lines = capsys.readouterr().err.splitlines()
     assert len(lines) == 1
     assert re.fullmatch(
-        r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d INFO netkeeper\.example hello world", lines[0]
+        r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d INFO netkeep\.example hello world", lines[0]
     )
 
 
 def test_records_below_level_are_dropped(capsys: pytest.CaptureFixture[str]) -> None:
     setup_logging("WARNING")
-    logging.getLogger("netkeeper.example").info("quiet")
+    logging.getLogger("netkeep.example").info("quiet")
     assert capsys.readouterr().err == ""
 
 

@@ -1,4 +1,4 @@
-"""netkeeper.linkedin.rehearse: the real request pattern against a neutral site (P2-11).
+"""netkeep.linkedin.rehearse: the real request pattern against a neutral site (P2-11).
 
 Two things are being proved here, and the second matters more than the first:
 
@@ -23,7 +23,7 @@ quietly do something the shared fakes already refuse (a second context, closing
 the user's browser). What they add is the two things a rehearsal needs and the
 shared page deliberately lacks: a ``mouse`` to replay a scroll plan through and
 an ``on`` to listen for requests with. The real thing is
-``tests/smoke/test_rehearse_smoke.py``, opt-in behind ``NETKEEPER_BROWSER_TESTS=1``.
+``tests/smoke/test_rehearse_smoke.py``, opt-in behind ``NETKEEP_BROWSER_TESTS=1``.
 
 ``serve_replica`` is exercised for real over loopback, because a neutral site
 nobody ever fetched from is not evidence that the site is neutral. Nothing here
@@ -45,15 +45,15 @@ from browser_fakes import FakeBrowser, FakeConnector, FakeContext, FakeMouse, Fa
 from flagship_site import FakeResponse
 from profile_site import SiteRequest
 
-from netkeeper.linkedin.browser import AttachBrowserProvider, BrowserUnavailable, PageLike
-from netkeeper.linkedin.flagship import CONTACT_DETAILS_SCREEN_ID, NAVIGATION_PATH
-from netkeeper.linkedin.flagship_profile import (
+from netkeep.linkedin.browser import AttachBrowserProvider, BrowserUnavailable, PageLike
+from netkeep.linkedin.flagship import CONTACT_DETAILS_SCREEN_ID, NAVIGATION_PATH
+from netkeep.linkedin.flagship_profile import (
     COMPONENT_PATH,
     parse_contact_info,
     parse_profile,
     profile_slug,
 )
-from netkeeper.linkedin.pacing import (
+from netkeep.linkedin.pacing import (
     DEFAULT_BURST_PROFILE,
     DEFAULT_DELAY_PROFILE,
     BurstProfile,
@@ -64,7 +64,7 @@ from netkeeper.linkedin.pacing import (
     rest_pointer_like_a_person,
     scroll_back_to_top,
 )
-from netkeeper.linkedin.rehearse import (
+from netkeep.linkedin.rehearse import (
     LINKEDIN_HOST,
     LOOPBACK_HOSTS,
     REHEARSAL_SLUGS,
@@ -491,7 +491,7 @@ async def test_a_rehearsal_refuses_the_whatwg_backslash_userinfo_trick() -> None
     """F3 (#168 review): the exact url that reads as loopback to ``urlsplit`` and as
     LinkedIn to a real browser -- see ``strict_origin``'s docstring. Before this fix,
     ``_require_neutral`` read ``urlsplit(...).hostname`` alone and approved this,
-    which would have let ``netkeeper rehearse --site`` navigate a real Chrome to
+    which would have let ``netkeep rehearse --site`` navigate a real Chrome to
     ``www.linkedin.com``.
     """
     provider, _, connector = _setup()
@@ -868,7 +868,7 @@ def test_the_replica_serves_a_profile_shaped_page_on_loopback() -> None:
         svg = httpx.get(f"{base}/static/avatar.svg", timeout=5)
 
     assert page.status_code == 200
-    assert "netkeeper rehearsal replica" in page.text
+    assert "netkeep rehearsal replica" in page.text
     assert 'href="/static/replica.css"' in page.text
     assert 'href="/in/rehearsal-alex-doe/overlay/contact-info/">Contact info</a>' in page.text
     assert 'id="rehydrate-data"' in page.text
@@ -911,7 +911,7 @@ def test_the_rehearsal_slugs_are_invented() -> None:
 
 async def test_each_visit_is_the_enrichment_jobs_pattern() -> None:
     """#190: the page view, the lazy card the scroll made the page ask for, and the
-    overlay the one click made it ask for -- the page's requests, none of netkeeper's."""
+    overlay the one click made it ask for -- the page's requests, none of netkeep's."""
     rehearsal, context, _, _ = await _rehearse(visits=2)
 
     for visit in rehearsal.visits:
@@ -939,7 +939,7 @@ async def test_a_replica_that_stops_answering_is_named_in_the_log() -> None:
 
 def test_the_replica_answers_in_the_shapes_the_parsers_read() -> None:
     """Served for real: a rehearsal that loaded garbage would stop at visit one."""
-    from netkeeper.linkedin.flagship import rehydration_payload
+    from netkeep.linkedin.flagship import rehydration_payload
 
     slug = REHEARSAL_SLUGS[0]
     with serve_replica() as base:

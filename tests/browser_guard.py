@@ -15,7 +15,7 @@ class RealBrowserBlocked(BaseException):
 
 
 #: The debug ports a person's own Chrome listens on. No test may ever reach one of
-#: these, opted out or not: the netkeeper profile behind them is a real LinkedIn
+#: these, opted out or not: the netkeep profile behind them is a real LinkedIn
 #: session, and during an armed week, a live scheduler's (#293 review).
 _PERSONAL_CDP_PORTS = frozenset({9222})
 
@@ -47,13 +47,13 @@ def isolated_cdp(url: str) -> str:
     if is_personal_cdp(url):
         raise RealBrowserBlocked(
             f"a smoke test tried a raw CDP connect to {url}, a personal Chrome's debug"
-            " port or no port. Set NETKEEPER_CDP_URL to an isolated Chrome on another port"
+            " port or no port. Set NETKEEP_CDP_URL to an isolated Chrome on another port"
         )
     return url
 
 
 #: #675 review: the ports a live service on this machine may listen on: the maintainer's
-#: netkeeper Chrome (9222) and netkeeper serve (8000). No test connects to either.
+#: netkeep Chrome (9222) and netkeep serve (8000). No test connects to either.
 LIVE_LOCAL_PORTS = frozenset({9222, 8000})
 
 

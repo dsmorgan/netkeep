@@ -46,7 +46,7 @@ const KIND_TITLE: Record<ArchiveKind, string> = {
 
 const KIND_EXPLANATION: Record<ArchiveKind, string> = {
   archive:
-    'This is the zip LinkedIn emails you. netkeeper reads it directly — connections, messages, ' +
+    'This is the zip LinkedIn emails you. netkeep reads it directly — connections, messages, ' +
     'and invitations — with no column mapping and no file to unzip by hand.',
   messages:
     'This is one file out of the full archive, not the whole zip, so only your message history ' +
@@ -77,15 +77,15 @@ type Guidance = { headline: string; body: string }
 const NOT_A_LINKEDIN_EXPORT: Guidance = {
   headline: "This doesn't look like a LinkedIn export",
   body:
-    'netkeeper looked for a Connections, messages, or Invitations table and found none. Make ' +
+    'netkeep looked for a Connections, messages, or Invitations table and found none. Make ' +
     'sure this is the zip LinkedIn emailed you, or one of Connections.csv, messages.csv, ' +
     'Invitations.csv extracted from it.',
 }
 
 const UNSAFE_MEMBER_PATH: Guidance = {
-  headline: 'This zip has a file netkeeper will not open',
+  headline: 'This zip has a file netkeep will not open',
   body:
-    "One of the files inside has a path netkeeper refuses to trust. That isn't how a real " +
+    "One of the files inside has a path netkeep refuses to trust. That isn't how a real " +
     'LinkedIn export is put together — request a fresh export from LinkedIn and try that ' +
     'download instead of this file.',
 }
@@ -93,14 +93,14 @@ const UNSAFE_MEMBER_PATH: Guidance = {
 const OVER_A_GUARD: Guidance = {
   headline: 'This file is bigger or stranger than a real LinkedIn export',
   body:
-    'netkeeper refused it before opening it, as a precaution — a real export is nowhere near ' +
+    'netkeep refused it before opening it, as a precaution — a real export is nowhere near ' +
     'this large or this densely compressed. If this genuinely is your export, request a fresh ' +
     'copy from LinkedIn and try that download.',
 }
 
 const NESTED_ZIP: Guidance = {
   headline: 'This zip has another zip inside it',
-  body: "That's one unzip too many for netkeeper to guess at safely — open this one and upload the file inside it instead of the outer zip.",
+  body: "That's one unzip too many for netkeep to guess at safely — open this one and upload the file inside it instead of the outer zip.",
 }
 
 const DAMAGED: Guidance = {
@@ -111,15 +111,15 @@ const DAMAGED: Guidance = {
 const ENCRYPTED: Guidance = {
   headline: 'This zip is password-protected',
   body:
-    'netkeeper cannot open it, and LinkedIn does not put a password on an export — so this is ' +
+    'netkeep cannot open it, and LinkedIn does not put a password on an export — so this is ' +
     'either a zip you made yourself or one from somewhere else. Upload the export as LinkedIn ' +
     'sent it.',
 }
 
 const MALFORMED_TABLE: Guidance = {
-  headline: 'netkeeper found the table it wanted but could not read it',
+  headline: 'netkeep found the table it wanted but could not read it',
   body:
-    'One of the tables inside is missing a column netkeeper needs, or is not readable as text ' +
+    'One of the tables inside is missing a column netkeep needs, or is not readable as text ' +
     'at all. If this file has been opened and re-saved by a spreadsheet, use the original ' +
     'download from LinkedIn instead.',
 }
@@ -138,7 +138,7 @@ const KNOWN_CODES: Record<ArchiveRefusalCode, Guidance> = {
 }
 
 /**
- * Never asserts what the file *is* — only that netkeeper couldn't use it — so
+ * Never asserts what the file *is* — only that netkeep couldn't use it — so
  * it stays honest for anything that reaches this screen without a code: a
  * failure from somewhere other than the archive endpoint's own refusals, or a
  * backend older than the code it sends. The backend's own text is always shown
@@ -146,7 +146,7 @@ const KNOWN_CODES: Record<ArchiveRefusalCode, Guidance> = {
  * do" lives when nothing above knows better.
  */
 const DEFAULT_ARCHIVE_ERROR: Guidance = {
-  headline: "netkeeper couldn't import this file",
+  headline: "netkeep couldn't import this file",
   body:
     "What it reported is below. If that doesn't say what to do, try downloading a fresh copy " +
     'from LinkedIn and use that, or double-check you picked the file this screen names.',
@@ -292,7 +292,7 @@ function summary(result: ArchiveImportResult): string {
   if (connections.rows > 0 && connections.skipped === connections.rows) {
     return (
       `Read ${connections.rows} ${plural(connections.rows, 'row')} in Connections.csv, but none ` +
-      'of them named anybody netkeeper could identify.'
+      'of them named anybody netkeep could identify.'
     )
   }
   return 'Nothing new — everything here was already there.'
@@ -358,7 +358,7 @@ function ConnectionsCard({ counts }: { counts: ArchiveConnectionCounts }) {
  *
  * `unfamiliarFiles` names every file read as message history under another
  * name (issue #74). It was imported, but LinkedIn exports its own assistants'
- * chat logs in the same shape, and one netkeeper does not know by name reads
+ * chat logs in the same shape, and one netkeep does not know by name reads
  * as conversations that add nothing. The note says which file to look at.
  */
 export function MessagesCard({
@@ -395,8 +395,7 @@ export function MessagesCard({
           <Note tone="warn" role="status">
             <p>
               {counts.no_owner} {plural(counts.no_owner, 'conversation')} could not be read because
-              netkeeper could not tell which participant was you. The rest of the file was still
-              read.
+              netkeep could not tell which participant was you. The rest of the file was still read.
             </p>
           </Note>
         )}
@@ -497,13 +496,13 @@ function ArchiveResult({
       {ignored.length > 0 && (
         <Note>
           <p className="font-medium">
-            netkeeper also found {ignored.length} other {plural(ignored.length, 'table')} in the
+            netkeep also found {ignored.length} other {plural(ignored.length, 'table')} in the
             export and didn&rsquo;t read {plural(ignored.length, 'it', 'them')}.
           </p>
           <p>
-            netkeeper reads Connections.csv, messages.csv, and Invitations.csv today; everything
-            else it recognized as a table is listed here, untouched: {ignored.join(', ')}. (A real
-            export usually has other files too — a profile file, assistant chat logs, anything that
+            netkeep reads Connections.csv, messages.csv, and Invitations.csv today; everything else
+            it recognized as a table is listed here, untouched: {ignored.join(', ')}. (A real export
+            usually has other files too — a profile file, assistant chat logs, anything that
             isn&rsquo;t a table — that don&rsquo;t show up in this list either way.)
           </p>
         </Note>

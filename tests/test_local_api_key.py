@@ -24,27 +24,27 @@ from sqlalchemy import Engine
 from starlette.routing import BaseRoute
 from typer.testing import CliRunner
 
-from netkeeper import paths
-from netkeeper.cli import app as cli
-from netkeeper.config import Settings
-from netkeeper.db import session_scope
-from netkeeper.logging_setup import (
+from netkeep import paths
+from netkeep.cli import app as cli
+from netkeep.config import Settings
+from netkeep.db import session_scope
+from netkeep.logging_setup import (
     RedactQueryFilter,
     log_file,
     remove_file_handler,
     setup_logging,
 )
-from netkeeper.redaction import strip_secrets
-from netkeeper.services import keychain, local_api_key
-from netkeeper.services.local_api_key import LocalApiKey
-from netkeeper.services.support_bundle import Level, build_bundle
-from netkeeper.services.users import ensure_local_user
-from netkeeper.web.app import create_app
-from netkeeper.web.security import OPEN_API_PATHS, RULE_LOCAL_KEY
+from netkeep.redaction import strip_secrets
+from netkeep.services import keychain, local_api_key
+from netkeep.services.local_api_key import LocalApiKey
+from netkeep.services.support_bundle import Level, build_bundle
+from netkeep.services.users import ensure_local_user
+from netkeep.web.app import create_app
+from netkeep.web.security import OPEN_API_PATHS, RULE_LOCAL_KEY
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 BASE = "http://127.0.0.1"
-COOKIE = "netkeeper_session_80"  # the client's base URL has no port: http's 80
+COOKIE = "netkeep_session_80"  # the client's base URL has no port: http's 80
 NOW = 1_800_000_000.0
 
 
@@ -231,7 +231,7 @@ async def test_a_wrong_credential_is_refused(
     forged = {"Cookie": f"{COOKIE}={LocalApiKey('guess').session_value()}"}
     assert (await anonymous.get("/api/v1/me", headers=forged)).status_code == 401
     # The right value under another port's name belongs to another server.
-    other_port = {"Cookie": f"netkeeper_session_8001={key.session_value()}"}
+    other_port = {"Cookie": f"netkeep_session_8001={key.session_value()}"}
     assert (await anonymous.get("/api/v1/me", headers=other_port)).status_code == 401
     # The key itself is no cookie.
     as_cookie = {"Cookie": f"{COOKIE}={key.key}"}
@@ -280,7 +280,7 @@ async def test_the_other_checks_still_run_with_a_good_credential(
     async with httpx.AsyncClient(
         transport=transport, base_url="http://evil.example:8000"
     ) as rebound:
-        cookie = {"Cookie": f"netkeeper_session_8000={key.session_value()}"}
+        cookie = {"Cookie": f"netkeep_session_8000={key.session_value()}"}
         assert (await rebound.get("/api/v1/me", headers=cookie)).status_code == 421
 
 
@@ -319,7 +319,7 @@ async def test_the_first_browser_claims_the_session_once(
     async with httpx.AsyncClient(transport=transport, base_url=BASE) as second:
         refused = await second.post("/api/v1/session/claim", headers=CSRF)
         assert refused.status_code == 403
-        assert "netkeeper open" in refused.json()["detail"]
+        assert "netkeep open" in refused.json()["detail"]
         assert "set-cookie" not in refused.headers
 
 
@@ -357,7 +357,7 @@ async def test_the_cookie_survives_a_restart(app: FastAPI) -> None:
             assert (await client.get("/api/v1/me", headers=headers)).status_code == 200
 
 
-def test_netkeeper_open_prints_a_link_the_server_accepts() -> None:
+def test_netkeep_open_prints_a_link_the_server_accepts() -> None:
     result = CliRunner().invoke(cli, ["open", "--port", "8123", "--link-only"])
     assert result.exit_code == 0, result.output
     [link] = re.findall(r"http://\S+", result.output)
@@ -367,17 +367,17 @@ def test_netkeeper_open_prints_a_link_the_server_accepts() -> None:
     assert key.key not in result.output
 
 
-def test_netkeeper_open_says_so_when_the_keychain_refuses(memory_keyring: MemoryKeyring) -> None:
+def test_netkeep_open_says_so_when_the_keychain_refuses(memory_keyring: MemoryKeyring) -> None:
     memory_keyring.broken = True
     result = CliRunner().invoke(cli, ["open"])
     assert result.exit_code == 1
     # Not a dead end (#618 review): it says how to connect anyway, and how to fix it.
     assert "the Keychain refused the local API key" in result.output
-    assert "restart netkeeper serve, then load the UI" in result.output
+    assert "restart netkeep serve, then load the UI" in result.output
     assert "unlock your login keychain" in result.output
 
 
-def test_netkeeper_open_points_the_link_at_a_base_url_given() -> None:
+def test_netkeep_open_points_the_link_at_a_base_url_given() -> None:
     result = CliRunner().invoke(cli, ["open", "--base-url", "http://localhost:5173", "--link-only"])
     assert result.exit_code == 0, result.output
     [link] = re.findall(r"http://\S+", result.output)
@@ -404,8 +404,8 @@ def test_the_connect_code_never_reaches_the_access_log() -> None:
 
 def test_the_bundles_secret_pass_strips_the_credentials() -> None:
     text = (
-        "Cookie: netkeeper_session_8000=deadbeef\n"
-        "set netkeeper_session_8000=cafef00d\n"
+        "Cookie: netkeep_session_8000=deadbeef\n"
+        "set netkeep_session_8000=cafef00d\n"
         "Authorization: Bearer the-local-key\n"
     )
     stripped = strip_secrets(text)
@@ -474,6 +474,30 @@ async def test_get_session_sets_a_valid_cookie_again(
     assert "SameSite=strict" in set_cookie
 
 
+async def test_the_cookie_from_before_the_rename_still_connects_and_is_renamed(
+    running_app: FastAPI, anonymous: httpx.AsyncClient
+) -> None:
+    """``netkeeper_session_<port>`` holds the same HMAC, so it works for one release, and
+    the UI's ``GET /session`` sets the new name beside it (#661)."""
+    value = _key(running_app).session_value()
+    old = {"Cookie": f"netkeeper_session_80={value}"}
+    assert (await anonymous.get("/api/v1/me", headers=old)).status_code == 200
+    refreshed = await anonymous.get("/api/v1/session", headers=old)
+    assert refreshed.json()["connected"] is True
+    assert refreshed.headers["set-cookie"].startswith(f"{COOKIE}={value};")
+    forged = {"Cookie": f"netkeeper_session_80={LocalApiKey('guess').session_value()}"}
+    assert (await anonymous.get("/api/v1/me", headers=forged)).status_code == 401
+    other_port = {"Cookie": f"netkeeper_session_8001={value}"}
+    assert (await anonymous.get("/api/v1/me", headers=other_port)).status_code == 401
+
+
+def test_the_session_label_is_pinned_through_the_rename() -> None:
+    """A new HMAC label would disconnect every browser at the upgrade (#661)."""
+    assert local_api_key._SESSION_LABEL == b"netkeeper-ui-session"
+    assert local_api_key.COOKIE_PREFIX == "netkeep_session"
+    assert local_api_key.LEGACY_COOKIE_PREFIX == "netkeeper_session"
+
+
 async def test_get_session_sets_no_cookie_without_a_valid_one(
     running_app: FastAPI, anonymous: httpx.AsyncClient
 ) -> None:
@@ -505,14 +529,14 @@ async def test_the_open_command_names_a_data_directory_that_is_not_the_default(
     command = (await anonymous.get("/api/v1/session")).json()["open_command"]
     # The test's data directory is not the default, and the client is not on web.port.
     assert command == (
-        f"NETKEEPER_DATA={shlex.quote(str(paths.data_dir()))} netkeeper open"
+        f"NETKEEP_DATA={shlex.quote(str(paths.data_dir()))} netkeep open"
         " --base-url http://127.0.0.1"
     )
     monkeypatch.setattr(paths, "is_default_data_dir", lambda _: True)
-    monkeypatch.setenv("NETKEEPER_KEYCHAIN_SERVICE", "netkeeper-alt")
-    assert local_api_key.open_command() == "NETKEEPER_KEYCHAIN_SERVICE=netkeeper-alt netkeeper open"
-    monkeypatch.delenv("NETKEEPER_KEYCHAIN_SERVICE")
-    assert local_api_key.open_command() == "netkeeper open"
+    monkeypatch.setenv("NETKEEP_KEYCHAIN_SERVICE", "netkeep-alt")
+    assert local_api_key.open_command() == "NETKEEP_KEYCHAIN_SERVICE=netkeep-alt netkeep open"
+    monkeypatch.delenv("NETKEEP_KEYCHAIN_SERVICE")
+    assert local_api_key.open_command() == "netkeep open"
 
 
 async def test_the_open_command_has_no_base_url_on_the_configured_address(
@@ -527,7 +551,7 @@ async def test_the_open_command_has_no_base_url_on_the_configured_address(
 def test_a_key_made_at_once_by_two_processes_is_read_back(
     memory_keyring: MemoryKeyring, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``netkeeper open`` and the first ``serve`` both make a key: each goes on with the
+    """``netkeep open`` and the first ``serve`` both make a key: each goes on with the
     one the Keychain kept, not the one it wrote (#618 review)."""
     real_set = keychain.set_install_secret
 
@@ -563,7 +587,7 @@ async def test_every_route_needs_the_key_unless_it_is_pinned_open(
     if built:
         (dist / "assets").mkdir(parents=True)
         (dist / "index.html").write_text("<!doctype html>")
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", str(dist))
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", str(dist))
     app = create_app(Settings(), engine=bare_engine)
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)

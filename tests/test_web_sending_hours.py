@@ -10,12 +10,12 @@ from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.db import session_scope
-from netkeeper.models import User, UserKind
-from netkeeper.services import sending_hours
-from netkeeper.services.settings_kv import set_setting
+from netkeep.db import session_scope
+from netkeep.models import User, UserKind
+from netkeep.services import sending_hours
+from netkeep.services.settings_kv import set_setting
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 URL = "/api/v1/settings/sending-hours"
 
 

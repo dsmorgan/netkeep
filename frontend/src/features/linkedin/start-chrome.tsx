@@ -16,17 +16,17 @@ import {
 } from './start-chrome-copy'
 
 /**
- * **Start Chrome** (#599): starts netkeeper's own Chrome (ADR 0012), on its dedicated
- * profile and debug port, with netkeeper in an app window, or opens that window in it
+ * **Start Chrome** (#599): starts netkeep's own Chrome (ADR 0012), on its dedicated
+ * profile and debug port, with netkeep in an app window, or opens that window in it
  * when it's running. It calls the one launcher (`POST /linkedin/browser/start`), which
  * refuses rather than touch any other Chrome, and says how it went from the
  * `browser.launch` event, refusals included, with what to do.
  *
- * Whether netkeeper's Chrome is running is `GET /linkedin/browser/health`'s reading of
+ * Whether netkeep's Chrome is running is `GET /linkedin/browser/health`'s reading of
  * its profile's lock file. The button is disabled while a run holds the browser and
  * while a launch is in flight, so one press is one launch. It isn't offered at all
  * when this process can't launch (not `serve`, or not the local owner). `compact`
- * (the dashboard) shows it only while netkeeper's Chrome isn't running.
+ * (the dashboard) shows it only while netkeep's Chrome isn't running.
  */
 export function StartChrome({ compact = false }: { compact?: boolean }) {
   const queryClient = useQueryClient()
@@ -71,7 +71,7 @@ export function StartChrome({ compact = false }: { compact?: boolean }) {
       setTaskId(null)
       setSaid({
         tone: 'warn',
-        text: "netkeeper didn't hear how the launch went. Look for netkeeper's Chrome window; if there's none, try again.",
+        text: "netkeep didn't hear how the launch went. Look for netkeep's Chrome window; if there's none, try again.",
       })
       void queryClient.invalidateQueries({ queryKey: linkedinKeys.browserHealth() })
     }, LAUNCH_WAIT_MS)
@@ -88,11 +88,11 @@ export function StartChrome({ compact = false }: { compact?: boolean }) {
       {!compact && (
         <p>
           {running
-            ? `netkeeper's Chrome is running (pid ${pid ?? 'unknown'}). Start Chrome opens netkeeper in it again.`
-            : "netkeeper's Chrome isn't running."}
+            ? `netkeep's Chrome is running (pid ${pid ?? 'unknown'}). Start Chrome opens netkeep in it again.`
+            : "netkeep's Chrome isn't running."}
         </p>
       )}
-      {compact && !running && <p>netkeeper's Chrome isn't running.</p>}
+      {compact && !running && <p>netkeep's Chrome isn't running.</p>}
       <div className="flex flex-wrap items-center gap-2">
         <Button
           size="sm"
@@ -115,7 +115,7 @@ export function StartChrome({ compact = false }: { compact?: boolean }) {
         >
           <p>{said.text}</p>
           {said.detail !== undefined && said.detail !== '' && (
-            <p className="text-xs text-muted-foreground">netkeeper said: {said.detail}</p>
+            <p className="text-xs text-muted-foreground">netkeep said: {said.detail}</p>
           )}
         </div>
       )}

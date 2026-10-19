@@ -19,11 +19,11 @@ from fastapi import FastAPI
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.config import Settings
-from netkeeper.crm import inbox_apply
-from netkeeper.db import session_scope
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.models import (
+from netkeep.config import Settings
+from netkeep.crm import inbox_apply
+from netkeep.db import session_scope
+from netkeep.linkedin.classify import Outcome
+from netkeep.models import (
     Mailbox,
     MailboxStatus,
     MessageStatus,
@@ -34,24 +34,24 @@ from netkeeper.models import (
     TestSend,
     User,
 )
-from netkeeper.scoping import get_scoped, scoped
-from netkeeper.services import heat as heat_service
-from netkeeper.services import poll_status as service
-from netkeeper.services import route_breaker, runs
-from netkeeper.services.campaign_sender import DRAFTS_POLL_EVERY, GmailSender
-from netkeeper.services.linkedin_accounts import (
+from netkeep.scoping import get_scoped, scoped
+from netkeep.services import heat as heat_service
+from netkeep.services import poll_status as service
+from netkeep.services import route_breaker, runs
+from netkeep.services.campaign_sender import DRAFTS_POLL_EVERY, GmailSender
+from netkeep.services.linkedin_accounts import (
     arm_scheduled_runs,
     ensure_account,
     pause_schedule,
 )
-from netkeeper.services.linkedin_session import flag_session
-from netkeeper.services.scheduler import (
+from netkeep.services.linkedin_session import flag_session
+from netkeep.services.scheduler import (
     DEFAULT_SCHEDULES,
     JobKind,
     establish_schedule,
     stored_due,
 )
-from netkeeper.services.settings_kv import set_setting
+from netkeep.services.settings_kv import set_setting
 
 #: 11:00 in New York, inside the default LinkedIn active hours (08:30 to 21:30).
 NOW = datetime(2026, 9, 16, 15, 0, tzinfo=UTC)
@@ -238,7 +238,7 @@ def test_a_connected_mailbox_nobody_armed_is_off(world: World) -> None:
     status = world.status()
 
     assert status.checks[0].state is S.OFF
-    assert status.checks[0].reason == "No mailbox is armed, so netkeeper doesn't read Gmail"
+    assert status.checks[0].reason == "No mailbox is armed, so netkeep doesn't read Gmail"
     assert status.mailboxes[0].state is S.OFF
     assert not status.mailboxes[0].armed
 
@@ -398,7 +398,7 @@ def test_a_mailbox_with_a_locked_keychain_says_so_instead_of_due(world: World) -
 
     assert [p.state for p in status.mailboxes] == [S.SCHEDULED, S.BLOCKED]
     assert status.mailboxes[1].reason == (
-        "The Keychain is locked, so netkeeper can't read locked@example.test;"
+        "The Keychain is locked, so netkeep can't read locked@example.test;"
         " unlock it and the next minute's check reads it"
     )
     assert status.checks[0].state is S.SCHEDULED
@@ -464,7 +464,7 @@ def test_a_test_draft_to_verify_keeps_the_drafts_poll_busy(world: World) -> None
 
 
 def test_a_sent_draft_to_verify_keeps_the_drafts_poll_busy(world: World) -> None:
-    """#510: a draft netkeeper saw sent is still searched for until the check passes."""
+    """#510: a draft netkeep saw sent is still searched for until the check passes."""
     for session, user in world.write():
         mailbox = _mailbox(session, user, polled=NOW)
         campaign = factories.make_campaign(session, user, mailbox_id=mailbox.id)
@@ -842,7 +842,7 @@ def test_a_tripped_inbox_breaker_blocks_the_inbox_poll_only(world: World) -> Non
     assert inbox.next_at is None
     reason = inbox.reason or ""
     assert "messaging page changed" in reason
-    assert "netkeeper linkedin inbox" in reason
+    assert "netkeep linkedin inbox" in reason
     assert "LinkedIn steps" not in reason  # #431's hold text says that, when true
     for key in ("linkedin_enrich", "linkedin_incremental_sync"):
         assert checks[key].state in (S.SCHEDULED, S.DUE)
@@ -884,7 +884,7 @@ def test_a_tripped_inbox_breaker_after_a_fresh_poll_has_no_hold_text(world: Worl
     reason = world.read()["linkedin_inbox"].reason or ""
 
     assert reason.startswith("The LinkedIn inbox poll is stopped after two polls found")
-    assert "netkeeper linkedin inbox" in reason
+    assert "netkeep linkedin inbox" in reason
     assert "LinkedIn steps" not in reason and "held" not in reason
 
 
@@ -913,7 +913,7 @@ def test_a_tripped_inbox_owner_breaker_blocks_the_inbox_poll_and_names_the_fix(
     assert "sign back in to yours" in reason
     assert (
         "otherwise click **Forget inbox owner** under Posture on the Settings page, or run"
-        " `netkeeper linkedin inbox-forget-owner`"
+        " `netkeep linkedin inbox-forget-owner`"
     ) in reason
     assert checks["linkedin_enrich"].state in (S.SCHEDULED, S.DUE)
 
@@ -921,7 +921,7 @@ def test_a_tripped_inbox_owner_breaker_blocks_the_inbox_poll_and_names_the_fix(
 def test_the_inbox_owner_popover_names_the_self_contact_when_its_urn_is_set(
     world: World,
 ) -> None:
-    from netkeeper.crm.self_contact import ensure_self_contact
+    from netkeep.crm.self_contact import ensure_self_contact
 
     for session, user in world.write():
         _trip_owner(session, user, _arm_linkedin(session, user, kinds=(JobKind.INBOX,)))
@@ -945,7 +945,7 @@ def test_one_owner_mismatch_leaves_the_inbox_poll_scheduled(world: World) -> Non
 
 
 def test_a_corrupt_inbox_owner_row_blocks_the_inbox_poll_and_says_so(world: World) -> None:
-    from netkeeper.services.settings_kv import set_setting
+    from netkeep.services.settings_kv import set_setting
 
     for session, user in world.write():
         account_id = _arm_linkedin(session, user, kinds=(JobKind.INBOX,))

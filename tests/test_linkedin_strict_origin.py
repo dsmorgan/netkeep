@@ -1,4 +1,4 @@
-"""``netkeeper.linkedin.strict_origin``: closing the urlsplit-vs-browser gap (F3).
+"""``netkeep.linkedin.strict_origin``: closing the urlsplit-vs-browser gap (F3).
 
 A reviewer found that ``rehearse._require_neutral`` and ``fetch._require_fetchable_origin``
 both trusted ``urlsplit`` alone, and both could be fooled the same way: a backslash
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from netkeeper.linkedin.strict_origin import NotAStrictOrigin, Origin, parse_strict_origin
+from netkeep.linkedin.strict_origin import NotAStrictOrigin, Origin, parse_strict_origin
 
 # --- the attack this module exists to close -----------------------------------
 

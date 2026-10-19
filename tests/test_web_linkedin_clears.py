@@ -1,6 +1,6 @@
 """``/linkedin``: the confirmed session-flag and heat clears, and browser health (#181).
 
-The clears are the web half of ``netkeeper linkedin clear-flag`` and of spec
+The clears are the web half of ``netkeep linkedin clear-flag`` and of spec
 9.7's manual heat clear. Both clear a LinkedIn safety signal, so each needs
 ``confirm: true`` and the exact state the person was shown, and refuses
 anything else without writing. Browser health reads only what was recorded;
@@ -19,14 +19,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from test_runs_serve import HEADERS
 
-from netkeeper.config import Settings
-from netkeeper.crm.inbox_apply import record_short_first_poll, short_first_poll
-from netkeeper.db import session_scope
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.models import SyncRunKind, SyncRunStatus, SyncRunTrigger, User, UserKind
-from netkeeper.services import heat, runs
-from netkeeper.services.linkedin_accounts import ensure_account
-from netkeeper.services.linkedin_session import (
+from netkeep.config import Settings
+from netkeep.crm.inbox_apply import record_short_first_poll, short_first_poll
+from netkeep.db import session_scope
+from netkeep.linkedin.classify import Outcome
+from netkeep.models import SyncRunKind, SyncRunStatus, SyncRunTrigger, User, UserKind
+from netkeep.services import heat, runs
+from netkeep.services.linkedin_accounts import ensure_account
+from netkeep.services.linkedin_session import (
     SESSION_FLAG_KEY,
     FlagClearRefused,
     clear_confirmed_flag,
@@ -35,7 +35,7 @@ from netkeeper.services.linkedin_session import (
     same_instant,
     session_flag,
 )
-from netkeeper.services.settings_kv import set_setting
+from netkeep.services.settings_kv import set_setting
 
 FLAG_URL = "/api/v1/linkedin/session-flag/clear"
 HEAT_URL = "/api/v1/linkedin/heat/clear"
@@ -188,7 +188,7 @@ async def test_clear_flag_leaves_a_warning_in_the_log(
     _flag(running_app)
     seen = (await client.get("/api/v1/linkedin/status")).json()
 
-    with caplog.at_level(logging.WARNING, logger="netkeeper.services.linkedin_session"):
+    with caplog.at_level(logging.WARNING, logger="netkeep.services.linkedin_session"):
         response = await client.post(
             FLAG_URL,
             json={
@@ -272,7 +272,7 @@ async def test_heat_clear_leaves_a_warning_in_the_log(
     _raise_heat(running_app, datetime.now(UTC))
     seen = (await client.get("/api/v1/linkedin/heat")).json()
 
-    with caplog.at_level(logging.WARNING, logger="netkeeper.services.heat"):
+    with caplog.at_level(logging.WARNING, logger="netkeep.services.heat"):
         response = await client.post(
             HEAT_URL,
             json={"confirm": True, "last_raised_at": seen["last_raised_at"]},
@@ -368,7 +368,7 @@ async def test_browser_health_says_unknown_before_anything_checked(
 
     assert health["session_status"] == "unknown"
     assert health["session_summary"] == "not checked yet"
-    assert any("netkeeper preflight" in w for w in health["session_warnings"])
+    assert any("netkeep preflight" in w for w in health["session_warnings"])
     assert health["chrome_unreachable_at"] is None
     assert health["can_start_runs"] is False
     assert health["running_run_id"] is None

@@ -1,8 +1,8 @@
-"""``netkeeper linkedin sync|enrich|runs|run|cancel|schedule`` (P2-10).
+"""``netkeep linkedin sync|enrich|runs|run|cancel|schedule`` (P2-10).
 
-The supervised first run at CP4 is ``netkeeper linkedin sync`` then
-``netkeeper linkedin enrich --max-visits 5``, by hand, while scheduled runs stay
-disarmed; ``netkeeper linkedin schedule arm`` afterwards is a separate,
+The supervised first run at CP4 is ``netkeep linkedin sync`` then
+``netkeep linkedin enrich --max-visits 5``, by hand, while scheduled runs stay
+disarmed; ``netkeep linkedin schedule arm`` afterwards is a separate,
 confirmed act. The browser here is a fake Chrome (``run_fakes``): nothing
 attaches to a real one and nothing leaves this machine.
 """
@@ -20,31 +20,31 @@ from run_fakes import ConnectionsContext, fake_provider, fast_profiles, no_sleep
 from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
 
-from netkeeper import cli as cli_module
-from netkeeper import migrations
-from netkeeper.cli import app as cli
-from netkeeper.config import Settings
-from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.models import SyncRunKind, SyncRunStatus, SyncRunTrigger, User
-from netkeeper.scoping import install_scope_guard
-from netkeeper.services import budgets, enrich_plan, route_breaker, runs
-from netkeeper.services.linkedin_accounts import (
+from netkeep import cli as cli_module
+from netkeep import migrations
+from netkeep.cli import app as cli
+from netkeep.config import Settings
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+from netkeep.linkedin.classify import Outcome
+from netkeep.models import SyncRunKind, SyncRunStatus, SyncRunTrigger, User
+from netkeep.scoping import install_scope_guard
+from netkeep.services import budgets, enrich_plan, route_breaker, runs
+from netkeep.services.linkedin_accounts import (
     account_id_for,
     ensure_account,
     schedule_paused,
     scheduled_runs_armed,
 )
-from netkeeper.services.linkedin_session import flag_session
-from netkeeper.services.scheduler import (
+from netkeep.services.linkedin_session import flag_session
+from netkeep.services.scheduler import (
     SERVED_SCHEDULES,
     JobKind,
     stored_due,
     sync_account_schedule,
 )
-from netkeeper.services.settings_kv import delete_setting, set_setting
-from netkeeper.services.users import ensure_local_user
-from netkeeper.worker import BrowserWorker
+from netkeep.services.settings_kv import delete_setting, set_setting
+from netkeep.services.users import ensure_local_user
+from netkeep.worker import BrowserWorker
 
 #: These tests start runs by hand at whatever time the suite runs (#213).
 pytestmark = pytest.mark.usefixtures("inside_active_hours")
@@ -56,7 +56,7 @@ NOW = datetime(2026, 9, 23, 15, 0, tzinfo=UTC)
 def cli_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[sessionmaker[Session]]:
     """A migrated database with the local user, under tmp_path only."""
     url = database_url(tmp_path)
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     engine = make_engine(url)
     migrations.upgrade(engine)
     factory = make_session_factory(engine)
@@ -264,7 +264,7 @@ def test_reset_breaker_asks_before_it_takes_the_write_lock(
         return True
 
     monkeypatch.setattr("typer.confirm", confirm_while_serve_writes)
-    monkeypatch.setattr("netkeeper.db.SQLITE_BUSY_TIMEOUT_MS", 100)
+    monkeypatch.setattr("netkeep.db.SQLITE_BUSY_TIMEOUT_MS", 100)
 
     result = CliRunner().invoke(cli, ["linkedin", "schedule", "reset-breaker"])
 
@@ -429,7 +429,7 @@ def test_enrich_says_it_can_show_up_in_who_viewed_your_profile_before_it_starts(
     async def no_run(*args: object, **kwargs: object) -> None:
         return None
 
-    monkeypatch.setattr("netkeeper.cli._execute_printing", no_run)
+    monkeypatch.setattr("netkeep.cli._execute_printing", no_run)
 
     result = CliRunner().invoke(cli, ["linkedin", "enrich", "--max-visits", "5"])
 
@@ -502,7 +502,7 @@ def test_runs_run_and_cancel(cli_db: sessionmaker[Session]) -> None:
 
 
 def test_a_run_shows_its_hidden_members(cli_db: sessionmaker[Session]) -> None:
-    """#515: ``netkeeper linkedin run`` shows a full sync's hidden count and its note."""
+    """#515: ``netkeep linkedin run`` shows a full sync's hidden count and its note."""
     with session_scope(cli_db, write=True) as session:
         user = _user(session)
         run_id = runs.create_run(
@@ -532,7 +532,7 @@ def test_resuming_an_enrichment_shows_the_profile_view_notice_before_it_starts(
     async def no_run(*args: object, **kwargs: object) -> None:
         return None
 
-    monkeypatch.setattr("netkeeper.cli._execute_printing", no_run)
+    monkeypatch.setattr("netkeep.cli._execute_printing", no_run)
     with session_scope(cli_db, write=True) as session:
         user = _user(session)
         old = runs.create_run(
@@ -611,7 +611,7 @@ def test_arming_asks_before_it_takes_the_write_lock(
         return True
 
     monkeypatch.setattr("typer.confirm", confirm_while_serve_writes)
-    monkeypatch.setattr("netkeeper.db.SQLITE_BUSY_TIMEOUT_MS", 100)
+    monkeypatch.setattr("netkeep.db.SQLITE_BUSY_TIMEOUT_MS", 100)
 
     result = CliRunner().invoke(cli, ["linkedin", "schedule", "arm"])
 
@@ -640,7 +640,7 @@ def test_an_unreadable_schema_keys_the_lock_by_account_one(
     programming error; either way preflight keys the lock by account 1, not a crash."""
     from sqlalchemy import exc
 
-    from netkeeper.linkedin.activity_lock import SINGLE_ACCOUNT_KEY
+    from netkeep.linkedin.activity_lock import SINGLE_ACCOUNT_KEY
 
     def schema_too_old(*args: object) -> int:
         raise getattr(exc, error)("SELECT ...", {}, Exception("no such column"))
@@ -652,7 +652,7 @@ def test_an_unreadable_schema_keys_the_lock_by_account_one(
 def test_the_lock_key_is_the_local_users_account(cli_db: sessionmaker[Session]) -> None:
     with session_scope(cli_db, write=True) as session:
         account = ensure_account(session, _user(session)).id
-    from netkeeper.linkedin.activity_lock import account_key
+    from netkeep.linkedin.activity_lock import account_key
 
     assert cli_module._browser_lock_key() == account_key(account)
     provider = cli_module._provider(Settings())
@@ -759,7 +759,7 @@ def test_schedule_status_shows_the_contact_info_breaker(cli_db: sessionmaker[Ses
     tripped = runner.invoke(cli, ["linkedin", "schedule", "status"]).output
     assert (
         "Contact info breaker: tripped, 3 of 3 Contact-info-lost enrich runs in a row;"
-        " scheduled enrichment runs are skipped (`netkeeper linkedin schedule reset-breaker`)"
+        " scheduled enrichment runs are skipped (`netkeep linkedin schedule reset-breaker`)"
     ) in tripped
 
 
@@ -829,7 +829,7 @@ def test_schedule_status_shows_the_inbox_breaker(cli_db: sessionmaker[Session]) 
     tripped = runner.invoke(cli, ["linkedin", "schedule", "status"]).output
     assert (
         "inbox breaker: tripped, 2 of 2 unreadable inbox runs in a row;"
-        " scheduled inbox runs are skipped (`netkeeper linkedin schedule reset-breaker`)"
+        " scheduled inbox runs are skipped (`netkeep linkedin schedule reset-breaker`)"
     ) in tripped
     # The connections lines are not the inbox's.
     assert "route-changed breaker: 0 of 2 route_changed connections runs in a row" in tripped
@@ -885,12 +885,12 @@ def test_schedule_status_shows_the_inbox_owner_breaker_and_its_fix(
     tripped = runner.invoke(cli, ["linkedin", "schedule", "status"]).output
     assert (
         "inbox owner breaker: tripped, 2 of 2 owner_mismatch inbox runs in a row;"
-        " scheduled inbox runs are skipped (`netkeeper linkedin schedule reset-breaker`)"
+        " scheduled inbox runs are skipped (`netkeep linkedin schedule reset-breaker`)"
     ) in tripped
     assert (
         "to fix the mailbox mismatch: if Chrome is signed in to another LinkedIn account" in tripped
     )
-    assert "netkeeper linkedin inbox-forget-owner" in tripped
+    assert "netkeep linkedin inbox-forget-owner" in tripped
     # The unreadable-page breaker is a different line and stays clear.
     assert "inbox breaker: 0 of 2 unreadable inbox runs in a row" in tripped
 

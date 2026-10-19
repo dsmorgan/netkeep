@@ -6,7 +6,7 @@ Two halves, on the same fixtures:
   handler (``scheduled_runs._auto_send_handler``) and checks its outcome, the words it
   logs, the runs it records, and the hold it writes. These expectations were written
   before the handler's checks became shared functions and pass unchanged after.
-- **The outlook agrees.** :func:`netkeeper.services.auto_send_outlook.outlook` reads the
+- **The outlook agrees.** :func:`netkeep.services.auto_send_outlook.outlook` reads the
   same checks, in the same order, without writing anything, and names the same reason.
 
 No test here touches a browser, LinkedIn, or the network.
@@ -29,10 +29,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from test_linkedin_steps import LINKEDIN, Lane, make_lane
 
-from netkeeper.config import LinkedInSettings, Settings
-from netkeeper.db import session_scope
-from netkeeper.linkedin.messaging import MessageOutcome, MessageOutcomeKind
-from netkeeper.models import (
+from netkeep.config import LinkedInSettings, Settings
+from netkeep.db import session_scope
+from netkeep.linkedin.messaging import MessageOutcome, MessageOutcomeKind
+from netkeep.models import (
     CampaignStep,
     StepMode,
     SyncRun,
@@ -42,8 +42,8 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.scoping import scoped
-from netkeeper.services import (
+from netkeep.scoping import scoped
+from netkeep.services import (
     auto_send_outlook,
     budgets,
     linkedin_steps,
@@ -52,17 +52,17 @@ from netkeeper.services import (
     scheduler,
     ui_settings,
 )
-from netkeeper.services import heat as heat_service
-from netkeeper.services.auto_send_outlook import Wait
-from netkeeper.services.budgets import ActionClass
-from netkeeper.services.linkedin_accounts import (
+from netkeep.services import heat as heat_service
+from netkeep.services.auto_send_outlook import Wait
+from netkeep.services.budgets import ActionClass
+from netkeep.services.linkedin_accounts import (
     arm_scheduled_runs,
     disarm_scheduled_runs,
     ensure_account,
     pause_schedule,
 )
-from netkeeper.services.scheduled_runs import auto_send_off
-from netkeeper.services.settings_kv import get_setting, set_setting
+from netkeep.services.scheduled_runs import auto_send_off
+from netkeep.services.settings_kv import get_setting, set_setting
 
 AUTO = Settings(
     campaigns=replace(Settings().campaigns, linkedin_auto_send=True),
@@ -157,7 +157,7 @@ async def fire(
     ctx = scheduler.JobContext(lane.user_id, _account(lane), scheduler.JobKind.AUTO_SEND, at, False)
     before = {run.id for run in lane.runs()}
     caplog.clear()
-    with caplog.at_level(logging.INFO, logger="netkeeper.services.scheduled_runs"):
+    with caplog.at_level(logging.INFO, logger="netkeep.services.scheduled_runs"):
         outcome = await handler(ctx)
     prefix = "scheduled auto-send claimed nothing: "
     words = [
@@ -265,7 +265,7 @@ def _prefill_open(lane: Lane) -> None:
 
 
 def _sending_hours_closed(lane: Lane) -> None:
-    from netkeeper.services import sending_hours
+    from netkeep.services import sending_hours
 
     lane.write(
         lambda s, u: sending_hours.write(
@@ -459,8 +459,8 @@ def test_the_outlook_reads_the_gate(lane: Lane, state: str) -> None:
 
 
 def test_the_outlook_reads_the_session_flag(lane: Lane) -> None:
-    from netkeeper.linkedin.classify import Outcome
-    from netkeeper.services.linkedin_session import flag_session
+    from netkeep.linkedin.classify import Outcome
+    from netkeep.services.linkedin_session import flag_session
 
     lane.enroll(contact=dict(CONTACT))
     _scheduled(lane)
@@ -703,7 +703,7 @@ async def test_a_gate_skip_with_auto_send_off_is_quiet(
     _scheduled(lane)
     _hot(lane)
     user = lane.read(lambda s, u: u)
-    with caplog.at_level(logging.DEBUG, logger="netkeeper.services.scheduler"):
+    with caplog.at_level(logging.DEBUG, logger="netkeep.services.scheduler"):
         result = await scheduler.poll_and_fire(
             lane.factory,
             user,
@@ -776,10 +776,10 @@ async def test_the_schedule_gives_the_outlook_with_auto_send_on(
     import httpx
     from conftest import _copy_template
 
-    from netkeeper.web.app import create_app
+    from netkeep.web.app import create_app
 
     _copy_template(_migrated_template, tmp_path / "bare")
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", str(tmp_path / "no-dist"))
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", str(tmp_path / "no-dist"))
     app = create_app(AUTO, engine=bare_engine)
     async with app.router.lifespan_context(app):
         factory = app.state.session_factory
@@ -810,13 +810,13 @@ async def test_the_schedule_gives_the_outlook_with_auto_send_on(
 
 @pytest.fixture
 def cli_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> Any:
-    from netkeeper import migrations
-    from netkeeper.db import database_url, make_engine, make_session_factory
-    from netkeeper.scoping import install_scope_guard
-    from netkeeper.services.users import ensure_local_user
+    from netkeep import migrations
+    from netkeep.db import database_url, make_engine, make_session_factory
+    from netkeep.scoping import install_scope_guard
+    from netkeep.services.users import ensure_local_user
 
     url = database_url(tmp_path)
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     engine = make_engine(url)
     migrations.upgrade(engine)
     factory = make_session_factory(engine)
@@ -830,7 +830,7 @@ def cli_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> Any:
 def _status(*args: str) -> str:
     from typer.testing import CliRunner
 
-    from netkeeper.cli import app as cli
+    from netkeep.cli import app as cli
 
     result = CliRunner().invoke(cli, [*args, "linkedin", "schedule", "status"])
     assert result.exit_code == 0, result.output
@@ -849,7 +849,7 @@ def test_schedule_status_says_auto_send_is_off(cli_db: Any) -> None:
 def test_schedule_status_gives_the_next_check_and_the_last(cli_db: Any, tmp_path: Any) -> None:
     import random
 
-    from netkeeper.models.base import utcnow
+    from netkeep.models.base import utcnow
 
     config = tmp_path / "auto.toml"
     config.write_text('[campaigns]\nlinkedin_auto_send = true\n[linkedin]\ntimezone = "UTC"\n')
@@ -879,7 +879,7 @@ def test_schedule_status_gives_the_next_check_and_the_last(cli_db: Any, tmp_path
     assert f"auto-send: on; next check {due:%Y-%m-%d %H:%M} UTC" in output
     assert (
         "  next check: auto-send is held: a message bubble is open in Chrome. Fix it in Chrome,"
-        " then run `netkeeper linkedin auto-send-resume`"
+        " then run `netkeep linkedin auto-send-resume`"
     ) in output
     assert "  last check: none recorded yet" in output
 
@@ -948,7 +948,7 @@ def test_the_words_carry_the_times() -> None:
 
 
 def _hours(enabled: bool) -> Callable[[Lane], None]:
-    from netkeeper.services import sending_hours
+    from netkeep.services import sending_hours
 
     def write(lane: Lane) -> None:
         lane.write(
@@ -1029,8 +1029,8 @@ def _attributes(function: Any, owner: str) -> set[str]:
 def test_every_refusal_the_claim_gives_about_the_user_maps() -> None:
     """Read from the code: every ``Refusal`` member ``user_refusal`` names, and every
     ``ChannelReason`` the LinkedIn guard names. A new one fails here until it is mapped."""
-    from netkeeper.services import campaign_guards
-    from netkeeper.services.campaign_guards import ChannelReason
+    from netkeep.services import campaign_guards
+    from netkeep.services.campaign_guards import ChannelReason
 
     refusals = {
         linkedin_steps.Refusal[name] for name in _attributes(linkedin_steps.user_refusal, "Refusal")
@@ -1041,7 +1041,7 @@ def test_every_refusal_the_claim_gives_about_the_user_maps() -> None:
     assert refusals and browser
     assert set(auto_send_outlook.REFUSALS) == refusals | browser
     # And the guard is the one the claim asks for LinkedIn.
-    from netkeeper.models import TemplateChannel
+    from netkeep.models import TemplateChannel
 
     assert campaign_guards._CHANNEL_GUARDS[TemplateChannel.LINKEDIN.value] is (
         campaign_guards._browser
@@ -1091,7 +1091,7 @@ def test_an_unmapped_refusal_raises_rather_than_guessing() -> None:
 
 
 def test_each_step_names_the_budget_it_spends() -> None:
-    from netkeeper.models import TemplateChannel
+    from netkeep.models import TemplateChannel
 
     def step(channel: TemplateChannel, mode: StepMode) -> CampaignStep:
         return CampaignStep(channel=channel, mode=mode)
@@ -1125,8 +1125,8 @@ async def test_a_broken_outlook_never_stops_a_schedule_control(
     path: str,
     body: Any,
 ) -> None:
-    from netkeeper.services.linkedin_accounts import schedule_paused, scheduled_runs_armed
-    from netkeeper.web.security import CLIENT_HEADER, CLIENT_HEADER_VALUE
+    from netkeep.services.linkedin_accounts import schedule_paused, scheduled_runs_armed
+    from netkeep.web.security import CLIENT_HEADER, CLIENT_HEADER_VALUE
 
     factory = running_app.state.session_factory
     with session_scope(factory, write=True) as session:
@@ -1179,7 +1179,7 @@ async def test_the_campaign_says_which_budget_each_step_spends(
 ) -> None:
     import factories
 
-    from netkeeper.models import TemplateChannel
+    from netkeep.models import TemplateChannel
 
     with session_scope(running_app.state.session_factory, write=True) as session:
         user = session.scalars(select(User).where(User.kind == UserKind.LOCAL)).one()
@@ -1197,8 +1197,8 @@ async def test_the_campaign_says_which_budget_each_step_spends(
 def _chosen_start(at: datetime) -> Callable[[Lane], None]:
     def choose(lane: Lane) -> None:
         def write(session: Session, user: User) -> None:
-            from netkeeper.models import Campaign
-            from netkeeper.scoping import get_scoped
+            from netkeep.models import Campaign
+            from netkeep.scoping import get_scoped
 
             campaign = get_scoped(session, user, Campaign, lane.campaign_id)
             assert campaign is not None
@@ -1274,6 +1274,6 @@ def test_schedule_status_survives_a_broken_outlook(
     with caplog.at_level(logging.WARNING):
         output = _status()
     assert "auto-send outlook unavailable" in output
-    assert "disarmed: `netkeeper serve` fires no scheduled LinkedIn run" in output
+    assert "disarmed: `netkeep serve` fires no scheduled LinkedIn run" in output
     assert "route-changed breaker" in output and "inbox owner breaker" in output
     assert "KeyError" in caplog.text and "Somebody" not in caplog.text

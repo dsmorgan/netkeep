@@ -1,6 +1,6 @@
 # The reconnect workflow
 
-This document describes the networking method that netkeeper automates. It is written generically: the tools it names are categories, not products. The method comes from hellophello's job-search networking program, whose training material this replaces. The [architecture spec](architecture.md#3-mapping-to-the-reference-workflow) maps each step here to a netkeeper feature.
+This document describes the networking method that netkeep automates. It is written generically: the tools it names are categories, not products. The method comes from hellophello's job-search networking program, whose training material this replaces. The [architecture spec](architecture.md#3-mapping-to-the-reference-workflow) maps each step here to a netkeep feature.
 
 ## Overview
 
@@ -97,7 +97,7 @@ If a follow-up batch gets a low response, try individual emails instead of a bat
 | Response to the first email | 12% to 15% |
 | Response to the follow-up | Often higher than the first |
 | Combined response target | 35% |
-| Open rate | 65% to 70% (netkeeper does not measure opens; see the spec's non-goals) |
+| Open rate | 65% to 70% (netkeep does not measure opens; see the spec's non-goals) |
 
 ## Weekly checklist
 

@@ -17,18 +17,18 @@ from local_api import LocalKey
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.config import Settings
-from netkeeper.db import make_session_factory, session_scope
-from netkeeper.models import User
-from netkeeper.models.base import utcnow
-from netkeeper.scoping import install_scope_guard
-from netkeeper.services import ui_settings
-from netkeeper.services.scheduled_runs import ServeExtractor
-from netkeeper.services.settings_kv import set_setting
-from netkeeper.services.users import ensure_local_user
-from netkeeper.web.app import create_app
+from netkeep.config import Settings
+from netkeep.db import make_session_factory, session_scope
+from netkeep.models import User
+from netkeep.models.base import utcnow
+from netkeep.scoping import install_scope_guard
+from netkeep.services import ui_settings
+from netkeep.services.scheduled_runs import ServeExtractor
+from netkeep.services.settings_kv import set_setting
+from netkeep.services.users import ensure_local_user
+from netkeep.web.app import create_app
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 URL = "/api/v1/settings/config"
 PREFILLS = "linkedin.budget.li_prefills_per_day"
 
@@ -114,13 +114,13 @@ async def test_config_toml_locks_the_auto_send_switch(
     base = running_app.state.settings
     running_app.state.settings = replace(
         base,
-        source_path=Path("/etc/netkeeper.toml"),
+        source_path=Path("/etc/netkeep.toml"),
         file_keys=frozenset({AUTO}),
         campaigns=replace(base.campaigns, linkedin_auto_send=file_value),
     )
     field = _field((await client.get(URL)).json(), AUTO)
     assert (field["value"], field["source"], field["editable"]) == (file_value, "file", False)
-    assert field["locked_reason"].startswith("Set in /etc/netkeeper.toml")
+    assert field["locked_reason"].startswith("Set in /etc/netkeep.toml")
     readers = await _on_everywhere(client)
     assert readers == dict.fromkeys(("options", "schedule", "settings"), file_value)
     # The page never turns it on under the file; it may always turn its own value off,
@@ -191,7 +191,7 @@ async def test_a_key_config_toml_sets_is_locked(
     base = running_app.state.settings
     running_app.state.settings = replace(
         base,
-        source_path=Path("/etc/netkeeper.toml"),
+        source_path=Path("/etc/netkeep.toml"),
         file_keys=frozenset({PREFILLS}),
         linkedin=replace(
             base.linkedin, budget=replace(base.linkedin.budget, li_prefills_per_day=10)
@@ -202,7 +202,7 @@ async def test_a_key_config_toml_sets_is_locked(
     assert "the file wins" in refused.json()["detail"]
     field = _field((await client.get(URL)).json(), PREFILLS)
     assert (field["value"], field["source"], field["editable"]) == (10, "file", False)
-    assert "/etc/netkeeper.toml" in field["locked_reason"]
+    assert "/etc/netkeep.toml" in field["locked_reason"]
     limits = (await client.get("/api/v1/linkedin/budget")).json()["budgets"]
     assert {b["action"]: b["day"]["limit"] for b in limits}["li_prefills"] == 10
 
@@ -284,8 +284,8 @@ async def test_serve_starts_its_scheduler_and_polls_from_each_users_settings_pag
         wholes.append(campaign_settings)
         return _Stopped()
 
-    monkeypatch.setattr("netkeeper.web.app.start_serve_scheduler", scheduler)
-    monkeypatch.setattr("netkeeper.web.app.MailboxMonitor", _Monitor)
+    monkeypatch.setattr("netkeep.web.app.start_serve_scheduler", scheduler)
+    monkeypatch.setattr("netkeep.web.app.MailboxMonitor", _Monitor)
     _Monitor.instances = []
     served = create_app(Settings(), engine=engine, extractor=ServeExtractor(executor=_no_executor))
     async with served.router.lifespan_context(served):
@@ -347,7 +347,7 @@ async def test_the_posture_report_shows_a_setting_serve_cannot_read_on_its_row(
     # The active-hours row prints "now HH:MM". Three reports are compared, so a wall
     # clock that ticks over a minute between them fails the comparison (#584 CI).
     frozen = utcnow()
-    monkeypatch.setattr("netkeeper.web.api.posture.utcnow", lambda: frozen)
+    monkeypatch.setattr("netkeep.web.api.posture.utcnow", lambda: frozen)
     with session_scope(running_app.state.session_factory) as session:
         first = session.scalars(select(User)).first()
         assert first is not None
@@ -426,7 +426,7 @@ async def test_runs_read_the_saved_sync_and_enrichment_settings(
 ) -> None:
     """The worker resolves each run's settings as it starts, so a run started after the
     save uses the new values."""
-    from netkeeper.worker import BrowserWorker
+    from netkeep.worker import BrowserWorker
 
     factory = running_app.state.session_factory
     worker = BrowserWorker(
@@ -522,7 +522,7 @@ def _file_sets_auto_send(value: bool) -> Settings:
     base = Settings()
     return replace(
         base,
-        source_path=Path("/etc/netkeeper.toml"),
+        source_path=Path("/etc/netkeep.toml"),
         file_keys=frozenset({AUTO}),
         campaigns=replace(base.campaigns, linkedin_auto_send=value),
     )

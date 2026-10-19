@@ -1,7 +1,7 @@
 /**
- * The filterable columns, mirroring `x-netkeeper-fields` in the OpenAPI document.
+ * The filterable columns, mirroring `x-netkeep-fields` in the OpenAPI document.
  *
- * `netkeeper.crm.filters.FilterTree` publishes each field's kind, label, the
+ * `netkeep.crm.filters.FilterTree` publishes each field's kind, label, the
  * ops it takes, and an enum's values under that extension key, but
  * `openapi-typescript` keeps only the types, so the builder needs the metadata
  * in a form it can iterate. `predicates.test.ts` reads the extension straight out

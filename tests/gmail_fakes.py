@@ -4,11 +4,11 @@ Nothing here reaches Google. :class:`FakeGoogle` serves ``/token`` (the
 authorization-code and refresh-token grants, with PKCE checked) and
 ``/profile`` on ``127.0.0.1`` and a free port, in a thread. A test plays the
 person's part with :meth:`FakeGoogle.consent`, which reads the authorization
-URL netkeeper built the way Google's page would, and answers the redirect URL
+URL netkeep built the way Google's page would, and answers the redirect URL
 Google would send the browser to.
 
 The fixture ``fake_google`` (``tests/conftest.py``) starts one and points
-``netkeeper.campaigns.gmail_oauth.GOOGLE`` at it.
+``netkeep.campaigns.gmail_oauth.GOOGLE`` at it.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ import httplib2
 from keyring.backend import KeyringBackend
 from keyring.errors import KeyringError, PasswordDeleteError
 
-from netkeeper.campaigns.gmail_oauth import GMAIL_SCOPE, GoogleEndpoints
+from netkeep.campaigns.gmail_oauth import GMAIL_SCOPE, GoogleEndpoints
 
 CLIENT_ID = "1234-fake.apps.googleusercontent.com"
 CLIENT_SECRET = "fake-client-secret"

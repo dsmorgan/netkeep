@@ -16,9 +16,9 @@ import {
   STATUS_LOGGED_OUT,
 } from './test-support'
 
-/** `STOP_REASON_TEXT['owner_mismatch']` (`netkeeper/services/runs.py`). */
+/** `STOP_REASON_TEXT['owner_mismatch']` (`netkeep/services/runs.py`). */
 const OWNER_MISMATCH =
-  "the page showed another LinkedIn mailbox than this account's; if Chrome is signed in to another LinkedIn account, sign back in to yours; otherwise click **Forget inbox owner** under Posture on the Settings page, or run `netkeeper linkedin inbox-forget-owner` (or, if your own contact has a LinkedIn ID, it does not match this mailbox and netkeeper cannot edit it yet)"
+  "the page showed another LinkedIn mailbox than this account's; if Chrome is signed in to another LinkedIn account, sign back in to yours; otherwise click **Forget inbox owner** under Posture on the Settings page, or run `netkeep linkedin inbox-forget-owner` (or, if your own contact has a LinkedIn ID, it does not match this mailbox and netkeep cannot edit it yet)"
 
 afterEach(() => {
   resetFakeEventSource()
@@ -35,7 +35,7 @@ describe('session banner', () => {
     renderLinkedInPage({ 'GET /api/v1/linkedin/status': () => jsonResponse(STATUS_LOGGED_OUT) })
     const banner = await screen.findByRole('alert')
     expect(within(banner).getByText(/log in to linkedin/i)).toBeInTheDocument()
-    expect(within(banner).getByText(/netkeeper preflight/i)).toBeInTheDocument()
+    expect(within(banner).getByText(/netkeep preflight/i)).toBeInTheDocument()
     expect(banner).toHaveTextContent(/clears this automatically/i)
     // No clear button for a logged-out flag (#181): preflight clears it once it
     // sees a live session, which is better evidence than a click.
@@ -46,10 +46,10 @@ describe('session banner', () => {
     renderLinkedInPage({ 'GET /api/v1/linkedin/status': () => jsonResponse(STATUS_CHECKPOINT) })
     const banner = await screen.findByRole('alert')
     expect(within(banner).getByText(/resolve the checkpoint/i)).toBeInTheDocument()
-    expect(within(banner).getByText(/netkeeper linkedin clear-flag/i)).toBeInTheDocument()
+    expect(within(banner).getByText(/netkeep linkedin clear-flag/i)).toBeInTheDocument()
     // The by-hand clear (#181), which always asks first (linkedin-clears.test.tsx).
     expect(within(banner).getByRole('button', { name: 'Clear flag…' })).toBeInTheDocument()
-    // R-13: nothing here may say or imply netkeeper clears this on its own —
+    // R-13: nothing here may say or imply netkeep clears this on its own —
     // a live session cookie is not proof a checkpoint is resolved (spec 9.7),
     // so only a person, with the button or the CLI command above, ends this banner.
     expect(banner).not.toHaveTextContent(/automatic/i)

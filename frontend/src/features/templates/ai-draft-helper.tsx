@@ -2,7 +2,7 @@
  * "Draft with your AI assistant" (#368): a prompt to copy into an AI chat
  * assistant you already use, and a place to paste its reply back.
  *
- * netkeeper makes no call to any AI provider and stores no key for one. You
+ * netkeep makes no call to any AI provider and stores no key for one. You
  * carry the text both ways by copy and paste. The prompt is built from the form,
  * the merge-field list (`GET /templates/merge-fields`, asked without a contact),
  * and lint's own rule sentences, so it never holds a contact's data, even when
@@ -207,7 +207,7 @@ export function AiDraftHelper({
         <div id={ids.panel} className="space-y-3">
           <p className="text-xs text-muted-foreground">
             Describe the campaign, copy the prompt into an AI chat assistant you already use, then
-            paste its reply here. netkeeper sends nothing to any AI service; what you paste into one
+            paste its reply here. netkeep sends nothing to any AI service; what you paste into one
             goes to that provider under its terms. What you type in this form goes into the prompt
             word for word, so never type contacts' names or details: the prompt uses placeholders
             like {'{{ first_name }}'} instead.{' '}

@@ -65,7 +65,7 @@ COMPOSE_VIEW_CONTEXTS_FIELD: Final = "messagingDashComposeViewContextsByRecipien
 COMPOSE_OPTIONS_PATH: Final = "/voyager/api/voyagerMessagingDashComposeOptions/"
 #: ``POST``, body ``{"conversationUrn": ...}``, answered 202 with no body.
 TYPING_PATH: Final = "/voyager/api/voyagerMessagingDashMessengerConversations?action=typing"
-#: ``POST``; the page's own send. netkeeper never sends it (ADR 0006, ADR 0007).
+#: ``POST``; the page's own send. netkeep never sends it (ADR 0006, ADR 0007).
 CREATE_MESSAGE_PATH: Final = (
     "/voyager/api/voyagerMessagingDashMessengerMessages?action=createMessage"
 )
@@ -173,7 +173,7 @@ class Organization:
         return f"urn:li:msg_messagingParticipant:{self.urn}"
 
 
-#: The mailbox owner: the account netkeeper runs as.
+#: The mailbox owner: the account netkeep runs as.
 OWNER: Final = Member(1, "Odalys", "Inventova", "Owner of this invented mailbox", "SELF")
 ZEPHYRINE: Final = Member(101, "Zephyrine", "Mockwell", "Data engineer at Fictional Robotics Co")
 THADDEUS: Final = Member(102, "Thaddeus", "Placeholdt", "Head of design at Acme Testing Group")
@@ -805,7 +805,7 @@ def typing_body(conversation: int) -> str:
 def create_message_request(
     conversation: int, text: str, *, token: str, tracking_id: str = "inventedtrack001"
 ) -> str:
-    """What the page posts when the **person** clicks Send. netkeeper never posts it."""
+    """What the page posts when the **person** clicks Send. netkeep never posts it."""
     return json.dumps(
         {
             "message": {

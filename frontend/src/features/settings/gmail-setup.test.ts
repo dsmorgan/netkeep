@@ -22,14 +22,14 @@ function states(steps: ReturnType<typeof wizardSteps>) {
 
 describe('consoleLinks', () => {
   it('names the project on every page that needs it', () => {
-    expect(consoleLinks('netkeeper-ab12cd')).toEqual({
+    expect(consoleLinks('netkeep-ab12cd')).toEqual({
       createProject: 'https://console.cloud.google.com/projectcreate',
-      dashboard: 'https://console.cloud.google.com/home/dashboard?project=netkeeper-ab12cd',
+      dashboard: 'https://console.cloud.google.com/home/dashboard?project=netkeep-ab12cd',
       gmailApi:
-        'https://console.cloud.google.com/apis/library/gmail.googleapis.com?project=netkeeper-ab12cd',
-      branding: 'https://console.cloud.google.com/auth/branding?project=netkeeper-ab12cd',
-      audience: 'https://console.cloud.google.com/auth/audience?project=netkeeper-ab12cd',
-      createClient: 'https://console.cloud.google.com/auth/clients/create?project=netkeeper-ab12cd',
+        'https://console.cloud.google.com/apis/library/gmail.googleapis.com?project=netkeep-ab12cd',
+      branding: 'https://console.cloud.google.com/auth/branding?project=netkeep-ab12cd',
+      audience: 'https://console.cloud.google.com/auth/audience?project=netkeep-ab12cd',
+      createClient: 'https://console.cloud.google.com/auth/clients/create?project=netkeep-ab12cd',
       installGcloud: 'https://cloud.google.com/sdk/docs/install',
     })
   })
@@ -53,20 +53,20 @@ describe('consoleLinks', () => {
   })
 
   it('puts the ID in the project parameter of every project link', () => {
-    const links = consoleLinks('netkeeper-510123')
+    const links = consoleLinks('netkeep-510123')
     const projectLinks = [links.gmailApi, links.branding, links.audience, links.createClient]
     for (const href of projectLinks) {
-      expect(new URL(href as string).searchParams.get('project')).toBe('netkeeper-510123')
+      expect(new URL(href as string).searchParams.get('project')).toBe('netkeep-510123')
     }
   })
 })
 
 describe('gcloudCommands', () => {
   it('spells out the two steps gcloud can do', () => {
-    expect(gcloudCommands('netkeeper-ab12cd')).toEqual({
+    expect(gcloudCommands('netkeep-ab12cd')).toEqual({
       login: 'gcloud auth login',
-      createProject: 'gcloud projects create netkeeper-ab12cd --name=netkeeper',
-      enableGmail: 'gcloud services enable gmail.googleapis.com --project=netkeeper-ab12cd',
+      createProject: 'gcloud projects create netkeep-ab12cd --name=netkeep',
+      enableGmail: 'gcloud services enable gmail.googleapis.com --project=netkeep-ab12cd',
     })
   })
 })
@@ -75,11 +75,11 @@ describe('project IDs', () => {
   it('suggests one Google accepts', () => {
     let n = 0
     const id = suggestProjectId(() => (n++ % 36) / 36)
-    expect(id).toBe('netkeeper-abcdef')
+    expect(id).toBe('netkeep-abcdef')
     for (let i = 0; i < 50; i++) expect(suggestProjectId()).toMatch(PROJECT_ID_PATTERN)
   })
 
-  it.each(['short', '1netkeeper', 'netkeeper-', 'Netkeeper-x1', 'net keeper', 'a'.repeat(31)])(
+  it.each(['short', '1netkeep', 'netkeep-', 'Netkeep-x1', 'net keeper', 'a'.repeat(31)])(
     'refuses %s',
     (id) => expect(PROJECT_ID_PATTERN.test(id)).toBe(false),
   )
@@ -116,14 +116,14 @@ describe('wizardSteps', () => {
   })
 
   it('lets a saved client and a saved project ID check step 1, and a connected mailbox too', () => {
-    const withId = wizardSteps({ done: [], project_id: 'netkeeper-ab12cd' }, status(), undefined)
+    const withId = wizardSteps({ done: [], project_id: 'netkeep-ab12cd' }, status(), undefined)
     expect(states(withId).project).toBe('done/checked')
     const live = wizardSteps({ done: [] }, status({ mailboxes: [mailbox()] }), undefined)
     expect(states(live).project).toBe('done/checked')
   })
 
   it('counts a saved client as proof of the console steps it needs', () => {
-    const steps = wizardSteps({ done: [], project_id: 'netkeeper-ab12cd' }, status(), undefined)
+    const steps = wizardSteps({ done: [], project_id: 'netkeep-ab12cd' }, status(), undefined)
     expect(states(steps)).toMatchObject({
       project: 'done/checked',
       gmail_api: 'todo/marked',
@@ -160,7 +160,7 @@ describe('wizardSteps', () => {
   it('a disconnected mailbox proves nothing', () => {
     const gone = mailbox({ status: 'disabled', status_reason: 'disconnected' })
     const steps = wizardSteps(
-      { done: [], project_id: 'netkeeper-ab12cd' },
+      { done: [], project_id: 'netkeep-ab12cd' },
       status({ mailboxes: [gone] }),
       undefined,
     )
@@ -180,12 +180,12 @@ describe('wizardSteps', () => {
 
 describe('parseProjectInput', () => {
   it('takes the project parameter from a pasted console URL', () => {
-    const url = 'https://console.cloud.google.com/auth/branding?project=Netkeeper-510123&x=1'
-    expect(parseProjectInput(url)).toBe('netkeeper-510123')
+    const url = 'https://console.cloud.google.com/auth/branding?project=Netkeep-510123&x=1'
+    expect(parseProjectInput(url)).toBe('netkeep-510123')
   })
 
   it('takes plain text as the ID, trimmed and lowercased', () => {
-    expect(parseProjectInput('  Netkeeper-510123 ')).toBe('netkeeper-510123')
+    expect(parseProjectInput('  Netkeep-510123 ')).toBe('netkeep-510123')
   })
 
   it('leaves a URL with no project parameter to fail validation', () => {
@@ -197,7 +197,7 @@ describe('parseProjectInput', () => {
 
 describe('lacksSuffix', () => {
   it('flags an ID that may be the name', () => {
-    expect(lacksSuffix('netkeeper')).toBe(true)
-    expect(lacksSuffix('netkeeper-510123')).toBe(false)
+    expect(lacksSuffix('netkeep')).toBe(true)
+    expect(lacksSuffix('netkeep-510123')).toBe(false)
   })
 })

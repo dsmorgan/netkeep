@@ -23,7 +23,7 @@ function renderSection(current: SelfContact = CURRENT) {
     if (pathname !== '/api/v1/settings/self-contact') return jsonResponse({}, 500)
     if (request.method === 'GET') return jsonResponse(current)
     expect(request.method).toBe('PUT')
-    expect(request.headers.get('X-Netkeeper-Client')).not.toBeNull() // the CSRF header
+    expect(request.headers.get('X-Netkeep-Client')).not.toBeNull() // the CSRF header
     const body = (await request.json()) as SelfContactIn
     puts.push(body)
     return jsonResponse({ ...current, ...body, exists: true })

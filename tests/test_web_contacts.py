@@ -22,13 +22,13 @@ from isolation.harness import acting_as
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.crm import contacts as service
-from netkeeper.crm.filters import parse_filter
-from netkeeper.crm.interactions import add_interaction
-from netkeeper.crm.provenance import record_synced_value
-from netkeeper.crm.tags import create_tag, tag_contact
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.crm import contacts as service
+from netkeep.crm.filters import parse_filter
+from netkeep.crm.interactions import add_interaction
+from netkeep.crm.provenance import record_synced_value
+from netkeep.crm.tags import create_tag, tag_contact
+from netkeep.db import session_scope
+from netkeep.models import (
     ContactMet,
     ContactSnapshot,
     ContactSource,
@@ -38,11 +38,11 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.models.contacts import Contact
-from netkeeper.scoping import get_scoped
-from netkeeper.web.schemas import MAX_QUERY_OFFSET
+from netkeep.models.contacts import Contact
+from netkeep.scoping import get_scoped
+from netkeep.web.schemas import MAX_QUERY_OFFSET
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 AT = datetime(2026, 2, 1, 9, 30, tzinfo=UTC)
 
 
@@ -581,7 +581,7 @@ async def test_an_expired_token_asks_for_the_count_again(
 ) -> None:
     from datetime import timedelta
 
-    from netkeeper.crm.confirmation import Signer
+    from netkeep.crm.confirmation import Signer
 
     running_app.state.confirmations = Signer(key=b"short-lived" * 4, ttl=timedelta(seconds=-1))
     counted = await _count(client, EVERYONE, "archive")
@@ -1220,8 +1220,8 @@ def test_a_bulk_action_resolves_now_once(
         filter_calls += 1
         return service_clock()
 
-    monkeypatch.setattr("netkeeper.crm.contacts.utcnow", service_clock)
-    monkeypatch.setattr("netkeeper.crm.filters.utcnow", filter_clock)
+    monkeypatch.setattr("netkeep.crm.contacts.utcnow", service_clock)
+    monkeypatch.setattr("netkeep.crm.filters.utcnow", filter_clock)
 
     with session_scope(factory, write=True) as session:
         user = session.get(User, owner.id)

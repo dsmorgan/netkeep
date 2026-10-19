@@ -12,9 +12,9 @@ const TOKEN = /`([^`]+)`|\*\*([^*]+)\*\*|\*([^*]+)\*/g
  * ever reaches `dangerouslySetInnerHTML` and nothing in the source text can
  * inject an element React did not itself create.
  *
- * `netkeeper/services/posture.py`'s `GAPS` and every protection's `warnings`
+ * `netkeep/services/posture.py`'s `GAPS` and every protection's `warnings`
  * and `value` are written in exactly this subset for the terminal report
- * (`netkeeper posture`; `render()`'s `_wrapped` just wraps the text, so the
+ * (`netkeep posture`; `render()`'s `_wrapped` just wraps the text, so the
  * backticks and asterisks print as themselves there) — this renders the same
  * three markers instead of showing them literally, which is what a person
  * reading the Settings page's Posture card sees otherwise (review179r2).

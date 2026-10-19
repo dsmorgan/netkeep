@@ -4,15 +4,15 @@ import httpx
 import pytest
 from starlette.types import Message, Receive, Scope, Send
 
-from netkeeper.web.security import (
+from netkeep.web.security import (
     RULE_CLIENT_HEADER,
     RULE_ORIGIN,
     RULE_SEC_FETCH_SITE,
     csrf_violation,
 )
 
-OK = {"x-netkeeper-client": "1"}
-CSRF = {"X-Netkeeper-Client": "1"}
+OK = {"x-netkeep-client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 PATH = "/api/v1/tasks/ping"
 
 
@@ -40,7 +40,7 @@ def test_reads_are_never_blocked(method: str) -> None:
 @pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE", "post"])
 def test_state_changes_need_the_client_header(method: str) -> None:
     assert _rule(method) == RULE_CLIENT_HEADER
-    assert _rule(method, headers={"x-netkeeper-client": "yes"}) == RULE_CLIENT_HEADER
+    assert _rule(method, headers={"x-netkeep-client": "yes"}) == RULE_CLIENT_HEADER
     assert _rule(method, headers=OK) is None
 
 
@@ -107,7 +107,7 @@ async def test_post_without_the_header_is_refused(client: httpx.AsyncClient) -> 
     assert response.status_code == 403
     body = response.json()
     assert body["rule"] == RULE_CLIENT_HEADER
-    assert "X-Netkeeper-Client" in body["detail"]
+    assert "X-Netkeep-Client" in body["detail"]
 
 
 async def test_post_with_the_header_and_same_origin_passes(client: httpx.AsyncClient) -> None:
@@ -135,7 +135,7 @@ async def test_get_is_never_blocked(client: httpx.AsyncClient) -> None:
 
 def test_the_host_names_are_loopback_only() -> None:
     """#175 review F8: pinned, so the list cannot quietly grow a wildcard."""
-    from netkeeper.web.security import LOOPBACK_HOSTNAMES, host_violation
+    from netkeep.web.security import LOOPBACK_HOSTNAMES, host_violation
 
     assert frozenset({"127.0.0.1", "localhost", "::1"}) == LOOPBACK_HOSTNAMES
     for bad in ("evil.example:8000", "127.0.0.1.evil.example", "", "localhost.evil:80", "[::2]"):
@@ -193,14 +193,14 @@ WELL_FORMED_LOOPBACK_HOSTS = [
 
 @pytest.mark.parametrize("host", MALFORMED_HOSTS)
 def test_a_malformed_host_is_refused(host: str) -> None:
-    from netkeeper.web.security import LOOPBACK_HOSTNAMES, host_violation
+    from netkeep.web.security import LOOPBACK_HOSTNAMES, host_violation
 
     assert host_violation({"host": host}, LOOPBACK_HOSTNAMES)
 
 
 @pytest.mark.parametrize("host", WELL_FORMED_LOOPBACK_HOSTS)
 def test_a_well_formed_loopback_host_is_accepted(host: str) -> None:
-    from netkeeper.web.security import LOOPBACK_HOSTNAMES, host_violation
+    from netkeep.web.security import LOOPBACK_HOSTNAMES, host_violation
 
     assert not host_violation({"host": host}, LOOPBACK_HOSTNAMES)
 
@@ -210,7 +210,7 @@ def test_a_well_formed_loopback_host_is_accepted(host: str) -> None:
 )
 async def test_the_middleware_answers_421_for_a_malformed_host(host: str) -> None:
     """The same four, through the middleware: refused before any route sees them."""
-    from netkeeper.web.security import RULE_HOST, CSRFMiddleware
+    from netkeep.web.security import RULE_HOST, CSRFMiddleware
 
     reached: list[str] = []
 

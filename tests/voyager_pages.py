@@ -9,12 +9,12 @@ fixture would fail there rather than test the sync against a shape LinkedIn
 never sends.
 
 :class:`FakeConnectionsSource` is a neutral, in-memory
-:class:`~netkeeper.linkedin.connections.ConnectionsSource` with no request
+:class:`~netkeep.linkedin.connections.ConnectionsSource` with no request
 shape of its own, for tests that drive ``run_connections_sync`` or
 ``services.connections_sync.sync_connections`` and only need pages, not a
 transport (``tests/test_linkedin_connections.py``,
 ``tests/test_connections_sync.py``). It reuses :func:`classify` and
-:func:`~netkeeper.linkedin.voyager.parse_connections_page` to interpret a
+:func:`~netkeep.linkedin.voyager.parse_connections_page` to interpret a
 scripted :class:`Scripted` answer, so the fixtures below (``THROTTLED``,
 ``CHECKPOINT``, ...) drive it exactly as they drove ``VoyagerConnections``
 before #189 retired that wrapper along with the in-page connections endpoint
@@ -29,9 +29,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from netkeeper.linkedin.classify import Outcome, classify
-from netkeeper.linkedin.connections import SourcePage
-from netkeeper.linkedin.voyager import (
+from netkeep.linkedin.classify import Outcome, classify
+from netkeep.linkedin.connections import SourcePage
+from netkeep.linkedin.voyager import (
     ConnectionsPageResult,
     ConnectionSummary,
     RouteChanged,
@@ -157,7 +157,7 @@ class FakeConnectionsSource:
     (``THROTTLED``, ``CHECKPOINT``, ...) still work unchanged, because
     ``script[i]`` still classifies a :class:`Scripted` answer the ordinary way
     (spec 9.7) and parses an ``Ok`` one the ordinary way
-    (:func:`~netkeeper.linkedin.voyager.parse_connections_page`) -- only the
+    (:func:`~netkeep.linkedin.voyager.parse_connections_page`) -- only the
     honest, unscripted path skips both, building the page straight from
     ``people``. ``script[i]`` also accepts a hand-built ``SourcePage``
     directly, for a page shaped differently than the default honest slice (a

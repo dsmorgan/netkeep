@@ -189,8 +189,8 @@ describe('Gmail page', () => {
     expect(await screen.findByText(/No Gmail account is connected yet/)).toBeInTheDocument()
     expect(screen.getByText('not set')).toBeInTheDocument()
     const connect = screen.getByRole('region', { name: 'Connect or reconnect' })
-    expect(within(connect).getByText('netkeeper gmail client <file>')).toBeInTheDocument()
-    expect(within(connect).getByText('netkeeper gmail login')).toBeInTheDocument()
+    expect(within(connect).getByText('netkeep gmail client <file>')).toBeInTheDocument()
+    expect(within(connect).getByText('netkeep gmail login')).toBeInTheDocument()
     expect(await screen.findByText(/nothing is sent/)).toBeInTheDocument()
     expect(await screen.findByText('No email yet.')).toBeInTheDocument()
   })
@@ -233,10 +233,10 @@ describe('Gmail page', () => {
   })
 
   it('shows which Keychain service holds the client and token (#580)', async () => {
-    renderPage({ mailboxes: status({ keychain_service: 'netkeeper@0123456789ab' }) })
+    renderPage({ mailboxes: status({ keychain_service: 'netkeep@0123456789ab' }) })
 
     expect(await screen.findByText('Keychain service')).toBeInTheDocument()
-    expect(screen.getByText('netkeeper@0123456789ab')).toBeInTheDocument()
+    expect(screen.getByText('netkeep@0123456789ab')).toBeInTheDocument()
   })
 
   it('re-authorizes a mailbox that needs it', async () => {
@@ -333,7 +333,7 @@ describe('Gmail page', () => {
       }),
     })
 
-    expect(await screen.findByText(/netkeeper serve isn’t running/)).toBeInTheDocument()
+    expect(await screen.findByText(/netkeep serve isn’t running/)).toBeInTheDocument()
     expect(screen.getByText('The Keychain refused.')).toBeInTheDocument()
     expect(screen.getByText('needs attention')).toBeInTheDocument()
   })

@@ -1,4 +1,4 @@
-"""``netkeeper do-not-send list|add|remove`` (#238, Part B), against a migrated scratch
+"""``netkeep do-not-send list|add|remove`` (#238, Part B), against a migrated scratch
 database under ``tmp_path``."""
 
 from __future__ import annotations
@@ -10,13 +10,13 @@ import pytest
 from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
 
-from netkeeper import migrations
-from netkeeper.cli import app as cli
-from netkeeper.crm import do_not_send
-from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.models import DoNotSendReason
-from netkeeper.scoping import install_scope_guard
-from netkeeper.services.users import ensure_local_user
+from netkeep import migrations
+from netkeep.cli import app as cli
+from netkeep.crm import do_not_send
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+from netkeep.models import DoNotSendReason
+from netkeep.scoping import install_scope_guard
+from netkeep.services.users import ensure_local_user
 
 runner = CliRunner()
 
@@ -24,7 +24,7 @@ runner = CliRunner()
 @pytest.fixture
 def cli_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[sessionmaker[Session]]:
     url = database_url(tmp_path)
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     engine = make_engine(url)
     migrations.upgrade(engine)
     factory = make_session_factory(engine)

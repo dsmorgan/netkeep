@@ -1,4 +1,4 @@
-"""netkeeper.campaigns.render (spec 11.1; item P3-03): the sandbox, merge fields, ``ago``, lint."""
+"""netkeep.campaigns.render (spec 11.1; item P3-03): the sandbox, merge fields, ``ago``, lint."""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ from jinja2 import nodes
 from jinja2.exceptions import SecurityError
 from time_limit import Stopwatch, scaled
 
-from netkeeper.campaigns import render as render_module
-from netkeeper.campaigns.render import (
+from netkeep.campaigns import render as render_module
+from netkeep.campaigns.render import (
     ALLOWED_FILTERS,
     ALLOWED_NODES,
     ALLOWED_TESTS,
@@ -39,9 +39,9 @@ from netkeeper.campaigns.render import (
     placeholder_example,
     render,
 )
-from netkeeper.linkedin import pacing
-from netkeeper.linkedin.pacing import TYPING_LINT_SECONDS, TYPING_WARN_CHARS
-from netkeeper.models import TemplateChannel
+from netkeep.linkedin import pacing
+from netkeep.linkedin.pacing import TYPING_LINT_SECONDS, TYPING_WARN_CHARS
+from netkeep.models import TemplateChannel
 
 EMAIL = TemplateChannel.EMAIL
 LINKEDIN = TemplateChannel.LINKEDIN

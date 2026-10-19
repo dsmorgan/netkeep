@@ -21,16 +21,16 @@ import pytest
 from sqlalchemy.orm import Session, sessionmaker
 from voyager_pages import PEOPLE, Person
 
-from netkeeper.crm import apply as mapping
-from netkeeper.crm import contacts as contacts_service
-from netkeeper.crm.identity import IncomingContact, Matched, merge, resolve
-from netkeeper.crm.identity import apply as identity_apply
-from netkeeper.db import session_scope
-from netkeeper.linkedin.connections import ConnectionsPage, SyncMode
-from netkeeper.linkedin.voyager import ConnectionSummary
-from netkeeper.models import Contact, ContactAlias, ContactSource, User
-from netkeeper.scoping import scoped
-from netkeeper.services import enrich_plan
+from netkeep.crm import apply as mapping
+from netkeep.crm import contacts as contacts_service
+from netkeep.crm.identity import IncomingContact, Matched, merge, resolve
+from netkeep.crm.identity import apply as identity_apply
+from netkeep.db import session_scope
+from netkeep.linkedin.connections import ConnectionsPage, SyncMode
+from netkeep.linkedin.voyager import ConnectionSummary
+from netkeep.models import Contact, ContactAlias, ContactSource, User
+from netkeep.scoping import scoped
+from netkeep.services import enrich_plan
 
 NOW = datetime(2026, 9, 24, 15, 0, tzinfo=UTC)
 LATER = NOW + timedelta(days=7)
@@ -460,7 +460,7 @@ def test_a_voyager_row_whose_urn_is_another_contacts_never_merges_the_card_conta
     writer: Session, user: User
 ) -> None:
     """Slug reassigned: the card showed a slug that, by the time Voyager answers,
-    it reports for a person netkeeper already holds under a URN. The URN and the
+    it reports for a person netkeep already holds under a URN. The URN and the
     slug name two contacts: a candidate, so neither is written, the card contact
     keeps its mark and gets no URN, and both are held from aging for review."""
     x = PEOPLE[1]

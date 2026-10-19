@@ -72,8 +72,8 @@ function Row({ row }: { row: LeftoverDraft }) {
 }
 
 /**
- * Drafts netkeeper no longer wants (#543): discarded by a merge, left on an enrollment
- * that ended, test sends, and drafts still waiting that would be wrong to send. netkeeper
+ * Drafts netkeep no longer wants (#543): discarded by a merge, left on an enrollment
+ * that ended, test sends, and drafts still waiting that would be wrong to send. netkeep
  * deletes nothing in Gmail, so each row links to the draft there for you to delete by
  * hand. Flagged rows come first, drafts left after a reply last. It never shows a
  * subject or a body.
@@ -86,8 +86,8 @@ export function LeftoverCard() {
       <CardHeader>
         <CardTitle level={2}>Leftover drafts</CardTitle>
         <CardDescription>
-          Drafts netkeeper no longer needs. netkeeper deletes nothing in Gmail, so open each one
-          there and delete it yourself.
+          Drafts netkeep no longer needs. netkeep deletes nothing in Gmail, so open each one there
+          and delete it yourself.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">

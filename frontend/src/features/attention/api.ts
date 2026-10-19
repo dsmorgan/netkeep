@@ -111,7 +111,7 @@ const READS = ['/query', '/preview', '/lint']
  */
 export function changesAttention(method: string, url: string): boolean {
   if (!UNSAFE_METHODS.has(method.toUpperCase())) return false
-  const path = new URL(url, 'http://netkeeper.invalid').pathname
+  const path = new URL(url, 'http://netkeep.invalid').pathname
   if (!path.startsWith('/api/v1/')) return false
   return !READS.some((suffix) => path.endsWith(suffix))
 }
@@ -138,10 +138,10 @@ export function menuLabel(attention: Attention | undefined): string {
   return `Open navigation, ${total} ${total === 1 ? 'item needs' : 'items need'} you`
 }
 
-/** The tab title: `(N) netkeeper`, N being `title_total` (Triage stays out). */
+/** The tab title: `(N) netkeep`, N being `title_total` (Triage stays out). */
 export function documentTitle(attention: Attention | undefined): string {
   const total = attention?.title_total ?? 0
-  return total > 0 ? `(${total}) netkeeper` : 'netkeeper'
+  return total > 0 ? `(${total}) netkeep` : 'netkeep'
 }
 
 /**

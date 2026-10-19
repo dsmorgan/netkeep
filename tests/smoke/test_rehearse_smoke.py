@@ -1,8 +1,8 @@
-"""``netkeeper rehearse`` against a real Chrome. Opt in with ``NETKEEPER_BROWSER_TESTS=1``.
+"""``netkeep rehearse`` against a real Chrome. Opt in with ``NETKEEP_BROWSER_TESTS=1``.
 
 Skipped by default, because it needs a browser the developer started and the
 rest of the suite stays offline. The only site involved is the loopback replica
-``netkeeper.linkedin.rehearse.serve_replica`` starts -- the same one the command
+``netkeep.linkedin.rehearse.serve_replica`` starts -- the same one the command
 starts -- and nothing here knows a LinkedIn URL.
 
 What it proves that ``tests/test_rehearse.py`` cannot, because that one drives
@@ -12,7 +12,7 @@ Playwright offers, that the request log really fills from a real page load
 browser's own headers because nothing overrides them, and that a whole
 rehearsal adds no browser process and no context.
 
-Start Chrome first with the command ``netkeeper browser launch`` prints.
+Start Chrome first with the command ``netkeep browser launch`` prints.
 """
 
 from __future__ import annotations
@@ -23,10 +23,10 @@ from collections.abc import Iterator
 
 import pytest
 
-from netkeeper.linkedin.browser import AttachBrowserProvider, BrowserUnavailable
-from netkeeper.linkedin.flagship import NAVIGATION_PATH
-from netkeeper.linkedin.flagship_profile import COMPONENT_PATH
-from netkeeper.linkedin.rehearse import (
+from netkeep.linkedin.browser import AttachBrowserProvider, BrowserUnavailable
+from netkeep.linkedin.flagship import NAVIGATION_PATH
+from netkeep.linkedin.flagship_profile import COMPONENT_PATH
+from netkeep.linkedin.rehearse import (
     REDACTED,
     NotANeutralSite,
     rehearse,
@@ -35,17 +35,17 @@ from netkeeper.linkedin.rehearse import (
 )
 
 pytestmark = pytest.mark.skipif(
-    os.environ.get("NETKEEPER_BROWSER_TESTS") != "1",
-    reason="browser smoke suite: start Chrome, then set NETKEEPER_BROWSER_TESTS=1",
+    os.environ.get("NETKEEP_BROWSER_TESTS") != "1",
+    reason="browser smoke suite: start Chrome, then set NETKEEP_BROWSER_TESTS=1",
 )
 
-CDP_URL = os.environ.get("NETKEEPER_CDP_URL", "http://127.0.0.1:9222")
+CDP_URL = os.environ.get("NETKEEP_CDP_URL", "http://127.0.0.1:9222")
 SEED = 20260923
 
 
 @pytest.fixture(scope="module")
 def site() -> Iterator[str]:
-    """The same loopback replica `netkeeper rehearse` starts for itself."""
+    """The same loopback replica `netkeep rehearse` starts for itself."""
     with serve_replica() as base:
         yield base
 
@@ -62,7 +62,7 @@ async def test_a_rehearsal_logs_what_a_real_page_load_asked_for(
     try:
         rehearsal = await rehearse(provider, site=site, visits=2, seed=SEED, time_scale=200.0)
     except BrowserUnavailable as exc:
-        pytest.fail(f"{exc}\nStart Chrome with the command `netkeeper browser launch` prints.")
+        pytest.fail(f"{exc}\nStart Chrome with the command `netkeep browser launch` prints.")
 
     assert len(rehearsal.visits) == 2
     assert rehearsal.hosts == ("127.0.0.1",)
@@ -83,7 +83,7 @@ async def test_a_rehearsal_is_the_enrichment_jobs_pattern_in_a_real_tab(
 ) -> None:
     """#190: each visit is the page, the lazy card its scroll made it ask for, and the
     overlay its one Contact info click made it ask for -- the page's requests, read by
-    the real source, in a real Chrome. netkeeper sends none of them."""
+    the real source, in a real Chrome. netkeep sends none of them."""
     rehearsal = await rehearse(provider, site=site, visits=2, seed=SEED, time_scale=200.0)
 
     assert (rehearsal.harvested, rehearsal.stopped, rehearsal.clicks) == (2, None, 2)

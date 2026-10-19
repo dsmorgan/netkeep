@@ -1,4 +1,4 @@
-"""netkeeper.services.simulate: the virtual-clock scheduler replay.
+"""netkeep.services.simulate: the virtual-clock scheduler replay.
 
 This is where P2-09's "done when" lives: *simulate reproduces a daily
 schedule across restarts without a skipped or doubled run.* Everything here
@@ -20,11 +20,11 @@ import pytest
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.config import HeatSettings
-from netkeeper.db import make_engine, make_session_factory, session_scope
-from netkeeper.models import Base, User
-from netkeeper.scoping import install_scope_guard
-from netkeeper.services import heat, scheduler, simulate
+from netkeep.config import HeatSettings
+from netkeep.db import make_engine, make_session_factory, session_scope
+from netkeep.models import Base, User
+from netkeep.scoping import install_scope_guard
+from netkeep.services import heat, scheduler, simulate
 
 START = datetime(2026, 9, 1, 0, 0, tzinfo=UTC)
 ACCOUNT = 1

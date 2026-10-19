@@ -10,16 +10,16 @@ from typing import Any
 import factories
 from sqlalchemy.orm import Session
 
-from netkeeper.campaigns import templates as template_service
-from netkeeper.config import Settings
-from netkeeper.crm import do_not_send
-from netkeeper.crm import import_runs as import_service
-from netkeeper.crm import lists as list_service
-from netkeeper.crm import positions as position_service
-from netkeeper.crm import tags as tag_service
-from netkeeper.crm.filters import parse_filter
-from netkeeper.crm.interactions import add_interaction
-from netkeeper.models import (
+from netkeep.campaigns import templates as template_service
+from netkeep.config import Settings
+from netkeep.crm import do_not_send
+from netkeep.crm import import_runs as import_service
+from netkeep.crm import lists as list_service
+from netkeep.crm import positions as position_service
+from netkeep.crm import tags as tag_service
+from netkeep.crm.filters import parse_filter
+from netkeep.crm.interactions import add_interaction
+from netkeep.models import (
     Campaign,
     Contact,
     ContactList,
@@ -44,13 +44,13 @@ from netkeeper.models import (
     TestSend,
     User,
 )
-from netkeeper.models.base import utcnow
-from netkeeper.scoping import scoped
-from netkeeper.services import campaigns as campaign_service
-from netkeeper.services import enrich_plan, run_contacts, runs, step_mode, user_dictionary
-from netkeeper.services import mailboxes as mailbox_service
-from netkeeper.services.linkedin_accounts import ensure_account
-from netkeeper.web.app import API_PREFIX
+from netkeep.models.base import utcnow
+from netkeep.scoping import scoped
+from netkeep.services import campaigns as campaign_service
+from netkeep.services import enrich_plan, run_contacts, runs, step_mode, user_dictionary
+from netkeep.services import mailboxes as mailbox_service
+from netkeep.services.linkedin_accounts import ensure_account
+from netkeep.web.app import API_PREFIX
 
 Body = dict[str, Any]
 

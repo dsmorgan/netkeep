@@ -1,7 +1,7 @@
 """PageConnections: the connections list from the page's own answers (#187, ADR 0006).
 
-Driven through the real :class:`~netkeeper.linkedin.browser.BrowserRun` and the real
-:func:`~netkeeper.linkedin.connections.run_connections_sync` over :mod:`flagship_site`'s
+Driven through the real :class:`~netkeep.linkedin.browser.BrowserRun` and the real
+:func:`~netkeep.linkedin.connections.run_connections_sync` over :mod:`flagship_site`'s
 fake page, which "receives" its first screen on navigation and "sends" a pagination
 request per scroll. The attacks this file makes on the source, each a test below: can a
 changed payload write part of a page or the wrong person? Can a run be complete without
@@ -36,10 +36,10 @@ from flagship_site import (
 from run_fakes import fake_provider
 from voyager_pages import PEOPLE, Person
 
-from netkeeper.linkedin import flagship, page_connections
-from netkeeper.linkedin.browser import BrowserRun, BrowserUnavailable, ScrollOutcome
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.connections import (
+from netkeep.linkedin import flagship, page_connections
+from netkeep.linkedin.browser import BrowserRun, BrowserUnavailable, ScrollOutcome
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.connections import (
     AnswerLost,
     ConnectionsPage,
     StopReason,
@@ -48,15 +48,15 @@ from netkeeper.linkedin.connections import (
     SyncResult,
     run_connections_sync,
 )
-from netkeeper.linkedin.observe import (
+from netkeep.linkedin.observe import (
     ObservationFailed,
     ObservationLimits,
     ResponseMatch,
     ResponseRule,
 )
-from netkeeper.linkedin.pacing import ScrollPlan
-from netkeeper.linkedin.page_connections import PageConnections
-from netkeeper.linkedin.voyager import RouteChanged
+from netkeep.linkedin.pacing import ScrollPlan
+from netkeep.linkedin.page_connections import PageConnections
+from netkeep.linkedin.voyager import RouteChanged
 
 #: No test here needs more scroll plans than this; a scroll loop that never stops
 #: fails at this bound instead of hanging the suite (#198 review, L4).
@@ -613,7 +613,7 @@ async def test_a_lost_answer_the_page_asks_for_again_is_read_and_the_run_complet
 ) -> None:
     """Run 5 on #31: the answer for start 20 arrives, its body cannot be read. The page
     asks for 20 again on the next scroll, that one reads, and the run completes."""
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     people = many(55)
     site = FlagshipSite(people, lost={20: Lost("reask")})
     out = await sync(site)
@@ -640,7 +640,7 @@ async def test_a_lost_answer_lost_again_on_the_retry_is_still_waited_out() -> No
 
 
 async def test_a_page_that_moves_past_a_lost_answer_reads_on_and_the_run_is_incomplete() -> None:
-    """#200: the page read its own copy of 40-49 and asks for 50; netkeeper never saw
+    """#200: the page read its own copy of 40-49 and asks for 50; netkeep never saw
     40-49. The loss is recorded and the run reads on to the end of the list, never
     RouteChanged, never complete."""
     people = many(90)
@@ -705,7 +705,7 @@ async def test_a_lost_answer_never_puts_the_exception_message_in_a_log(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Playwright's messages quote urls; only the class and a fixed category are kept."""
-    caplog.set_level(logging.DEBUG, logger="netkeeper")
+    caplog.set_level(logging.DEBUG, logger="netkeep")
     out = await sync(FlagshipSite(many(60), lost={20: Lost("move_on")}))
     (lost,) = out.result.losses
     assert "fake-lost-slug" in LOST_BODY_MESSAGE
@@ -815,7 +815,7 @@ async def test_several_lost_answers_are_each_read_past_and_recorded(
 ) -> None:
     """Run 7 on #31, several times over: every answer the page moved past is recorded,
     in order, and the run reads on to the end of the list, incomplete."""
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     people = many(120)
     out = await sync(FlagshipSite(people, lost={20: Lost("move_on"), 70: Lost("move_on")}))
     result = out.result
@@ -879,7 +879,7 @@ async def test_lost_places_cannot_prove_an_early_end() -> None:
 async def test_a_failure_after_a_loss_names_the_loss_in_the_log(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     huge = Answer(status=200, body=b"0" * (8 * 1024 * 1024 + 1))
     with pytest.raises(ObservationFailed):
         await sync(FlagshipSite(many(90), lost={20: Lost("move_on")}, answers={30: huge}))
@@ -897,7 +897,7 @@ async def test_as_many_losses_as_the_cap_still_read_to_the_end() -> None:
 async def test_one_loss_more_than_the_cap_stops_the_run_as_answer_lost(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     people = many(200)
     lost = {start: Lost("move_on") for start in (20, 40, 60, 80, 100, 120)}
     out = await sync(FlagshipSite(people, lost=lost))
@@ -968,7 +968,7 @@ async def test_the_loss_log_carries_the_fixed_diagnostics_and_no_promise(
 ) -> None:
     """#200 items 2 and 3: the loss line names fixed facts only, and no line promises a
     scroll that a stop then contradicts."""
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     await sync(FlagshipSite(many(60), lost={20: Lost("move_on")}), max_lost=0)
     (loss,) = [
         r.getMessage()
@@ -997,7 +997,7 @@ async def test_the_loss_log_carries_the_fixed_diagnostics_and_no_promise(
 async def test_the_same_start_lost_again_on_a_re_ask_is_logged_as_such(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     out = await sync(FlagshipSite(many(45), lost={30: Lost("reask", times=2)}))
     assert out.result.complete and out.result.losses == ()
     assert "the page asked again for start 30, and it could not be read again" in caplog.text
@@ -1012,7 +1012,7 @@ async def test_a_lost_answer_is_read_from_its_streamed_copy_and_nothing_is_lost(
     """The cause Part B found: the page read answer 40 and aborted its stream, so
     Chrome kept no body. The body tap's copy agrees with what the page asked next
     (50, ten cards in between), so it stands in: nothing is lost, the run completes."""
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     people = many(90)
     site = FlagshipSite(people, tap=True, lost={40: Lost("move_on", streamed="whole")})
     out = await sync(site)
@@ -1062,7 +1062,7 @@ async def test_a_streamed_copy_that_disagrees_with_the_page_is_not_used(
 ) -> None:
     """The copy of 40 asks for 50, but the page asked for 60: it does not stand in, and
     the jump past the lost start stops the run safely."""
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     site = FlagshipSite(
         many(90),
         tap=True,
@@ -1165,7 +1165,7 @@ async def test_a_whole_copy_of_an_answer_with_a_hidden_member_is_used(
     """Run 177's lost answer (#515): the answer for 40 holds 9 cards for its 10 places
     and asks for 50. Chrome kept no body, the streamed copy is whole, and the page moves
     on to 50. The copy stands in: nothing is lost, the run completes, 1 member hidden."""
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     people = many(90)
     hide = {40: 1}
     site = FlagshipSite(people, tap=True, hide=hide, lost={40: Lost("move_on", streamed="whole")})
@@ -1184,7 +1184,7 @@ async def test_a_rescued_copy_the_flight_check_finds_not_whole_is_counted_not_re
     """#525 review: a copy that passes the rescue's checks but holds a model row its
     root never reaches is not whole by :func:`flight.is_whole`. That is reported -- one
     INFO line, a count on the run -- and not yet enforced: the copy is still used."""
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     people = many(90)
     hide = {40: 1}
     copy = FlagshipSite(people, hide=hide)._page(40) + b'fff:{"stray":1}\n'
@@ -1201,7 +1201,7 @@ async def test_a_flight_check_that_raises_never_aborts_the_rescue(
 ) -> None:
     """#525 re-review: the check is only reported, so any exception from it reads as
     not whole -- logged by its type name, never its message -- and the copy is used."""
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
 
     def raises(payload: object, *, endpoint: str) -> bool:
         raise ValueError("fake-secret-detail-0000")
@@ -1289,7 +1289,7 @@ async def test_hidden_members_are_counted_and_the_run_ends_at_its_proven_short_s
     30 hold 9 cards each for 10 places, and the answer at 40 holds 6 and asks for
     nothing. 3 members are hidden, 43 seen of 46 is within the slack, and the second
     unit (3 cards, the end proven) ends the run: no third, empty unit, and no WARNING."""
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     people = many(46)
     hide = {10: 1, 20: 1, 30: 1}
     gate = Gate()
@@ -1298,7 +1298,7 @@ async def test_hidden_members_are_counted_and_the_run_ends_at_its_proven_short_s
     assert out.result.hidden == 3 and out.result.shortfall == 3
     assert out.urns == _visible(people, hide)
     assert gate.units == 2 and out.result.pages == 2
-    sync_loggers = {"netkeeper.linkedin.connections", "netkeeper.linkedin.page_connections"}
+    sync_loggers = {"netkeep.linkedin.connections", "netkeep.linkedin.page_connections"}
     warnings = [
         r.getMessage()
         for r in caplog.records
@@ -1321,7 +1321,7 @@ async def test_hidden_places_count_when_a_quiet_last_answer_is_rescued(
     """#554: the same 46 places, but the last answer (40-45) is lost and the page goes
     quiet. The copy parses and asks for nothing: 43 read plus 3 hidden is the 46 the
     total names, with no slack, so the copy stands in and the run is complete."""
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     people = many(46)
     hide = {10: 1, 20: 1, 30: 1}
     site = FlagshipSite(
@@ -1342,7 +1342,7 @@ async def test_hidden_places_do_not_rescue_a_quiet_last_answer_short_of_the_tota
     one place short. Counting hidden places adds no slack, not even one place, so the
     copy is refused, its own log line says how many places it accounts for, and the run
     stops answer_lost at 40."""
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     site = FlagshipSite(
         many(46),
         end="short",
@@ -1367,7 +1367,7 @@ async def test_a_quiet_last_answer_copy_that_asks_for_a_next_page_is_not_used(
     """#554: the copy of the last answer (40) parses and, with the 3 hidden places,
     accounts for all 46 places, but it asks for a next start: it does not prove the
     end, so it is refused on its own log line and the run stops answer_lost at 40."""
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     people = many(46)
     copy = pagination_payload(people[40:46], start=40, next_start=50)
     site = FlagshipSite(
@@ -1412,7 +1412,7 @@ async def test_the_places_of_a_lost_answer_are_not_counted_as_hidden() -> None:
 async def test_a_browser_without_cdp_sessions_reads_as_before(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     out = await sync(FlagshipSite(many(45)))
     assert out.result.complete
     assert "no body tap on this tab (RuntimeError)" in caplog.text
@@ -1421,7 +1421,7 @@ async def test_a_browser_without_cdp_sessions_reads_as_before(
 async def test_a_tap_whose_session_cannot_enable_the_network_is_closed_and_unused(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
 
     class Refusing(FakeCdpSession):
         async def send(self, method: str, params: Any = None) -> Any:
@@ -1548,7 +1548,7 @@ def test_the_source_bounds_are_pinned() -> None:
 
 
 async def test_no_name_slug_or_urn_reaches_a_log(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.DEBUG, logger="netkeeper")
+    caplog.set_level(logging.DEBUG, logger="netkeep")
     people = many(45)
     await sync(FlagshipSite(people, repeat=frozenset({20}), skip=frozenset({40})))
     text = caplog.text

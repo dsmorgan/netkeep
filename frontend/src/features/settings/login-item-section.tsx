@@ -18,7 +18,7 @@ function message(error: unknown): string {
 
 /**
  * Run at login (#600): a switch that installs or removes the launchd agent that starts
- * `netkeeper serve`. It shows the state the server read from the plist and `launchctl`,
+ * `netkeep serve`. It shows the state the server read from the plist and `launchctl`,
  * not a remembered flag, and it is disabled with the reason off macOS. Turning it on
  * while this server runs registers the agent for the next login rather than starting a
  * second copy; the answer's message says so.
@@ -42,7 +42,7 @@ export function LoginItemSection() {
       <CardHeader>
         <h2 className="font-heading text-sm leading-snug font-bold">Run at login</h2>
         <CardDescription>
-          netkeeper keeps running in the background and restarts after a crash. This adds a launchd
+          netkeep keeps running in the background and restarts after a crash. This adds a launchd
           agent in your Library folder; turning it off removes the agent and keeps your data.
         </CardDescription>
       </CardHeader>
@@ -61,7 +61,7 @@ export function LoginItemSection() {
                   change.mutate(checked === true)
                 }}
               />
-              <Label htmlFor={id}>Start netkeeper when I log in</Label>
+              <Label htmlFor={id}>Start netkeep when I log in</Label>
             </div>
             {!item.supported && item.unsupported_reason && (
               <p className="text-muted-foreground">{item.unsupported_reason}</p>
@@ -81,7 +81,7 @@ export function LoginItemSection() {
               <p role="alert">
                 The agent runs{' '}
                 <code className="font-mono text-xs break-all">{item.points_elsewhere}</code>, not
-                this copy of netkeeper.
+                this copy of netkeep.
               </p>
             )}
             {(item.legacy || item.points_elsewhere) && (
@@ -102,7 +102,7 @@ export function LoginItemSection() {
             {change.isError && <p role="alert">{message(change.error)}</p>}
             {item.supported && item.enabled && (
               <p className="text-muted-foreground">
-                How to check: after your next login, open netkeeper&apos;s bookmark without starting
+                How to check: after your next login, open netkeep&apos;s bookmark without starting
                 anything.{' '}
                 <a
                   href={LOGIN_ITEM_TROUBLESHOOTING_URL}

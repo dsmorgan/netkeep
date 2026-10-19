@@ -1,6 +1,6 @@
-"""Request sessions (``netkeeper.web.deps.get_session``): writers for methods that may write.
+"""Request sessions (``netkeep.web.deps.get_session``): writers for methods that may write.
 
-A handler marked :func:`~netkeeper.web.deps.read_only` opts back out (#62): a
+A handler marked :func:`~netkeep.web.deps.read_only` opts back out (#62): a
 ``POST`` that only reads, because its input does not fit a query string, must
 not take the SQLite write lock.
 """
@@ -16,10 +16,10 @@ from fastapi.routing import APIRoute
 from local_api import LocalKey
 from sqlalchemy import Engine, event
 
-from netkeeper.db import is_writer, make_session_factory
-from netkeeper.web.app import API_PREFIX, discover_routers
-from netkeeper.web.deps import READ_ONLY_ATTR, SAFE_METHODS, SessionDep, read_only
-from netkeeper.web.security import CLIENT_HEADER, CLIENT_HEADER_VALUE
+from netkeep.db import is_writer, make_session_factory
+from netkeep.web.app import API_PREFIX, discover_routers
+from netkeep.web.deps import READ_ONLY_ATTR, SAFE_METHODS, SessionDep, read_only
+from netkeep.web.security import CLIENT_HEADER, CLIENT_HEADER_VALUE
 
 METHODS = ["GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE"]
 

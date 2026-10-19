@@ -1,4 +1,4 @@
-# Contributing to netkeeper
+# Contributing to netkeep
 
 Thanks for your interest. This page explains how the project works so your time is well spent.
 
@@ -35,27 +35,27 @@ Phase 0 in the spec adds the runnable scaffold. Until then there is nothing to b
 
 The offline suite drives the attach path against fakes. The smoke suite drives it
 against a real Chrome, which is the only way to know that Playwright still behaves as
-the code assumes and that the tab netkeeper opens sends the browser's own headers and
+the code assumes and that the tab netkeep opens sends the browser's own headers and
 client hints. It is skipped unless you opt in, and it talks to a loopback HTTP server
 this repository serves: no test in this project, opt-in or not, contacts linkedin.com.
 
 ```sh
-.venv/bin/netkeeper browser launch     # prints the command; run that command yourself
-NETKEEPER_BROWSER_TESTS=1 .venv/bin/python -m pytest tests/smoke -q
+.venv/bin/netkeep browser launch     # prints the command; run that command yourself
+NETKEEP_BROWSER_TESTS=1 .venv/bin/python -m pytest tests/smoke -q
 ```
 
-**Stop `netkeeper serve` before you run the smoke suite.** The test suite points
-`NETKEEPER_DATA` at a temporary directory for every test, so the smoke tests take
+**Stop `netkeep serve` before you run the smoke suite.** The test suite points
+`NETKEEP_DATA` at a temporary directory for every test, so the smoke tests take
 their activity lock there, not in your real data directory. They cannot see a run that
 `serve` holds, and running them alongside one opens a second CDP client on your Chrome.
 
 Run it against Chrome stable in a window, not a headless one, and say which Chrome
 version you used in the pull request. Run it against an isolated Chrome (its own
 `--user-data-dir`, not signed in to LinkedIn) on a debug port other than 9222, and point
-`NETKEEPER_CDP_URL` at it: the suite refuses every port-9222 address, the default
-included, because that is where your own netkeeper Chrome listens. Point
-`NETKEEPER_SMOKE_PROFILE` at that Chrome's `--user-data-dir` too: every attach checks
-that the Chrome on the port holds netkeeper's profile (#624), and the suite links each
+`NETKEEP_CDP_URL` at it: the suite refuses every port-9222 address, the default
+included, because that is where your own netkeep Chrome listens. Point
+`NETKEEP_SMOKE_PROFILE` at that Chrome's `--user-data-dir` too: every attach checks
+that the Chrome on the port holds netkeep's profile (#624), and the suite links each
 test's profile to that directory. Without it, the suite skips and names the variable. Outside
 `tests/smoke/`, every test is refused a real Chrome altogether (`tests/conftest.py`,
 `_no_real_browser`); a test that genuinely needs one opts out with

@@ -24,7 +24,7 @@ import {
 
 /** What a switch to Auto-send changes, as the API's `confirm_text` says it. */
 export const AUTO_SEND_CONFIRM =
-  "netkeeper sends this step's messages itself, within your active hours, spacing and budget."
+  "netkeep sends this step's messages itself, within your active hours, spacing and budget."
 
 const SWITCHABLE = new Set<Campaign['status']>(['active', 'paused'])
 

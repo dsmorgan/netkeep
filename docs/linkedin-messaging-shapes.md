@@ -2,7 +2,7 @@
 
 This note records the structure of what LinkedIn's messaging pages load and which controls they show, as the maintainer's capture of **2026-10-05** showed it (#374; 2026-10-06 UTC). It records **structure only**: paths, query names, keys, `_type` names, enum values, how identifiers nest, counts, and the roles and accessible names of controls. It holds no name, slug, profile or member id, URN value, message text, token, or header value. The capture stays in the maintainer's private folder; nothing in this repository was copied from it.
 
-[ADR 0006](adr/0006-observe-dont-request.md) records why netkeeper reads these answers rather than requesting anything itself. The hand-built fixtures that follow these shapes, with invented people, are `tests/messaging_pages.py`; `tests/test_messaging_pages.py` checks that none of their values appears in the capture. That check is opt-in, so no ordinary test run reads the private folder: it runs only with `NETKEEPER_CAPTURE_DIR` set to the capture folder (`NETKEEPER_CAPTURE_DIR=~/code/netkeeper-private/messaging-capture .venv/bin/python -m pytest tests/test_messaging_pages.py`), and skips otherwise. Only the maintainer, or an analysis session he approves, sets it, and never with `-l`/`--showlocals` or `--pdb`, which would print the capture. The inbox poll (P4-01, #380) and the prefill (P4-03, #382) are built from this note. Where the capture was silent, this note says so, and [What P4 reads, and what it assumes](#what-p4-reads-and-what-it-assumes) lists what the first supervised runs must confirm.
+[ADR 0006](adr/0006-observe-dont-request.md) records why netkeep reads these answers rather than requesting anything itself. The hand-built fixtures that follow these shapes, with invented people, are `tests/messaging_pages.py`; `tests/test_messaging_pages.py` checks that none of their values appears in the capture. That check is opt-in, so no ordinary test run reads the private folder: it runs only with `NETKEEP_CAPTURE_DIR` set to the capture folder (`NETKEEP_CAPTURE_DIR=~/code/netkeeper-private/messaging-capture .venv/bin/python -m pytest tests/test_messaging_pages.py`), and skips otherwise. Only the maintainer, or an analysis session he approves, sets it, and never with `-l`/`--showlocals` or `--pdb`, which would print the capture. The inbox poll (P4-01, #380) and the prefill (P4-03, #382) are built from this note. Where the capture was silent, this note says so, and [What P4 reads, and what it assumes](#what-p4-reads-and-what-it-assumes) lists what the first supervised runs must confirm.
 
 The capture holds five HAR files and four HTML files: the inbox, older conversations, one thread and a profile; opening the bubble from a profile and typing; the **Message** click for a connection never messaged; one real send; the **Message** control; and both kinds of bubble.
 
@@ -35,13 +35,13 @@ Every list and thread answer comes from one path. The `queryId` is `<name>.<hash
 | Several threads | same | `messengerMessages` | `criteria:List((conversationUrn,syncToken))` | `messengerMessagesBySyncTokensInBatch` |
 | Counts, receipts, quick replies | same | `messengerMailboxCounts`, `messengerSeenReceipts`, `messengerQuickReplies` | `mailboxUrn` or `conversationUrn` | not read |
 
-A filtered list carries extra `predicateUnions` entries: the InMail filter puts `INMAIL` before `PRIMARY_INBOX`. #555 makes netkeeper read an older page only when its `query` is exactly the single `PRIMARY_INBOX` predicate, and stops the poll as `route_changed` for any other; before it, the check read the first predicate.
+A filtered list carries extra `predicateUnions` entries: the InMail filter puts `INMAIL` before `PRIMARY_INBOX`. #555 makes netkeep read an older page only when its `query` is exactly the single `PRIMARY_INBOX` predicate, and stops the poll as `route_changed` for any other; before it, the check read the first predicate.
 
 Every captured list and thread request was answered `200` with a whole body; none was aborted. They are `fetch` requests answered `application/graphql`.
 
 Around them the page also sends `POST /voyager/api/voyagerMessagingDashMessagingBadge?action=markAllMessagesAsSeen`, `POST .../voyagerMessagingDashMessengerMessageDeliveryAcknowledgements?action=sendDeliveryAcknowledgement`, `POST /voyager/api/messaging/dash/presenceStatuses`, `GET .../voyagerMessagingDashConversationNudges`, `GET .../voyagerMessagingDashSecondaryInbox?q=previewBanner`, and `/realtime/` traffic (below). Opening the inbox marks messages as seen; that's the page's own doing, and a poll can't avoid it.
 
-`/voyager/api/messaging/conversations`, the path `netkeeper/linkedin/voyager.py` targets, appears nowhere in the capture.
+`/voyager/api/messaging/conversations`, the path `netkeep/linkedin/voyager.py` targets, appears nowhere in the capture.
 
 ## The envelope
 
@@ -109,7 +109,7 @@ The list is ordered by `lastActivityAt`, newest first, in every captured answer.
 | `INBOX`, `PRIMARY_INBOX`, `INMAIL` | Conversations that began as InMail. `state` `PENDING`, `ACCEPTED` or `DECLINED`; often a `subject`. Pending ones carried the `InMail` label and a `hostUrnData` render item (`type` `SALES_INMAIL` or `PREMIUM_INMAIL`); accepted ones had no label and no `hostUrnData`, and some carried a `conversationVerificationLabel`; sponsored ones also appear here (`state` `null`, the `Sponsored` label, a `messageAdRenderContent` item) | `INMAIL_ACCEPTED`, `INMAIL_ACCEPTED_VERIFIED`, `INMAIL_PENDING`, `INMAIL_DECLINED`, `PREMIUM_INMAIL`, `SPONSORED_IN_INBOX`; invented: `INMAIL_ACCEPTED_LABELLED` |
 | `INBOX`, `SECONDARY_INBOX`, `INMAIL` | Pending requests, with `hostUrnData` and no label | `SECONDARY_PENDING` |
 | `ARCHIVE`, `INMAIL` | Sponsored messages and `LinkedIn Offer` items | `SPONSORED`, `SPONSORED_MESSAGE`, `OFFER` |
-| `INMAIL`, `SPAM` | A pending InMail filed as spam: `state` `PENDING`, the `InMail` label and a `hostUrnData` render item. The CP8c analysis read this set from the category list; no captured conversation had it, so the fixture is invented. Rule 4 skips it, so netkeeper counts it as `skipped_other` and never attributes it to a contact | invented: `INMAIL_SPAM` |
+| `INMAIL`, `SPAM` | A pending InMail filed as spam: `state` `PENDING`, the `InMail` label and a `hostUrnData` render item. The CP8c analysis read this set from the category list; no captured conversation had it, so the fixture is invented. Rule 4 skips it, so netkeep counts it as `skipped_other` and never attributes it to a contact | invented: `INMAIL_SPAM` |
 
 - **Sponsored and offers.** `conversationTypeText.text` is `Sponsored` or `LinkedIn Offer` (`InMail` on pending InMail); these are LinkedIn's own labels. A sponsored item also carries a `messageAdRenderContent` render item (`status`, `sponsoredCampaignUrn`, `subContent`, and tracking keys), or a `conversationAdsMessageContent` render item with `contentMetadata.conversationAdContent`. Some had an **organization** participant: `participantType.organization` (`com.linkedin.messenger.OrganizationParticipantInfo`), `hostIdentityUrn` `urn:li:fsd_company:<n>`, `participantType.member: null`.
 - **InMail.** `INMAIL` in `categories`. It stays after the person accepts, so an accepted InMail with a contact sits in `PRIMARY_INBOX` beside ordinary conversations.
@@ -121,7 +121,7 @@ The list is ordered by `lastActivityAt`, newest first, in every captured answer.
 
 ## The filtered list, and the page's move to the newest thread
 
-Choosing the InMail filter in the inbox (CP8d, #520) sends the same `messengerConversations` request as the older pages, with the filter as an **extra `conversationCategoryPredicate`** in `predicateUnions`: `INMAIL` first, then `PRIMARY_INBOX`. Paging is unchanged (`lastUpdatedBefore`, then `nextCursor`), `count` stays 20, and the answer is `messengerConversationsByCategoryQuery` with the same items. The page's address carries the filter as well: later requests name `/messaging/thread/<id>/?filter=<token>`, where the token is six lowercase letters. netkeeper never chooses a filter and its poll goes to `/messaging/` with no query. A filtered page that arrives during a poll stops it rather than being taken for part of the primary inbox (#555 reads an older page only for the single `PRIMARY_INBOX` predicate; before it, the check read the first predicate, which held only while LinkedIn listed the filter's predicate first).
+Choosing the InMail filter in the inbox (CP8d, #520) sends the same `messengerConversations` request as the older pages, with the filter as an **extra `conversationCategoryPredicate`** in `predicateUnions`: `INMAIL` first, then `PRIMARY_INBOX`. Paging is unchanged (`lastUpdatedBefore`, then `nextCursor`), `count` stays 20, and the answer is `messengerConversationsByCategoryQuery` with the same items. The page's address carries the filter as well: later requests name `/messaging/thread/<id>/?filter=<token>`, where the token is six lowercase letters. netkeep never chooses a filter and its poll goes to `/messaging/` with no query. A filtered page that arrives during a poll stops it rather than being taken for part of the primary inbox (#555 reads an older page only for the single `PRIMARY_INBOX` predicate; before it, the check read the first predicate, which held only while LinkedIn listed the filter's predicate first).
 
 About 1.1 s after `load`, with no input, the page selects the newest conversation and rewrites the address to `/messaging/thread/<id>/`. The unfiltered inbox does the same. A poll that has to scroll (a first poll, or more than 20 changed conversations) re-checks the address, so this can end it as route changed. Whether a narrow layout selects a thread at all is unknown. The capture doesn't prove it either way; #556 tracks it and still needs evidence.
 
@@ -129,7 +129,7 @@ About 1.1 s after `load`, with no input, the page selects the newest conversatio
 
 Every list item held **at most one message**; a few had no `messages` key at all. That message's `deliveredAt` always equalled the item's `lastActivityAt`. Earlier messages come only from `messengerMessages`.
 
-So under the 2026-10-03 decision, the poll opens threads **by navigation only** (to `conversationUrl`), only for conversations in `InboxJobSpec.open_threads_for` (a prefilled message or a live enrollment), and **at most 5 per poll** (`netkeeper/linkedin/inbox.py`, `MAX_THREADS_OPENED`). A reply that arrived after another newer message, in a conversation the poll doesn't open, is seen only as the last message.
+So under the 2026-10-03 decision, the poll opens threads **by navigation only** (to `conversationUrl`), only for conversations in `InboxJobSpec.open_threads_for` (a prefilled message or a live enrollment), and **at most 5 per poll** (`netkeep/linkedin/inbox.py`, `MAX_THREADS_OPENED`). A reply that arrived after another newer message, in a conversation the poll doesn't open, is seen only as the last message.
 
 ## A thread
 
@@ -191,7 +191,7 @@ From `composer.html`:
 - The messages are `li` items holding `div[data-event-urn="<msg_message urn>"][data-view-name="message-list-item"]`. A multi-line message renders as one `p` with `br` between lines. Other profile links in the bubble are absolute, `https://www.linkedin.com/in/<profile id>`.
 - The composer sits in `form#msg-form-<ember id>`: one `div[contenteditable="true"][role="textbox"][aria-multiline="true"]` with `aria-label="Write a message…"` (U+2026), followed by an `aria-hidden` placeholder `div` with the same text.
 - **Send** is that form's only `button[type="submit"]`, text `Send`. Beside it, a `button` with `data-test-msg-ui-send-mode-toggle-presenter__button`, text `Open send options`, holds the "Press Enter to Send" setting. Attach-image, attach-file, GIF and emoji buttons sit in the same footer.
-- **Send** has a plain `disabled` attribute while the composer is empty, and the page enables it once the composer holds text. Past 8,000 characters, the page shows a red indicator and disables Send. It doesn't truncate the text and shows no counter. netkeeper's lint refuses bodies over 8,000 characters, and its typing time limit keeps a body near 1,100 characters, so neither goes past the page's own.
+- **Send** has a plain `disabled` attribute while the composer is empty, and the page enables it once the composer holds text. Past 8,000 characters, the page shows a red indicator and disables Send. It doesn't truncate the text and shows no counter. netkeep's lint refuses bodies over 8,000 characters, and its typing time limit keeps a body near 1,100 characters, so neither goes past the page's own.
 
 ## The never-messaged bubble
 
@@ -209,7 +209,7 @@ The CP8d captures (#520, 2026-10-16) of three more New message bubbles, a verifi
 - **The recipient field** is an `input[role="combobox"]` with `aria-expanded="false"`, and an "Add … recipients for your message" button beside it, whose name doesn't start with `Remove`.
 - **The card** has two relative links, both `/in/<slug>/` with the vanity slug: the photo (`img` `alt` `<NAME> Profile`, plus a presence span) and the name. A `<degree> degree connection` badge and the headline follow.
 - **A second `Messaging` dialog sits beside it.** In all three captures a *minimized sponsored* bubble (`msg-spinmail-thread-presenter` in its body) was on the page: `role="dialog"`, `aria-label="Messaging"`, `data-msg-overlay-conversation-bubble-is-minimized="true"`, a header `h2` with the sender's name as text only (**no link**), a close button `Close your conversation with <A> and <B>`, and **no composer**. Its ember ids are lower than the New message bubble's, so it was most likely there before the click (an inference). The New message bubble is the other dialog: not minimized, with the composer.
-- **The profile's name is in an `h2`**, with no `h1` on the page. netkeeper finds the top card and reads the name from a single `h1`; with none, it finds no top card and skips the name check (`NAME_CHECK_SKIPPED`). #552 reads the name from the top card's `h2`. A name with a suffix reads `<NAME>, <CRED>` in one text node.
+- **The profile's name is in an `h2`**, with no `h1` on the page. netkeep finds the top card and reads the name from a single `h1`; with none, it finds no top card and skips the name check (`NAME_CHECK_SKIPPED`). #552 reads the name from the top card's `h2`. A name with a suffix reads `<NAME>, <CRED>` in one text node.
 
 The prefill must check that there is exactly one chip, that its `Remove <name>` names the contact, and that the compose option's `recipientUrns` is the contact's URN.
 
@@ -225,7 +225,7 @@ No other messaging request appeared while typing: no draft save. The category an
 
 ## Sending
 
-The person's **Send** posts `POST /voyager/api/voyagerMessagingDashMessengerMessages?action=createMessage` (`text/plain` JSON), answered `200` `application/json`. netkeeper never sends it.
+The person's **Send** posts `POST /voyager/api/voyagerMessagingDashMessengerMessages?action=createMessage` (`text/plain` JSON), answered `200` `application/json`. netkeep never sends it.
 
 Request:
 
@@ -251,7 +251,7 @@ Response:
 
 `value.originToken`, `value.conversationUrn` and `value.body.text` equal the request's. The owner's messages in later list and thread answers carry the same `originToken` key. No `/realtime/` event was captured for the send (see `/realtime/` below).
 
-**Matching a send the person made.** The prefill doesn't send, so netkeeper never sees the `originToken` before the person clicks. The poll can match on what the list and thread answers carry: a message in the prefilled conversation (`conversation.entityUrn`, or the `createMessage` answer's `value.conversationUrn` if the tab observes it), whose `sender.hostIdentityUrn` is the mailbox owner (and whose `originToken` is therefore set), with `deliveredAt` after the prefill's hand-over. `entityUrn` identifies that message from then on. The text can confirm it, within `SNIPPET_MAX`.
+**Matching a send the person made.** The prefill doesn't send, so netkeep never sees the `originToken` before the person clicks. The poll can match on what the list and thread answers carry: a message in the prefilled conversation (`conversation.entityUrn`, or the `createMessage` answer's `value.conversationUrn` if the tab observes it), whose `sender.hostIdentityUrn` is the mailbox owner (and whose `originToken` is therefore set), with `deliveredAt` after the prefill's hand-over. `entityUrn` identifies that message from then on. The text can confirm it, within `SNIPPET_MAX`.
 
 ## Enter and Shift+Enter
 
@@ -265,7 +265,7 @@ The maintainer ran the step 9 table in both the bubble and `/messaging/`, with t
 | Off | Enter | new line |
 | Off | ⌘+Enter | sent |
 
-**Shift+Enter never sends, whatever the setting.** So P4-03 types a newline as Shift+Enter, flips `SHIFT_ENTER_NEWLINES_ALLOWED` in `netkeeper/linkedin/pacing.py`, and never presses Enter or ⌘+Enter; P4-11's lint allows multi-line LinkedIn templates. The capture also shows a multi-line message stored with `\n` in `body.text` and rendered with `br`.
+**Shift+Enter never sends, whatever the setting.** So P4-03 types a newline as Shift+Enter, flips `SHIFT_ENTER_NEWLINES_ALLOWED` in `netkeep/linkedin/pacing.py`, and never presses Enter or ⌘+Enter; P4-11's lint allows multi-line LinkedIn templates. The capture also shows a multi-line message stored with `\n` in `body.text` and rendered with `br`.
 
 ## The bubble across pages
 
@@ -300,7 +300,7 @@ data: {"com.linkedin.realtimefrontend.DecoratedEvent": {
         "actor": {...}, "conversation": {<a full Conversation>}, "previousMessages": {"elements": [{"entityUrn": "..."}]}}}}}}}
 ```
 
-`result` is the same `com.linkedin.messenger.Message` the GraphQL answers carry (see "The envelope"), with the full conversation inline. `_message()` parses it unchanged (`tests/test_cp8d_message_shapes.py` pins that). `replySuggestionTopicV<N>` brings the quick replies for that message just before it (`doDecorateQuickRepliesMessengerRealtimeDecoration`, a list of `com.linkedin.messenger.QuickReply`). `tabBadgeUpdateTopic` events use the Voyager `$type` form (`RealtimeBadgingItemCountsEvent`). **netkeeper doesn't read the stream**: the inbox poll reads by sync token, and no body-tap matcher names `/realtime/`.
+`result` is the same `com.linkedin.messenger.Message` the GraphQL answers carry (see "The envelope"), with the full conversation inline. `_message()` parses it unchanged (`tests/test_cp8d_message_shapes.py` pins that). `replySuggestionTopicV<N>` brings the quick replies for that message just before it (`doDecorateQuickRepliesMessengerRealtimeDecoration`, a list of `com.linkedin.messenger.QuickReply`). `tabBadgeUpdateTopic` events use the Voyager `$type` form (`RealtimeBadgingItemCountsEvent`). **netkeep doesn't read the stream**: the inbox poll reads by sync token, and no body-tap matcher names `/realtime/`.
 
 The CP8c analysis (#484, #519) added these facts:
 
@@ -355,20 +355,20 @@ The CP8c captures (#484) settled the live reply's delivery, focus after the clic
 | Existing or new | `existingConversationUrn` present (`REPLY`) or absent (`CONNECTION_MESSAGE`) | Captured | |
 | The existing bubble | One `role="dialog"` named `Messaging`, whose header `h2` link is `/in/<contact's profile id>/` | Captured | Another id, or two dialogs: no key |
 | A `Contact info` dialog | Not a bubble: a `<dialog>` with no `role` attribute, named `Contact info` through `aria-labelledby` to `header#dialog-header > h2`, modal while open, at `/in/<slug>/overlay/contact-info/`. The checks look for `Messaging` dialogs, so it isn't counted (`tests/test_contact_info_dialog_guard.py`). A tab left on that address fails the prefill's "on the contact's profile" check, which is safe. The dialog's own shape is in `linkedin-flagship-web-shapes.md` | Captured (CP8d) | |
-| The new bubble | `New message`; exactly one chip, `Remove <name>`; every `/in/` link in the scope is the contact's, by slug or member id, and at least one is there (#481) | Captured (root role unknown); a minimized sponsored `Messaging` dialog beside it: captured (CP8d), and netkeeper counted it as an open bubble and held before the click; #551 makes it ignore a minimized, composer-less, link-less one | Zero or two chips: no key |
+| The new bubble | `New message`; exactly one chip, `Remove <name>`; every `/in/` link in the scope is the contact's, by slug or member id, and at least one is there (#481) | Captured (root role unknown); a minimized sponsored `Messaging` dialog beside it: captured (CP8d), and netkeep counted it as an open bubble and held before the click; #551 makes it ignore a minimized, composer-less, link-less one | Zero or two chips: no key |
 | The composer | Exactly one `role="textbox"` named `Write a message…` in that bubble, empty | Captured | None, two, or not empty: no key |
 | Focus | Focus the composer by role and name before typing | Captured (CP8c, #519): focus stays on the Message button after the click | |
 | Newlines | Shift+Enter | Captured: never sends | |
 | Send | `button[type="submit"]` named `Send`: the prefill never clicks it; auto-send ([ADR 0008](adr/0008-auto-send.md)) clicks it once, behind its gates, and then the existing bubble's one close button, whose name starts with `Close your conversation with ` and is then the header link's name, alone or with one other name across ` and ` (#499, #516) | Captured | Not exactly one, not in the composer's form, hidden or disabled: no click |
-| Typing indicator | The page's own `action=typing` posts, about every 5 s | Captured | Not netkeeper's to stop |
+| Typing indicator | The page's own `action=typing` posts, about every 5 s | Captured | Not netkeep's to stop |
 | A send the person made | A new owner message in that conversation, `deliveredAt` after the hand-over | Captured | |
 | Message length | 8,000 characters | Captured (CP8c, #519): past 8,000 the page disables Send | |
 
 ## Retire the conversations half of `voyager.py`
 
-**Retired in P4-01 (#380).** The poll deletes the conversations section of `netkeeper/linkedin/voyager.py` (`CONVERSATIONS_ENDPOINT`, `CONVERSATIONS_PATH`, `CONVERSATIONS_DECORATION_ID`, `CONVERSATIONS_DEFAULT_COUNT`, `conversations_query`, `ConversationParticipant`, `ConversationSummary`, `ConversationsPageResult`, `parse_conversations_page`, and its helpers), `tests/fixtures/voyager/conversations_page.json`, and their tests in `tests/test_linkedin_voyager.py`, and writes `netkeeper/linkedin/messaging_shapes.py` from this note. Rebuilding it doesn't pay:
+**Retired in P4-01 (#380).** The poll deletes the conversations section of `netkeep/linkedin/voyager.py` (`CONVERSATIONS_ENDPOINT`, `CONVERSATIONS_PATH`, `CONVERSATIONS_DECORATION_ID`, `CONVERSATIONS_DEFAULT_COUNT`, `conversations_query`, `ConversationParticipant`, `ConversationSummary`, `ConversationsPageResult`, `parse_conversations_page`, and its helpers), `tests/fixtures/voyager/conversations_page.json`, and their tests in `tests/test_linkedin_voyager.py`, and writes `netkeep/linkedin/messaging_shapes.py` from this note. Rebuilding it doesn't pay:
 
-- **Its path is gone.** It reads `/voyager/api/messaging/conversations` with a `decorationId`; the capture never requests that path. Under ADR 0006 netkeeper reads only what the page loads, so a parser for a path the page doesn't load can never run.
+- **Its path is gone.** It reads `/voyager/api/messaging/conversations` with a `decorationId`; the capture never requests that path. Under ADR 0006 netkeep reads only what the page loads, so a parser for a path the page doesn't load can never run.
 - **Its envelope is wrong.** It expects `data.elements` and `data.paging` (`start`, `count`, `total`). The GraphQL answer is `data.<field>.elements` with `metadata` holding a sync token or a cursor, and no total.
 - **Its keys are wrong.** It reads participants' `firstName` and `lastName` as strings and `publicIdentifier`; the answer nests them as `participantType.member.firstName.text` and has no vanity slug, only a `profileUrl` by id. It reads `unread` (the answer has `read` and `unreadCount`) and `lastMessage` (the answer has `messages.elements`). It keeps `lastMessage.sender.entityUrn`, which in the new shape is a messaging-participant URN, not the `fsd_profile` URN matching needs.
 - **It can't tell the kinds apart.** It has no `categories`, `groupChat`, or sponsored markers, so it would attribute InMail and ads.
@@ -376,7 +376,7 @@ The CP8c captures (#484) settled the live reply's delivery, focus after the clic
 
 ## How the inbox poll reads it (P4-01)
 
-`netkeeper/linkedin/messaging_shapes.py` parses the answers and `netkeeper/linkedin/page_inbox.py` (`PageInbox`) reads them from the tab. The poll sends nothing: it navigates to `/messaging/`, scrolls the list with the mouse wheel, and goes to a thread's page by its address. The rules the source adds beyond the table above:
+`netkeep/linkedin/messaging_shapes.py` parses the answers and `netkeep/linkedin/page_inbox.py` (`PageInbox`) reads them from the tab. The poll sends nothing: it navigates to `/messaging/`, scrolls the list with the mouse wheel, and goes to a thread's page by its address. The rules the source adds beyond the table above:
 
 - **Whole or not at all.** A list or thread answer that doesn't parse, a list that isn't newest first, a request for an older page that doesn't start where the last answer ended (`lastUpdatedBefore` not later than the oldest conversation seen, or a `nextCursor` that isn't the last answer's), a body the observation couldn't keep, and a list that stops loading before it proves its end (six scrolls with nothing new) all stop the poll as `route_changed`. The run ends `aborted`, never `completed`.
 - **`complete`.** True only when a list answer reached a conversation at or before `since`, or the end of the list, within `max_conversations`. The end is **assumed** to be a category answer with no next cursor or no conversations, so even a short inbox needs one scroll to prove it.
@@ -387,4 +387,4 @@ The CP8c captures (#484) settled the live reply's delivery, focus after the clic
 - **A thread that yields nothing.** A thread opened by navigation whose answer is lost, answered with an error status, or under a renamed field stops the poll. A one-to-one item that carries no message, whose thread was asked for and not opened (the cap), makes the read `complete=False`.
 - **Older pages** must be the `PRIMARY_INBOX` category, or the poll stops.
 - **Whose mailbox.** The delta carries the owner URN. The core aborts the poll (`owner_mismatch`, nothing written) when it differs from the self contact's `li_urn`, or, with none, from the owner the first poll recorded.
-- **The first poll is by hand.** A scheduled inbox poll starts nothing (`first_inbox_poll`) until one inbox poll has completed; `netkeeper linkedin inbox` is the first.
+- **The first poll is by hand.** A scheduled inbox poll starts nothing (`first_inbox_poll`) until one inbox poll has completed; `netkeep linkedin inbox` is the first.

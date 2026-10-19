@@ -18,7 +18,7 @@ from typing import Any
 import httplib2
 import pytest
 
-from netkeeper.campaigns.gmail import (
+from netkeep.campaigns.gmail import (
     RESENDABLE_METHODS,
     GmailClient,
     GmailRejected,

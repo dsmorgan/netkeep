@@ -11,8 +11,8 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.db import session_scope
+from netkeep.models import (
     Contact,
     ContactMet,
     MetSource,
@@ -20,9 +20,9 @@ from netkeeper.models import (
     TriageDecisionKind,
     User,
 )
-from netkeeper.scoping import get_scoped, scoped
+from netkeep.scoping import get_scoped, scoped
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 CONTACTS = "/api/v1/contacts"
 TRIAGE = "/api/v1/triage"
 NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)

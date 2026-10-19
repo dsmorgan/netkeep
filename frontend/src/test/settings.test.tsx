@@ -69,7 +69,7 @@ describe('settings', () => {
         return jsonResponse({
           client_configured: false,
           client_id: null,
-          keychain_service: 'netkeeper',
+          keychain_service: 'netkeep',
           mailboxes: [],
           reauth_required: false,
         })

@@ -33,8 +33,8 @@ from flagship_pages import (
 )
 from voyager_pages import PEOPLE, Person
 
-from netkeeper.linkedin.browser import PageLike
-from netkeeper.linkedin.flagship import (
+from netkeep.linkedin.browser import PageLike
+from netkeep.linkedin.flagship import (
     CONNECTIONS_PAGE_PATH,
     CONNECTIONS_SCREEN_PATH,
     PAGINATION_PATH,

@@ -1,12 +1,12 @@
-"""``netkeeper.crm.exports`` (spec 10.6): CSV, JSON, and vCard over a filtered stream.
+"""``netkeep.crm.exports`` (spec 10.6): CSV, JSON, and vCard over a filtered stream.
 
 The nine-column round trip (P1-11's "done when") is the load-bearing test in
 here: :func:`test_nine_column_round_trips_through_the_real_importer`. It drives
-``netkeeper.crm.import_runs.create_run``/``commit`` — the actual importer, not a
+``netkeep.crm.import_runs.create_run``/``commit`` — the actual importer, not a
 private reimplementation of the same eight columns — because a stand-in reader
 only proves the export function is the inverse of itself; it proves nothing
 about whether the file the real importer sees comes back the same. See the
-module docstring of ``netkeeper.crm.exports`` for what does and does not survive
+module docstring of ``netkeep.crm.exports`` for what does and does not survive
 that round trip and why (the "First Name" asymmetry is deliberate, not a bug).
 """
 
@@ -25,10 +25,10 @@ import pytest
 from sqlalchemy import event
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.campaigns.templates import contact_fields
-from netkeeper.crm import contacts as contact_service
-from netkeeper.crm import do_not_send, import_runs
-from netkeeper.crm.exports import (
+from netkeep.campaigns.templates import contact_fields
+from netkeep.crm import contacts as contact_service
+from netkeep.crm import do_not_send, import_runs
+from netkeep.crm.exports import (
     FORMULA_TRIGGERS,
     FULL_FIELDS,
     LINKEDIN_ARCHIVE,
@@ -39,10 +39,10 @@ from netkeeper.crm.exports import (
     export_stream,
     filename_for,
 )
-from netkeeper.crm.filters import FilterTree, SortKey, parse_filter
-from netkeeper.crm.importer import ImportField, get_preset
-from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.models import (
+from netkeep.crm.filters import FilterTree, SortKey, parse_filter
+from netkeep.crm.importer import ImportField, get_preset
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+from netkeep.models import (
     Base,
     Contact,
     ContactLink,
@@ -52,7 +52,7 @@ from netkeeper.models import (
     LinkKind,
     User,
 )
-from netkeeper.scoping import get_scoped, install_scope_guard
+from netkeep.scoping import get_scoped, install_scope_guard
 
 NOW = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
 
@@ -196,7 +196,7 @@ def test_nine_column_export_mapping_agrees_with_the_importer_except_first_name()
     """The export's column-to-field mapping must match ``importer.PRESETS["nine-column"]``.
 
     Except "First Name": that one is deliberately asymmetric (module docstring
-    of ``netkeeper.crm.exports``) — the export reads ``preferred_name``, the
+    of ``netkeep.crm.exports``) — the export reads ``preferred_name``, the
     importer writes ``first_name``, on purpose, so a mail merge addresses people
     by the name you actually call them. Every *other* column must agree, or the
     round trip breaks silently the next time either side changes independently.
@@ -1087,7 +1087,7 @@ def test_export_batches_across_the_page_boundary(
     session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A result set larger than one batch is still returned whole, in order."""
-    monkeypatch.setattr("netkeeper.crm.exports._BATCH_SIZE", 2)
+    monkeypatch.setattr("netkeep.crm.exports._BATCH_SIZE", 2)
     user = factories.make_user(session)
     for _ in range(5):
         factories.make_contact(session, user)

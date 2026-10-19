@@ -1,7 +1,7 @@
-"""netkeeper.services.heat: persisted heat state, keyed by LinkedIn account (spec 9.7, 9.10).
+"""netkeep.services.heat: persisted heat state, keyed by LinkedIn account (spec 9.7, 9.10).
 
 The core-side half of the seam: this module opens sessions and reads/writes
-``settings_kv``; the decay math it calls into (``netkeeper.linkedin.heat``) is
+``settings_kv``; the decay math it calls into (``netkeep.linkedin.heat``) is
 tested standalone in tests/test_linkedin_heat.py.
 """
 
@@ -14,10 +14,10 @@ import factories
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.config import HeatSettings
-from netkeeper.db import session_scope
-from netkeeper.models import User
-from netkeeper.services import heat
+from netkeep.config import HeatSettings
+from netkeep.db import session_scope
+from netkeep.models import User
+from netkeep.services import heat
 
 NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
 SETTINGS = HeatSettings(per_block=1.0, half_life_hours=6, skip_threshold=2.5)

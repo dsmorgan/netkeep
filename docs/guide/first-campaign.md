@@ -44,18 +44,18 @@ A change to a step or its template after you approve it undoes the approval, so 
 
 ## 6. While it runs
 
-- **Arm to send.** After netkeeper finds its own test draft in your mailbox, **Arm to send** in Settings lets `send` steps go out on their own, inside your daily cap. The **Campaigns: sending** chip in the header shows while it sends.
-- **Replies stop the sequence.** netkeeper checks the mailbox for replies; a reply ends that person's enrollment, and **Inbox** shows a badge for it.
+- **Arm to send.** After netkeep finds its own test draft in your mailbox, **Arm to send** in Settings lets `send` steps go out on their own, inside your daily cap. The **Campaigns: sending** chip in the header shows while it sends.
+- **Replies stop the sequence.** netkeep checks the mailbox for replies; a reply ends that person's enrollment, and **Inbox** shows a badge for it.
 - **Responses from elsewhere.** If someone answers by phone or in person, choose **Record a response** on their row in the campaign's enrollments, or on their contact page. It ends their enrollment as replied or opted out.
 - **Pause and resume.** **Pause** on the campaign's page holds every step; **Resume** picks up again. A step that came due while paused fires at the next chance. **End campaign** stops it for good.
 - **Follow up.** Under **Make a list from this campaign**, make a list from one outcome, such as the people who didn't reply, then **Start a campaign from it**.
 
 ## 7. LinkedIn steps
 
-A LinkedIn step is prefilled by default: netkeeper types the message into the conversation in your LinkedIn Chrome and stops, and you click **Send**.
+A LinkedIn step is prefilled by default: netkeep types the message into the conversation in your LinkedIn Chrome and stops, and you click **Send**.
 
 1. When a step is due, it appears in the LinkedIn queue on the dashboard and on the campaign's page. Choose **Prefill**. Nothing prefills on its own.
-2. netkeeper opens the conversation in the LinkedIn Chrome and types the message. Read it there and click **Send** yourself.
+2. netkeep opens the conversation in the LinkedIn Chrome and types the message. Read it there and click **Send** yourself.
 3. The message moves to **Waiting for you** until the next inbox poll sees it sent. **I sent it, check now** runs that poll at once. **Discard** drops a prefill you won't send.
 
 An email reply also stops a LinkedIn-only enrollment, as long as a mailbox is armed. Without one, the campaign's page says "Email replies aren't watched".

@@ -1,0 +1,430 @@
+"""TOML settings as frozen dataclasses mirroring ``config.example.toml``.
+
+Resolution order (spec section 15): ``--config``, ``$NETKEEP_CONFIG``,
+``./config.toml``, ``<data_dir>/config.toml``, then the built-in defaults below.
+Unknown sections and keys are logged and ignored; wrong types raise
+:class:`ConfigError`. A key netkeep no longer reads (:data:`DEPRECATED_KEYS`) is
+ignored too, with one deprecation warning per file that names each such key. So is
+the ``[me]`` section (#342): templates no longer have ``me.*`` fields, and your own
+details are the self contact. Its ``name``, ``website`` and ``city`` are kept aside
+as :class:`LegacyMe`, only to seed the self contact the first time it is created.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import tomllib
+import types
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field, fields, is_dataclass, replace
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Union, get_args, get_origin, get_type_hints
+
+from netkeep.logging_setup import DEFAULT_KEEP, DEFAULT_MAX_MB, personal
+from netkeep.paths import config_candidates
+
+if TYPE_CHECKING:
+    from _typeshed import DataclassInstance
+
+log = logging.getLogger(__name__)
+
+# Field metadata roles the loader and renderer understand.
+_ROLE = "netkeep.config"
+_SKIP = {_ROLE: "skip"}  # not a config key (for example Settings.source_path)
+
+
+class ConfigError(ValueError):
+    """A config file could not be parsed, or a value has the wrong type or shape."""
+
+
+DEPRECATED_KEYS: dict[str, str] = {
+    "campaigns.send_window_days": "the send window is gone",
+    "campaigns.send_window_hours": "the send window is gone",
+}
+"""Keys an older config may still hold, and why netkeep ignores them. A file that
+has any of them still loads: they are left out, with one warning (see
+:func:`_load_file`)."""
+
+DEPRECATED_ADVICE = (
+    "netkeep no longer limits when campaigns send; each campaign has a scheduled start,"
+    " chosen when you activate it. Remove these keys from the file"
+)
+
+
+@dataclass(frozen=True, slots=True)
+class WebSettings:
+    host: str = "127.0.0.1"
+    port: int = 8000
+
+
+ME_SECTION_ADVICE = (
+    "templates no longer have me.* fields, and a test send renders with your own details,"
+    " which you edit under Settings, About you. Remove [me] from the file"
+)
+
+
+@dataclass(frozen=True, slots=True)
+class LegacyMe:
+    """What an older config's ``[me]`` section held that the self contact can use (#342).
+
+    Never a merge field. Read only to seed the self contact when netkeep first
+    creates it (:func:`netkeep.crm.self_contact.ensure_self_contact`); after that,
+    the self contact is what you edit, and these are ignored.
+    """
+
+    name: str = ""
+    website: str = ""
+    city: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class BudgetSettings:
+    connection_pages_per_day: int = 150
+    profile_visits_per_day: int = 60
+    # None: 5 x the daily limit in force (``budgets.PROFILE_VISIT_DAYS_PER_WEEK``, #318).
+    # TOML has no null, so leaving the key out is how a config file asks for that.
+    profile_visits_per_week: int | None = None
+    inbox_polls_per_day: int = 8
+    li_messages_auto_per_day: int = 15
+    li_prefills_per_day: int = 15
+    warmup_start: int = 20
+    warmup_step: int = 10
+
+
+@dataclass(frozen=True, slots=True)
+class PacingSettings:
+    profile_delay_median_s: int = 25
+    profile_delay_sigma: float = 0.6
+    distraction_p: float = 0.08
+    distraction_range_s: tuple[int, int] = (120, 480)
+    burst_size: tuple[int, int] = (8, 15)
+    burst_break_s: tuple[int, int] = (300, 1200)
+
+
+@dataclass(frozen=True, slots=True)
+class HeatSettings:
+    per_block: float = 1.0
+    half_life_hours: int = 6
+    skip_threshold: float = 2.5
+
+
+@dataclass(frozen=True, slots=True)
+class LinkedInSettings:
+    cdp_url: str = "http://127.0.0.1:9222"
+    timezone: str = "America/New_York"
+    active_hours: tuple[str, str] = ("08:30", "21:30")
+    weekend_multiplier: float = 0.5
+    enrich_stale_days: int = 180
+    disconnect_after_misses: int = 2
+    # #599: ``serve`` starts netkeep's Chrome once it is listening. Off by default:
+    # starting a browser stays your choice (ADR 0012, rule 5).
+    start_chrome_at_startup: bool = False
+    budget: BudgetSettings = field(default_factory=BudgetSettings)
+    pacing: PacingSettings = field(default_factory=PacingSettings)
+    heat: HeatSettings = field(default_factory=HeatSettings)
+    # The config file that sets ``active_hours``, when one does (#343): it wins over the
+    # Settings page, so "where to change them" names it. None: change them in Settings.
+    active_hours_pinned_in: str | None = field(default=None, compare=False, metadata=_SKIP)
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignSettings:
+    """``[campaigns]``. There is no send window (#338): each campaign has a scheduled
+    start, and ``holidays`` only steer the suggested send slots
+    (:mod:`netkeep.campaigns.schedule`)."""
+
+    mailbox_daily_cap: int = 80
+    send_spacing_median_s: int = 240
+    send_spacing_floor_s: int = 90
+    contacted_within_days_guard: int = 30
+    linkedin_auto_send: bool = False
+    reply_poll_minutes: int = 10
+    holidays: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class LlmSettings:
+    enabled: bool = False
+    model: str = "claude-sonnet-5"
+    bulk_model: str = "claude-haiku-4-5-20251001"
+    daily_call_cap: int = 200
+
+
+@dataclass(frozen=True, slots=True)
+class BackupSettings:
+    nightly: bool = True
+    keep: int = 14
+
+
+@dataclass(frozen=True, slots=True)
+class LogSettings:
+    """``[logs]``: when ``<data>/logs/netkeep.log`` rotates, and how many old files stay
+    (:mod:`netkeep.logging_setup`, #602)."""
+
+    max_mb: int = DEFAULT_MAX_MB
+    keep: int = DEFAULT_KEEP
+
+
+@dataclass(frozen=True, slots=True)
+class Settings:
+    """Every section of ``config.toml``. ``source_path`` is None when defaults were used."""
+
+    web: WebSettings = field(default_factory=WebSettings)
+    linkedin: LinkedInSettings = field(default_factory=LinkedInSettings)
+    campaigns: CampaignSettings = field(default_factory=CampaignSettings)
+    llm: LlmSettings = field(default_factory=LlmSettings)
+    backup: BackupSettings = field(default_factory=BackupSettings)
+    logs: LogSettings = field(default_factory=LogSettings)
+    source_path: Path | None = field(default=None, metadata=_SKIP)
+    # A deprecated [me] section's values, when the file had one (see LegacyMe).
+    legacy_me: LegacyMe | None = field(default=None, metadata=_SKIP)
+    # The dotted keys the config file set ("linkedin.budget.li_prefills_per_day"), so
+    # a value the file sets can win over the Settings page (#343). None when these
+    # settings did not come from a file the loader read (the defaults, or a test's).
+    file_keys: frozenset[str] | None = field(default=None, compare=False, metadata=_SKIP)
+    # The dotted keys whose value came from the Settings page (#343): see
+    # ``netkeep.services.ui_settings.resolve``. Empty until resolved.
+    ui_keys: frozenset[str] = field(default=frozenset(), compare=False, metadata=_SKIP)
+    # For each key in ``ui_keys``, the value it had before the Settings page's value was
+    # laid over it, so resolving again restores those keys alone and never keeps a value
+    # since reset, whatever else a ``replace`` changed in between (#343).
+    ui_originals: tuple[tuple[str, Any], ...] = field(
+        default=(), compare=False, repr=False, metadata=_SKIP
+    )
+
+
+def load_settings(explicit: Path | None = None) -> Settings:
+    """Load the first config file in the search order, or the defaults if none exists.
+
+    ``explicit`` is the ``--config`` path. Because the user asked for that file by
+    name, a missing one is an error rather than a silent fall-through.
+    """
+    if explicit is not None:
+        explicit = explicit.expanduser()
+        if not explicit.is_file():
+            raise ConfigError(f"{explicit}: config file not found")
+    for candidate in config_candidates(explicit):
+        if candidate.is_file():
+            return _load_file(candidate)
+        log.debug("%s: no config file there", personal(candidate))
+    log.debug("no config file found; using built-in defaults")
+    return Settings()
+
+
+def _load_file(path: Path) -> Settings:
+    try:
+        with path.open("rb") as handle:
+            raw = tomllib.load(handle)
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"{path}: invalid TOML: {exc}") from exc
+    raw = _drop_deprecated(raw, source=path)
+    raw, legacy_me = _drop_me(raw, source=path)
+    settings = _from_table(Settings, raw, prefix="", source=path)
+    log.debug("loaded settings from %s", personal(path))
+    file_keys = frozenset(_leaf_keys(raw))
+    if "linkedin.active_hours" in file_keys:
+        settings = replace(
+            settings, linkedin=replace(settings.linkedin, active_hours_pinned_in=str(path))
+        )
+    return replace(settings, source_path=path, legacy_me=legacy_me, file_keys=file_keys)
+
+
+def _leaf_keys(raw: Mapping[str, object], prefix: str = "") -> list[str]:
+    """Every dotted key ``raw`` gives a value, tables descended into (#343)."""
+    keys: list[str] = []
+    for name, value in raw.items():
+        key = _join(prefix, name)
+        if isinstance(value, Mapping):
+            keys.extend(_leaf_keys(value, key))
+        else:
+            keys.append(key)
+    return keys
+
+
+def _drop_me(raw: dict[str, Any], *, source: Path) -> tuple[dict[str, Any], LegacyMe | None]:
+    """``raw`` without its ``[me]`` section, with one warning, and what it held for the
+    self contact. A value that is not a string is left out, not an error: the whole
+    section is ignored, so nothing in it can stop netkeep from starting."""
+    if "me" not in raw:
+        return raw, None
+    cleaned = {k: v for k, v in raw.items() if k != "me"}
+    log.warning("%s: ignoring the deprecated [me] section: %s", personal(source), ME_SECTION_ADVICE)
+    table = raw["me"]
+    if not isinstance(table, Mapping):
+        return cleaned, None
+    values = {
+        name: value.strip()
+        for name in ("name", "website", "city")
+        if isinstance(value := table.get(name), str)
+    }
+    return cleaned, LegacyMe(**values)
+
+
+def _drop_deprecated(raw: dict[str, Any], *, source: Path) -> dict[str, Any]:
+    """``raw`` without :data:`DEPRECATED_KEYS`, and one warning naming those it held."""
+    found: list[str] = []
+    cleaned: dict[str, Any] = dict(raw)
+    for key in DEPRECATED_KEYS:
+        section, name = key.split(".", 1)
+        table = cleaned.get(section)
+        if isinstance(table, Mapping) and name in table:
+            cleaned[section] = {k: v for k, v in table.items() if k != name}
+            found.append(key)
+    if found:
+        reasons = sorted({DEPRECATED_KEYS[key] for key in found})
+        log.warning(
+            "%s: ignoring deprecated %s %s (%s). %s",
+            personal(source),
+            "key" if len(found) == 1 else "keys",
+            ", ".join(found),
+            "; ".join(reasons),
+            DEPRECATED_ADVICE,
+        )
+    return cleaned
+
+
+def _from_table[T: DataclassInstance](
+    cls: type[T], raw: Mapping[str, object], *, prefix: str, source: Path
+) -> T:
+    """Build ``cls`` from a TOML table, defaulting absent keys and validating present ones."""
+    hints = get_type_hints(cls)
+    kwargs: dict[str, object] = {}
+    known: set[str] = set()
+    for f in fields(cls):
+        if f.metadata.get(_ROLE) == "skip":
+            continue
+        known.add(f.name)
+        if f.name in raw:
+            key = _join(prefix, f.name)
+            kwargs[f.name] = _convert(raw[f.name], hints[f.name], key=key, source=source)
+    for name in raw:
+        if name in known:
+            continue
+        key = _join(prefix, name)
+        if isinstance(raw[name], Mapping):
+            log.warning("%s: ignoring unknown section [%s]", personal(source), key)
+        else:
+            log.warning("%s: ignoring unknown key %s", personal(source), key)
+    build: Callable[..., T] = cls
+    return build(**kwargs)
+
+
+def _convert(value: object, hint: Any, *, key: str, source: Path) -> object:
+    """Check ``value`` against the dataclass field type ``hint`` and return it.
+
+    ``X | None`` checks ``value`` as ``X``: TOML has no null, so a present key
+    always has a value, and an absent one keeps the field's default.
+    """
+    if get_origin(hint) in (Union, types.UnionType):
+        options = [arg for arg in get_args(hint) if arg is not type(None)]
+        if len(options) != 1:
+            raise TypeError(f"unsupported settings field type for {key}: {hint!r}")
+        return _convert(value, options[0], key=key, source=source)
+    if is_dataclass(hint) and isinstance(hint, type):
+        if not isinstance(value, Mapping):
+            raise ConfigError(f"{source}: {key} must be a table, got {_kind(value)}")
+        return _from_table(hint, value, prefix=key, source=source)
+    if hint is bool:
+        if not isinstance(value, bool):
+            raise ConfigError(f"{source}: {key} must be true or false, got {_kind(value)}")
+        return value
+    if hint is int:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ConfigError(f"{source}: {key} must be an integer, got {_kind(value)}")
+        return value
+    if hint is float:
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise ConfigError(f"{source}: {key} must be a number, got {_kind(value)}")
+        return float(value)
+    if hint is str:
+        if not isinstance(value, str):
+            raise ConfigError(f"{source}: {key} must be a string, got {_kind(value)}")
+        return value
+    if get_origin(hint) is tuple:
+        return _convert_list(value, get_args(hint), key=key, source=source)
+    raise TypeError(f"unsupported settings field type for {key}: {hint!r}")
+
+
+def _convert_list(
+    value: object, args: tuple[Any, ...], *, key: str, source: Path
+) -> tuple[object, ...]:
+    """Validate a TOML array against ``tuple[X, ...]`` (any length) or ``tuple[X, Y]`` (fixed)."""
+    variable = len(args) == 2 and args[1] is Ellipsis
+    if not isinstance(value, list):
+        raise ConfigError(f"{source}: {key} must be a list, got {_kind(value)}")
+    if variable:
+        item_hints = [args[0]] * len(value)
+    elif len(value) == len(args):
+        item_hints = list(args)
+    else:
+        raise ConfigError(f"{source}: {key} must have exactly {len(args)} items, got {len(value)}")
+    return tuple(
+        _convert(item, item_hint, key=f"{key}[{index}]", source=source)
+        for index, (item, item_hint) in enumerate(zip(value, item_hints, strict=True))
+    )
+
+
+_TOML_KINDS: dict[type[object], str] = {
+    bool: "boolean",
+    int: "integer",
+    float: "float",
+    str: "string",
+    list: "list",
+    dict: "table",
+}
+
+
+def _kind(value: object) -> str:
+    return _TOML_KINDS.get(type(value), type(value).__name__)
+
+
+def _join(prefix: str, name: str) -> str:
+    return f"{prefix}.{name}" if prefix else name
+
+
+def render_toml(obj: DataclassInstance, *, table: str = "") -> str:
+    """Render a settings dataclass as TOML text that :func:`load_settings` reads back.
+
+    ``table`` names the top-level table to emit the object's scalars under; leave it
+    empty for :class:`Settings`, whose fields are all sub-tables.
+    """
+    lines: list[str] = []
+    _render_table(obj, prefix=table, lines=lines)
+    return "\n".join(lines) + "\n"
+
+
+def _render_table(obj: DataclassInstance, *, prefix: str, lines: list[str]) -> None:
+    scalars: list[str] = []
+    nested: list[tuple[str, DataclassInstance]] = []
+    for f in fields(obj):
+        role = f.metadata.get(_ROLE)
+        if role == "skip":
+            continue
+        value = getattr(obj, f.name)
+        if value is None:
+            continue  # TOML has no null; an absent key reads back as the None default
+        if is_dataclass(value) and not isinstance(value, type):
+            nested.append((f.name, value))
+        else:
+            scalars.append(f"{f.name} = {_toml_value(value)}")
+    if prefix:
+        if lines:
+            lines.append("")
+        lines.append(f"[{prefix}]")
+    lines.extend(scalars)
+    for name, sub in nested:
+        _render_table(sub, prefix=_join(prefix, name), lines=lines)
+
+
+def _toml_value(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int | float):
+        return repr(value)
+    if isinstance(value, str):
+        # JSON string escapes are a subset of TOML basic-string escapes.
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, tuple | list):
+        return "[" + ", ".join(_toml_value(item) for item in value) + "]"
+    raise TypeError(f"cannot render {type(value).__name__} as TOML")

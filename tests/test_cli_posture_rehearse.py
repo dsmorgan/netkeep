@@ -1,4 +1,4 @@
-"""`netkeeper posture` and `netkeeper rehearse`: two thirds of CP3's demo (P2-11).
+"""`netkeep posture` and `netkeep rehearse`: two thirds of CP3's demo (P2-11).
 
 CP3 is the checkpoint where the extractor's safety is reviewed before the first
 live run, and these are the commands it is reviewed through. So what is tested
@@ -10,7 +10,7 @@ command line and not only inside the function.
 itself and a fake browser in place of Chrome, so the wiring under test is the
 whole command bar the CDP connection: the replica really serves, the pacing
 plan is really built, and the log is really rendered. The Chrome half is
-``tests/smoke/test_rehearse_smoke.py``, opt-in behind ``NETKEEPER_BROWSER_TESTS=1``.
+``tests/smoke/test_rehearse_smoke.py``, opt-in behind ``NETKEEP_BROWSER_TESTS=1``.
 """
 
 from __future__ import annotations
@@ -28,34 +28,34 @@ from sqlalchemy.orm import Session, sessionmaker
 from test_rehearse import ReplayContext
 from typer.testing import CliRunner
 
-from netkeeper import migrations
-from netkeeper.cli import app as cli
-from netkeeper.config import Settings
-from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.linkedin.browser import AttachBrowserProvider, BrowserUnavailable
-from netkeeper.linkedin.preflight import Fingerprint, LoginState, PreflightReport
-from netkeeper.models import User, UserKind
-from netkeeper.scoping import install_scope_guard
-from netkeeper.services import heat as heat_rows
-from netkeeper.services.linkedin_accounts import ensure_account
-from netkeeper.services.posture import SINGLE_ACCOUNT_ID
-from netkeeper.services.scheduler import sync_account_schedule
-from netkeeper.services.users import ensure_local_user
-from netkeeper.worker import session_probe as _session_probe
+from netkeep import migrations
+from netkeep.cli import app as cli
+from netkeep.config import Settings
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+from netkeep.linkedin.browser import AttachBrowserProvider, BrowserUnavailable
+from netkeep.linkedin.preflight import Fingerprint, LoginState, PreflightReport
+from netkeep.models import User, UserKind
+from netkeep.scoping import install_scope_guard
+from netkeep.services import heat as heat_rows
+from netkeep.services.linkedin_accounts import ensure_account
+from netkeep.services.posture import SINGLE_ACCOUNT_ID
+from netkeep.services.scheduler import sync_account_schedule
+from netkeep.services.users import ensure_local_user
+from netkeep.worker import session_probe as _session_probe
 
 
 @pytest.fixture
 def cli_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[sessionmaker[Session]]:
-    """A migrated database with the local user, pointed to by ``NETKEEPER_DATABASE_URL``."""
+    """A migrated database with the local user, pointed to by ``NETKEEP_DATABASE_URL``."""
     url = database_url(tmp_path)
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     engine = make_engine(url)
     migrations.upgrade(engine)
     factory = make_session_factory(engine)
     install_scope_guard(factory)
     with session_scope(factory, write=True) as session:
         user = ensure_local_user(session, settings=Settings())
-        # The state `netkeeper serve` leaves behind at start: a schedule for
+        # The state `netkeep serve` leaves behind at start: a schedule for
         # every job kind. Without it the scheduler-side protections have
         # nothing to act on and posture says so, which is its own test in
         # tests/test_posture.py rather than a permanent warning here.
@@ -86,11 +86,11 @@ def fake_chrome(monkeypatch: pytest.MonkeyPatch) -> ReplayContext:
     def provider(_settings: Settings) -> AttachBrowserProvider:
         return AttachBrowserProvider("http://127.0.0.1:9222", connector=connector)
 
-    monkeypatch.setattr("netkeeper.cli._provider", provider)
+    monkeypatch.setattr("netkeep.cli._provider", provider)
     return context
 
 
-# --- netkeeper posture ----------------------------------------------------------
+# --- netkeep posture ----------------------------------------------------------
 
 
 def test_posture_prints_the_table_of_protections(cli_db: sessionmaker[Session]) -> None:
@@ -122,7 +122,7 @@ def test_posture_leads_with_a_summary_and_keeps_the_details_for_the_flag(
         assert detail not in summary.output
         assert detail in details.output
     assert "hard max" not in summary.output
-    assert "run `netkeeper posture --details` for each row's detail" in summary.output
+    assert "run `netkeep posture --details` for each row's detail" in summary.output
     assert len(summary.output.splitlines()) < len(details.output.splitlines())
 
 
@@ -196,7 +196,7 @@ def test_posture_reports_a_browser_it_could_not_attach_to(
             connector=FakeConnector(error=BrowserUnavailable("Chrome is not running")),
         )
 
-    monkeypatch.setattr("netkeeper.cli._provider", unreachable)
+    monkeypatch.setattr("netkeep.cli._provider", unreachable)
 
     result = CliRunner().invoke(cli, ["posture"])
 
@@ -224,7 +224,7 @@ def test_posture_is_all_clear_when_the_probe_finds_a_session(
             "http://127.0.0.1:9222", connector=FakeConnector([FakeBrowser([context])])
         )
 
-    monkeypatch.setattr("netkeeper.cli._provider", logged_in)
+    monkeypatch.setattr("netkeep.cli._provider", logged_in)
 
     result = CliRunner().invoke(cli, ["posture"])
 
@@ -238,7 +238,7 @@ def test_posture_stays_clear_and_exits_zero_above_100_a_day_with_the_note_listed
     cli_db: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """#319 review S1: the profile-visit risk is a note, not a warning. A script
-    gated on `netkeeper posture` keeps passing; the reader still sees why."""
+    gated on `netkeep posture` keeps passing; the reader still sees why."""
 
     def logged_in(_settings: Settings) -> AttachBrowserProvider:
         jar = [{"name": "li_at", "value": "fake", "domain": ".linkedin.com", "expires": -1}]
@@ -253,7 +253,7 @@ def test_posture_stays_clear_and_exits_zero_above_100_a_day_with_the_note_listed
             "http://127.0.0.1:9222", connector=FakeConnector([FakeBrowser([context])])
         )
 
-    monkeypatch.setattr("netkeeper.cli._provider", logged_in)
+    monkeypatch.setattr("netkeep.cli._provider", logged_in)
     config = tmp_path / "318-risky.toml"
     config.write_text("[linkedin.budget]\nprofile_visits_per_day = 101\n", encoding="utf-8")
 
@@ -304,12 +304,12 @@ def test_a_preflight_report_becomes_a_probe_with_no_place_for_a_secret(
         "cookie_names",
         "problems",
         # #624: the dedicated-profile check, a profile path, two pids, and a reason
-        # netkeeper writes itself. Nothing the browser or a page sends ends up in it.
+        # netkeep writes itself. Nothing the browser or a page sends ends up in it.
         "profile",
     }
 
 
-# --- netkeeper rehearse ----------------------------------------------------------
+# --- netkeep rehearse ----------------------------------------------------------
 
 
 def test_rehearse_starts_its_own_replica_and_prints_the_request_log(
@@ -403,7 +403,7 @@ def test_rehearse_reports_a_browser_it_cannot_attach_to(
             connector=FakeConnector(error=BrowserUnavailable("Chrome is not running")),
         )
 
-    monkeypatch.setattr("netkeeper.cli._provider", unreachable)
+    monkeypatch.setattr("netkeep.cli._provider", unreachable)
 
     result = CliRunner().invoke(cli, ["rehearse", "--visits", "1", "--scale", "5000"])
 
@@ -464,7 +464,7 @@ def test_posture_reads_the_mode_off_the_provider_it_would_run_with(
         provider.mode = "launch"
         return provider
 
-    monkeypatch.setattr("netkeeper.cli._provider", odd)
+    monkeypatch.setattr("netkeep.cli._provider", odd)
 
     result = CliRunner().invoke(cli, ["posture", "--no-probe"])
 
@@ -475,7 +475,7 @@ def test_posture_reads_the_mode_off_the_provider_it_would_run_with(
 
 def test_the_default_rehearsal_is_short_enough_to_watch() -> None:
     """Three visits at the default pacing is about a minute; the demo has to finish."""
-    from netkeeper.cli import DEFAULT_REHEARSAL_VISITS
+    from netkeep.cli import DEFAULT_REHEARSAL_VISITS
 
     assert DEFAULT_REHEARSAL_VISITS == 3
 
@@ -494,7 +494,7 @@ def test_posture_reads_the_local_users_own_account_by_default(
     """Budgets and heat are keyed by the account row (P2-06), not by a hardcoded 1.
 
     A hosted user's account takes id 1 here, so the local user's is 2; heat
-    raised on account 2 must show up in a plain ``netkeeper posture``, and
+    raised on account 2 must show up in a plain ``netkeep posture``, and
     ``--account 1`` must still read the other one.
     """
     with session_scope(cli_db, write=True) as session:

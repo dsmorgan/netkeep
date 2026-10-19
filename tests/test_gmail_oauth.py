@@ -15,8 +15,8 @@ import pytest
 from gmail_fakes import CLIENT_ID, CLIENT_SECRET, FAKE_EMAIL, FakeGoogle
 from time_limit import Stopwatch
 
-from netkeeper.campaigns import gmail_oauth
-from netkeeper.campaigns.gmail_oauth import (
+from netkeep.campaigns import gmail_oauth
+from netkeep.campaigns.gmail_oauth import (
     ClientConfigError,
     GmailApiRefused,
     InvalidGrant,

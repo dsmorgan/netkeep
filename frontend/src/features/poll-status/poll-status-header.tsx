@@ -30,7 +30,7 @@ const GROUPS: ReadonlyArray<{ group: PollCheck['group']; label: string }> = [
  * The top bar's background-check status (#401): when Gmail was last checked and is
  * checked next, and the LinkedIn inbox's state, with every check in a popover.
  *
- * A check that cannot run (paused, outside active hours, disarmed, `netkeeper serve`
+ * A check that cannot run (paused, outside active hours, disarmed, `netkeep serve`
  * not running, not built yet) says so and never shows a time. Below `sm` only the
  * clock icon shows; the lines stay for screen readers.
  */
@@ -73,8 +73,8 @@ function ChecksDetail({ status, now }: { status: PollStatus; now: number }) {
         <PopoverTitle>Background checks</PopoverTitle>
         <PopoverDescription>
           {status.background_running
-            ? 'What netkeeper serve checks on its own, and when. Pages update after each check.'
-            : 'netkeeper serve isn’t running, so nothing is checked in the background.'}
+            ? 'What netkeep serve checks on its own, and when. Pages update after each check.'
+            : 'netkeep serve isn’t running, so nothing is checked in the background.'}
         </PopoverDescription>
       </div>
       {GROUPS.map(({ group, label }) => {

@@ -3,7 +3,7 @@
  * copy into an AI chat assistant you already use, and the parser for the reply
  * you paste back.
  *
- * netkeeper never talks to an AI provider. Both functions are pure: the prompt
+ * netkeep never talks to an AI provider. Both functions are pure: the prompt
  * is built from the form, the merge-field list (`GET /templates/merge-fields`),
  * lint's rules as instructions (`PROMPT_RULES`, keyed by rule id next to
  * `WHY_IT_MATTERS`), and, only when you tick the box, the template's current

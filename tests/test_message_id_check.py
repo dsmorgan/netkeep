@@ -1,4 +1,4 @@
-"""netkeeper.services.message_id_check (#510): what the Message-ID check searches for, and
+"""netkeep.services.message_id_check (#510): what the Message-ID check searches for, and
 where a mailbox is on the way to arming to send. Read-only; no Gmail."""
 
 from __future__ import annotations
@@ -10,8 +10,8 @@ import factories
 from campaign_fakes import NOW, make_mailbox
 from sqlalchemy.orm import Session
 
-from netkeeper.campaigns.compose import message_id_for
-from netkeeper.models import (
+from netkeep.campaigns.compose import message_id_for
+from netkeep.models import (
     Campaign,
     CampaignStatus,
     Mailbox,
@@ -21,9 +21,9 @@ from netkeeper.models import (
     TestSend,
     User,
 )
-from netkeeper.scoping import get_scoped
-from netkeeper.services import message_id_check as check
-from netkeeper.services.message_id_check import ArmNextStep, MessageIdWait
+from netkeep.scoping import get_scoped
+from netkeep.services import message_id_check as check
+from netkeep.services.message_id_check import ArmNextStep, MessageIdWait
 
 ARMED: dict[str, Any] = {"armed_at": NOW - timedelta(days=1), "armed_by": "test"}
 
@@ -62,7 +62,7 @@ def _steps(session: Session, user: User, mailbox: Mailbox) -> check.ArmSteps:
     return check.arm_steps(session, user, mailbox, now=NOW)
 
 
-def test_a_draft_seen_sent_is_searched_for_by_netkeepers_own_message_id(session: Session) -> None:
+def test_a_draft_seen_sent_is_searched_for_by_netkeeps_own_message_id(session: Session) -> None:
     user, mailbox, campaign = _setup(session)
     message_id = _message(
         session, user, campaign, sent_at=NOW - timedelta(hours=1), gmail_draft_id="d1"
@@ -182,19 +182,18 @@ def test_describe_says_each_step_for_the_cli(session: Session) -> None:
     user, mailbox, campaign = _setup(session)
     assert check.describe(_steps(session, user, mailbox)) == [
         "1. armed for drafts: done",
-        "2. netkeeper found its own draft: waiting: no draft yet; send a test from a"
+        "2. netkeep found its own draft: waiting: no draft yet; send a test from a"
         " campaign's review",
         "3. arm to send: not yet: waits for the steps above",
     ]
     _message(session, user, campaign, sent_at=NOW - timedelta(hours=1), gmail_draft_id="d1")
     check.record_checked(session, user, mailbox.id, now=NOW)
     assert check.describe(_steps(session, user, mailbox))[1] == (
-        "2. netkeeper found its own draft: waiting: not found yet;"
-        " last checked 2026-09-29 14:00 UTC"
+        "2. netkeep found its own draft: waiting: not found yet; last checked 2026-09-29 14:00 UTC"
     )
     mailbox.message_id_verified_at = NOW
     session.flush()
     assert check.describe(_steps(session, user, mailbox))[1:] == [
-        "2. netkeeper found its own draft: done 2026-09-29 14:00 UTC",
-        "3. arm to send: ready: `netkeeper gmail arm --send`",
+        "2. netkeep found its own draft: done 2026-09-29 14:00 UTC",
+        "3. arm to send: ready: `netkeep gmail arm --send`",
     ]

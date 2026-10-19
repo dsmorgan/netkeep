@@ -2,7 +2,7 @@
 
 Every fresh database has user 1 and mailbox 1, so two data directories under one
 service would read, overwrite and delete each other's Gmail client and token. The
-default data directory keeps ``netkeeper``, so an existing install keeps its secrets.
+default data directory keeps ``netkeep``, so an existing install keeps its secrets.
 The keyring is conftest's in-memory fake; no test here touches a real Keychain, and
 the default data directory is under a scratch ``HOME``.
 """
@@ -16,12 +16,12 @@ import pytest
 from gmail_fakes import FAKE_EMAIL, MemoryKeyring
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper import paths
-from netkeeper.db import session_scope
-from netkeeper.services import keychain
-from netkeeper.services import mailboxes as service
+from netkeep import paths
+from netkeep.db import session_scope
+from netkeep.services import keychain
+from netkeep.services import mailboxes as service
 
-PACKAGE = Path(__file__).resolve().parents[1] / "netkeeper"
+PACKAGE = Path(__file__).resolve().parents[1] / "netkeep"
 TOKEN = "gmail/mailbox/1"
 
 
@@ -36,7 +36,7 @@ def home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 
 
 def _default(home: Path) -> Path:
-    return home / "Library" / "Application Support" / "netkeeper"
+    return home / "Library" / "Application Support" / "netkeep"
 
 
 def _use(monkeypatch: pytest.MonkeyPatch, directory: str | Path | None) -> None:
@@ -50,14 +50,14 @@ def test_the_default_data_directory_keeps_the_service_existing_installs_used(
     monkeypatch: pytest.MonkeyPatch, home: Path
 ) -> None:
     _use(monkeypatch, None)
-    assert keychain.service_name() == keychain.DEFAULT_SERVICE == "netkeeper"
+    assert keychain.service_name() == keychain.DEFAULT_SERVICE == "netkeep"
 
 
 @pytest.mark.parametrize("create", [False, True])
-def test_naming_the_default_directory_explicitly_still_uses_netkeeper(
+def test_naming_the_default_directory_explicitly_still_uses_netkeep(
     monkeypatch: pytest.MonkeyPatch, home: Path, create: bool
 ) -> None:
-    """``NETKEEPER_DATA`` set to the default path, however it is spelled, is the default."""
+    """``NETKEEP_DATA`` set to the default path, however it is spelled, is the default."""
     default = _default(home)
     if create:
         default.mkdir(parents=True)
@@ -66,13 +66,13 @@ def test_naming_the_default_directory_explicitly_still_uses_netkeeper(
     spellings = [
         str(default),
         f"{default}/",
-        "~/Library/Application Support/netkeeper",
-        str(home / "Library" / ".." / "Library" / "Application Support" / "netkeeper"),
+        "~/Library/Application Support/netkeep",
+        str(home / "Library" / ".." / "Library" / "Application Support" / "netkeep"),
         str(link),
     ]
     for spelling in spellings:
         _use(monkeypatch, spelling)
-        assert keychain.service_name() == "netkeeper", spelling
+        assert keychain.service_name() == "netkeep", spelling
 
 
 def test_a_case_insensitive_spelling_of_an_existing_default_is_the_default(
@@ -80,11 +80,11 @@ def test_a_case_insensitive_spelling_of_an_existing_default_is_the_default(
 ) -> None:
     default = _default(home)
     default.mkdir(parents=True)
-    other_case = home / "library" / "application support" / "NETKEEPER"
+    other_case = home / "library" / "application support" / "NETKEEP"
     if not other_case.exists():
         pytest.skip("this file system is case-sensitive")
     _use(monkeypatch, other_case)
-    assert keychain.service_name() == "netkeeper"
+    assert keychain.service_name() == "netkeep"
 
 
 def test_off_macos_the_default_is_data_under_the_working_directory(
@@ -94,9 +94,9 @@ def test_off_macos_the_default_is_data_under_the_working_directory(
     monkeypatch.chdir(tmp_path)
     for directory in (None, "data", tmp_path / "data"):
         _use(monkeypatch, directory)
-        assert keychain.service_name() == "netkeeper", directory
+        assert keychain.service_name() == "netkeep", directory
     _use(monkeypatch, tmp_path / "elsewhere")
-    assert keychain.service_name() != "netkeeper"
+    assert keychain.service_name() != "netkeep"
 
 
 def test_any_other_directory_gets_its_own_stable_hashed_service(
@@ -104,32 +104,32 @@ def test_any_other_directory_gets_its_own_stable_hashed_service(
 ) -> None:
     _use(monkeypatch, tmp_path / "one")
     one = keychain.service_name()
-    assert re.fullmatch(r"netkeeper@[0-9a-f]{12}", one)
+    assert re.fullmatch(r"netkeep@[0-9a-f]{12}", one)
     _use(monkeypatch, f"{tmp_path}/two/../one/")
     assert keychain.service_name() == one  # the resolved path decides
     _use(monkeypatch, tmp_path / "two")
-    assert keychain.service_name() not in {one, "netkeeper"}
+    assert keychain.service_name() not in {one, "netkeep"}
     # A directory beside the default, or inside it, is not the default.
-    for near in (_default(home) / "sub", _default(home).with_name("netkeeper-2")):
+    for near in (_default(home) / "sub", _default(home).with_name("netkeep-2")):
         _use(monkeypatch, near)
-        assert keychain.service_name() != "netkeeper", near
+        assert keychain.service_name() != "netkeep", near
 
 
 def test_the_override_names_the_service(
     monkeypatch: pytest.MonkeyPatch, home: Path, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv(keychain.SERVICE_ENV, " netkeeper-rehearsal ")
+    monkeypatch.setenv(keychain.SERVICE_ENV, " netkeep-rehearsal ")
     for directory in (None, tmp_path / "scratch"):
         _use(monkeypatch, directory)
-        assert keychain.service_name() == "netkeeper-rehearsal"
+        assert keychain.service_name() == "netkeep-rehearsal"
     monkeypatch.setenv(keychain.SERVICE_ENV, "  ")  # blank is unset
-    assert keychain.service_name().startswith("netkeeper@")
+    assert keychain.service_name().startswith("netkeep@")
 
 
 def test_the_default_directory_still_reads_its_existing_entries(
     monkeypatch: pytest.MonkeyPatch, home: Path, memory_keyring: MemoryKeyring
 ) -> None:
-    memory_keyring.entries[("netkeeper", f"1/{TOKEN}")] = "rt-existing"
+    memory_keyring.entries[("netkeep", f"1/{TOKEN}")] = "rt-existing"
     _use(monkeypatch, None)
     assert keychain.get_secret(1, TOKEN) == "rt-existing"
     _use(monkeypatch, _default(home))
@@ -148,7 +148,7 @@ def test_two_data_directories_never_share_an_entry(
     _use(monkeypatch, None)
     assert keychain.get_secret(1, TOKEN) == "rt-live"  # and never overwrites it
     services = {entry_service for entry_service, _ in memory_keyring.entries}
-    assert len(services) == 2 and "netkeeper" in services
+    assert len(services) == 2 and "netkeep" in services
 
 
 def test_disconnect_in_one_directory_never_deletes_the_others_token(
@@ -189,5 +189,5 @@ def test_a_literal_service_name_for_one_path_never_moves(
 ) -> None:
     """Changing the hash would silently move everyone's Gmail secrets to a new service
     (and, since #600, rename their login item's label)."""
-    monkeypatch.setenv("NETKEEPER_DATA", "/nk-pin/data")
-    assert keychain.service_name() == "netkeeper@6f70bec19518"
+    monkeypatch.setenv("NETKEEP_DATA", "/nk-pin/data")
+    assert keychain.service_name() == "netkeep@6f70bec19518"

@@ -11,11 +11,11 @@ from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.campaigns import templates as service
-from netkeeper.db import session_scope
-from netkeeper.models import CampaignStatus, TemplateChannel, User, UserKind
+from netkeep.campaigns import templates as service
+from netkeep.db import session_scope
+from netkeep.models import CampaignStatus, TemplateChannel, User, UserKind
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 EMAIL = {"name": "reconnect", "channel": "email", "subject": "Hi {{ first_name }}",
          "body": "Hi {{ first_name }}, Ada here."}  # fmt: skip
 

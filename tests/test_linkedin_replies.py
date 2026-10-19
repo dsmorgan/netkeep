@@ -1,7 +1,7 @@
 """LinkedIn reply and send detection (P4-02, #381).
 
-The inbox poll's apply (:mod:`netkeeper.crm.inbox_apply`) hands its new messages to
-:func:`netkeeper.services.campaign_replies.apply_linkedin_news` in its writer session.
+The inbox poll's apply (:mod:`netkeep.crm.inbox_apply`) hands its new messages to
+:func:`netkeep.services.campaign_replies.apply_linkedin_news` in its writer session.
 These tests build deltas with :mod:`inbox_fakes` (``FakeInboxSource`` for the runner),
 so nothing here touches LinkedIn. Every URN and message is invented.
 """
@@ -31,14 +31,14 @@ from inbox_fakes import (
 )
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.config import LinkedInSettings, Settings
-from netkeeper.crm import inbox_apply
-from netkeeper.crm.interactions import add_interaction
-from netkeeper.crm.self_contact import ensure_self_contact
-from netkeeper.db import session_scope
-from netkeeper.linkedin.inbox import InboxConversation, InboxMessage
-from netkeeper.linkedin.messaging import MessageOutcome, MessageOutcomeKind
-from netkeeper.models import (
+from netkeep.config import LinkedInSettings, Settings
+from netkeep.crm import inbox_apply
+from netkeep.crm.interactions import add_interaction
+from netkeep.crm.self_contact import ensure_self_contact
+from netkeep.db import session_scope
+from netkeep.linkedin.inbox import InboxConversation, InboxMessage
+from netkeep.linkedin.messaging import MessageOutcome, MessageOutcomeKind
+from netkeep.models import (
     Campaign,
     CampaignStatus,
     Contact,
@@ -59,16 +59,16 @@ from netkeeper.models import (
     TemplateChannel,
     User,
 )
-from netkeeper.scoping import get_scoped, scoped
-from netkeeper.services import campaign_engine as engine
-from netkeeper.services import campaign_replies as replies
-from netkeeper.services import linkedin_steps, runs
-from netkeeper.services.campaign_guards import check_step
-from netkeeper.services.inbox_poll import poll_inbox
-from netkeeper.services.linkedin_accounts import ensure_account
-from netkeeper.services.linkedin_session import record_session_evidence
-from netkeeper.services.linkedin_steps import claim_prefill, record_prefill_outcome
-from netkeeper.services.simulate_campaign import (
+from netkeep.scoping import get_scoped, scoped
+from netkeep.services import campaign_engine as engine
+from netkeep.services import campaign_replies as replies
+from netkeep.services import linkedin_steps, runs
+from netkeep.services.campaign_guards import check_step
+from netkeep.services.inbox_poll import poll_inbox
+from netkeep.services.linkedin_accounts import ensure_account
+from netkeep.services.linkedin_session import record_session_evidence
+from netkeep.services.linkedin_steps import claim_prefill, record_prefill_outcome
+from netkeep.services.simulate_campaign import (
     CampaignShape,
     SimulatedLinkedIn,
     StepShape,
@@ -926,7 +926,7 @@ def test_in_simulate_a_linkedin_reply_after_a_prefilled_step_stops_the_email(
 
 
 def test_simulate_campaign_replays_a_linkedin_step_in_its_schedule() -> None:
-    """``netkeeper simulate --campaign`` (P3-13): a LinkedIn step fires now, one prefill
+    """``netkeep simulate --campaign`` (P3-13): a LinkedIn step fires now, one prefill
     at a time, and the email after it counts from each simulated send."""
     shape = CampaignShape(
         campaign_id=1,

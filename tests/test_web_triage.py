@@ -20,12 +20,12 @@ from isolation.harness import FixedUser
 from sqlalchemy import Engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.crm import tags as tag_service
-from netkeeper.crm import triage as triage_service
-from netkeeper.crm.identity import merge
-from netkeeper.crm.interactions import add_interaction
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.crm import tags as tag_service
+from netkeep.crm import triage as triage_service
+from netkeep.crm.identity import merge
+from netkeep.crm.interactions import add_interaction
+from netkeep.db import session_scope
+from netkeep.models import (
     Contact,
     ContactMet,
     ContactSnapshot,
@@ -36,10 +36,10 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.scoping import get_scoped, scoped_update
-from netkeeper.web.deps import LocalSingleUser
+from netkeep.scoping import get_scoped, scoped_update
+from netkeep.web.deps import LocalSingleUser
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
 EARLIER = NOW - timedelta(days=30)
 LOCAL_USER_ID = 1

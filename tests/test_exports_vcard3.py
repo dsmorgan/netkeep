@@ -19,7 +19,7 @@ import factories
 import pytest
 from sqlalchemy.orm import Session
 
-from netkeeper.crm.exports import (
+from netkeep.crm.exports import (
     UID_NAMESPACE,
     VCARD_ONLY_PRESETS,
     ExportError,
@@ -28,8 +28,8 @@ from netkeeper.crm.exports import (
     export_stream,
     filename_for,
 )
-from netkeeper.crm.filters import FilterTree, parse_filter
-from netkeeper.models import (
+from netkeep.crm.filters import FilterTree, parse_filter
+from netkeep.models import (
     Contact,
     ContactLink,
     ContactTag,

@@ -9,7 +9,7 @@ import { ErrorNote, LoadingNote } from '@/features/crm/controls'
 
 /**
  * The contact's campaign enrollments, newest first, and **Record a response** for one
- * that came outside netkeeper (#512).
+ * that came outside netkeep (#512).
  */
 export function ContactCampaigns({ contactId, name }: { contactId: number; name: string }) {
   const enrollments = useQuery(contactEnrollmentsQuery(contactId))

@@ -21,12 +21,12 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 from test_runs_serve import HEADERS, client_for, served
 
-from netkeeper.config import Settings
-from netkeeper.db import session_scope
-from netkeeper.models import SyncRunKind, SyncRunStatus, SyncRunTrigger, User, UserKind
-from netkeeper.services import budgets, enrich_plan, runs
-from netkeeper.services.linkedin_accounts import ensure_account
-from netkeeper.web.app import create_app
+from netkeep.config import Settings
+from netkeep.db import session_scope
+from netkeep.models import SyncRunKind, SyncRunStatus, SyncRunTrigger, User, UserKind
+from netkeep.services import budgets, enrich_plan, runs
+from netkeep.services.linkedin_accounts import ensure_account
+from netkeep.web.app import create_app
 
 #: These tests start runs by hand at whatever time the suite runs (#213).
 pytestmark = pytest.mark.usefixtures("inside_active_hours")
@@ -138,7 +138,7 @@ async def test_budget_heat_and_status_read_what_posture_reads(
         "armed": False,
         "schedule_paused": False,
         "running_run_id": None,
-        "can_start_runs": False,  # this app was not started by `netkeeper serve`
+        "can_start_runs": False,  # this app was not started by `netkeep serve`
     }
 
 
@@ -153,14 +153,14 @@ async def test_browser_instructions_come_from_config_and_touch_no_browser(
     assert browser["profile_dir"].endswith("chrome-profile")
     assert browser["launch_command"][1] == "  --remote-debugging-port=9222 \\"
     assert browser["remote_host_note"] is None  # the default cdp_url is loopback
-    assert browser["check_command"] == "netkeeper preflight"
+    assert browser["check_command"] == "netkeep preflight"
 
 
 async def test_a_resume_takes_the_rest_of_the_plan_and_runs_it(
     bare_engine: Engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """POST resume records a new run on the old plan's remainder and submits it (202)."""
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", "/nonexistent-dist")
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", "/nonexistent-dist")
     settings = Settings()
     provider, connector = fake_provider()
     async with served(bare_engine, settings, provider, Clock(NOW)) as app:
@@ -204,7 +204,7 @@ async def test_a_failed_enrichment_with_a_remaining_plan_can_be_resumed(
     stored plan is exactly as resumable. `enrich_plan.start_resume` already
     allowed this (it checks running/completed/resumed_by, never the status
     name); the LinkedIn page only needed to stop hiding the button for it."""
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", "/nonexistent-dist")
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", "/nonexistent-dist")
     settings = Settings()
     provider, connector = fake_provider()
     async with served(bare_engine, settings, provider, Clock(NOW)) as app:
@@ -243,10 +243,10 @@ async def test_resume_is_refused_while_flagged_and_a_sync_has_nothing_to_resume(
 ) -> None:
     """X3: the resume endpoint refuses a flagged session with 409 and records nothing.
     F5: resuming a connections sync is a 404, not a 500."""
-    from netkeeper.linkedin.classify import Outcome
-    from netkeeper.services.linkedin_session import flag_session
+    from netkeep.linkedin.classify import Outcome
+    from netkeep.services.linkedin_session import flag_session
 
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", "/nonexistent-dist")
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", "/nonexistent-dist")
     settings = Settings()
     provider, connector = fake_provider()
     async with served(bare_engine, settings, provider, Clock(NOW)) as app:
@@ -322,12 +322,12 @@ async def test_budget_carries_the_risk_warning_above_100_a_day(
     tmp_path: Path,
     _migrated_template: Path,
 ) -> None:
-    """#318: ``risk_warning`` is the sentence ``netkeeper posture`` shows, and the
+    """#318: ``risk_warning`` is the sentence ``netkeep posture`` shows, and the
     limit in force is still the one configured. It informs; nothing refuses."""
     from conftest import _copy_template
 
     _copy_template(_migrated_template, tmp_path / "bare")
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", str(tmp_path / "no-dist"))
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", str(tmp_path / "no-dist"))
     base = Settings()
     settings = replace(
         base,

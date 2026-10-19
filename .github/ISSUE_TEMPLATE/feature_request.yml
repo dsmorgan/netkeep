@@ -13,7 +13,7 @@ body:
     id: proposal
     attributes:
       label: Proposal
-      description: What should netkeeper do instead?
+      description: What should netkeep do instead?
     validations:
       required: true
   - type: input

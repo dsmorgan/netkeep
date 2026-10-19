@@ -10,10 +10,10 @@ import factories
 import pytest
 from sqlalchemy.orm import Session
 
-from netkeeper.config import Settings
-from netkeeper.models import User
-from netkeeper.services import ui_settings
-from netkeeper.services.settings_kv import get_setting, set_setting
+from netkeep.config import Settings
+from netkeep.models import User
+from netkeep.services import ui_settings
+from netkeep.services.settings_kv import get_setting, set_setting
 
 PREFILLS = "linkedin.budget.li_prefills_per_day"
 VISITS = "linkedin.budget.profile_visits_per_day"
@@ -201,7 +201,7 @@ def test_auto_send_is_a_switch_the_page_holds() -> None:
 
 def test_the_auto_send_confirmation_states_the_risks() -> None:
     """Written out, not read from the module: the words a person confirms before
-    netkeeper may click Send by itself."""
+    netkeep may click Send by itself."""
     text = ui_settings.AUTO_SEND_CONFIRM
     for phrase in (
         "clicks Send on LinkedIn by itself",

@@ -87,7 +87,7 @@ describe('activating with a scheduled start', () => {
     expect(await dialog.findByText(`Starts ${formatStart(DEFAULT_START)}`)).toBeVisible()
     expect(dialog.getByText('Most effective: Tue–Thu mornings.')).toBeVisible()
     expect(dialog.getByText('serve', { selector: 'code' }).parentElement).toHaveTextContent(
-      'netkeeper sends only while serve is running and this Mac is awake.',
+      'netkeep sends only while serve is running and this Mac is awake.',
     )
     expect(dialog.getByLabelText('Start date and time')).toHaveValue(toLocalInput(DEFAULT_START))
     expect(dialog.getByText(/Sending hours: Mon to Fri, 09:00 to 17:00\./)).toBeVisible()
@@ -142,7 +142,7 @@ describe('activating with a scheduled start', () => {
                 at,
                 warning:
                   at === fromLocalInput(late)
-                    ? 'That is outside the suggested slots (Tue to Thu, 09:00 to 16:30). netkeeper will still send then.'
+                    ? 'That is outside the suggested slots (Tue to Thu, 09:00 to 16:30). netkeep will still send then.'
                     : null,
               }),
             )
@@ -160,7 +160,7 @@ describe('activating with a scheduled start', () => {
 
     fireEvent.change(dialog.getByLabelText('Start date and time'), { target: { value: late } })
     expect(await dialog.findByText('Not a suggested time')).toBeVisible()
-    expect(dialog.getByText(/netkeeper will still send then/)).toBeVisible()
+    expect(dialog.getByText(/netkeep will still send then/)).toBeVisible()
     const confirm = dialog.getByRole('button', { name: 'Activate campaign' })
     expect(confirm).toBeEnabled()
     fireEvent.click(confirm)

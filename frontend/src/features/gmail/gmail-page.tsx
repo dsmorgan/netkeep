@@ -14,9 +14,9 @@ import { SendsCard } from './sends-card'
 
 /**
  * The Gmail page (#449), laid out like the LinkedIn page: the connection and today's
- * sends, the reply poll and the posture rows that concern Gmail, the drafts netkeeper
+ * sends, the reply poll and the posture rows that concern Gmail, the drafts netkeep
  * left in Gmail for you to clean up (#543), then recent email.
- * Everything on it is read from what netkeeper already stored; no request here calls
+ * Everything on it is read from what netkeep already stored; no request here calls
  * Gmail. The app-wide banner still announces a mailbox that needs signing in again.
  */
 export function GmailPage() {

@@ -4,7 +4,7 @@ Each command drives the same service functions its API counterpart does, so
 most tests assert on the exact fixture-derived counts the service layer's own
 tests use (``tests/test_archive_import.py``) or compare the CLI's output
 against a direct call to the service function on the same database.
-``netkeeper contacts stats`` shares ``netkeeper.crm.triage.progress()``'s
+``netkeep contacts stats`` shares ``netkeep.crm.triage.progress()``'s
 live-rows baseline (``archived_at IS NULL AND merged_into_id IS NULL``) for its
 four ``ContactMet`` counts and ``total``, the same numbers ``GET /triage/next``
 et al. surface as ``TriageProgressOut`` and ``GET /contacts/stats`` now surfaces
@@ -34,16 +34,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
 
-from netkeeper import migrations
-from netkeeper.cli import app as cli
-from netkeeper.config import Settings
-from netkeeper.crm import import_runs, triage
-from netkeeper.crm.contacts import _has_child, _has_tag, add_email, contact_stats, merge_contacts
-from netkeeper.crm.exports import export_stream
-from netkeeper.crm.filters import FilterTree
-from netkeeper.crm.tags import create_tag, tag_contact
-from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.models import (
+from netkeep import migrations
+from netkeep.cli import app as cli
+from netkeep.config import Settings
+from netkeep.crm import import_runs, triage
+from netkeep.crm.contacts import _has_child, _has_tag, add_email, contact_stats, merge_contacts
+from netkeep.crm.exports import export_stream
+from netkeep.crm.filters import FilterTree
+from netkeep.crm.tags import create_tag, tag_contact
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+from netkeep.models import (
     Contact,
     ContactEmail,
     ContactMet,
@@ -52,9 +52,9 @@ from netkeeper.models import (
     TagSource,
     User,
 )
-from netkeeper.scoping import install_scope_guard, scoped, scoped_contacts, scoped_count
-from netkeeper.services.users import ensure_local_user
-from netkeeper.web.app import create_app
+from netkeep.scoping import install_scope_guard, scoped, scoped_contacts, scoped_count
+from netkeep.services.users import ensure_local_user
+from netkeep.web.app import create_app
 
 FIXTURES_ARCHIVE = Path(__file__).parent / "fixtures" / "archive"
 FIXTURES_CSV = Path(__file__).parent / "fixtures" / "csv"
@@ -85,9 +85,9 @@ def _run_id(output: str, label: str) -> int:
 
 @pytest.fixture
 def cli_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[sessionmaker[Session]]:
-    """A migrated database with the local user, pointed to by ``NETKEEPER_DATABASE_URL``."""
+    """A migrated database with the local user, pointed to by ``NETKEEP_DATABASE_URL``."""
     url = database_url(tmp_path)
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     engine = make_engine(url)
     migrations.upgrade(engine)
     factory = make_session_factory(engine)
@@ -147,7 +147,7 @@ def test_cli_import_archive_names_its_run_and_that_run_rolls_back(
     """#132: the archive import is a run like any other, found and undone by its id."""
     result = CliRunner().invoke(cli, ["import", "archive", str(FIXTURES_ARCHIVE)])
     assert result.exit_code == 0, result.output
-    assert "recorded as import run 1; undo it with `netkeeper import rollback 1`" in result.output
+    assert "recorded as import run 1; undo it with `netkeep import rollback 1`" in result.output
     runs = CliRunner().invoke(cli, ["import", "runs"])
     assert "archive" in runs.output and "committed" in runs.output
 
@@ -183,7 +183,7 @@ def test_cli_import_archive_of_a_missing_path_is_a_usage_error(
 def _fresh_cli_database(tmp_path: Path, dirname: str) -> str:
     """A migrated database with the local user, at its own path, and its URL.
 
-    Not the ``cli_db`` fixture: that one monkeypatches ``$NETKEEPER_DATABASE_URL``
+    Not the ``cli_db`` fixture: that one monkeypatches ``$NETKEEP_DATABASE_URL``
     for the whole test, which ``database_url()`` prefers over any path given to
     it (CLAUDE.md) — and the ``client``/``running_app`` fixtures' own database
     is built from a path the same way (``bare_engine``), so the two would
@@ -219,13 +219,13 @@ async def test_the_cli_and_the_api_report_the_same_counts_for_the_same_archive(
             zf.write(source, arcname=source.name)
 
     cli_result = CliRunner().invoke(
-        cli, ["import", "archive", str(zipped)], env={"NETKEEPER_DATABASE_URL": cli_url}
+        cli, ["import", "archive", str(zipped)], env={"NETKEEP_DATABASE_URL": cli_url}
     )
     assert cli_result.exit_code == 0, cli_result.output
 
     response = await client.post(
         "/api/v1/imports/archive",
-        headers={"X-Netkeeper-Client": "1"},
+        headers={"X-Netkeep-Client": "1"},
         files={"file": ("export.zip", zipped.read_bytes(), "application/zip")},
     )
     assert response.status_code == 201, response.text
@@ -329,13 +329,13 @@ async def test_the_cli_and_the_api_write_the_same_rows_for_the_same_archive(
             zf.write(source, arcname=source.name)
 
     cli_result = CliRunner().invoke(
-        cli, ["import", "archive", str(zipped)], env={"NETKEEPER_DATABASE_URL": cli_url}
+        cli, ["import", "archive", str(zipped)], env={"NETKEEP_DATABASE_URL": cli_url}
     )
     assert cli_result.exit_code == 0, cli_result.output
 
     response = await client.post(
         "/api/v1/imports/archive",
-        headers={"X-Netkeeper-Client": "1"},
+        headers={"X-Netkeep-Client": "1"},
         files={"file": ("export-rows.zip", zipped.read_bytes(), "application/zip")},
     )
     assert response.status_code == 201, response.text
@@ -426,7 +426,7 @@ def test_cli_import_csv_refuses_undecided_candidates_and_still_leaves_a_draft(
     assert (
         "error: 1 row(s) match more than one contact and have no decision "
         "(rows 3); decide them in the app (import run 1), or finish this "
-        "run with `netkeeper import resume 1 --on-candidate new` (or `--on-candidate "
+        "run with `netkeep import resume 1 --on-candidate new` (or `--on-candidate "
         "skip`) -- re-running `import csv` would read the file into a second draft and "
         "leave run 1 behind as an orphan"
     ) in result.output
@@ -509,7 +509,7 @@ def test_cli_import_csv_on_candidate_new_makes_a_repeated_person_two_contacts(
     # exactly the pair it created and nobody else, in row order.
     assert (
         "warning: 2 new contacts share a name and company with another row in this file. "
-        "They were kept as separate contacts: netkeeper never matches two rows of the same "
+        "They were kept as separate contacts: netkeep never matches two rows of the same "
         "file against each other by name and company alone. Merging any of them is safe, "
         "but it means this import can no longer be rolled back. "
         f"Contacts: {row_3.id}, {row_4.id}."
@@ -600,7 +600,7 @@ def test_cli_import_resume_without_on_candidate_refuses_again_naming_the_same_ru
     result = CliRunner().invoke(cli, ["import", "resume", str(run_id)])
     assert result.exit_code == 1
     assert f"import run {run_id}" in result.output
-    assert f"netkeeper import resume {run_id} --on-candidate new" in result.output
+    assert f"netkeep import resume {run_id} --on-candidate new" in result.output
 
     with cli_db() as session:
         user = ensure_local_user(session)
@@ -869,7 +869,7 @@ def _write_lock_race(
     opens a brand new engine at call time, after this patch takes effect, so it is the one
     that picks up the shorter wait; the lock-holder thread below does not need to.
     """
-    monkeypatch.setattr("netkeeper.db.SQLITE_BUSY_TIMEOUT_MS", 50)
+    monkeypatch.setattr("netkeep.db.SQLITE_BUSY_TIMEOUT_MS", 50)
     holder_ready = threading.Event()
     release_holder = threading.Event()
 
@@ -894,7 +894,7 @@ def test_cli_import_rm_reports_a_clean_error_on_a_write_lock_race(
 ) -> None:
     """`rm` is destructive; losing a concurrent write-lock race must not surface as a raw
     traceback, the same guarantee `csv` and `resume` get below (`_reporting_lock_races`,
-    netkeeper/cli.py) -- all three are writers, not read-mostly.
+    netkeep/cli.py) -- all three are writers, not read-mostly.
     """
     draft = CliRunner().invoke(cli, ["import", "csv", str(NINE_COLUMN_SAMPLE), "--dry-run"])
     assert draft.exit_code == 0, draft.output
@@ -1286,8 +1286,8 @@ def test_contact_stats_agrees_with_triage_progress_on_the_four_states(
 ) -> None:
     """The regression the API review asked for: these two can never quietly drift.
 
-    ``netkeeper contacts stats`` has a real API counterpart after all —
-    ``netkeeper.crm.triage.progress()``, surfaced through ``GET /triage/next``
+    ``netkeep contacts stats`` has a real API counterpart after all —
+    ``netkeep.crm.triage.progress()``, surfaced through ``GET /triage/next``
     et al. — and it counts live contacts only. This pins ``contact_stats()`` to
     the same four counts on the same seed ``triage.progress()`` would see.
     """
@@ -1329,7 +1329,7 @@ def test_contact_stats_agrees_with_triage_progress_on_the_four_states(
 def test_cli_contacts_stats_does_not_leak_across_users(cli_db: sessionmaker[Session]) -> None:
     """The EXISTS subqueries in contact_stats() carry a user_id term of their own
 
-    (defense in depth, per netkeeper.crm.filters._child_rows), because the scope
+    (defense in depth, per netkeep.crm.filters._child_rows), because the scope
     guard only inspects the outer statement and cannot see into a correlated
     subquery. This is what proves that term does something: the same counts
     before and after a second user gets contacts, emails, phones, and a tag.
@@ -1362,7 +1362,7 @@ def test_cli_contacts_stats_does_not_leak_across_users(cli_db: sessionmaker[Sess
 def test_contact_stats_child_subqueries_name_the_user_in_their_own_where(
     cli_db: sessionmaker[Session],
 ) -> None:
-    """The runtime scope guard only inspects the outer statement (netkeeper.scoping), so
+    """The runtime scope guard only inspects the outer statement (netkeep.scoping), so
     the ``user_id`` term inside each correlated ``EXISTS`` in ``_has_child``/``_has_tag`` is
     the only thing keeping ``with_email``, ``with_phone``, ``tagged``, and ``tagged_by_rule``
     to one user -- defense in depth, the same convention ``tests/test_filters.py``'s
@@ -1409,8 +1409,8 @@ def test_cli_contacts_stats_with_no_contacts_is_all_zero(cli_db: sessionmaker[Se
 async def test_get_contact_stats_agrees_with_the_cli_and_triage_progress(
     cli_db: sessionmaker[Session],
 ) -> None:
-    """The parity item P1-25 exists for: ``GET /contacts/stats``, ``netkeeper contacts
-    stats``, and ``netkeeper.crm.triage.progress()`` must report the same numbers,
+    """The parity item P1-25 exists for: ``GET /contacts/stats``, ``netkeep contacts
+    stats``, and ``netkeep.crm.triage.progress()`` must report the same numbers,
     because they once did not (#85 finding 2, #90). Each reaches the same underlying
     counts through its own path -- the router, the CLI's own engine, and a direct
     call -- so a drift in any one of the three fails this test.
@@ -1445,8 +1445,8 @@ async def test_get_contact_stats_agrees_with_the_cli_and_triage_progress(
         user = ensure_local_user(session)
         progress = triage.progress(session, user)
 
-    # A second engine on the same file NETKEEPER_DATABASE_URL names, exactly as
-    # `netkeeper serve` would open one: the app's own database, not a copy of it.
+    # A second engine on the same file NETKEEP_DATABASE_URL names, exactly as
+    # `netkeep serve` would open one: the app's own database, not a copy of it.
     engine = make_engine(database_url())
     try:
         app = create_app(Settings(), engine=engine)

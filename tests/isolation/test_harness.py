@@ -10,18 +10,18 @@ from pydantic import BaseModel
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
-from netkeeper.db import make_session_factory
-from netkeeper.models import JsonValue, SettingKV, User
-from netkeeper.scoping import (
+from netkeep.db import make_session_factory
+from netkeep.models import JsonValue, SettingKV, User
+from netkeep.scoping import (
     UnscopedQueryError,
     get_scoped,
     install_scope_guard,
     scoped,
     unscoped,
 )
-from netkeeper.services.settings_kv import set_setting
-from netkeeper.web.app import API_PREFIX
-from netkeeper.web.deps import CurrentUser, LocalSingleUser, SessionDep
+from netkeep.services.settings_kv import set_setting
+from netkeep.web.app import API_PREFIX
+from netkeep.web.deps import CurrentUser, LocalSingleUser, SessionDep
 
 from .discovery import list_operations
 from .harness import assert_isolated, path_fields

@@ -1,8 +1,8 @@
-"""Start netkeeper's Chrome when netkeeper starts, and what the button reads (#599).
+"""Start netkeep's Chrome when netkeep starts, and what the button reads (#599).
 
 ``serve`` calls the one launcher (#636) once it is listening, only when
 ``linkedin.start_chrome_at_startup`` is on, and the **Start Chrome** button reads
-whether netkeeper's Chrome is running from ``GET /linkedin/browser/health``. Fakes only:
+whether netkeep's Chrome is running from ``GET /linkedin/browser/health``. Fakes only:
 no test starts Chrome or knocks on a port.
 """
 
@@ -21,26 +21,26 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy import Engine
 
-from netkeeper import worker
-from netkeeper.config import Settings
-from netkeeper.db import session_scope
-from netkeeper.linkedin import activity_lock
-from netkeeper.models import User
-from netkeeper.paths import data_dir
-from netkeeper.services import ui_settings
-from netkeeper.services.chrome_launch import (
+from netkeep import worker
+from netkeep.config import Settings
+from netkeep.db import session_scope
+from netkeep.linkedin import activity_lock
+from netkeep.models import User
+from netkeep.paths import data_dir
+from netkeep.services import ui_settings
+from netkeep.services.chrome_launch import (
     LAUNCH_EVENT,
     LAUNCH_TASK,
     LaunchResult,
     LaunchStatus,
     Refusal,
 )
-from netkeeper.services.events import Event
-from netkeeper.services.scheduled_runs import ServeExtractor
-from netkeeper.services.users import local_owner
-from netkeeper.web.app import create_app
+from netkeep.services.events import Event
+from netkeep.services.scheduled_runs import ServeExtractor
+from netkeep.services.users import local_owner
+from netkeep.web.app import create_app
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 SETTINGS_URL = "/api/v1/settings/config"
 HEALTH_URL = "/api/v1/linkedin/browser/health"
 KEY = "linkedin.start_chrome_at_startup"
@@ -88,7 +88,7 @@ async def _start(app: FastAPI, **kwargs: Any) -> str | None:
 
 
 def _hold_profile(pid: int) -> None:
-    """netkeeper's profile held by ``pid``, as Chrome's ``SingletonLock`` names it."""
+    """netkeep's profile held by ``pid``, as Chrome's ``SingletonLock`` names it."""
     profile = data_dir() / "chrome-profile"
     profile.mkdir(parents=True, exist_ok=True)
     (profile / "SingletonLock").symlink_to(f"{socket.gethostname()}-{pid}")
@@ -101,7 +101,7 @@ def test_the_setting_is_off_by_default() -> None:
     assert Settings().linkedin.start_chrome_at_startup is False
     spec = ui_settings.BY_KEY[KEY]
     assert (spec.kind, spec.group, spec.applies) == ("bool", "linkedin_runs", "now")
-    assert spec.label == "Start netkeeper's Chrome when netkeeper starts"
+    assert spec.label == "Start netkeep's Chrome when netkeep starts"
     assert "Run at login" in spec.help and "when you log in" in spec.help
     assert "sign in to LinkedIn yourself" in spec.help
 
@@ -138,11 +138,11 @@ async def test_on_starts_chrome_exactly_once_and_logs_the_outcome(
     spawner = _FakeSpawner()
     _ready(running_app, spawner)
     events = running_app.state.bus.subscribe()
-    with caplog.at_level(logging.INFO, logger="netkeeper.worker"):
+    with caplog.at_level(logging.INFO, logger="netkeep.worker"):
         task_id = await _start(running_app)
     assert task_id is not None
     assert spawner.calls == [False]  # once, and never the first-run sign-in page
-    assert "start netkeeper's Chrome at startup: started: started" in caplog.text
+    assert "start netkeep's Chrome at startup: started: started" in caplog.text
     seen: list[Event] = []
     while not seen:
         event = await asyncio.wait_for(anext(events), 1)
@@ -159,7 +159,7 @@ async def test_a_refusal_is_logged_with_its_case(
     )
     spawner = _FakeSpawner(refused)
     _ready(running_app, spawner)
-    with caplog.at_level(logging.INFO, logger="netkeeper.worker"):
+    with caplog.at_level(logging.INFO, logger="netkeep.worker"):
         await _start(running_app)
     assert spawner.calls == [False]
     assert "refused (not_dedicated): port 9333 answers, but not ours" in caplog.text
@@ -170,7 +170,7 @@ async def test_no_call_while_a_run_holds_the_browser(
 ) -> None:
     spawner = _FakeSpawner()
     _ready(running_app, spawner)
-    with caplog.at_level(logging.INFO, logger="netkeeper.worker"):
+    with caplog.at_level(logging.INFO, logger="netkeep.worker"):
         assert await _start(running_app, run_holds_browser=lambda: True) is None
     assert spawner.calls == []
     assert "a run holds the browser" in caplog.text
@@ -195,7 +195,7 @@ async def test_no_second_chrome_when_one_holds_the_profile(
     spawner = _FakeSpawner()
     _ready(running_app, spawner)
     _hold_profile(os.getpid())  # a live pid
-    with caplog.at_level(logging.INFO, logger="netkeeper.worker"):
+    with caplog.at_level(logging.INFO, logger="netkeep.worker"):
         assert await _start(running_app) is None
     assert spawner.calls == []
     assert f"it's already running (pid {os.getpid()})" in caplog.text
@@ -288,9 +288,9 @@ async def test_the_hook_logs_what_the_start_raises(
 
     monkeypatch.setattr(worker, "start_chrome_at_startup", broken)
     app = worker.serve_app(Settings(), ui_base="http://127.0.0.1:8124")
-    with caplog.at_level(logging.ERROR, logger="netkeeper.worker"):
+    with caplog.at_level(logging.ERROR, logger="netkeep.worker"):
         await app.state.after_listening()
-    assert "could not start netkeeper's Chrome at startup" in caplog.text
+    assert "could not start netkeep's Chrome at startup" in caplog.text
 
 
 async def test_the_lifespan_runs_the_hook_as_a_task_and_cancels_it_at_shutdown(
@@ -303,7 +303,7 @@ async def test_the_lifespan_runs_the_hook_as_a_task_and_cancels_it_at_shutdown(
     import conftest
 
     conftest._copy_template(_migrated_template, tmp_path / "bare")
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", str(tmp_path / "no-dist"))
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", str(tmp_path / "no-dist"))
     extractor = ServeExtractor(executor=lambda factory, bus: object())  # type: ignore[arg-type,return-value]
     app = create_app(Settings(), engine=bare_engine, extractor=extractor)
     began = asyncio.Event()
@@ -338,8 +338,8 @@ def test_serve_tells_the_startup_hook_when_it_is_listening(
     import uvicorn
     from typer.testing import CliRunner
 
-    from netkeeper import cli as cli_module
-    from netkeeper.cli import app as cli_app
+    from netkeep import cli as cli_module
+    from netkeep.cli import app as cli_app
 
     application = FastAPI()
     seen: list[bool] = []
@@ -363,20 +363,20 @@ def test_serve_tells_the_startup_hook_when_it_is_listening(
     assert seen == [False, True]
 
 
-def test_posture_no_probe_says_whether_netkeepers_chrome_is_running(
+def test_posture_no_probe_says_whether_netkeeps_chrome_is_running(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """#599: ``netkeeper posture --no-probe`` reads the profile's lock, never the port."""
+    """#599: ``netkeep posture --no-probe`` reads the profile's lock, never the port."""
     from typer.testing import CliRunner
 
-    from netkeeper import migrations
-    from netkeeper.cli import app as cli_app
-    from netkeeper.db import database_url, make_engine, make_session_factory
-    from netkeeper.scoping import install_scope_guard
-    from netkeeper.services.users import ensure_local_user
+    from netkeep import migrations
+    from netkeep.cli import app as cli_app
+    from netkeep.db import database_url, make_engine, make_session_factory
+    from netkeep.scoping import install_scope_guard
+    from netkeep.services.users import ensure_local_user
 
     url = database_url(tmp_path)
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     engine = make_engine(url)
     migrations.upgrade(engine)
     factory = make_session_factory(engine)
@@ -385,16 +385,16 @@ def test_posture_no_probe_says_whether_netkeepers_chrome_is_running(
         ensure_local_user(session)
     engine.dispose()
     before = CliRunner().invoke(cli_app, ["posture", "--no-probe", "--details"])
-    assert "netkeeper's Chrome isn't running" in before.output, before.output
+    assert "netkeep's Chrome isn't running" in before.output, before.output
     _hold_profile(os.getpid())
     after = CliRunner().invoke(cli_app, ["posture", "--no-probe", "--details"])
-    assert f"netkeeper's Chrome is running (pid {os.getpid()})" in after.output, after.output
+    assert f"netkeep's Chrome is running (pid {os.getpid()})" in after.output, after.output
 
 
 # --- what the button reads -----------------------------------------------------------------
 
 
-async def test_health_says_whether_netkeepers_chrome_is_running(
+async def test_health_says_whether_netkeeps_chrome_is_running(
     client: httpx.AsyncClient, running_app: FastAPI
 ) -> None:
     body = (await client.get(HEALTH_URL)).json()
@@ -431,7 +431,7 @@ async def test_only_the_owner_is_offered_the_button(
     import factories
     from isolation.harness import FixedUser
 
-    from netkeeper.models import UserKind
+    from netkeep.models import UserKind
 
     running_app.state.chrome_launcher = _FakeSpawner()
     with session_scope(running_app.state.session_factory, write=True) as session:

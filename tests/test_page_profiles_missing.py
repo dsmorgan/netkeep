@@ -4,8 +4,8 @@ The CP8c capture (#484) showed that a profile url that does not exist never answ
 ``404``: the document answers ``200`` with a flight that has no top card, names the
 missing-profile page (its router's ``initialPath`` is ``/404/``, its page instance
 ``urn:li:page:d_flagship3_404``), and the page's own script then moves the tab to
-``/404/``. These tests drive the real :class:`~netkeeper.linkedin.page_profiles.PageProfiles`
-and :func:`~netkeeper.linkedin.enrich.run_enrichment` over :mod:`profile_site`'s fake
+``/404/``. These tests drive the real :class:`~netkeep.linkedin.page_profiles.PageProfiles`
+and :func:`~netkeep.linkedin.enrich.run_enrichment` over :mod:`profile_site`'s fake
 pages, with invented people and invented flight around the captured anchors.
 
 The attacks: can a real profile be read as missing (a top card, a redirect, a path
@@ -28,21 +28,21 @@ from test_page_profiles import LOST, NOW, tab_of, target, visit
 from time_limit import Stopwatch
 from voyager_pages import PEOPLE, Person
 
-from netkeeper.crm.apply import HarvestResult, apply_harvest
-from netkeeper.db import session_scope
-from netkeeper.linkedin import flagship_profile, page_profiles
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.enrich import (
+from netkeep.crm.apply import HarvestResult, apply_harvest
+from netkeep.db import session_scope
+from netkeep.linkedin import flagship_profile, page_profiles
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.enrich import (
     MAX_UNREADABLE_IN_A_ROW,
     EnrichTarget,
     StopReason,
     UnreadableCause,
 )
-from netkeeper.linkedin.flagship_profile import has_top_card, is_missing_page
-from netkeeper.linkedin.observe import Observation, ObservedResponse
-from netkeeper.linkedin.voyager import RouteChanged
-from netkeeper.models import Contact, User
-from netkeeper.scoping import get_scoped
+from netkeep.linkedin.flagship_profile import has_top_card, is_missing_page
+from netkeep.linkedin.observe import Observation, ObservedResponse
+from netkeep.linkedin.voyager import RouteChanged
+from netkeep.models import Contact, User
+from netkeep.scoping import get_scoped
 
 #: The issue's invented slug, and two more invented people whose profiles are gone.
 QUORBELLE = Person(514, "Quorbelle", "Fictionary", None, public_id="quorbelle-fictionary")
@@ -102,7 +102,7 @@ async def test_the_missing_page_is_not_found_and_no_scroll_is_spent() -> None:
     tab = tab_of(site)
     assert tab.mouse.wheels == [] and tab.mouse.moves == []  # no scroll, no pointer rest
     assert site.clicks == [] and out.result.clicks == 0
-    # Nothing new was requested: the one document netkeeper navigated to.
+    # Nothing new was requested: the one document netkeep navigated to.
     assert site.requests == [("GET", f"/in/{QUORBELLE.slug}/", None)]
     assert tab.goto_calls == [f"{ORIGIN}/in/{QUORBELLE.slug}/"]
 

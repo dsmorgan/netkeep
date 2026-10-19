@@ -17,7 +17,7 @@
  *   tracked action, and nothing in the API records that one ran.
  * - **Build a list** has a signal that lies: `GET /lists` always includes the
  *   built-in "Validated" smart list the backend seeds at every server start
- *   (`ensure_validated_list`, `netkeeper/web/app.py`), and nothing in the
+ *   (`ensure_validated_list`, `netkeep/web/app.py`), and nothing in the
  *   response marks it as built-in — a fresh install with zero user-made
  *   lists still returns one. Counting raw length would read "Done" the
  *   moment a server has ever started, for a person who has built nothing, so

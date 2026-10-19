@@ -7,12 +7,12 @@ from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.db import session_scope
-from netkeeper.models import User
-from netkeeper.services import gmail_setup
-from netkeeper.services.settings_kv import get_setting, set_setting
+from netkeep.db import session_scope
+from netkeep.models import User
+from netkeep.services import gmail_setup
+from netkeep.services.settings_kv import get_setting, set_setting
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 EMPTY = {
     "project_id": None,
     "sender_email": None,
@@ -46,14 +46,14 @@ async def test_nothing_is_set_up_at_first(client: httpx.AsyncClient) -> None:
 async def test_progress_is_stored_normalized_and_in_order(client: httpx.AsyncClient) -> None:
     response = await _put(
         client,
-        project_id="  Netkeeper-ab12cd ",
+        project_id="  Netkeep-ab12cd ",
         sender_email=" me@example.com ",
         done=["test_user", "project", "project"],
     )
     assert response.status_code == 200, response.text
     expected = {
         **EMPTY,
-        "project_id": "netkeeper-ab12cd",
+        "project_id": "netkeep-ab12cd",
         "sender_email": "me@example.com",
         "done": ["project", "test_user"],
     }
@@ -62,20 +62,18 @@ async def test_progress_is_stored_normalized_and_in_order(client: httpx.AsyncCli
 
 
 async def test_a_put_replaces_and_can_clear(client: httpx.AsyncClient) -> None:
-    await _put(client, project_id="netkeeper-ab12cd", done=["project"])
+    await _put(client, project_id="netkeep-ab12cd", done=["project"])
     response = await _put(client, project_id="", sender_email=None, done=[])
     assert response.json() == EMPTY
 
 
 async def test_a_put_needs_the_csrf_header(client: httpx.AsyncClient) -> None:
-    response = await client.put("/api/v1/gmail-setup", json={"project_id": "netkeeper-ab12cd"})
+    response = await client.put("/api/v1/gmail-setup", json={"project_id": "netkeep-ab12cd"})
     assert response.status_code == 403
     assert (await client.get("/api/v1/gmail-setup")).json() == EMPTY
 
 
-@pytest.mark.parametrize(
-    "project_id", ["a" * 6, "a" + "b" * 28 + "9", "netkeeper-510123", "a-b-c-d"]
-)
+@pytest.mark.parametrize("project_id", ["a" * 6, "a" + "b" * 28 + "9", "netkeep-510123", "a-b-c-d"])
 async def test_the_edges_of_a_valid_project_id_round_trip(
     client: httpx.AsyncClient, project_id: str
 ) -> None:
@@ -88,13 +86,13 @@ async def test_the_edges_of_a_valid_project_id_round_trip(
     ("body", "fragment"),
     [
         ({"project_id": "short"}, "6 to 30"),
-        ({"project_id": "1netkeeper"}, "starting with a letter"),
-        ({"project_id": "netkeeper-"}, "not ending with a hyphen"),
+        ({"project_id": "1netkeep"}, "starting with a letter"),
+        ({"project_id": "netkeep-"}, "not ending with a hyphen"),
         ({"project_id": "net keeper"}, "lowercase"),
-        ({"project_id": "netkeeper;rm-rf"}, "lowercase"),
+        ({"project_id": "netkeep;rm-rf"}, "lowercase"),
         ({"project_id": "a" * 31}, "6 to 30"),
         ({"project_id": "My Project"}, "lowercase"),
-        ({"project_id": "Netkeeper_510123"}, "lowercase"),
+        ({"project_id": "Netkeep_510123"}, "lowercase"),
         ({"sender_email": "not-an-address"}, "email address"),
         ({"done": ["project", "launch_rockets"]}, "launch_rockets"),
     ],
@@ -170,7 +168,7 @@ async def test_the_stored_value_holds_exactly_these_keys(
     """Nothing secret (a client secret, a token) can ride along in ``settings_kv``."""
     response = await _put(
         client,
-        project_id="netkeeper-ab12cd",
+        project_id="netkeep-ab12cd",
         sender_email="me@example.com",
         done=["project"],
         client_secret="s3cret",

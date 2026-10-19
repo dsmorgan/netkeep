@@ -37,7 +37,7 @@ import { Button } from '@/components/ui/button'
 import { DECISION_MEANINGS, TRIAGE_GOAL } from './method'
 
 /** Per-viewer, per-browser. Nothing about it reaches the server or another tab. */
-const STORAGE_KEY = 'netkeeper.triage.explainer'
+const STORAGE_KEY = 'netkeep.triage.explainer'
 const OPEN = 'open'
 
 /** Whether this viewer has opened it before. `false` whenever the answer is unknown. */

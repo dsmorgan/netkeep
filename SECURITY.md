@@ -1,6 +1,6 @@
 # Security policy
 
-netkeeper handles other people's contact details, your Gmail OAuth token, and a logged-in LinkedIn browser session. Security reports are taken seriously.
+netkeep handles other people's contact details, your Gmail OAuth token, and a logged-in LinkedIn browser session. Security reports are taken seriously.
 
 ## Supported versions
 

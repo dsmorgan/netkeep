@@ -4,7 +4,7 @@
  * `GET /api/v1/contacts/stats` (P1-25, spec 10.1) is the one source for
  * contact counts and triage progress; nothing here recomputes a count the
  * backend already has. The open-imports query reuses the `status` filter
- * `GET /imports` already exposes for the same reason `netkeeper import runs
+ * `GET /imports` already exposes for the same reason `netkeep import runs
  * --status draft` does (#90): a second, dashboard-only way to ask "is an
  * import still open" would just be a second dialect of the same question.
  */

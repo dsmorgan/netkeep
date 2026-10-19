@@ -74,7 +74,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals()
   resetFakeEventSource()
-  document.title = 'netkeeper'
+  document.title = 'netkeep'
 })
 
 describe('the attention helpers', () => {
@@ -97,11 +97,11 @@ describe('the attention helpers', () => {
   })
 
   it('titles the tab with every number but Triage', () => {
-    expect(documentTitle(undefined)).toBe('netkeeper')
+    expect(documentTitle(undefined)).toBe('netkeep')
     expect(documentTitle(attention({ counts: { ...attention().counts, triage: 40 } }))).toBe(
-      'netkeeper',
+      'netkeep',
     )
-    expect(documentTitle(BUSY)).toBe('(124) netkeeper')
+    expect(documentTitle(BUSY)).toBe('(124) netkeep')
   })
 
   it('marks the menu for a number or a dot, not for Triage alone', () => {
@@ -183,7 +183,7 @@ describe('the nav badges', () => {
 
     expect(primaryNav().getByRole('link', { name: 'Inbox' })).toBeInTheDocument()
     expect(screen.queryByTestId('attention-count')).toBeNull()
-    expect(document.title).toBe('netkeeper')
+    expect(document.title).toBe('netkeep')
   })
 })
 
@@ -196,7 +196,7 @@ describe('the menu dot and the tab title', () => {
       name: 'Open navigation, 124 items need you',
     })
     expect(within(menu).getByTestId('attention-dot')).toBeInTheDocument()
-    await waitFor(() => expect(document.title).toBe('(124) netkeeper'))
+    await waitFor(() => expect(document.title).toBe('(124) netkeep'))
   })
 
   it('leaves the menu plain when only Triage has a backlog', async () => {
@@ -205,7 +205,7 @@ describe('the menu dot and the tab title', () => {
 
     await primaryNav().findByRole('link', { name: 'Triage, 4000 to triage' })
     expect(screen.getByRole('button', { name: 'Open navigation' })).toBeInTheDocument()
-    expect(document.title).toBe('netkeeper')
+    expect(document.title).toBe('netkeep')
   })
 })
 
@@ -244,7 +244,7 @@ describe('refreshing', () => {
 
     expect(await primaryNav().findByRole('link', { name: 'Inbox' })).toBeInTheDocument()
     expect(fetches()).toBe(before + 1)
-    await waitFor(() => expect(document.title).toBe('netkeeper'))
+    await waitFor(() => expect(document.title).toBe('netkeep'))
   })
 
   it('does not refetch after a change the backend refused', async () => {
@@ -312,7 +312,7 @@ describe('a partial answer', () => {
 })
 
 describe('one item', () => {
-  it('titles the tab "(1) netkeeper" and names the menu for one item', async () => {
+  it('titles the tab "(1) netkeep" and names the menu for one item', async () => {
     const one = attention({ counts: { ...attention().counts, inbox: 1 }, title_total: 1 })
     expect(menuLabel(one)).toBe('Open navigation, 1 item needs you')
     expect(menuLabel(attention({ flags: { ...attention().flags, gmail: 'Sign in again.' } }))).toBe(
@@ -323,7 +323,7 @@ describe('one item', () => {
     serve(() => one)
     await renderApp('/exports')
 
-    await waitFor(() => expect(document.title).toBe('(1) netkeeper'))
+    await waitFor(() => expect(document.title).toBe('(1) netkeep'))
     expect(screen.getByRole('button', { name: 'Open navigation, 1 item needs you' })).toBeVisible()
   })
 })
@@ -405,7 +405,7 @@ describe('the activity indicator (#347)', () => {
       title_total: 3,
     })
     act(() => FakeEventSource.instances.at(-1)?.emit('mailbox.status', {}))
-    await waitFor(() => expect(document.title).toBe('(3) netkeeper'))
+    await waitFor(() => expect(document.title).toBe('(3) netkeep'))
     expect(live).toHaveTextContent('LinkedIn: running. A LinkedIn enrichment run is running.')
     expect(screen.getAllByTestId('activity-live')).toHaveLength(1)
   })

@@ -1,6 +1,6 @@
 """The body tap (#200): the streamed copy of an answer whose own body Chrome could not keep.
 
-:class:`netkeeper.linkedin.body_tap.BodyTap` is fed CDP event parameters by hand here,
+:class:`netkeep.linkedin.body_tap.BodyTap` is fed CDP event parameters by hand here,
 the way the one read-only session ``BrowserRun._open_body_tap`` opens feeds it; the
 stream call is a fake that records what it was asked. Nothing opens a socket.
 """
@@ -14,9 +14,9 @@ from typing import Any
 
 import pytest
 
-from netkeeper.linkedin import body_tap
-from netkeeper.linkedin.body_tap import BodyTap
-from netkeeper.linkedin.observe import ResponseMatch, ResponseRule
+from netkeep.linkedin import body_tap
+from netkeep.linkedin.body_tap import BodyTap
+from netkeep.linkedin.observe import ResponseMatch, ResponseRule
 
 ORIGIN = "https://www.linkedin.com"
 PAGINATION = f"{ORIGIN}/flagship-web/rsc-action/actions/pagination?sduiid=fake"
@@ -195,7 +195,7 @@ async def test_undecodable_buffered_data_is_empty(bad: object) -> None:
 
 
 def test_the_tap_session_buffers_are_pinned() -> None:
-    from netkeeper.linkedin import browser
+    from netkeep.linkedin import browser
 
     assert browser.TAP_RESOURCE_BUFFER_BYTES == 8 * 1024 * 1024
     assert browser.TAP_TOTAL_BUFFER_BYTES == 32 * 1024 * 1024

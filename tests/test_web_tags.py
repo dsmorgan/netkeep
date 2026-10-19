@@ -11,11 +11,11 @@ from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.crm.tags import DEFAULTS
-from netkeeper.db import session_scope
-from netkeeper.models import User
+from netkeep.crm.tags import DEFAULTS
+from netkeep.db import session_scope
+from netkeep.models import User
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 DEFAULT_RULE_COUNT = sum(len(default.fields) for default in DEFAULTS)
 
 

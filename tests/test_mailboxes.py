@@ -9,13 +9,13 @@ from gmail_fakes import CLIENT_ID, CLIENT_SECRET, FAKE_EMAIL, FakeGoogle, Memory
 from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.campaigns import gmail_oauth
-from netkeeper.db import session_scope
-from netkeeper.models import Mailbox, MailboxArm, MailboxStatus, User
-from netkeeper.scoping import unscoped
-from netkeeper.services import keychain
-from netkeeper.services import mailboxes as service
-from netkeeper.services.events import EventBus
+from netkeep.campaigns import gmail_oauth
+from netkeep.db import session_scope
+from netkeep.models import Mailbox, MailboxArm, MailboxStatus, User
+from netkeep.scoping import unscoped
+from netkeep.services import keychain
+from netkeep.services import mailboxes as service
+from netkeep.services.events import EventBus
 
 CLIENT = gmail_oauth.OAuthClient(client_id=CLIENT_ID, client_secret=CLIENT_SECRET)
 NOW = datetime(2026, 9, 26, 12, 0, tzinfo=UTC)
@@ -72,7 +72,7 @@ def test_connecting_stores_the_token_in_the_keychain_and_never_in_the_database(
     assert mailbox.status_reason is None
     assert mailbox.checked_at == NOW
     assert mailbox.daily_cap == 80
-    assert mailbox.label_prefix == "netkeeper"
+    assert mailbox.label_prefix == "netkeep"
     assert mailbox.keychain_ref == f"gmail/mailbox/{mailbox.id}"
     assert memory_keyring.entries == {
         (keychain.service_name(), f"{user.id}/gmail/mailbox/{mailbox.id}"): "rt-secret-value"

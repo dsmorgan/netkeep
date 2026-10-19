@@ -2,7 +2,7 @@
 
 Every test here starts separate Python interpreters with ``subprocess``: not
 coroutines, not threads. Each process builds its own provider with its own fresh
-:class:`ActivityLocks`, which is what ``netkeeper serve`` and ``netkeeper preflight``
+:class:`ActivityLocks`, which is what ``netkeep serve`` and ``netkeep preflight``
 in a terminal each do, so nothing they share lives in Python -- only the lock file
 under the data directory both are pointed at.
 
@@ -31,16 +31,16 @@ import pytest
 from browser_fakes import FakeConnector
 from typer.testing import CliRunner
 
-from netkeeper.cli import app as cli
-from netkeeper.linkedin import activity_lock
-from netkeeper.linkedin.browser import AttachBrowserProvider
+from netkeep.cli import app as cli
+from netkeep.linkedin import activity_lock
+from netkeep.linkedin.browser import AttachBrowserProvider
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="flock(2) is POSIX")
 
 HELPER = Path(__file__).with_name("activity_lock_proc.py")
 ACCOUNT = activity_lock.SINGLE_ACCOUNT_KEY
 TIMEOUT_S = 20.0
-SERVE = "netkeeper serve"
+SERVE = "netkeep serve"
 
 
 class Holder:
@@ -90,7 +90,7 @@ class Holder:
 
 
 def _env(data: Path) -> dict[str, str]:
-    return {**os.environ, "NETKEEPER_DATA": str(data)}
+    return {**os.environ, "NETKEEP_DATA": str(data)}
 
 
 def contend(data: Path, mode: str, *args: str, account: str = ACCOUNT) -> dict[str, Any]:
@@ -226,16 +226,16 @@ def test_a_waiting_process_queues_behind_a_live_holder(data: Path, holders: list
     assert result["attaches"] == 1
 
 
-def test_netkeeper_preflight_tells_the_user_who_holds_the_browser(
+def test_netkeep_preflight_tells_the_user_who_holds_the_browser(
     data: Path, holders: list[Holder], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """What a person sees typing `netkeeper preflight` while `netkeeper serve` runs a job."""
+    """What a person sees typing `netkeep preflight` while `netkeep serve` runs a job."""
     holder = Holder(data)
     holders.append(holder)
     connector = FakeConnector()
-    monkeypatch.setenv("NETKEEPER_DATA", str(data))
+    monkeypatch.setenv("NETKEEP_DATA", str(data))
     monkeypatch.setattr(
-        "netkeeper.cli.AttachBrowserProvider",
+        "netkeep.cli.AttachBrowserProvider",
         lambda cdp_url: AttachBrowserProvider(cdp_url, connector=connector),
     )
 

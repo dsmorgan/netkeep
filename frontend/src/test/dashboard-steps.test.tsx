@@ -12,7 +12,7 @@ const STATES: Record<string, Partial<SetupStep>> = {
   about_you: { state: 'done', reason: 'Your details are set for test sends.' },
   import: { state: 'in_progress', next: true, reason: '1 draft import waiting to be finished.' },
   gmail: { state: 'skipped', skipped: true, reason: 'Skipped. Set up your Google Cloud project.' },
-  chrome: { state: 'todo', next: true, reason: 'Start netkeeper’s Chrome.' },
+  chrome: { state: 'todo', next: true, reason: 'Start netkeep’s Chrome.' },
   first_sync: { state: 'blocked', reason: 'Waits for chrome.' },
 }
 

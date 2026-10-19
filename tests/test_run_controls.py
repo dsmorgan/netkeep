@@ -36,15 +36,15 @@ from test_runs_serve import (
 )
 from voyager_pages import FakeConnectionsSource
 
-from netkeeper.config import Settings
-from netkeeper.db import session_scope
-from netkeeper.linkedin.connections import SyncMode
-from netkeeper.linkedin.enrich import StopReason
-from netkeeper.models import Contact, SyncRunKind, SyncRunStatus, SyncRunTrigger, User
-from netkeeper.scoping import scoped
-from netkeeper.services import enrich_plan, run_contacts, runs, scheduler
-from netkeeper.services.connections_sync import sync_connections
-from netkeeper.services.linkedin_accounts import (
+from netkeep.config import Settings
+from netkeep.db import session_scope
+from netkeep.linkedin.connections import SyncMode
+from netkeep.linkedin.enrich import StopReason
+from netkeep.models import Contact, SyncRunKind, SyncRunStatus, SyncRunTrigger, User
+from netkeep.scoping import scoped
+from netkeep.services import enrich_plan, run_contacts, runs, scheduler
+from netkeep.services.connections_sync import sync_connections
+from netkeep.services.linkedin_accounts import (
     arm_scheduled_runs,
     disarm_scheduled_runs,
     ensure_account,
@@ -53,7 +53,7 @@ from netkeeper.services.linkedin_accounts import (
     schedule_paused,
     unpause_schedule,
 )
-from netkeeper.services.settings_kv import set_setting
+from netkeep.services.settings_kv import set_setting
 
 NOW = datetime(2026, 9, 23, 15, 0, tzinfo=UTC)
 ALL_DAY = (time(0, 0), time(23, 59))
@@ -466,9 +466,9 @@ async def test_the_served_handler_records_nothing_while_paused(
     session_factory: sessionmaker[Session],
 ) -> None:
     """The gap between the scheduler's gate and the handler: paused there, no run."""
-    from netkeeper.services.events import EventBus
-    from netkeeper.services.scheduled_runs import serve_registry
-    from netkeeper.services.tasks import TaskRunner
+    from netkeep.services.events import EventBus
+    from netkeep.services.scheduled_runs import serve_registry
+    from netkeep.services.tasks import TaskRunner
 
     owner, account = _armed_account(session_factory)
     with session_scope(session_factory, write=True) as session:
@@ -503,9 +503,9 @@ class _Race:
     a pause (or a disarm) that lands between the scheduler's gate and the handler."""
 
     def __init__(self, factory: sessionmaker[Session]) -> None:
-        from netkeeper.services.events import EventBus
-        from netkeeper.services.scheduled_runs import serve_registry
-        from netkeeper.services.tasks import TaskRunner
+        from netkeep.services.events import EventBus
+        from netkeep.services.scheduled_runs import serve_registry
+        from netkeep.services.tasks import TaskRunner
 
         class Never:
             async def execute(self, run_id: int, user_id: int) -> runs.RunOutcome:
@@ -630,7 +630,7 @@ async def test_a_disarm_after_the_gate_is_skipped_with_its_own_reason(
 
 
 def test_posture_says_the_schedule_is_paused(session_factory: sessionmaker[Session]) -> None:
-    from netkeeper.services.posture import posture
+    from netkeep.services.posture import posture
 
     with session_scope(session_factory, write=True) as session:
         user = factories.make_user(session, timezone="UTC")
@@ -655,7 +655,7 @@ def test_posture_says_the_schedule_is_paused(session_factory: sessionmaker[Sessi
 async def test_the_api_pauses_a_run_shows_it_and_resumes_it(
     bare_engine: Engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", "/nonexistent-dist")
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", "/nonexistent-dist")
     now = datetime.now(UTC)
     provider, connector = fake_provider()
     async with served(bare_engine, Settings(), provider, ServeClock(now)) as app:
@@ -774,7 +774,7 @@ async def test_the_schedule_pause_survives_a_restart_and_unpause_lets_runs_start
 
 @pytest.fixture
 def no_frontend(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", "/nonexistent-dist")
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", "/nonexistent-dist")
 
 
 async def test_pausing_a_running_sync_is_refused_and_sets_no_flag(

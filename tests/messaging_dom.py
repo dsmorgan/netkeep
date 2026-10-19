@@ -3,8 +3,8 @@
 :class:`MessagingSite` is a :class:`browser_fakes.FakeContext` whose tabs hold a small
 DOM parsed from :mod:`messaging_pages`' invented HTML (the captured layout, invented
 people). A tab answers the slice of Playwright's locator API that
-:meth:`netkeeper.linkedin.browser.BrowserRun.click_message` and
-:meth:`~netkeeper.linkedin.browser.BrowserRun.type_into_composer` use: roles and
+:meth:`netkeep.linkedin.browser.BrowserRun.click_message` and
+:meth:`~netkeep.linkedin.browser.BrowserRun.type_into_composer` use: roles and
 accessible names, a few CSS selectors, ``filter``, ``and_``, ``first``/``last``/``nth``,
 ``count``, ``get_attribute``, ``inner_text`` and one ``click``. Locators are lazy, as
 Playwright's are, so a test can change the page between two checks.
@@ -44,7 +44,7 @@ from messaging_pages import (
     profile_message_controls_html,
 )
 
-from netkeeper.linkedin.browser import PageLike
+from netkeep.linkedin.browser import PageLike
 
 VOID = frozenset({"br", "input", "img", "meta", "link", "hr"})
 #: Elements that aren't HTML, which Playwright's ``inner_text`` refuses (#497).

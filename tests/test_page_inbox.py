@@ -1,6 +1,6 @@
 """PageInbox: the inbox poll's source over the page's own answers (P4-01, #380, ADR 0006).
 
-Driven through the real :class:`~netkeeper.linkedin.browser.BrowserRun` over
+Driven through the real :class:`~netkeep.linkedin.browser.BrowserRun` over
 :mod:`inbox_site`'s fake messaging page. The attacks this file makes on the source, each a
 test below: does it stop at the bound? Does it open more threads than five, or one it may not?
 Can it skip a conversation that holds a real reply? Does an unknown shape read as "no replies"
@@ -23,22 +23,22 @@ from inbox_site import Behavior, InboxSite, Reply, conv, people
 from run_fakes import fake_provider
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.config import LinkedInSettings
-from netkeeper.db import session_scope
-from netkeeper.linkedin import messaging_shapes, page_connections, page_inbox
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.inbox import (
+from netkeep.config import LinkedInSettings
+from netkeep.db import session_scope
+from netkeep.linkedin import messaging_shapes, page_connections, page_inbox
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.inbox import (
     MAX_THREADS_OPENED,
     InboxDelta,
     InboxJobSpec,
     InboxReadStopped,
 )
-from netkeeper.linkedin.observe import ObservationFailed
-from netkeeper.linkedin.pacing import ScrollProfile
-from netkeeper.linkedin.page_inbox import PageInbox
-from netkeeper.models import Interaction, InteractionKind, SyncRunStatus, User
-from netkeeper.scoping import scoped
-from netkeeper.services.inbox_poll import poll_inbox
+from netkeep.linkedin.observe import ObservationFailed
+from netkeep.linkedin.pacing import ScrollProfile
+from netkeep.linkedin.page_inbox import PageInbox
+from netkeep.models import Interaction, InteractionKind, SyncRunStatus, User
+from netkeep.scoping import scoped
+from netkeep.services.inbox_poll import poll_inbox
 
 T0 = datetime.fromtimestamp(mp.T0 / 1000, tz=UTC)
 
@@ -599,7 +599,7 @@ async def _poll(
             factory, user_id, source, settings=LinkedInSettings(), clock=lambda: now
         )
     with session_scope(factory) as session:
-        from netkeeper.services import runs
+        from netkeep.services import runs
 
         user = session.get(User, user_id)
         assert user is not None
@@ -658,7 +658,7 @@ async def test_a_wall_aborts_the_poll_and_flags_the_session(
 
 
 def _set_self_urn(factory: sessionmaker[Session], user_id: int, urn: str | None) -> None:
-    from netkeeper.crm.self_contact import ensure_self_contact
+    from netkeep.crm.self_contact import ensure_self_contact
 
     with session_scope(factory, write=True) as session:
         user = session.get(User, user_id)
@@ -698,7 +698,7 @@ async def test_with_no_self_urn_the_first_polls_owner_is_recorded_and_held_to(
     with session_scope(session_factory) as session:
         user = session.get(User, user_id)
         assert user is not None
-        from netkeeper.services.settings_kv import get_setting
+        from netkeep.services.settings_kv import get_setting
 
         assert get_setting(session, user, "linkedin.inbox.owner_urn") == mp.OWNER.urn
 
@@ -707,7 +707,7 @@ async def test_with_no_self_urn_the_first_polls_owner_is_recorded_and_held_to(
     with session_scope(session_factory, write=True) as session:
         user = session.get(User, user_id)
         assert user is not None
-        from netkeeper.services.settings_kv import set_setting
+        from netkeep.services.settings_kv import set_setting
 
         set_setting(session, user, "linkedin.inbox.owner_urn", mp.ZEPHYRINE.urn)
     status, reason = await _poll(session_factory, user_id, site)
@@ -718,8 +718,8 @@ async def test_with_no_self_urn_the_first_polls_owner_is_recorded_and_held_to(
 async def test_after_a_mismatch_forgetting_the_owner_lets_the_next_poll_record_the_new_one(
     session_factory: sessionmaker[Session],
 ) -> None:
-    from netkeeper.crm import inbox_apply
-    from netkeeper.services.settings_kv import get_setting, set_setting
+    from netkeep.crm import inbox_apply
+    from netkeep.services.settings_kv import get_setting, set_setting
 
     user_id = _watched(session_factory)
     site = InboxSite([conv(100, people(1)[0], 50)], behavior=Behavior(first=1))
@@ -774,7 +774,7 @@ class _RecordingRun:
 
 @pytest.mark.parametrize("sleep", [no_sleep, None], ids=["injected sleep", "real sleep"])
 async def test_both_scroll_branches_rest_over_a_conversation_link(sleep: Any) -> None:
-    from netkeeper.linkedin.page_inbox import CONVERSATION_LINK
+    from netkeep.linkedin.page_inbox import CONVERSATION_LINK
 
     run = _RecordingRun()
     source = PageInbox(run, sleep=sleep, rng=random.Random(1), scroll_profile=ONE_WHEEL)  # type: ignore[arg-type]

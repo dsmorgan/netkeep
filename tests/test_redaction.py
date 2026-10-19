@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from netkeeper.logging_setup import PERSONAL_PATTERN, _mark
-from netkeeper.redaction import SECRET, Redactor, classify, strip_secrets
+from netkeep.logging_setup import PERSONAL_PATTERN, _mark
+from netkeep.redaction import SECRET, Redactor, classify, strip_secrets
 
 NAME = "Quorbelle Fictionary"
 EMAIL = "quorbelle.fictionary@example.test"
@@ -101,7 +101,7 @@ def test_the_second_line_of_defense_catches_unmarked_values(line: str) -> None:
 @pytest.mark.parametrize(
     "line",
     [
-        "2026-10-17 14:16:12 INFO netkeeper.worker run 12 finished in 340.5s",
+        "2026-10-17 14:16:12 INFO netkeep.worker run 12 finished in 340.5s",
         "budget 0/150 today (hard max 400/day), 2026-10-10T18:16:14.673840+00:00",
         "attach over CDP to http://127.0.0.1:9222",
         "migration 0045, version 0.0.1, 192.168.1.10",
@@ -119,7 +119,7 @@ def test_a_loopback_url_keeps_its_place_but_not_its_query() -> None:
 
 def test_data_and_home_directories_are_replaced(tmp_path: Path) -> None:
     home = tmp_path / "Users" / "quorbelleuser"
-    data = home / "Library" / "Application Support" / "netkeeper"
+    data = home / "Library" / "Application Support" / "netkeep"
     data.mkdir(parents=True)
     redactor = Redactor([(data, "<data>"), (home, "~")])
     out = redactor.text(f"opened {data}/netkeeper.sqlite3 and {home}/Downloads/a.zip")

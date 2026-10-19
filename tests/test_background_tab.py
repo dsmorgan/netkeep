@@ -7,7 +7,7 @@ asks Chrome for a background tab instead (``Target.createTarget`` with
 ``background: true``) and finds it by its target id. Only a prefill or an auto-send
 brings its tab forward, once, at its start (ADR 0007, ADR 0008).
 
-netkeeper's Chrome also holds the UI's window and setup tabs (ADR 0012). So the run's
+netkeep's Chrome also holds the UI's window and setup tabs (ADR 0012). So the run's
 tab opens in its own window (``newWindow: true``, #632), and the wait for it opens a
 session only on a new tab still on ``about:blank``, never on a UI or Google tab (#634).
 
@@ -25,15 +25,15 @@ from typing import Any
 import pytest
 from browser_fakes import FakeBrowser, FakeConnector, FakeContext, FakePage
 
-from netkeeper.linkedin import browser
-from netkeeper.linkedin.browser import ActivityLocks, AttachBrowserProvider, BrowserUnavailable
+from netkeep.linkedin import browser
+from netkeep.linkedin.browser import ActivityLocks, AttachBrowserProvider, BrowserUnavailable
 
 CDP_URL = "http://127.0.0.1:9222"
 LOCAL_PAGE = "http://127.0.0.1:8123/replica/list.html"
 FOCUS_METHODS = {"Page.bringToFront", "Target.activateTarget"}
 #: What ``Target.createTarget`` asks for, and nothing else (#195, #632).
 CREATE_PARAMS = {"url": "about:blank", "newWindow": True, "background": True}
-#: Tabs that share netkeeper's Chrome with runs (ADR 0012): the UI's app window, and a
+#: Tabs that share netkeep's Chrome with runs (ADR 0012): the UI's app window, and a
 #: Google page the Gmail setup opened. Invented loopback and Google URLs, never visited.
 UI_TAB = "http://127.0.0.1:8000/contacts"
 GOOGLE_TAB = "https://console.cloud.google.com/apis/credentials"

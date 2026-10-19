@@ -1,4 +1,4 @@
-"""netkeeper.services.simulate_run: the CP3 demo, `netkeeper simulate`.
+"""netkeep.services.simulate_run: the CP3 demo, `netkeep simulate`.
 
 Mutation standard (CLAUDE.md, and this issue's own instructions): every test
 here has to fail if the behavior it claims to check is removed. Where the
@@ -19,14 +19,14 @@ Two traps this project keeps hitting, both guarded here:
 * **fixtures too uniform for the failure to arise.** The warm-up and weekend
   tests use ``throttles=0`` runs so heat noise can't blur the numbers being
   checked, and the weekend test picks the day index a 14-day run starting on
-  :data:`netkeeper.services.simulate_run.REFERENCE_START_DATE` (a Monday)
+  :data:`netkeep.services.simulate_run.REFERENCE_START_DATE` (a Monday)
   actually lands a Saturday on. The heat-skip scenario (``days=3,
   throttles=20, seed=7``) and the consecutive-abort scenario were both picked
   by running them and checking the exact behavior claimed actually happened,
   not by construction alone.
 * **constants pinned only against themselves.** Every threshold this module
-  invents (:data:`~netkeeper.services.simulate_run.CONSECUTIVE_THROTTLE_ABORT`,
-  :data:`~netkeeper.services.simulate_run.REFERENCE_START_DATE`) is asserted
+  invents (:data:`~netkeep.services.simulate_run.CONSECUTIVE_THROTTLE_ABORT`,
+  :data:`~netkeep.services.simulate_run.REFERENCE_START_DATE`) is asserted
   against a literal below, never against the module's own name for it.
 """
 
@@ -41,14 +41,14 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from netkeeper import migrations
-from netkeeper.config import Settings
-from netkeeper.db import session_scope
-from netkeeper.models import User, UserKind
-from netkeeper.services import scheduler
-from netkeeper.services import simulate_run as sr
-from netkeeper.services.posture import SINGLE_ACCOUNT_ID, HeatPosture, TodaysBudget
-from netkeeper.services.scheduler import HEAT_SKIP_DISABLED
+from netkeep import migrations
+from netkeep.config import Settings
+from netkeep.db import session_scope
+from netkeep.models import User, UserKind
+from netkeep.services import scheduler
+from netkeep.services import simulate_run as sr
+from netkeep.services.posture import SINGLE_ACCOUNT_ID, HeatPosture, TodaysBudget
+from netkeep.services.scheduler import HEAT_SKIP_DISABLED
 
 DEFAULTS = Settings()
 
@@ -364,7 +364,7 @@ async def test_disabling_the_heat_skip_lets_browser_jobs_run_through_the_hot_per
 async def test_the_schedulers_own_heat_skip_warning_never_reaches_the_log(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """``netkeeper.services.scheduler`` logs a WARNING on its own for every
+    """``netkeep.services.scheduler`` logs a WARNING on its own for every
     heat-skipped fire ("scheduler: skipping enrich for account 1 (heat)"),
     naming the scratch account's id exactly the way it would name a real
     one. The skip is still fully visible in the report -- this same scenario
@@ -373,7 +373,7 @@ async def test_the_schedulers_own_heat_skip_warning_never_reaches_the_log(
     replay. ``caplog`` itself tries to lower the logger back to WARNING to
     capture at that level; this asserts that ``run_simulation`` still wins
     for the whole time it runs."""
-    with caplog.at_level(logging.WARNING, logger="netkeeper.services.scheduler"):
+    with caplog.at_level(logging.WARNING, logger="netkeep.services.scheduler"):
         report = await sr.run_simulation(
             days=HOT_DAYS, throttles=HOT_THROTTLES, seed=HOT_SEED, settings=DEFAULTS
         )
@@ -443,23 +443,21 @@ async def test_the_scratch_database_is_deleted_after_the_run(
 async def test_never_touches_the_configured_database_url(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A poisoned ``NETKEEPER_DATABASE_URL`` must be left completely alone: if
+    """A poisoned ``NETKEEP_DATABASE_URL`` must be left completely alone: if
     ``run_simulation`` ever opened it, the file would exist afterward."""
     poison = tmp_path / "must-never-be-touched.sqlite3"
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", f"sqlite:///{poison}")
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", f"sqlite:///{poison}")
 
     await sr.run_simulation(days=2, throttles=0, seed=0, settings=DEFAULTS)
 
     assert not poison.exists()
 
 
-async def test_never_touches_netkeeper_data(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Same proof for ``NETKEEPER_DATA``: this module must never resolve
+async def test_never_touches_netkeep_data(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Same proof for ``NETKEEP_DATA``: this module must never resolve
     ``paths.data_dir()`` at all, so nothing appears under it."""
-    fake_data_dir = tmp_path / "netkeeper-data"
-    monkeypatch.setenv("NETKEEPER_DATA", str(fake_data_dir))
+    fake_data_dir = tmp_path / "netkeep-data"
+    monkeypatch.setenv("NETKEEP_DATA", str(fake_data_dir))
 
     await sr.run_simulation(days=2, throttles=0, seed=0, settings=DEFAULTS)
 
@@ -468,7 +466,7 @@ async def test_never_touches_netkeeper_data(
 
 async def test_the_scratch_schema_is_built_by_migrations_not_create_all() -> None:
     """``Base.metadata.create_all`` never writes ``alembic_version``; only
-    ``netkeeper.migrations.upgrade`` does. Its presence, at the newest
+    ``netkeep.migrations.upgrade`` does. Its presence, at the newest
     revision on disk, is direct evidence of which one built the scratch
     schema -- the production one, not a models-only approximation of it that
     can drift from what the migrations actually build."""

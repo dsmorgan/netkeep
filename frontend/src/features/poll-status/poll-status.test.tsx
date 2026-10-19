@@ -242,7 +242,7 @@ describe('PollStatusHeader', () => {
     expect(within(gmail).getAllByText('every 10 min')).toHaveLength(2)
   })
 
-  it('says when netkeeper serve is not running', async () => {
+  it('says when netkeep serve is not running', async () => {
     renderWith(<PollStatusHeader />, () =>
       pollStatus({
         background_running: false,
@@ -394,7 +394,7 @@ describe('Check now', () => {
     renderWith(
       <PollStatusHeader />,
       () => pollStatus(),
-      () => jsonResponse({ detail: 'No mailbox is armed, so netkeeper doesn’t read Gmail' }, 409),
+      () => jsonResponse({ detail: 'No mailbox is armed, so netkeep doesn’t read Gmail' }, 409),
     )
     const gmail = await openPopover()
     const button = within(gmail).getByRole('button', { name: 'Check now' })
@@ -402,7 +402,7 @@ describe('Check now', () => {
     fireEvent.click(button)
 
     expect(await within(gmail).findByRole('alert')).toHaveTextContent(
-      'No mailbox is armed, so netkeeper doesn’t read Gmail',
+      'No mailbox is armed, so netkeep doesn’t read Gmail',
     )
     await waitFor(() => expect(button).toBeEnabled())
   })

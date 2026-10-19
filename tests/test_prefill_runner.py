@@ -22,13 +22,13 @@ from run_fakes import fake_provider
 from sqlalchemy.orm import Session, sessionmaker
 from test_linkedin_steps import LINKEDIN, Lane, make_lane
 
-from netkeeper.config import BudgetSettings, Settings
-from netkeeper.db import session_scope
-from netkeeper.linkedin import messaging
-from netkeeper.linkedin.activity_lock import account_key
-from netkeeper.linkedin.browser import AttachBrowserProvider, BrowserRun
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.messaging import (
+from netkeep.config import BudgetSettings, Settings
+from netkeep.db import session_scope
+from netkeep.linkedin import messaging
+from netkeep.linkedin.activity_lock import account_key
+from netkeep.linkedin.browser import AttachBrowserProvider, BrowserRun
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.messaging import (
     PLAN_INVARIANT_MESSAGE,
     MessageJobSpec,
     MessageOutcome,
@@ -37,9 +37,9 @@ from netkeeper.linkedin.messaging import (
     PrefillResult,
     plan_typing,
 )
-from netkeeper.linkedin.pacing import TypingPlan, TypingTooLong
-from netkeeper.linkedin.page_messaging import PagePrefill
-from netkeeper.models import (
+from netkeep.linkedin.pacing import TypingPlan, TypingTooLong
+from netkeep.linkedin.page_messaging import PagePrefill
+from netkeep.models import (
     Enrollment,
     Message,
     MessageStatus,
@@ -49,14 +49,14 @@ from netkeeper.models import (
     SyncRunTrigger,
     User,
 )
-from netkeeper.scoping import get_scoped, scoped
-from netkeeper.services import budgets, linkedin_steps, message_send, runs, scheduler
-from netkeeper.services.budgets import ActionClass
-from netkeeper.services.linkedin_accounts import ensure_account
-from netkeeper.services.linkedin_session import flag_session, session_flag
-from netkeeper.services.linkedin_steps import record_prefill_outcome
-from netkeeper.services.settings_kv import set_setting
-from netkeeper.worker import BrowserWorker
+from netkeep.scoping import get_scoped, scoped
+from netkeep.services import budgets, linkedin_steps, message_send, runs, scheduler
+from netkeep.services.budgets import ActionClass
+from netkeep.services.linkedin_accounts import ensure_account
+from netkeep.services.linkedin_session import flag_session, session_flag
+from netkeep.services.linkedin_steps import record_prefill_outcome
+from netkeep.services.settings_kv import set_setting
+from netkeep.worker import BrowserWorker
 
 CONTACT = {"li_urn": ZEPHYRINE.urn, "li_public_id": ZEPHYRINE.slug, "first_name": "Zephyrine"}
 
@@ -714,7 +714,7 @@ async def test_each_run_kind_gets_the_settings_page_values_through_the_worker(
     async def runner(*args: Any, **kwargs: Any) -> None:
         seen.append(kwargs)
 
-    monkeypatch.setattr(f"netkeeper.worker.{job}", runner)
+    monkeypatch.setattr(f"netkeep.worker.{job}", runner)
     provider: AttachBrowserProvider = fake_provider(MessagingSite(ZEPHYRINE))[0]
     three_am = datetime(2026, 9, 23, 3, 0, tzinfo=UTC)
     worker = BrowserWorker(provider, lane.factory, lane.settings.linkedin, clock=lambda: three_am)

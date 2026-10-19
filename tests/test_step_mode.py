@@ -28,11 +28,11 @@ from test_auto_send import AUTO, CONTACT, Auto, _given_back_unopened, _last_key_
 from test_linkedin_steps import LINKEDIN, Lane, make_lane
 from typer.testing import CliRunner
 
-from netkeeper import migrations
-from netkeeper.cli import app as cli
-from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.linkedin.messaging import MessageOutcomeKind
-from netkeeper.models import (
+from netkeep import migrations
+from netkeep.cli import app as cli
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+from netkeep.linkedin.messaging import MessageOutcomeKind
+from netkeep.models import (
     CampaignStatus,
     CampaignStep,
     Contact,
@@ -48,16 +48,16 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.scoping import get_scoped, install_scope_guard, scoped, unscoped
-from netkeeper.services import linkedin_steps, message_send, step_mode
-from netkeeper.services.budgets import ActionClass
-from netkeeper.services.campaigns import CampaignConflict, CampaignNotFound, InvalidCampaign
-from netkeeper.services.linkedin_accounts import arm_scheduled_runs
-from netkeeper.services.linkedin_steps import Refusal, claim_auto_send
-from netkeeper.services.step_mode import ConfirmNeeded
-from netkeeper.services.users import ensure_local_user
+from netkeep.scoping import get_scoped, install_scope_guard, scoped, unscoped
+from netkeep.services import linkedin_steps, message_send, step_mode
+from netkeep.services.budgets import ActionClass
+from netkeep.services.campaigns import CampaignConflict, CampaignNotFound, InvalidCampaign
+from netkeep.services.linkedin_accounts import arm_scheduled_runs
+from netkeep.services.linkedin_steps import Refusal, claim_auto_send
+from netkeep.services.step_mode import ConfirmNeeded
+from netkeep.services.users import ensure_local_user
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 OFF = replace(AUTO, campaigns=replace(AUTO.campaigns, linkedin_auto_send=False))
 LATER = NOW + timedelta(days=1)
 
@@ -147,7 +147,7 @@ def _other_contact(n: int) -> dict[str, Any]:
 def test_the_confirm_text_is_pinned() -> None:
     """The words a person agrees to (#536), written out here."""
     assert step_mode.AUTO_SEND_CONFIRM == (
-        "netkeeper sends this step's messages itself, within your active hours, spacing and budget."
+        "netkeep sends this step's messages itself, within your active hours, spacing and budget."
     )
 
 
@@ -543,7 +543,7 @@ def test_a_scheduled_run_on_a_kept_contact_is_refused_in_prepare(lane: Lane) -> 
 
 
 def test_a_merge_keeps_the_prefill_mark_of_the_row_that_wins(lane: Lane) -> None:
-    from netkeeper.crm import identity
+    from netkeep.crm import identity
 
     marked = lane.enroll(contact=_other_contact(11))  # active, due: queued at the switch
     survivor = lane.enroll(contact=dict(CONTACT), status=EnrollmentStatus.PENDING)
@@ -560,7 +560,7 @@ def test_a_merge_keeps_the_prefill_mark_of_the_row_that_wins(lane: Lane) -> None
 
 
 def test_a_merge_keeps_the_mark_for_the_merged_rows_next_step(lane: Lane) -> None:
-    from netkeeper.crm import identity
+    from netkeep.crm import identity
 
     step_one, step_two = _step(lane, 1).id, _step(lane, 2).id
 
@@ -608,7 +608,7 @@ def test_the_preview_counts_what_a_switch_would_change(lane: Lane) -> None:
     )
     assert detail.kept_prefill == 1
 
-    from netkeeper.services import campaigns as campaign_service
+    from netkeep.services import campaigns as campaign_service
 
     status = lane.read(
         lambda s, u: campaign_service.campaign_status(s, u, lane.campaign_id, now=NOW)
@@ -741,7 +741,7 @@ async def test_the_api_answers_404_for_another_users_campaign(
 @pytest.fixture
 def cli_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[sessionmaker[Session]]:
     url = database_url(tmp_path)
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     engine = make_engine(url)
     migrations.upgrade(engine)
     factory = make_session_factory(engine)

@@ -108,23 +108,23 @@ jobs:
     timeout-minutes: 15
     services:
       # tests/test_migrations.py runs the migration diff tests on SQLite always and
-      # on PostgreSQL when NETKEEPER_TEST_DATABASE_URL is set, so a SQLite-only
+      # on PostgreSQL when NETKEEP_TEST_DATABASE_URL is set, so a SQLite-only
       # construct fails here instead of on a hosted install.
       postgres:
         image: postgres:16
         env:
-          POSTGRES_USER: netkeeper
-          POSTGRES_PASSWORD: netkeeper
-          POSTGRES_DB: netkeeper_test
+          POSTGRES_USER: netkeep
+          POSTGRES_PASSWORD: netkeep
+          POSTGRES_DB: netkeep_test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U netkeeper -d netkeeper_test"
+          --health-cmd "pg_isready -U netkeep -d netkeep_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
-      NETKEEPER_TEST_DATABASE_URL: postgresql+psycopg://netkeeper:netkeeper@localhost:5432/netkeeper_test
+      NETKEEP_TEST_DATABASE_URL: postgresql+psycopg://netkeep:netkeep@localhost:5432/netkeep_test
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.3.0
@@ -139,7 +139,7 @@ jobs:
       - run: make test
         env:
           PYTEST_ADDOPTS: --durations=20
-          NETKEEPER_TEST_TIME_SCALE: "2"
+          NETKEEP_TEST_TIME_SCALE: "2"
 
   # The name the single Python job had, kept so a branch-protection rule that
   # requires it still finds it: green when all three jobs above passed, or when the

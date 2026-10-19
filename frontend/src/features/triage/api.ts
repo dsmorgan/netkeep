@@ -99,7 +99,7 @@ const NOT_IN_QUEUE: Record<string, string> = {
  * The contact field named in an undo `409`, or `null` when the wording has moved.
  *
  * The service builds its refusal as `contact 4 has <field>=<found> where the
- * decision left <expected>; <reason>` (`netkeeper/crm/triage.py`, `UndoConflict`),
+ * decision left <expected>; <reason>` (`netkeep/crm/triage.py`, `UndoConflict`),
  * and the field is the only part that says *which kind* of refusal this is:
  * `archived_at` and `merged_into_id` mean the contact has left the queue, and
  * anything else means a field was edited in between. That changes what the
@@ -342,7 +342,7 @@ function queueWhere(
  *
  * There is no triage endpoint that lists the queue — `GET /triage/next` serves
  * one card and its successor — but the queue is not a private ordering:
- * `netkeeper.crm.triage._queue_where` is `met IN states AND archived_at IS NULL
+ * `netkeep.crm.triage._queue_where` is `met IN states AND archived_at IS NULL
  * AND merged_into_id IS NULL`, ordered by `id`. `POST /contacts/query` compiles
  * to exactly that: `met` is a filterable enum field, `compile_where` adds
  * `merged_into_id IS NULL` unconditionally and `archived_at IS NULL` unless

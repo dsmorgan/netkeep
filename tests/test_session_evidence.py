@@ -3,7 +3,7 @@
 The Settings page's posture report never probes (a request handler may not touch
 the browser), so its session row used to read "unknown / not probed" even after a
 preflight and a week of runs that plainly worked. It now answers from the last
-evidence the database holds: what ``netkeeper preflight`` or ``posture --probe``
+evidence the database holds: what ``netkeep preflight`` or ``posture --probe``
 recorded, or the newest run that read LinkedIn without flagging the session.
 
 Cookie names only, never a value; nothing here is a real cookie.
@@ -26,33 +26,33 @@ from sqlalchemy.orm import Session, sessionmaker
 from test_preflight import FAKE_CSRF_VALUE, cookie, make_context, make_provider, provider_for
 from typer.testing import CliRunner
 
-from netkeeper import migrations
-from netkeeper.cli import app as cli
-from netkeeper.config import Settings
-from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.models import SyncRunKind, SyncRunStatus, SyncRunTrigger, User, UserKind
-from netkeeper.scoping import install_scope_guard
-from netkeeper.services import runs
-from netkeeper.services.linkedin_accounts import ensure_account
-from netkeeper.services.linkedin_session import (
+from netkeep import migrations
+from netkeep.cli import app as cli
+from netkeep.config import Settings
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+from netkeep.linkedin.classify import Outcome
+from netkeep.models import SyncRunKind, SyncRunStatus, SyncRunTrigger, User, UserKind
+from netkeep.scoping import install_scope_guard
+from netkeep.services import runs
+from netkeep.services.linkedin_accounts import ensure_account
+from netkeep.services.linkedin_session import (
     SESSION_EVIDENCE_KEY,
     last_session_evidence,
     record_session_evidence,
     recorded_evidence,
     run_evidence,
 )
-from netkeeper.services.linkedin_session import flag_session as raise_flag
-from netkeeper.services.posture import (
+from netkeep.services.linkedin_session import flag_session as raise_flag
+from netkeep.services.posture import (
     SESSION_EVIDENCE_FRESH_FOR,
     PostureReport,
     Protection,
     Status,
     posture,
 )
-from netkeeper.services.scheduler import sync_account_schedule
-from netkeeper.services.settings_kv import set_setting
-from netkeeper.services.users import ensure_local_user
+from netkeep.services.scheduler import sync_account_schedule
+from netkeep.services.settings_kv import set_setting
+from netkeep.services.users import ensure_local_user
 
 #: A Wednesday, 14:00 in New York, inside the default window.
 NOW = datetime(2026, 9, 23, 18, 0, tzinfo=UTC)
@@ -126,7 +126,7 @@ def test_no_evidence_at_all_is_unknown_and_says_how_to_find_out(
     row = _row(writer, user)
 
     assert row.status is Status.UNKNOWN
-    assert "netkeeper preflight" in row.warnings[0]
+    assert "netkeep preflight" in row.warnings[0]
     assert "this report shows what it finds" in row.warnings[0]
 
 
@@ -167,7 +167,7 @@ def test_stale_evidence_still_reads_on_but_warns(writer: Session, user: User) ->
     assert row.status is Status.ON
     assert "3 days ago" in row.value
     assert "may have expired" in row.warnings[0]
-    assert "netkeeper preflight" in row.warnings[0]
+    assert "netkeep preflight" in row.warnings[0]
 
 
 def test_the_freshness_boundary_is_inclusive(writer: Session, user: User) -> None:
@@ -375,7 +375,7 @@ def test_the_freshness_window_is_a_day() -> None:
 @pytest.fixture
 def cli_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[sessionmaker[Session]]:
     url = database_url(tmp_path)
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     engine = make_engine(url)
     migrations.upgrade(engine)
     factory = make_session_factory(engine)
@@ -395,7 +395,7 @@ def _recorded(factory: sessionmaker[Session]) -> Any:
 def test_preflight_records_a_live_session_with_cookie_names_only(
     cli_db: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("netkeeper.cli.AttachBrowserProvider", lambda cdp_url, **_: make_provider())
+    monkeypatch.setattr("netkeep.cli.AttachBrowserProvider", lambda cdp_url, **_: make_provider())
 
     result = CliRunner().invoke(cli, ["preflight"])
 
@@ -411,7 +411,7 @@ def test_preflight_records_no_session_too(
     cli_db: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     no_session = make_provider(cookies=[cookie("JSESSIONID", FAKE_CSRF_VALUE)])
-    monkeypatch.setattr("netkeeper.cli.AttachBrowserProvider", lambda cdp_url: no_session)
+    monkeypatch.setattr("netkeep.cli.AttachBrowserProvider", lambda cdp_url: no_session)
 
     result = CliRunner().invoke(cli, ["preflight"])
 
@@ -425,9 +425,7 @@ def test_an_unreadable_cookie_jar_records_nothing(
 ) -> None:
     context = make_context()
     context.cookie_error = RuntimeError("Protocol error")
-    monkeypatch.setattr(
-        "netkeeper.cli.AttachBrowserProvider", lambda cdp_url: provider_for(context)
-    )
+    monkeypatch.setattr("netkeep.cli.AttachBrowserProvider", lambda cdp_url: provider_for(context))
 
     result = CliRunner().invoke(cli, ["preflight"])
 
@@ -438,7 +436,7 @@ def test_an_unreadable_cookie_jar_records_nothing(
 def test_posture_probe_records_and_no_probe_then_shows_it(
     cli_db: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("netkeeper.cli._provider", lambda settings: make_provider())
+    monkeypatch.setattr("netkeep.cli._provider", lambda settings: make_provider())
 
     CliRunner().invoke(cli, ["posture"])
     evidence = _recorded(cli_db)

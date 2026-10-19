@@ -41,7 +41,7 @@ export type BrowserHealth = JsonOf<
 >
 export type BrowserStartAccepted = components['schemas']['BrowserStartAccepted']
 
-/** The run kinds the worker can actually run (`RUNNABLE_KINDS`, `netkeeper/services/runs.py`).
+/** The run kinds the worker can actually run (`RUNNABLE_KINDS`, `netkeep/services/runs.py`).
  *
  * `message_send` is started only by a prefill (the LinkedIn queue), and the API
  * answers a start for it here with `422`. `inbox` has its own button, **Check inbox

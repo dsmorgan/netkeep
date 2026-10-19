@@ -18,14 +18,14 @@ import pytest
 from sqlalchemy import event, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.crm import identity, import_runs, triage
-from netkeeper.crm.identity import CreateNew, MergeInto
-from netkeeper.crm.interactions import add_interaction
-from netkeeper.crm.lists import add_members, create_list
-from netkeeper.crm.provenance import may_overwrite, set_manual_field
-from netkeeper.crm.tags import create_rule, create_tag, tag_contact
-from netkeeper.db import mark_for_write, session_scope
-from netkeeper.models import (
+from netkeep.crm import identity, import_runs, triage
+from netkeep.crm.identity import CreateNew, MergeInto
+from netkeep.crm.interactions import add_interaction
+from netkeep.crm.lists import add_members, create_list
+from netkeep.crm.provenance import may_overwrite, set_manual_field
+from netkeep.crm.tags import create_rule, create_tag, tag_contact
+from netkeep.db import mark_for_write, session_scope
+from netkeep.models import (
     CampaignStatus,
     Contact,
     ContactEmail,
@@ -46,7 +46,7 @@ from netkeeper.models import (
     TemplateChannel,
     User,
 )
-from netkeeper.scoping import scoped, unscoped
+from netkeep.scoping import scoped, unscoped
 
 FIXTURES = Path(__file__).parent / "fixtures" / "csv"
 NOW = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
@@ -1194,7 +1194,7 @@ def test_no_warning_when_neither_row_has_a_company(writer: Session, user: User) 
     """Two rows that share a name and *neither* carries a company do not group either.
 
     This is not provable by two rows disagreeing (the case above): it would
-    also pass if :func:`~netkeeper.crm.identity.name_company_key` stopped
+    also pass if :func:`~netkeep.crm.identity.name_company_key` stopped
     requiring a company at all and fell back to, say, an empty string for a
     missing one -- both rows would then carry the *same* fallback key and group
     regardless. Two new contacts, both company-less, is the shape that

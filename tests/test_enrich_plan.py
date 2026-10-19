@@ -1,4 +1,4 @@
-"""netkeeper.services.enrich_plan: spec 9.6's order, the pins, and the stored plan (spec 9.9).
+"""netkeep.services.enrich_plan: spec 9.6's order, the pins, and the stored plan (spec 9.9).
 
 Contacts here are built to land in exactly one tier each, with connection dates
 chosen so that the tier, not the date, has to decide the order: a stale
@@ -15,8 +15,8 @@ import factories
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.db import session_scope
+from netkeep.models import (
     Contact,
     ContactMet,
     SyncRun,
@@ -25,8 +25,8 @@ from netkeeper.models import (
     SyncRunTrigger,
     User,
 )
-from netkeeper.services import enrich_plan, runs
-from netkeeper.services.enrich_plan import (
+from netkeep.services import enrich_plan, runs
+from netkeep.services.enrich_plan import (
     ENRICH_RETRY_AFTER,
     MAX_PINS,
     PinError,
@@ -240,7 +240,7 @@ def test_unpin_and_pins_per_account(writer: Session, user: User) -> None:
 
 
 def test_unreadable_pins_are_no_pins(writer: Session, user: User) -> None:
-    from netkeeper.services.settings_kv import set_setting
+    from netkeep.services.settings_kv import set_setting
 
     set_setting(writer, user, enrich_plan.pins_key(ACCOUNT), {"not": "a list"})
     assert enrich_plan.pinned(writer, user, ACCOUNT) == []

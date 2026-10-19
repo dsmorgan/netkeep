@@ -1,4 +1,4 @@
-"""netkeeper.campaigns.schedule (spec 11.4; P3-06, #338): suggested slots, the default
+"""netkeep.campaigns.schedule (spec 11.4; P3-06, #338): suggested slots, the default
 start, step due times, the overnight spill, and spacing."""
 
 from __future__ import annotations
@@ -9,8 +9,8 @@ from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
 
-from netkeeper.campaigns import schedule
-from netkeeper.campaigns.schedule import (
+from netkeep.campaigns import schedule
+from netkeep.campaigns.schedule import (
     ScheduleError,
     Suggested,
     default_start,
@@ -19,8 +19,8 @@ from netkeeper.campaigns.schedule import (
     step_due,
     suggested,
 )
-from netkeeper.config import CampaignSettings
-from netkeeper.localtime import local_today
+from netkeep.config import CampaignSettings
+from netkeep.localtime import local_today
 
 NY = "America/New_York"
 DEFAULTS = CampaignSettings()
@@ -43,7 +43,7 @@ def test_the_suggested_slots_and_default_start_are_pinned() -> None:
     assert (schedule.DEFAULT_START_DAY, schedule.DEFAULT_START_TIME) == ("Tue", "09:00")
     assert schedule.SUGGESTION == "Most effective: Tue–Thu mornings."  # noqa: RUF001
     assert schedule.SERVE_REMINDER == (
-        "netkeeper sends only while `serve` is running and this Mac is awake."
+        "netkeep sends only while `serve` is running and this Mac is awake."
         " Keep it running from the start time until the batch finishes."
     )
     got = slots()

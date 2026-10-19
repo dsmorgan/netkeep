@@ -31,19 +31,19 @@ function message(error: unknown): string {
 
 /**
  * Every protection the LinkedIn extractor has, right now (spec section 9,
- * P2-11) — the same report `netkeeper posture` prints from a terminal, read
+ * P2-11) — the same report `netkeep posture` prints from a terminal, read
  * here instead of typed. Read-only and built with no browser probe, so the
  * `linkedin session` row always reads "unknown": a live check stays
- * `netkeeper preflight`. The verdict line is shown exactly as the backend
+ * `netkeep preflight`. The verdict line is shown exactly as the backend
  * sends it — "nothing is misconfigured" on a clean report, never "you are
  * safe" — because this reads configuration and counters, not whether the
- * code that would enforce them actually runs (`netkeeper posture`'s own
- * wording, spec 9, `netkeeper/services/posture.py`).
+ * code that would enforce them actually runs (`netkeep posture`'s own
+ * wording, spec 9, `netkeep/services/posture.py`).
  *
  * It leads with a summary (#340): one line per protection, its state, and
  * every warning, since a warning is what makes the verdict "NOT clear". Each
  * row's full detail, its notes, and the gaps sit behind "Show details", the
- * same split as `netkeeper posture` and `netkeeper posture --details`.
+ * same split as `netkeep posture` and `netkeep posture --details`.
  */
 export function PostureSection() {
   const posture = useQuery(postureQuery)
@@ -187,7 +187,7 @@ function ManualSends({ rows }: { rows: readonly Protection[] }) {
         </ul>
       ) : (
         <p className="text-muted-foreground">
-          netkeeper prefills each LinkedIn message for you to send yourself; it never sends one.
+          netkeep prefills each LinkedIn message for you to send yourself; it never sends one.
         </p>
       )}
     </div>
@@ -196,7 +196,7 @@ function ManualSends({ rows }: { rows: readonly Protection[] }) {
 
 /**
  * The warning that the first LinkedIn inbox poll could not read back far enough, and
- * **Acknowledge** for it (#383): `netkeeper linkedin inbox-acknowledge`, without the CLI.
+ * **Acknowledge** for it (#383): `netkeep linkedin inbox-acknowledge`, without the CLI.
  */
 function ReplyPollAcknowledge({ rows }: { rows: readonly Protection[] }) {
   const queryClient = useQueryClient()
@@ -424,14 +424,14 @@ function RowActionDialog({
         </p>
         <p>
           If Chrome is signed in to another LinkedIn account, cancel and sign back in to yours
-          instead. Forget the mailbox only if you moved netkeeper to a different LinkedIn account on
+          instead. Forget the mailbox only if you moved netkeep to a different LinkedIn account on
           purpose: the next inbox poll records whichever account the page shows.
         </p>
         <p>
           This touches no browser and visits nothing. Scheduled inbox polls wait until you poll the
           inbox by hand to record the new mailbox: click{' '}
           <strong className="font-medium">Check inbox now</strong> on the LinkedIn page, or run{' '}
-          <code className="font-mono text-xs">netkeeper linkedin inbox</code>.
+          <code className="font-mono text-xs">netkeep linkedin inbox</code>.
         </p>
       </ConfirmDialog>
     )

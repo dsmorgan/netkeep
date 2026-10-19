@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from netkeeper.cli import app
-from netkeeper.config import (
+from netkeep.cli import app
+from netkeep.config import (
     ConfigError,
     LegacyMe,
     LinkedInSettings,
@@ -15,8 +15,8 @@ from netkeeper.config import (
     load_settings,
     render_toml,
 )
-from netkeeper.paths import data_dir
-from netkeeper.services.keychain import service_name
+from netkeep.paths import data_dir
+from netkeep.services.keychain import service_name
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -27,7 +27,7 @@ def isolated(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     cwd = tmp_path / "cwd"
     cwd.mkdir()
     monkeypatch.chdir(cwd)
-    monkeypatch.setenv("NETKEEPER_DATA", str(tmp_path / "data"))
+    monkeypatch.setenv("NETKEEP_DATA", str(tmp_path / "data"))
     return tmp_path
 
 
@@ -63,7 +63,7 @@ def test_example_config_loads_cleanly_as_the_defaults(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     example = REPO_ROOT / "config.example.toml"
-    with caplog.at_level(logging.WARNING, logger="netkeeper.config"):
+    with caplog.at_level(logging.WARNING, logger="netkeep.config"):
         settings = load_settings(example)
     assert settings.source_path == example
     assert replace(settings, source_path=None) == Settings()
@@ -82,7 +82,7 @@ def test_explicit_path_wins(isolated: Path, monkeypatch: pytest.MonkeyPatch) -> 
     _write(isolated / "env.toml", "[web]\nport = 2222\n")
     _write(isolated / "cwd" / "config.toml", "[web]\nport = 3333\n")
     _write(isolated / "data" / "config.toml", "[web]\nport = 4444\n")
-    monkeypatch.setenv("NETKEEPER_CONFIG", str(isolated / "env.toml"))
+    monkeypatch.setenv("NETKEEP_CONFIG", str(isolated / "env.toml"))
     settings = load_settings(explicit)
     assert settings.web.port == 1111
     assert settings.source_path == explicit
@@ -99,7 +99,7 @@ def test_env_var_used_when_no_explicit(isolated: Path, monkeypatch: pytest.Monke
     env_file = _write(isolated / "env.toml", "[web]\nport = 2222\n")
     _write(isolated / "cwd" / "config.toml", "[web]\nport = 3333\n")
     _write(isolated / "data" / "config.toml", "[web]\nport = 4444\n")
-    monkeypatch.setenv("NETKEEPER_CONFIG", str(env_file))
+    monkeypatch.setenv("NETKEEP_CONFIG", str(env_file))
     settings = load_settings()
     assert settings.web.port == 2222
     assert settings.source_path == env_file
@@ -109,7 +109,7 @@ def test_env_var_pointing_at_missing_file_falls_through(
     isolated: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write(isolated / "cwd" / "config.toml", "[web]\nport = 3333\n")
-    monkeypatch.setenv("NETKEEPER_CONFIG", str(isolated / "missing.toml"))
+    monkeypatch.setenv("NETKEEP_CONFIG", str(isolated / "missing.toml"))
     assert load_settings().web.port == 3333
 
 
@@ -164,7 +164,7 @@ def test_an_old_config_with_send_window_keys_loads_with_one_deprecation_warning(
     """#338: the hard send window is gone. A config that still has its keys loads, the keys
     are ignored, and one warning names both, rather than one unknown-key warning each."""
     path = _write(isolated / "c.toml", body)
-    with caplog.at_level(logging.WARNING, logger="netkeeper.config"):
+    with caplog.at_level(logging.WARNING, logger="netkeep.config"):
         settings = load_settings(path)
     assert settings.campaigns.mailbox_daily_cap == 40
     assert not hasattr(settings.campaigns, "send_window_days")
@@ -180,7 +180,7 @@ def test_one_deprecated_key_is_named_alone(
     isolated: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     path = _write(isolated / "c.toml", '[campaigns]\nsend_window_hours = ["09:00", "16:30"]\n')
-    with caplog.at_level(logging.WARNING, logger="netkeeper.config"):
+    with caplog.at_level(logging.WARNING, logger="netkeep.config"):
         load_settings(path)
     [warning] = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert "deprecated key campaigns.send_window_hours (" in warning
@@ -188,7 +188,7 @@ def test_one_deprecated_key_is_named_alone(
 
 def test_unknown_key_warns_and_is_ignored(isolated: Path, caplog: pytest.LogCaptureFixture) -> None:
     path = _write(isolated / "c.toml", '[linkedin]\nbogus = 1\ncdp_url = "http://x"\n')
-    with caplog.at_level(logging.WARNING, logger="netkeeper.config"):
+    with caplog.at_level(logging.WARNING, logger="netkeep.config"):
         settings = load_settings(path)
     assert settings.linkedin.cdp_url == "http://x"
     messages = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
@@ -201,7 +201,7 @@ def test_unknown_section_warns_and_is_ignored(
     isolated: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     path = _write(isolated / "c.toml", "[mystery]\nx = 1\n\n[linkedin.nope]\ny = 2\n")
-    with caplog.at_level(logging.WARNING, logger="netkeeper.config"):
+    with caplog.at_level(logging.WARNING, logger="netkeep.config"):
         settings = load_settings(path)
     assert replace(settings, source_path=None) == Settings()
     messages = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
@@ -285,7 +285,7 @@ def test_an_old_me_section_loads_with_one_deprecation_warning_and_is_ignored(
         "[web]\nport = 9001\n"
     )
     path = _write(isolated / "c.toml", body)
-    with caplog.at_level(logging.WARNING, logger="netkeeper.config"):
+    with caplog.at_level(logging.WARNING, logger="netkeep.config"):
         settings = load_settings(path)
     assert settings.web.port == 9001
     assert settings.legacy_me == LegacyMe(
@@ -300,9 +300,9 @@ def test_an_old_me_section_loads_with_one_deprecation_warning_and_is_ignored(
 def test_an_old_me_section_with_values_that_are_not_strings_still_loads(
     isolated: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """The section is ignored, so nothing in it can stop netkeeper from starting."""
+    """The section is ignored, so nothing in it can stop netkeep from starting."""
     path = _write(isolated / "c.toml", '[me]\nname = 12\ncity = "Paris"\nyears = 3\n')
-    with caplog.at_level(logging.WARNING, logger="netkeeper.config"):
+    with caplog.at_level(logging.WARNING, logger="netkeep.config"):
         settings = load_settings(path)
     assert settings.legacy_me == LegacyMe(city="Paris")
     assert len(caplog.records) == 1
@@ -390,15 +390,15 @@ def test_config_show_prints_settings_and_paths(isolated: Path) -> None:
         "data_dir": str(data_dir()),
         "config": str(path),
         "keychain_service": service_name(),
-        "log_file": str(data_dir() / "logs" / "netkeeper.log"),
+        "log_file": str(data_dir() / "logs" / "netkeep.log"),
     }
-    assert service_name().startswith("netkeeper@")  # conftest's scratch data directory
+    assert service_name().startswith("netkeep@")  # conftest's scratch data directory
     assert result.stdout.rstrip().endswith(
         "[paths]\n"
         + f'data_dir = "{data_dir()}"\n'
         + f'config = "{path}"\n'
         + f'keychain_service = "{service_name()}"\n'
-        + f'log_file = "{data_dir() / "logs" / "netkeeper.log"}"'
+        + f'log_file = "{data_dir() / "logs" / "netkeep.log"}"'
     )
 
 

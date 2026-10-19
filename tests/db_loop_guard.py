@@ -1,7 +1,7 @@
 """A reusable harness for background database work under ``serve`` (#259, #266).
 
 Every background session -- the browser worker's, the runners', the scheduler's --
-runs whole on :func:`netkeeper.db.off_loop`'s thread. One put back on the event
+runs whole on :func:`netkeep.db.off_loop`'s thread. One put back on the event
 loop is a deadlock waiting for a request: a request's write transaction opens in
 a worker thread and commits in a teardown that needs the loop, so a background
 write blocked *on the loop* in SQLite's busy handler keeps that commit from ever
@@ -16,7 +16,7 @@ path, and makes the result deterministic:
   commit needs the loop. A background write made on the loop meanwhile blocks the
   loop, the callback never runs, and the write fails "database is locked" after
   the (shortened) busy timeout. Off the loop, it waits and goes on.
-* **Every statement run on the loop's thread is recorded**, with the netkeeper
+* **Every statement run on the loop's thread is recorded**, with the netkeep
   line that ran it. The lock covers the start of a path; this covers all of it,
   reads included (in WAL mode a read never waits for the lock, so it cannot
   deadlock, but it still blocks the loop for as long as SQLite takes). A test
@@ -37,7 +37,7 @@ from typing import Any
 from sqlalchemy import Engine, event
 
 #: Short enough that a write stuck on the loop fails fast. Patch
-#: ``netkeeper.db.SQLITE_BUSY_TIMEOUT_MS`` to this before the engine connects.
+#: ``netkeep.db.SQLITE_BUSY_TIMEOUT_MS`` to this before the engine connects.
 BUSY_TIMEOUT_MS = 300
 
 
@@ -51,18 +51,18 @@ class OnTheLoop:
     def record(self, statement: str) -> None:
         if threading.current_thread() is not self.loop_thread:
             return
-        self.statements.append(f"{_netkeeper_site()}: {' '.join(statement.split())[:80]}")
+        self.statements.append(f"{_netkeep_site()}: {' '.join(statement.split())[:80]}")
 
 
-def _netkeeper_site() -> str:
-    """The innermost frame in the netkeeper package, outside ``db.py``: the site to fix."""
+def _netkeep_site() -> str:
+    """The innermost frame in the netkeep package, outside ``db.py``: the site to fix."""
     for frame in reversed(traceback.extract_stack()):
         path = frame.filename.replace("\\", "/")
-        if "/netkeeper/" in path and "/tests/" not in path and not path.endswith("/db.py"):
+        if "/netkeep/" in path and "/tests/" not in path and not path.endswith("/db.py"):
             if "/site-packages/" in path:
                 continue
-            return f"{path.rsplit('/netkeeper/', 1)[1]}:{frame.lineno} in {frame.name}"
-    return "outside netkeeper"
+            return f"{path.rsplit('/netkeep/', 1)[1]}:{frame.lineno} in {frame.name}"
+    return "outside netkeep"
 
 
 @asynccontextmanager

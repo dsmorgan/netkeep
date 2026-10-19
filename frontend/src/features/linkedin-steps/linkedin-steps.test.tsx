@@ -271,7 +271,7 @@ describe('the LinkedIn queue', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Prefill Rosalind Quillfeather' }))
 
     expect(await screen.findByText('Not prefilled. Nothing was typed in Chrome.')).toBeVisible()
-    expect(screen.getByText(/netkeeper couldn't start the prefill run/)).toBeVisible()
+    expect(screen.getByText(/netkeep couldn't start the prefill run/)).toBeVisible()
     expect(screen.getByText('no runner exists for message_send runs yet')).toBeVisible()
     expect(screen.queryByText(TYPING)).toBeNull()
     expect(screen.queryByRole('button', { name: /retry/i })).toBeNull()
@@ -573,7 +573,7 @@ describe('waiting for you', () => {
     })
     const row = await screen.findByRole('listitem', { name: 'Tobias Marrowbone, prefilled' })
     expect(row).toHaveTextContent(
-      "Auto-send typed it but didn't click Send: The LinkedIn schedule is paused, so netkeeper sent nothing.",
+      "Auto-send typed it but didn't click Send: The LinkedIn schedule is paused, so netkeep sent nothing.",
     )
   })
 
@@ -871,8 +871,8 @@ describe('the prefill notes (#383, ADR 0007)', () => {
 
     const note = await screen.findByRole('note')
     expect(note).toHaveTextContent('held until it has')
-    expect(note).toHaveTextContent('Run netkeeper linkedin inbox by hand')
-    expect(within(note).getByText('netkeeper linkedin inbox').tagName).toBe('CODE')
+    expect(note).toHaveTextContent('Run netkeep linkedin inbox by hand')
+    expect(within(note).getByText('netkeep linkedin inbox').tagName).toBe('CODE')
     expect(note).not.toHaveTextContent('`')
     expect(note).toHaveTextContent(FIRST_POLL_NOTE)
     expect(within(note).getByRole('link', { name: 'Check inbox now' })).toHaveAttribute(
@@ -915,7 +915,7 @@ describe('the prefill notes (#383, ADR 0007)', () => {
               enrollment_id: 31,
               reasons: ['linkedin_inbox_stale'],
               detail:
-                'the LinkedIn inbox has not been read: no poll has completed yet; run `netkeeper linkedin inbox` by hand',
+                'the LinkedIn inbox has not been read: no poll has completed yet; run `netkeep linkedin inbox` by hand',
             },
           },
           409,
@@ -926,7 +926,7 @@ describe('the prefill notes (#383, ADR 0007)', () => {
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('Not prefilled. Nothing was typed in Chrome.')
     expect(alert).toHaveTextContent('held until the inbox is read')
-    expect(alert).toHaveTextContent('run `netkeeper linkedin inbox` by hand')
+    expect(alert).toHaveTextContent('run `netkeep linkedin inbox` by hand')
     expect(reasonText('linkedin_inbox_stale')).toMatch(/^held until the inbox is read/)
   })
 })
@@ -966,8 +966,8 @@ describe('how a prefill that typed nothing ended', () => {
   })
 
   it('shows a phrase it has no words for exactly as the backend wrote it', async () => {
-    const alert = await finishPrefill('not_typed', 'a phrase from a newer netkeeper')
-    expect(alert).toHaveTextContent('a phrase from a newer netkeeper')
+    const alert = await finishPrefill('not_typed', 'a phrase from a newer netkeep')
+    expect(alert).toHaveTextContent('a phrase from a newer netkeep')
     expect(alert).toHaveTextContent(MAYBE_CLOSE_BUBBLE)
   })
 })
@@ -1126,13 +1126,13 @@ describe('every recorded phrase has words (S1 drift guard)', () => {
     )
     const words = prefillReason(sample)
     expect(words.text).not.toBe(sample)
-    expect(words.text).toMatch(/^(netkeeper |[A-Z])/)
+    expect(words.text).toMatch(/^(netkeep |[A-Z])/)
     expect(words.text).not.toMatch(/_/)
   })
 
   it('reads an auto-send refusal before Send through the phrase it carries', () => {
     const words = prefillReason('before Send: the composer does not hold focus')
-    expect(words.text).toBe('Before Send, the message box lost focus, so netkeeper stopped.')
+    expect(words.text).toBe('Before Send, the message box lost focus, so netkeep stopped.')
     expect(prefillReason('the composer is not in one message form').text).toMatch(/Send button/)
     expect(prefillEnding('send_clicked', null)).toBeNull()
   })
@@ -1146,7 +1146,7 @@ describe('every recorded phrase has words (S1 drift guard)', () => {
       'no Message control is on screen with nothing over it; close or move what covers it',
       'whether a message bubble is open could not be read',
       'whether a message bubble is open could not be read',
-      'a message bubble is already open in this or another LinkedIn tab in the netkeeper Chrome window, minimized ones included; close it, then try again',
+      'a message bubble is already open in this or another LinkedIn tab in the netkeep Chrome window, minimized ones included; close it, then try again',
     ]) {
       expect(prefillReason(phrase).bubble).toBe('closed')
     }
@@ -1164,12 +1164,12 @@ describe('every recorded phrase has words (S1 drift guard)', () => {
 describe('how a prefill that typed part of the message ended', () => {
   it.each([
     ['partially_typed', 'The prefill stopped part of the way through typing.'],
-    ['unknown', "netkeeper can't tell how much it typed"],
+    ['unknown', "netkeep can't tell how much it typed"],
   ])('%s says part of the message may be in the composer', async (outcome, title) => {
     const alert = await finishPrefill(outcome, 'the composer does not hold focus', 'failed')
 
     expect(alert).toHaveTextContent(title)
-    expect(alert).toHaveTextContent('The message box lost focus, so netkeeper stopped.')
+    expect(alert).toHaveTextContent('The message box lost focus, so netkeep stopped.')
     expect(alert).toHaveTextContent(PARTLY_TYPED)
     expect(alert).toHaveTextContent('never clears the composer and never retries')
     expect(alert).not.toHaveTextContent('Nothing was typed')
@@ -1183,7 +1183,7 @@ describe('how a prefill that typed part of the message ended', () => {
       'failed',
     )
     expect(alert).toHaveTextContent(
-      'After typing, the text in the message box changed while netkeeper typed.',
+      'After typing, the text in the message box changed while netkeep typed.',
     )
   })
 })
@@ -1225,9 +1225,9 @@ describe('prefill refusal reasons in plain words', () => {
     'recipient_name_mismatch',
     'recipient_name_unreadable',
     'no message composer is on the page',
-    'a message bubble is already open in this or another LinkedIn tab in the netkeeper Chrome window, minimized ones included; close it, then try again',
-    'another message composer is on the page, in an open or minimized bubble, in this or another LinkedIn tab in the netkeeper Chrome window; close the other bubbles',
-    'another message bubble is on the page, open or minimized, in this or another LinkedIn tab in the netkeeper Chrome window; close the others',
+    'a message bubble is already open in this or another LinkedIn tab in the netkeep Chrome window, minimized ones included; close it, then try again',
+    'another message composer is on the page, in an open or minimized bubble, in this or another LinkedIn tab in the netkeep Chrome window; close the other bubbles',
+    'another message bubble is on the page, open or minimized, in this or another LinkedIn tab in the netkeep Chrome window; close the others',
     'no Message control is on screen with nothing over it; close or move what covers it',
     "the conversation's bubble is not open",
     'the page shows a new-message bubble, not the conversation',
@@ -1262,7 +1262,7 @@ describe('prefill refusal reasons in plain words', () => {
   it.each(PHRASES)('says %j in plain words', (phrase) => {
     const reason = prefillReason(phrase)
     expect(reason.text).not.toBe(phrase)
-    expect(reason.text).toMatch(/^(netkeeper |[A-Z])/)
+    expect(reason.text).toMatch(/^(netkeep |[A-Z])/)
     expect(reason.text).not.toMatch(/_/)
   })
 
@@ -1271,7 +1271,7 @@ describe('prefill refusal reasons in plain words', () => {
       "The name in the message bubble doesn't match the name on the profile.",
     )
     expect(prefillReason('recipient_name_unreadable').text).toBe(
-      "netkeeper couldn't read the recipient's name in the message bubble, so it couldn't check it against the profile.",
+      "netkeep couldn't read the recipient's name in the message bubble, so it couldn't check it against the profile.",
     )
     expect(prefillReason('another_compose').text).toMatch(/second message composer/)
   })
@@ -1284,14 +1284,14 @@ describe('prefill refusal reasons in plain words', () => {
     ].map((phrase) => prefillReason(phrase))
     expect(words.map((w) => w.text)).toEqual([
       'The message bubble is for someone else.',
-      "The message bubble links to more than one person, so netkeeper couldn't confirm it's for this contact.",
-      "The message bubble doesn't link to a profile, so netkeeper couldn't confirm it's for this contact.",
+      "The message bubble links to more than one person, so netkeep couldn't confirm it's for this contact.",
+      "The message bubble doesn't link to a profile, so netkeep couldn't confirm it's for this contact.",
     ])
     expect(words.every((w) => w.bubble === 'open')).toBe(true)
     expect(
       prefillReason('before Send: the new-message bubble links to more than one person').text,
     ).toBe(
-      "Before Send, the message bubble links to more than one person, so netkeeper couldn't confirm it's for this contact.",
+      "Before Send, the message bubble links to more than one person, so netkeep couldn't confirm it's for this contact.",
     )
   })
 
@@ -1358,12 +1358,12 @@ describe('the inbox check states (#433)', () => {
             status: 'failed',
             stop_reason: 'owner_mismatch',
             stop_reason_text:
-              "the page showed another LinkedIn mailbox than this account's; if Chrome is signed in to another LinkedIn account, sign back in to yours; otherwise click **Forget inbox owner** under Posture on the Settings page, or run `netkeeper linkedin inbox-forget-owner` (or, if your own contact has a LinkedIn ID, it does not match this mailbox and netkeeper cannot edit it yet)",
+              "the page showed another LinkedIn mailbox than this account's; if Chrome is signed in to another LinkedIn account, sign back in to yours; otherwise click **Forget inbox owner** under Posture on the Settings page, or run `netkeep linkedin inbox-forget-owner` (or, if your own contact has a LinkedIn ID, it does not match this mailbox and netkeep cannot edit it yet)",
           }),
         ),
     })
     fireEvent.click(await screen.findByRole('button', { name: 'I sent it, check now' }))
-    expect(await screen.findByText(/netkeeper linkedin inbox-forget-owner/)).toBeVisible()
+    expect(await screen.findByText(/netkeep linkedin inbox-forget-owner/)).toBeVisible()
   })
 })
 
@@ -1379,7 +1379,7 @@ describe('Try again (#445)', () => {
     const list = await screen.findByRole('list', { name: 'Try again' })
     const row = within(list).getByRole('listitem')
     expect(row).toHaveTextContent('Wilhelmina Thorne')
-    expect(row).toHaveTextContent("Chrome didn't take netkeeper's click on Message.")
+    expect(row).toHaveTextContent("Chrome didn't take netkeep's click on Message.")
     expect(row).toHaveTextContent('Tried 2 times in a row.')
     expect(row).toHaveTextContent("That try used one of today's LinkedIn prefills.")
     expect(screen.getByText(TRY_AGAIN_NOTE)).toBeVisible()

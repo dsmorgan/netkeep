@@ -17,7 +17,7 @@ export function step(key: string, overrides: Partial<SetupStep> = {}): SetupStep
   }
 }
 
-/** The server's graph (`netkeeper/services/setup.py`), states aside. */
+/** The server's graph (`netkeep/services/setup.py`), states aside. */
 export const GRAPH: SetupStep[] = [
   step('about_you'),
   step('import', { target: '/imports' }),

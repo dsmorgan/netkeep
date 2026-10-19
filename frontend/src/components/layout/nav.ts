@@ -53,7 +53,7 @@ export function sectionLabel(pathname: string): string {
   const item = NAV_ITEMS.find((candidate) =>
     candidate.to === '/' ? pathname === '/' : pathname.startsWith(candidate.to),
   )
-  return item?.label ?? 'netkeeper'
+  return item?.label ?? 'netkeep'
 }
 
 /** How a count reads in its nav link's accessible name, with the exact number. */

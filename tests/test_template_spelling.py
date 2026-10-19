@@ -18,19 +18,19 @@ from sqlalchemy.orm import Session, sessionmaker
 from time_limit import Stopwatch, scaled
 from typer.testing import CliRunner
 
-from netkeeper import migrations
-from netkeeper.campaigns import spelling
-from netkeeper.campaigns import templates as template_service
-from netkeeper.campaigns.render import LintIssue, LintRule, Part, Severity
-from netkeeper.cli import app as cli
-from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.models import TemplateChannel, User, UserKind
-from netkeeper.scoping import install_scope_guard
-from netkeeper.services import user_dictionary
-from netkeeper.services.settings_kv import set_setting
-from netkeeper.services.users import ensure_local_user
+from netkeep import migrations
+from netkeep.campaigns import spelling
+from netkeep.campaigns import templates as template_service
+from netkeep.campaigns.render import LintIssue, LintRule, Part, Severity
+from netkeep.cli import app as cli
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+from netkeep.models import TemplateChannel, User, UserKind
+from netkeep.scoping import install_scope_guard
+from netkeep.services import user_dictionary
+from netkeep.services.settings_kv import set_setting
+from netkeep.services.users import ensure_local_user
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 EMAIL = TemplateChannel.EMAIL
 LINKEDIN = TemplateChannel.LINKEDIN
 
@@ -174,7 +174,7 @@ def test_contact_names_companies_your_name_and_built_ins_are_seeded(session: Ses
     factories.make_contact(session, other, first_name="Theirsworth")
     body = (
         "Hi Zelphine Okonquist of Brindlewick, Pemberly Vantorq here on LinkedIn "
-        "InMail, via netkeeper. Theirsworth"
+        "InMail, via netkeep. Theirsworth"
     )
     flagged = [
         i.field for i in template_service.spelling_warnings(session, user, EMAIL, None, body)
@@ -359,7 +359,7 @@ async def test_editor_lint_keeps_its_errors_when_spelling_fails(
 
 def test_cli_dictionary_add_list_remove(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     url = database_url(tmp_path)
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     engine = make_engine(url)
     try:
         migrations.upgrade(engine)

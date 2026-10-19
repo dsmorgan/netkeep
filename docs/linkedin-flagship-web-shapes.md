@@ -2,7 +2,7 @@
 
 This note records the structure of what LinkedIn's `flagship-web` client loads for the connections list, a profile, and the contact-info overlay, as the maintainer's capture of 2026-09-24 showed it (#149). It records **structure only**: row kinds, keys, `$type` names, identifiers the page uses for its own components, and counts. It holds no name, slug, profile id, email address, phone number, headline, or url of any person. The capture stays in the maintainer's private folder; nothing in this repository was copied from it.
 
-[ADR 0006](adr/0006-observe-dont-request.md) records why netkeeper reads these answers rather than requesting anything itself. The connections parser is `netkeeper/linkedin/flagship.py`; the profile and contact-info parsers are `netkeeper/linkedin/flagship_profile.py` (#190). The hand-built fixtures that follow these shapes, with invented people, are `tests/flagship_pages.py`. Where the capture was silent and a parser reads by analogy, this note says so, and the section [What enrichment reads, and what it assumes](#what-enrichment-reads-and-what-it-assumes) lists what the first supervised enrichment must confirm.
+[ADR 0006](adr/0006-observe-dont-request.md) records why netkeep reads these answers rather than requesting anything itself. The connections parser is `netkeep/linkedin/flagship.py`; the profile and contact-info parsers are `netkeep/linkedin/flagship_profile.py` (#190). The hand-built fixtures that follow these shapes, with invented people, are `tests/flagship_pages.py`. Where the capture was silent and a parser reads by analogy, this note says so, and the section [What enrichment reads, and what it assumes](#what-enrichment-reads-and-what-it-assumes) lists what the first supervised enrichment must confirm.
 
 ## The flight grammar
 
@@ -84,13 +84,13 @@ Each card is an element (`$L<ClientComponent>`) whose props hold `componentKey: 
   5. `Navigate` → `NavigateToScreen`, `screenId: "com.linkedin.sdui.flagshipnav.profile.Profile"`, `url: "/in/<slug>/"`, `requestedArguments.payload: {vanityName: <slug>, isVanityNameResolved: true, vieweeProfileId: <id>}`.
 - **A name link row**: the same trigger, under a component with its own key.
 - **A text element** whose `textProps.children` is `["Connected on <Month d, yyyy>"]`.
-- **A menu row**: the card's overflow menu. Its "Remove connection" confirmation carries `RemoveUi` (keyed by the card's `ConnectionCard_...` key), `Focus`, `AddToStringList`, a `SetState` of `totalConnectionsCount` as an expression (total minus one), and a `ServerRequest` `com.linkedin.sdui.mynetwork.RemoveConnectionVanityName` with `disconnectVanityName`. netkeeper never clicks it.
+- **A menu row**: the card's overflow menu. Its "Remove connection" confirmation carries `RemoveUi` (keyed by the card's `ConnectionCard_...` key), `Focus`, `AddToStringList`, a `SetState` of `totalConnectionsCount` as an expression (total minus one), and a `ServerRequest` `com.linkedin.sdui.mynetwork.RemoveConnectionVanityName` with `disconnectVanityName`. netkeep never clicks it.
 
 `vieweeProfileId` is the id behind `urn:li:fsd_profile:<id>`: 39 characters of `[A-Za-z0-9_-]`, starting `ACo`. Every card in the capture had exactly one identity (the two links agree), a `vanityName` equal to its key's slug, one name, one headline, and one "Connected on" date. 200 cards, 200 distinct ids.
 
 ### The end of the list
 
-The capture never reached it. What an answer past the last connection looks like is **not known**; the maintainer's decision is that an answer with no cards ends the list. netkeeper accepts three signals as the end: a connections answer with no cards; a short answer (fewer than ten) whose slot `[1]` carries no next request; or a full answer with no next request once the run has seen as many distinct people as the first screen's total. A full answer without a next request short of that total proves nothing, and a page that stops asking proves nothing. The first supervised full sync should confirm which signal LinkedIn sends; the fixtures invent `"$undefined"` for the empty slot.
+The capture never reached it. What an answer past the last connection looks like is **not known**; the maintainer's decision is that an answer with no cards ends the list. netkeep accepts three signals as the end: a connections answer with no cards; a short answer (fewer than ten) whose slot `[1]` carries no next request; or a full answer with no next request once the run has seen as many distinct people as the first screen's total. A full answer without a next request short of that total proves nothing, and a page that stops asking proves nothing. The first supervised full sync should confirm which signal LinkedIn sends; the fixtures invent `"$undefined"` for the empty slot.
 
 ## A profile
 
@@ -199,4 +199,4 @@ The smoke replicas and the rehearsal replica copy flagship-web's layout as #192 
 
 - Messaging still uses Voyager GraphQL (`voyagerMessagingGraphQL/graphql?queryId=messengerConversations...`): a phase 4 concern.
 - Bot detection is present: PerimeterX sensors (`protechts`, `px-cloud` collectors), reCAPTCHA Enterprise, and obfuscated telemetry posts on every page.
-- Some actions stream: `GET /flagship-web/rsc-action/actions/server-stream-request` (`text/event-stream`). Nothing netkeeper reads uses them.
+- Some actions stream: `GET /flagship-web/rsc-action/actions/server-stream-request` (`text/event-stream`). Nothing netkeep reads uses them.

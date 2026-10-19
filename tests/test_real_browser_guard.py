@@ -2,9 +2,9 @@
 
 During the review of #293, a mutant removed the CLI's active-hours refusal, and a
 test that relied on it went on to build the real attach provider on the default
-``http://127.0.0.1:9222``, where the maintainer's own netkeeper Chrome was listening.
+``http://127.0.0.1:9222``, where the maintainer's own netkeep Chrome was listening.
 ``tests/conftest.py``'s ``_no_real_browser`` now stands in front of the one place
-netkeeper opens a browser connection. These tests call the real attach path with
+netkeep opens a browser connection. These tests call the real attach path with
 the default URL and show the guard fires first: Playwright never starts and no
 socket is opened.
 """
@@ -21,15 +21,15 @@ import pytest
 from browser_guard import UNREACHABLE_CDP_URL, RealBrowserBlocked, is_personal_cdp, isolated_cdp
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.config import Settings
-from netkeeper.db import session_scope
-from netkeeper.linkedin import activity_lock
-from netkeeper.linkedin.browser import AttachBrowserProvider, PlaywrightCdpConnector
-from netkeeper.models import SyncRunKind, SyncRunTrigger
-from netkeeper.models.base import utcnow
-from netkeeper.services import runs
-from netkeeper.services.events import EventBus
-from netkeeper.worker import serve_extractor
+from netkeep.config import Settings
+from netkeep.db import session_scope
+from netkeep.linkedin import activity_lock
+from netkeep.linkedin.browser import AttachBrowserProvider, PlaywrightCdpConnector
+from netkeep.models import SyncRunKind, SyncRunTrigger
+from netkeep.models.base import utcnow
+from netkeep.services import runs
+from netkeep.services.events import EventBus
+from netkeep.worker import serve_extractor
 
 DEFAULT_CDP_URL = Settings().linkedin.cdp_url
 
@@ -203,8 +203,8 @@ async def test_the_launchers_real_probe_on_the_default_url_is_refused(
     tmp_path: Any, spies: dict[str, list[Any]]
 ) -> None:
     """The probe's default reader (#675) is guarded like the connector."""
-    from netkeeper.linkedin.browser import ActivityLocks
-    from netkeeper.worker import launcher_probe
+    from netkeep.linkedin.browser import ActivityLocks
+    from netkeep.worker import launcher_probe
 
     with pytest.raises(RealBrowserBlocked, match=r"127\.0\.0\.1:9222"):
         await launcher_probe(
@@ -219,7 +219,7 @@ async def test_the_launchers_real_probe_on_the_default_url_is_refused(
 async def test_opting_out_still_never_reads_the_pid_on_port_9222(
     spies: dict[str, list[Any]],
 ) -> None:
-    from netkeeper.linkedin.browser import CdpIdentityReader
+    from netkeep.linkedin.browser import CdpIdentityReader
 
     with pytest.raises(RealBrowserBlocked, match="isolated Chrome"):
         await CdpIdentityReader().read_pid(DEFAULT_CDP_URL)

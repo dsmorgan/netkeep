@@ -18,11 +18,11 @@ from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.campaigns import templates as template_service
-from netkeeper.crm import lists as list_service
-from netkeeper.crm.interactions import add_interaction
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.campaigns import templates as template_service
+from netkeep.crm import lists as list_service
+from netkeep.crm.interactions import add_interaction
+from netkeep.db import session_scope
+from netkeep.models import (
     Campaign,
     CampaignStatus,
     Enrollment,
@@ -36,9 +36,9 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.scoping import get_scoped, scoped
+from netkeep.scoping import get_scoped, scoped
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 
 
 def _local(session: Session) -> User:

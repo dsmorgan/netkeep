@@ -12,11 +12,11 @@ from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.db import session_scope
-from netkeeper.models import Contact, ContactSnapshot, Interaction, User, UserKind
-from netkeeper.scoping import get_scoped, unscoped
+from netkeep.db import session_scope
+from netkeep.models import Contact, ContactSnapshot, Interaction, User, UserKind
+from netkeep.scoping import get_scoped, unscoped
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
 LATER = NOW + timedelta(days=1)
 EARLIER = NOW - timedelta(days=1)

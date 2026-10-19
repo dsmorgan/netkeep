@@ -1,4 +1,4 @@
-"""A response that came outside netkeeper, recorded by a person (#512).
+"""A response that came outside netkeep, recorded by a person (#512).
 
 The first half pins what recording one does: which enrollments end, what is written, the
 refusals, the inbox and the results. The second half pins that nothing sends after it on
@@ -36,11 +36,11 @@ from test_linkedin_replies import ADA, World, make_world, said, you_sent
 from test_linkedin_steps import Lane, make_lane
 from typer.testing import CliRunner
 
-from netkeeper import migrations
-from netkeeper.campaigns.gmail import Message as GmailMessage
-from netkeeper.cli import app as cli
-from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.models import (
+from netkeep import migrations
+from netkeep.campaigns.gmail import Message as GmailMessage
+from netkeep.cli import app as cli
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+from netkeep.models import (
     Contact,
     DoNotSendAddress,
     Enrollment,
@@ -58,23 +58,23 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.scoping import get_scoped, install_scope_guard, scoped, unscoped
-from netkeeper.services import campaign_replies, campaign_results, inbox, linkedin_steps, runs
-from netkeeper.services import outside_responses as outside
-from netkeeper.services.campaign_engine import SendOutcome
-from netkeeper.services.linkedin_accounts import arm_scheduled_runs
-from netkeeper.services.linkedin_steps import claim_auto_send, ready_to_prefill, waiting_for_you
-from netkeeper.services.outside_responses import (
+from netkeep.scoping import get_scoped, install_scope_guard, scoped, unscoped
+from netkeep.services import campaign_replies, campaign_results, inbox, linkedin_steps, runs
+from netkeep.services import outside_responses as outside
+from netkeep.services.campaign_engine import SendOutcome
+from netkeep.services.linkedin_accounts import arm_scheduled_runs
+from netkeep.services.linkedin_steps import claim_auto_send, ready_to_prefill, waiting_for_you
+from netkeep.services.outside_responses import (
     ContactNotFound,
     EnrollmentNotFound,
     NothingToEnd,
     record_outside_response,
 )
-from netkeeper.services.users import ensure_local_user
+from netkeep.services.users import ensure_local_user
 
 EMAIL = TemplateChannel.EMAIL
 LINKEDIN = TemplateChannel.LINKEDIN
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 NOTE = "Called back from an invented number; keen to talk."
 _gmail_ids = itertools.count(1)
 
@@ -221,7 +221,7 @@ def test_a_response_ends_every_enrollment_of_the_contact_that_could_still_send(
     assert interaction.kind is InteractionKind.CALL_IN
     assert interaction.at == at and interaction.message_id == answered.id
     assert interaction.summary == (
-        f"Responded to a campaign by phone, outside netkeeper (positive): {NOTE}"
+        f"Responded to a campaign by phone, outside netkeep (positive): {NOTE}"
     )
     # Inbound: they reached you. Nothing moves the recent-contact clock.
     assert _contact(world, active).last_contacted_at is None
@@ -334,7 +334,7 @@ def test_an_opt_out_does_what_an_unsubscribe_reply_does(world: World, flag: bool
     contact = _contact(world, enrollment_id)
     assert contact.do_not_contact
     assert contact.do_not_contact_reason is not None
-    assert "outside netkeeper" in contact.do_not_contact_reason
+    assert "outside netkeep" in contact.do_not_contact_reason
     [address] = world.read(lambda s, u: list(s.scalars(scoped(u, DoNotSendAddress))))
     assert address.contact_id == contact.id
 
@@ -474,7 +474,7 @@ def test_an_opt_out_is_an_unsubscribe_item(world: World) -> None:
     assert item.kind is inbox.InboxKind.UNSUBSCRIBE
 
 
-def test_it_counts_in_the_results_as_a_reply_outside_netkeeper(world: World) -> None:
+def test_it_counts_in_the_results_as_a_reply_outside_netkeep(world: World) -> None:
     outside_id = _sent_enrollment(world)
     detected = _sent_enrollment(world, urn="urn:li:fsd_profile:INVENTEDOTHER")
     _sent_enrollment(world, urn="urn:li:fsd_profile:INVENTEDTHIRD")
@@ -505,7 +505,7 @@ def _email_reply(
         snippet="An invented reply.",
         headers=(("Subject", "Re: Hello"),),
     )
-    reply = campaign_replies.Reply(enrollment_id, message, unsubscribe, "netkeeper/x")
+    reply = campaign_replies.Reply(enrollment_id, message, unsubscribe, "netkeep/x")
     assert campaign_replies.record_reply(session, user, reply)
 
 
@@ -527,7 +527,7 @@ def _outside(world: World, enrollment_id: int, at: datetime) -> None:
 ENDERS: list[Any] = [
     pytest.param(_detected_email, id="detected email reply"),
     pytest.param(_detected_linkedin, id="detected LinkedIn reply"),
-    pytest.param(_outside, id="outside netkeeper"),
+    pytest.param(_outside, id="outside netkeep"),
 ]
 
 
@@ -635,7 +635,7 @@ def test_a_response_between_the_claim_and_the_gmail_send_stops_the_send(
     assert due is not None
 
     def mark_polled(session: Session) -> None:
-        from netkeeper.models import Mailbox
+        from netkeep.models import Mailbox
 
         mailbox = get_scoped(session, box.user, Mailbox, box.mailbox.id)
         assert mailbox is not None
@@ -842,7 +842,7 @@ def test_a_claimed_prefill_recorded_after_it_moves_nothing(prefill_world: World)
 
     message_id = world.write(claim)
     world.write(respond(enrollment_id, at=NOW))
-    from netkeeper.linkedin.messaging import MessageOutcome, MessageOutcomeKind
+    from netkeep.linkedin.messaging import MessageOutcome, MessageOutcomeKind
 
     outcome = MessageOutcome(MessageOutcomeKind.PREFILLED, "fixed words", None, 12)
     assert world.write(
@@ -1058,7 +1058,7 @@ async def test_a_logged_call_asks_whether_it_was_the_response_and_ends_nothing(
 @pytest.fixture
 def cli_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[sessionmaker[Session]]:
     url = database_url(tmp_path)
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     engine = make_engine(url)
     migrations.upgrade(engine)
     factory = make_session_factory(engine)

@@ -24,7 +24,7 @@ function renderSection(current: SendingHours = DEFAULT) {
     const { pathname } = new URL(request.url)
     if (pathname !== '/api/v1/settings/sending-hours') return jsonResponse({}, 500)
     if (request.method === 'GET') return jsonResponse(puts.length === 0 ? current : DEFAULT)
-    expect(request.headers.get('X-Netkeeper-Client')).not.toBeNull() // the CSRF header
+    expect(request.headers.get('X-Netkeep-Client')).not.toBeNull() // the CSRF header
     const body = (await request.json()) as SendingHoursIn
     puts.push(body)
     return jsonResponse({

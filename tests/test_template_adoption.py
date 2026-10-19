@@ -23,12 +23,12 @@ from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
 
-from netkeeper import migrations
-from netkeeper.campaigns import templates as template_service
-from netkeeper.campaigns.templates import REMOVED_FIELD_BLOCK
-from netkeeper.cli import app as cli
-from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.models import (
+from netkeep import migrations
+from netkeep.campaigns import templates as template_service
+from netkeep.campaigns.templates import REMOVED_FIELD_BLOCK
+from netkeep.cli import app as cli
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+from netkeep.models import (
     Campaign,
     CampaignStatus,
     CampaignStep,
@@ -44,21 +44,21 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.models.base import UserOwned
-from netkeeper.scoping import get_scoped, install_scope_guard, scoped
-from netkeeper.services import campaign_review
-from netkeeper.services import campaigns as campaign_service
-from netkeeper.services import template_adoption as service
-from netkeeper.services.campaign_engine import run_tick
-from netkeeper.services.campaigns import CampaignConflict, CampaignNotFound
-from netkeeper.services.template_adoption import AdoptionStale
-from netkeeper.services.users import ensure_local_user
-from netkeeper.web.api import template_adoption as template_api
+from netkeep.models.base import UserOwned
+from netkeep.scoping import get_scoped, install_scope_guard, scoped
+from netkeep.services import campaign_review
+from netkeep.services import campaigns as campaign_service
+from netkeep.services import template_adoption as service
+from netkeep.services.campaign_engine import run_tick
+from netkeep.services.campaigns import CampaignConflict, CampaignNotFound
+from netkeep.services.template_adoption import AdoptionStale
+from netkeep.services.users import ensure_local_user
+from netkeep.web.api import template_adoption as template_api
 
 EMAIL = TemplateChannel.EMAIL
 LINKEDIN = TemplateChannel.LINKEDIN
 OLD_TEXT = "Hi First, the text it was rendered with."
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 
 
 @pytest.fixture
@@ -671,7 +671,7 @@ async def test_the_api_answers_404_for_another_users_campaign(
 @pytest.fixture
 def cli_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[sessionmaker[Session]]:
     url = database_url(tmp_path)
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     engine = make_engine(url)
     migrations.upgrade(engine)
     factory = make_session_factory(engine)

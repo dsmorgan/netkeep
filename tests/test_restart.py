@@ -1,4 +1,4 @@
-"""**Restart netkeeper** (#597): ``POST /settings/restart``, how ``serve`` stops and comes
+"""**Restart netkeep** (#597): ``POST /settings/restart``, how ``serve`` stops and comes
 back under launchd and standalone, and the serve lock (#590) across it."""
 
 from __future__ import annotations
@@ -20,21 +20,21 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
 
-from netkeeper import cli
-from netkeeper.cli import app as cli_app
-from netkeeper.config import Settings, load_settings
-from netkeeper.db import session_scope
-from netkeeper.linkedin import activity_lock
-from netkeeper.models import SyncRunKind, SyncRunTrigger, User
-from netkeeper.models.base import utcnow
-from netkeeper.services import login_item, restart, restart_gate, runs, serve_lock
-from netkeeper.services.events import EventBus
-from netkeeper.services.linkedin_accounts import local_account_id
-from netkeeper.services.scheduled_runs import ServeExtractor
-from netkeeper.web.api import health
-from netkeeper.web.app import create_app
+from netkeep import cli
+from netkeep.cli import app as cli_app
+from netkeep.config import Settings, load_settings
+from netkeep.db import session_scope
+from netkeep.linkedin import activity_lock
+from netkeep.models import SyncRunKind, SyncRunTrigger, User
+from netkeep.models.base import utcnow
+from netkeep.services import login_item, restart, restart_gate, runs, serve_lock
+from netkeep.services.events import EventBus
+from netkeep.services.linkedin_accounts import local_account_id
+from netkeep.services.scheduled_runs import ServeExtractor
+from netkeep.web.api import health
+from netkeep.web.app import create_app
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 URL = "/api/v1/settings/restart"
 
 
@@ -43,14 +43,14 @@ URL = "/api/v1/settings/restart"
 
 def test_the_launchd_constants_match_the_agent() -> None:
     """The label the login item writes, and a status launchd restarts after."""
-    assert restart.LAUNCHD_LABEL == login_item.LABEL_BASE == "fun.tnkr.netkeeper"
+    assert restart.LAUNCHD_LABEL == login_item.LABEL_BASE == "fun.tnkr.netkeep"
     assert restart.LAUNCHD_RESTART_EXIT == 75
     # KeepAlive restarts only a job that did not exit successfully.
     item = login_item.LoginItem(
         data=Path("/nk"),
         agents_dir=Path("/nowhere"),
         runner=lambda _args: login_item.RunResult(0),
-        executable=Path("/bin/netkeeper"),
+        executable=Path("/bin/netkeep"),
         macos=True,
     )
     assert plistlib.loads(item.render_plist())["KeepAlive"] == {"SuccessfulExit": False}
@@ -60,12 +60,16 @@ def test_the_launchd_constants_match_the_agent() -> None:
 @pytest.mark.parametrize(
     ("environ", "expected"),
     [
+        ({"XPC_SERVICE_NAME": "fun.tnkr.netkeep"}, "launchd"),
+        ({"XPC_SERVICE_NAME": "fun.tnkr.netkeep.6f70bec19518"}, "launchd"),
+        ({"XPC_SERVICE_NAME": "fun.tnkr.netkeepx"}, "exec"),
+        # an agent from before the rename (#661) running this version
         ({"XPC_SERVICE_NAME": "fun.tnkr.netkeeper"}, "launchd"),
         ({"XPC_SERVICE_NAME": "fun.tnkr.netkeeper.6f70bec19518"}, "launchd"),
         ({"XPC_SERVICE_NAME": "fun.tnkr.netkeeperx"}, "exec"),
         # started by the removed script's agent: launchd would run a script that is gone
         (
-            {"XPC_SERVICE_NAME": "fun.tnkr.netkeeper", "NETKEEPER_LAUNCHD_LOG_DIR": "/d/logs"},
+            {"XPC_SERVICE_NAME": "fun.tnkr.netkeep", "NETKEEPER_LAUNCHD_LOG_DIR": "/d/logs"},
             "exec",
         ),
         ({"XPC_SERVICE_NAME": "0"}, "exec"),
@@ -91,7 +95,7 @@ def test_relaunch_standalone_re_execs_the_same_command() -> None:
     with pytest.raises(RuntimeError, match="relaunch returned"):
         restart.relaunch(
             "exec",
-            argv=["python3.12", "/venv/bin/netkeeper", "--config", "/c.toml", "serve"],
+            argv=["python3.12", "/venv/bin/netkeep", "--config", "/c.toml", "serve"],
             executable="/venv/bin/python",
             execv=lambda path, args: execs.append((path, args)),
             exit=exits.append,
@@ -99,7 +103,7 @@ def test_relaunch_standalone_re_execs_the_same_command() -> None:
     assert execs == [
         (
             "/venv/bin/python",
-            ["/venv/bin/python", "/venv/bin/netkeeper", "--config", "/c.toml", "serve"],
+            ["/venv/bin/python", "/venv/bin/netkeep", "--config", "/c.toml", "serve"],
         )
     ]
     assert exits == []
@@ -174,7 +178,7 @@ async def test_a_running_linkedin_run_refuses_the_restart(
     assert any(f"(#{run_id}) is going" in reason for reason in body["busy"])
     response = await client.post(URL, headers=CSRF)
     assert response.status_code == 409
-    assert "netkeeper is busy: a LinkedIn connections incremental run" in response.json()["detail"]
+    assert "netkeep is busy: a LinkedIn connections incremental run" in response.json()["detail"]
     await asyncio.sleep(0.05)
     assert stops == []
 
@@ -270,7 +274,7 @@ async def test_the_nightly_backup_refuses_the_restart(
 def test_the_nightly_backup_is_busy_only_while_it_writes(
     session_factory: sessionmaker[Session], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from netkeeper.services import backup_job
+    from netkeep.services import backup_job
 
     seen: list[bool] = []
     job = backup_job.NightlyBackups(
@@ -422,7 +426,7 @@ class _FakeServer:
 @pytest.mark.parametrize(
     ("environ", "ask", "relaunched"),
     [
-        ({"XPC_SERVICE_NAME": "fun.tnkr.netkeeper"}, True, ["launchd"]),
+        ({"XPC_SERVICE_NAME": "fun.tnkr.netkeep"}, True, ["launchd"]),
         ({"XPC_SERVICE_NAME": "0"}, True, ["exec"]),
         ({}, False, []),
     ],
@@ -461,7 +465,7 @@ async def test_a_real_server_stops_on_restart_with_an_event_stream_open(
     import conftest
 
     conftest._copy_template(_migrated_template, tmp_path / "bare")
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", str(tmp_path / "no-dist"))
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", str(tmp_path / "no-dist"))
     extractor = ServeExtractor(executor=lambda factory, bus: object())  # type: ignore[arg-type,return-value]
     served = create_app(Settings(), engine=bare_engine, extractor=extractor)
     server = uvicorn.Server(
@@ -492,8 +496,8 @@ async def test_a_real_server_stops_on_restart_with_an_event_stream_open(
 
 
 def test_web_reaches_the_exec_module_only_through_app_state() -> None:
-    """The one module that execs is imported by the CLI alone; ``netkeeper/web`` and the
-    gate it uses see a :class:`~netkeeper.services.restart_gate.RestartHook`."""
+    """The one module that execs is imported by the CLI alone; ``netkeep/web`` and the
+    gate it uses see a :class:`~netkeep.services.restart_gate.RestartHook`."""
     package = Path(restart.__file__).parents[1]
     importers = sorted(
         str(path.relative_to(package)) for path in package.rglob("*.py") if _imports_restart(path)
@@ -507,14 +511,14 @@ def _imports_restart(path: Path) -> bool:
 
     for node in ast.walk(ast.parse(path.read_text())):
         if isinstance(node, ast.ImportFrom):
-            if node.module == "netkeeper.services.restart":
+            if node.module == "netkeep.services.restart":
                 return True
-            if node.module == "netkeeper.services" and any(
+            if node.module == "netkeep.services" and any(
                 alias.name == "restart" for alias in node.names
             ):
                 return True
         if isinstance(node, ast.Import) and any(
-            alias.name == "netkeeper.services.restart" for alias in node.names
+            alias.name == "netkeep.services.restart" for alias in node.names
         ):
             return True
     return False
@@ -527,9 +531,9 @@ def test_serve_attaches_at_the_chrome_address_the_settings_page_set(
     local user's value in force, not the file's alone."""
     import factories
 
-    from netkeeper.linkedin.browser import AttachBrowserProvider
-    from netkeeper.services import ui_settings
-    from netkeeper.worker import BrowserWorker, serve_extractor
+    from netkeep.linkedin.browser import AttachBrowserProvider
+    from netkeep.services import ui_settings
+    from netkeep.worker import BrowserWorker, serve_extractor
 
     built = serve_extractor(Settings()).executor(session_factory, EventBus())
     assert isinstance(built, BrowserWorker) and isinstance(built.provider, AttachBrowserProvider)
@@ -619,7 +623,7 @@ async def test_cancel_during_the_quiesce_resumes_the_real_scheduler_the_engine_a
 def test_a_paused_nightly_backup_starts_no_new_write(
     session_factory: sessionmaker[Session], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from netkeeper.services import backup_job
+    from netkeep.services import backup_job
 
     job = backup_job.NightlyBackups(
         session_factory.kw["bind"], session_factory, Settings(), tmp_path / "backups"

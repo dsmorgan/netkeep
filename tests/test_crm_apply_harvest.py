@@ -1,4 +1,4 @@
-"""netkeeper.crm.apply.apply_harvest: a profile visit onto its contact (spec 9.4, 9.8, 10.5).
+"""netkeep.crm.apply.apply_harvest: a profile visit onto its contact (spec 9.4, 9.8, 10.5).
 
 P2-07's "done when", at the mapping: a fixture harvest updates children
 without downgrading known values to null. The attacks are the data-loss
@@ -20,17 +20,17 @@ import pytest
 from profile_fakes import PROFILES, Job, Profile, contact_info_of, details_of
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.crm import apply as mapping
-from netkeeper.crm import identity
-from netkeeper.crm.apply import HarvestCounts, HarvestResult, apply_harvest
-from netkeeper.crm.filters import compile_filter, parse_filter
-from netkeeper.crm.identity import IncomingContact, Matched, merge
-from netkeeper.crm.provenance import set_manual_field
-from netkeeper.db import session_scope
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.enrich import ProfileHarvest, UnreadableCause
-from netkeeper.linkedin.voyager import ContactInfo
-from netkeeper.models import (
+from netkeep.crm import apply as mapping
+from netkeep.crm import identity
+from netkeep.crm.apply import HarvestCounts, HarvestResult, apply_harvest
+from netkeep.crm.filters import compile_filter, parse_filter
+from netkeep.crm.identity import IncomingContact, Matched, merge
+from netkeep.crm.provenance import set_manual_field
+from netkeep.db import session_scope
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.enrich import ProfileHarvest, UnreadableCause
+from netkeep.linkedin.voyager import ContactInfo
+from netkeep.models import (
     Contact,
     ContactAlias,
     ContactEmail,
@@ -42,8 +42,8 @@ from netkeeper.models import (
     PhoneKind,
     User,
 )
-from netkeeper.scoping import scoped
-from netkeeper.services import dashboard
+from netkeep.scoping import scoped
+from netkeep.services import dashboard
 
 NOW = datetime(2026, 9, 23, 15, 0, tzinfo=UTC)
 PRIYA, MATEO, HANA, TOMASZ, AIKO = PROFILES
@@ -292,7 +292,7 @@ def test_a_new_headline_or_a_first_job_is_not_a_position_change(
 def test_the_dashboard_dates_a_new_job_by_when_the_visit_saw_it(
     writer: Session, user: User
 ) -> None:
-    """#286: the move started months ago by the profile; netkeeper noticed it today."""
+    """#286: the move started months ago by the profile; netkeep noticed it today."""
     contact = _stored(writer, user, PRIYA)
     apply_harvest(writer, user, _harvest(contact, PRIYA))
     moved = replace(
@@ -819,8 +819,8 @@ def test_a_sighting_restarts_a_streak_that_had_not_reached_gone(
 
 
 def _connections_page(people: list[Any], at: datetime) -> Any:
-    from netkeeper.linkedin.connections import ConnectionsPage, SyncMode
-    from netkeeper.linkedin.voyager import ConnectionSummary
+    from netkeep.linkedin.connections import ConnectionsPage, SyncMode
+    from netkeep.linkedin.voyager import ConnectionSummary
 
     return ConnectionsPage(
         mode=SyncMode.INCREMENTAL,
@@ -932,7 +932,7 @@ def test_a_website_that_is_not_http_is_never_stored(
 ) -> None:
     """#206 review: the parser keeps only http and https sites; this boundary holds
     even for a source that did not."""
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     contact = _stored(writer, user, MATEO)
     sites = ("javascript:alert(1)", " Data:text/html,x", "https://mateo.example.test/")
     apply_harvest(writer, user, _harvest(contact, replace(MATEO, websites=sites)))

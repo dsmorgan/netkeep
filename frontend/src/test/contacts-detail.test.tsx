@@ -379,11 +379,11 @@ describe('contact detail', () => {
     ).toBeTruthy()
   })
 
-  it('says when netkeeper suggested the answer and it is waiting for review', async () => {
+  it('says when netkeep suggested the answer and it is waiting for review', async () => {
     serveContact(contactDetail({ met: 'met', met_source: 'automatic' }))
     await renderApp('/contacts/1')
     await screen.findByRole('heading', { name: 'Ada Ventura' })
-    expect(screen.getByText('Suggested by netkeeper, waiting for your review.')).toBeInTheDocument()
+    expect(screen.getByText('Suggested by netkeep, waiting for your review.')).toBeInTheDocument()
   })
 
   it('adds and removes a tag', async () => {

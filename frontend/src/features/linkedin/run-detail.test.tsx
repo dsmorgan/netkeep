@@ -228,7 +228,7 @@ describe('RunDetail', () => {
     await waitFor(() => expect(onResumed).toHaveBeenCalledWith(99))
     expect(calls.some((call) => call.path === '/api/v1/linkedin/runs/1/resume')).toBe(true)
   })
-  it('shows the fields `netkeeper linkedin run` prints: plan, max visits, resumes (#405)', async () => {
+  it('shows the fields `netkeep linkedin run` prints: plan, max visits, resumes (#405)', async () => {
     renderDetail(7, {
       'GET /api/v1/linkedin/runs/7': () =>
         jsonResponse(

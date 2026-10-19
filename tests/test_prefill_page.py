@@ -42,8 +42,8 @@ from messaging_pages import (
 )
 from run_fakes import fake_provider
 
-from netkeeper.linkedin import browser as browser_module
-from netkeeper.linkedin.browser import (
+from netkeep.linkedin import browser as browser_module
+from netkeep.linkedin.browser import (
     BrowserRun,
     BrowserUnavailable,
     BubbleLayout,
@@ -51,15 +51,15 @@ from netkeeper.linkedin.browser import (
     TypingEnd,
     message_control_refusal,
 )
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.messaging import (
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.messaging import (
     MessageJobSpec,
     MessageOutcomeKind,
     PrefillResult,
     plan_typing,
 )
-from netkeeper.linkedin.pacing import TypeStep, TypingPlan
-from netkeeper.linkedin.page_messaging import PagePrefill
+from netkeep.linkedin.pacing import TypeStep, TypingPlan
+from netkeep.linkedin.page_messaging import PagePrefill
 
 BODY = "Hi Zephyrine, good to see you!"
 T0 = datetime(2026, 10, 5, 15, 0, tzinfo=UTC)
@@ -784,7 +784,7 @@ async def test_a_card_refusal_logs_its_links_forms_and_never_their_hrefs(
 ) -> None:
     cards = _photo_and_name(f"/in/{Z_ID}/", f"https://www.linkedin.com/in/{T_SLUG}/x/")
     html = _new([ZEPHYRINE], cards=cards)
-    with caplog.at_level("INFO", logger="netkeeper.linkedin.browser"):
+    with caplog.at_level("INFO", logger="netkeep.linkedin.browser"):
         ran = await prefill(MessagingSite(ZEPHYRINE, bubble=Bubble(ZEPHYRINE, None, html=html)))
     assert_no_keys(ran)
     lines = [r.getMessage() for r in caplog.records if "card check refused" in r.getMessage()]
@@ -802,7 +802,7 @@ async def test_a_card_that_passes_logs_its_shape_once_per_run(
 ) -> None:
     cards = _photo_and_name(f"/in/{Z_ID}/overlay/photo/", f"/in/{Z_SLUG}/")
     html = _new([ZEPHYRINE], cards=cards)
-    with caplog.at_level("INFO", logger="netkeeper.linkedin.browser"):
+    with caplog.at_level("INFO", logger="netkeep.linkedin.browser"):
         ran = await prefill(MessagingSite(ZEPHYRINE, bubble=Bubble(ZEPHYRINE, None, html=html)))
     assert ran.kind is MessageOutcomeKind.PREFILLED, ran.result
     lines = [r.getMessage() for r in caplog.records if "card check" in r.getMessage()]
@@ -954,7 +954,7 @@ def test_the_bubble_check_words_are_pinned() -> None:
 
 def test_the_bubble_already_open_words_are_pinned() -> None:
     assert browser_module.BUBBLE_ALREADY_OPEN == (
-        "a message bubble is already open in this or another LinkedIn tab in the netkeeper"
+        "a message bubble is already open in this or another LinkedIn tab in the netkeep"
         " Chrome window, minimized ones included;"
         " close it, then try again"
     )
@@ -1046,7 +1046,7 @@ async def test_a_sponsored_bubble_beside_the_new_message_bubble_is_typed(
     before = f'<div style="display:none">{SPONSORED}</div>' if hidden else SPONSORED
     bubble = Bubble(ZEPHYRINE, None, html=new_message_bubble_html(ZEPHYRINE))
     site = MessagingSite(ZEPHYRINE, before=before, bubble=bubble)
-    with caplog.at_level("DEBUG", logger="netkeeper.linkedin.browser"):
+    with caplog.at_level("DEBUG", logger="netkeep.linkedin.browser"):
         ran = await prefill(site)
     assert ran.kind is MessageOutcomeKind.PREFILLED, ran.result
     assert composer_text(ran.tab) == BODY
@@ -1351,8 +1351,8 @@ async def test_a_final_text_that_is_not_the_body_is_partially_typed() -> None:
 
 
 async def test_after_the_click_the_run_never_opens_navigates_scrolls_or_observes() -> None:
-    from netkeeper.linkedin.observe import ResponseMatch, ResponseRule
-    from netkeeper.linkedin.pacing import ScrollPlan
+    from netkeep.linkedin.observe import ResponseMatch, ResponseRule
+    from netkeep.linkedin.pacing import ScrollPlan
 
     site = MessagingSite(ZEPHYRINE)
     provider, _ = fake_provider(site)
@@ -1513,7 +1513,7 @@ async def test_a_composer_the_text_rule_cannot_read_types_nothing(inside: str) -
     ],
 )
 def test_the_composer_text_rule(paragraphs: list[str], text: str) -> None:
-    from netkeeper.linkedin.messaging import composer_text
+    from netkeep.linkedin.messaging import composer_text
 
     assert composer_text(paragraphs) == text
 
@@ -1731,7 +1731,7 @@ async def test_a_skipped_chip_check_logs_once_in_fixed_words(
 ) -> None:
     profile = profile_message_controls_html(ZEPHYRINE).replace(f"<h1>{ZEPHYRINE.name}</h1>", "")
     site = MessagingSite(ZEPHYRINE, profile_html=profile, bubble=Bubble(ZEPHYRINE, None))
-    with caplog.at_level("INFO", logger="netkeeper.linkedin.page_messaging"):
+    with caplog.at_level("INFO", logger="netkeep.linkedin.page_messaging"):
         await prefill(site)
     lines = [r.getMessage() for r in caplog.records if "name checked" in r.getMessage()]
     assert lines == ["prefill: recipient name checked: skipped (no single profile heading)"]

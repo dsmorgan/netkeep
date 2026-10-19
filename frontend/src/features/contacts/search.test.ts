@@ -17,7 +17,7 @@ describe('page bounds', () => {
   })
 
   it('keeps the largest offset a URL can produce inside the API ceiling', () => {
-    // `MAX_QUERY_OFFSET` in netkeeper/web/schemas.py, pinned there too.
+    // `MAX_QUERY_OFFSET` in netkeep/web/schemas.py, pinned there too.
     const largest = pageOffset({ page: MAX_PAGE, size: MAX_PAGE_SIZE })
     expect(Number.isSafeInteger(largest)).toBe(true)
     expect(largest).toBeLessThanOrEqual(1_000_000_000)

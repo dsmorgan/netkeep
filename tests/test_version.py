@@ -1,7 +1,7 @@
 from typer.testing import CliRunner
 
-from netkeeper import __version__
-from netkeeper.cli import app
+from netkeep import __version__
+from netkeep.cli import app
 
 
 def test_version_command_prints_version() -> None:

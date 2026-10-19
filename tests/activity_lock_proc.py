@@ -1,8 +1,8 @@
-"""A second netkeeper process, for ``test_activity_lock_processes.py`` to start.
+"""A second netkeep process, for ``test_activity_lock_processes.py`` to start.
 
 Each mode builds its own :class:`AttachBrowserProvider` with its own fresh
-:class:`ActivityLocks` and a :class:`FakeConnector`, exactly as ``netkeeper
-preflight`` or ``netkeeper serve`` builds its own provider, and prints one JSON line
+:class:`ActivityLocks` and a :class:`FakeConnector`, exactly as ``netkeep
+preflight`` or ``netkeep serve`` builds its own provider, and prints one JSON line
 saying what happened and how many times its connector attached. Nothing here reaches
 a real browser: the connector is the offline fake.
 
@@ -15,7 +15,7 @@ Modes:
 ``try ACCOUNT [--wait]``
     Enter and leave ``provider.run(ACCOUNT)``; print ``attached`` or ``busy``.
 ``preflight ACCOUNT``
-    Run :func:`netkeeper.linkedin.preflight.preflight` and print its verdict.
+    Run :func:`netkeep.linkedin.preflight.preflight` and print its verdict.
 """
 
 from __future__ import annotations
@@ -28,12 +28,12 @@ import sys
 from browser_fakes import FakeBrowser, FakeConnector, FakeContext
 from browser_guard import UNREACHABLE_CDP_URL
 
-from netkeeper.linkedin.browser import (
+from netkeep.linkedin.browser import (
     ActivityLocks,
     AttachBrowserProvider,
     BrowserBusy,
 )
-from netkeeper.linkedin.preflight import preflight
+from netkeep.linkedin.preflight import preflight
 
 CDP_URL = UNREACHABLE_CDP_URL  # never a real Chrome, even without the guard (#294)
 
@@ -81,7 +81,7 @@ def main(argv: list[str]) -> None:
     mode, account, *rest = argv
     if mode == "hold":
         if "--as" in rest:
-            # What the busy message will call this process: `netkeeper serve`, say.
+            # What the busy message will call this process: `netkeep serve`, say.
             sys.argv = rest[rest.index("--as") + 1].split()
         asyncio.run(_hold(account))
     elif mode == "try":

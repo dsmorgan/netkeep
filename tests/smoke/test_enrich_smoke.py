@@ -1,6 +1,6 @@
 """``PageProfiles`` over a real Chrome: one Contact info click, and the page's own answers (#190).
 
-Opt in with ``NETKEEPER_BROWSER_TESTS=1``, same as every other file under
+Opt in with ``NETKEEP_BROWSER_TESTS=1``, same as every other file under
 ``tests/smoke/``. The only site involved is a loopback replica this file serves for
 itself; the people are :mod:`voyager_pages`' invented cast and the payloads
 :mod:`flagship_pages`' hand-built ones.
@@ -15,8 +15,8 @@ altered or added: the replica records every request it received, the page record
 every request it sent, and the two lists are the same, marker header included. And
 that a page with two such links, or none, gets no click at all.
 
-Start Chrome first with the command ``netkeeper browser launch`` prints, and point
-``NETKEEPER_CDP_URL`` at it.
+Start Chrome first with the command ``netkeep browser launch`` prints, and point
+``NETKEEP_CDP_URL`` at it.
 """
 
 from __future__ import annotations
@@ -47,9 +47,9 @@ from flagship_pages import (
 )
 from voyager_pages import PEOPLE, Person
 
-from netkeeper.linkedin.browser import AttachBrowserProvider, BrowserRun, BrowserUnavailable
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.enrich import (
+from netkeep.linkedin.browser import AttachBrowserProvider, BrowserRun, BrowserUnavailable
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.enrich import (
     EnrichJobSpec,
     EnrichResult,
     EnrichTarget,
@@ -58,17 +58,17 @@ from netkeeper.linkedin.enrich import (
     StopReason,
     run_enrichment,
 )
-from netkeeper.linkedin.flagship import CONTACT_DETAILS_SCREEN_ID, NAVIGATION_PATH
-from netkeeper.linkedin.flagship_profile import COMPONENT_PATH
-from netkeeper.linkedin.pacing import DelayProfile, ScrollProfile
-from netkeeper.linkedin.page_profiles import PageProfiles
+from netkeep.linkedin.flagship import CONTACT_DETAILS_SCREEN_ID, NAVIGATION_PATH
+from netkeep.linkedin.flagship_profile import COMPONENT_PATH
+from netkeep.linkedin.pacing import DelayProfile, ScrollProfile
+from netkeep.linkedin.page_profiles import PageProfiles
 
 pytestmark = pytest.mark.skipif(
-    os.environ.get("NETKEEPER_BROWSER_TESTS") != "1",
-    reason="browser smoke suite: start Chrome, then set NETKEEPER_BROWSER_TESTS=1",
+    os.environ.get("NETKEEP_BROWSER_TESTS") != "1",
+    reason="browser smoke suite: start Chrome, then set NETKEEP_BROWSER_TESTS=1",
 )
 
-CDP_URL = os.environ.get("NETKEEPER_CDP_URL", "http://127.0.0.1:9222")
+CDP_URL = os.environ.get("NETKEEP_CDP_URL", "http://127.0.0.1:9222")
 PRIYA, MATEO = PEOPLE[0], PEOPLE[1]
 #: #514: an invented person whose profile does not exist.
 QUORBELLE = Person(514, "Quorbelle", "Fictionary", None, public_id="quorbelle-fictionary")
@@ -399,13 +399,13 @@ async def _visit(
             )
             page_log = await _page_log(run)
     except BrowserUnavailable as exc:
-        pytest.fail(f"{exc}\nStart Chrome with the command `netkeeper browser launch` prints.")
+        pytest.fail(f"{exc}\nStart Chrome with the command `netkeep browser launch` prints.")
     return result, harvests, page_log["sent"], page_log
 
 
 async def _page_log(run: BrowserRun) -> dict[str, Any]:
     # The test reads the replica page's own record of what it sent and saw. This is
-    # test code on a loopback page, never something netkeeper does.
+    # test code on a loopback page, never something netkeep does.
     page = await run.ensure_page()
     log: dict[str, Any] = await page.evaluate(
         "({sent: window.__sent, clicks: window.__clicks, keys: window.__keys,"
@@ -419,8 +419,8 @@ def _contact_info_clicks(log: dict[str, Any]) -> list[dict[str, Any]]:
 
     The no-click tests count only these (#196 item 3): the smoke Chrome is a real,
     windowed browser that comes to the front (#195), and a person or the OS clicking
-    it lands a trusted click on the filler content that netkeeper never made. A click
-    netkeeper made can only be on Contact info, and would also send the overlay's
+    it lands a trusted click on the filler content that netkeep never made. A click
+    netkeep made can only be on Contact info, and would also send the overlay's
     request, which those tests check separately.
     """
     return [click for click in log["clicks"] if click.get("text") == "Contact info"]
@@ -449,7 +449,7 @@ async def test_one_click_brings_the_overlay_and_the_visit_reads_whole(
     assert log["clicks"] == [{"trusted": True, "text": "Contact info"}]
     assert log["keys"] == 0
     # Nothing altered or added: what the replica received is what the page sent, the
-    # lazy card on the scroll and the overlay on the click, and nothing of netkeeper's.
+    # lazy card on the scroll and the overlay on the click, and nothing of netkeep's.
     received = [(r["path"], r["body"], r["marker"]) for r in _Replica.received]
     assert received == [(urlsplit(s["path"]).path, s["body"], s["marker"]) for s in sent]
     assert [path for path, _, _ in received] == [COMPONENT_PATH, NAVIGATION_PATH]
@@ -559,7 +559,7 @@ async def test_answers_the_page_aborts_after_reading_are_read_from_their_streame
     client aborts each once it has read every byte: Chrome keeps no body for either.
     The body tap's session received both as they streamed, both copies are whole, and
     the visit reads whole, with one click and nothing sent but what the page sent."""
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     _Replica.abort = {"component", f"overlay:{PRIYA.slug}"}
     result, harvests, sent, log = await _visit(provider, site, [_target(PRIYA)])
 

@@ -1,4 +1,4 @@
-"""netkeeper.services.budgets: per-day/per-week action counters (spec 9.6, 9.10).
+"""netkeep.services.budgets: per-day/per-week action counters (spec 9.6, 9.10).
 
 The three things #101 calls out as easy to get wrong:
 
@@ -23,11 +23,11 @@ import factories
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
-import netkeeper.services.budgets as budgets
-from netkeeper.config import BudgetSettings
-from netkeeper.db import session_scope
-from netkeeper.models import User
-from netkeeper.services.budgets import (
+import netkeep.services.budgets as budgets
+from netkeep.config import BudgetSettings
+from netkeep.db import session_scope
+from netkeep.models import User
+from netkeep.services.budgets import (
     HARD_MAX_PER_DAY,
     HARD_MAX_PER_WEEK,
     ActionClass,
@@ -211,7 +211,7 @@ def test_an_unknown_timezone_falls_back_to_utc_with_a_warning(
     writer: Session, caplog: pytest.LogCaptureFixture
 ) -> None:
     user = factories.make_user(writer, timezone="Mars/Olympus")
-    with caplog.at_level("WARNING", logger="netkeeper.services.budgets"):
+    with caplog.at_level("WARNING", logger="netkeep.services.budgets"):
         result = status(
             writer, user, ACCOUNT, ActionClass.CONNECTION_PAGES, now=NOW, settings=DEFAULT_SETTINGS
         )
@@ -396,7 +396,7 @@ def test_no_risk_warning_at_or_below_100_a_day() -> None:
 
 def test_a_risk_warning_above_100_a_day_names_the_number_in_force() -> None:
     assert profile_visit_risk_warning(_settings(profile_visits_per_day=101)) == (
-        "Profile visits are set to 101 a day, above the 100 a day netkeeper was designed"
+        "Profile visits are set to 101 a day, above the 100 a day netkeep was designed"
         " around. More visits a day make it more likely that LinkedIn restricts your account"
         " or asks you to verify it. Heat still slows runs down after LinkedIn throttles a visit."
     )

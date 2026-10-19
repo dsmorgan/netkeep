@@ -1,4 +1,4 @@
-"""netkeeper.services.posture: every protection, and a warning for anything off (P2-11).
+"""netkeep.services.posture: every protection, and a warning for anything off (P2-11).
 
 The module exists for one property, so most of this file tests that property:
 
@@ -49,22 +49,22 @@ from campaign_fakes import make_mailbox
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.chrome_profile import ProfileCheck, check_dedicated_profile
-from netkeeper.config import Settings
-from netkeeper.db import session_scope
-from netkeeper.linkedin import activity_lock
-from netkeeper.linkedin.browser import AttachBrowserProvider
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.preflight import preflight
-from netkeeper.models import SettingKV, SyncRunKind, User
-from netkeeper.scoping import unscoped
-from netkeeper.services import heat as heat_rows
-from netkeeper.services import posture as posture_module
-from netkeeper.services import route_breaker, sending_hours
-from netkeeper.services import scheduler as scheduler_module
-from netkeeper.services.budgets import ActionClass, configured_default, consume
-from netkeeper.services.linkedin_session import flag_session
-from netkeeper.services.posture import (
+from netkeep.chrome_profile import ProfileCheck, check_dedicated_profile
+from netkeep.config import Settings
+from netkeep.db import session_scope
+from netkeep.linkedin import activity_lock
+from netkeep.linkedin.browser import AttachBrowserProvider
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.preflight import preflight
+from netkeep.models import SettingKV, SyncRunKind, User
+from netkeep.scoping import unscoped
+from netkeep.services import heat as heat_rows
+from netkeep.services import posture as posture_module
+from netkeep.services import route_breaker, sending_hours
+from netkeep.services import scheduler as scheduler_module
+from netkeep.services.budgets import ActionClass, configured_default, consume
+from netkeep.services.linkedin_session import flag_session
+from netkeep.services.posture import (
     ATTACH_ONLY,
     ENFORCED_BY,
     KEY_DEDICATED_PROFILE,
@@ -85,7 +85,7 @@ from netkeeper.services.posture import (
     render,
     verdict,
 )
-from netkeeper.services.scheduler import (
+from netkeep.services.scheduler import (
     CATCHUP_MAX_MINUTES,
     CATCHUP_MIN_MINUTES,
     DEFAULT_SCHEDULES,
@@ -97,9 +97,9 @@ from netkeeper.services.scheduler import (
     served_schedules,
     sync_account_schedule,
 )
-from netkeeper.services.setting_checks import MAX_ACTIVE_WINDOW_HOURS, WEEKEND_DAMPING_CEILING
-from netkeeper.services.settings_kv import delete_setting, set_setting
-from netkeeper.worker import session_probe as _session_probe
+from netkeep.services.setting_checks import MAX_ACTIVE_WINDOW_HOURS, WEEKEND_DAMPING_CEILING
+from netkeep.services.settings_kv import delete_setting, set_setting
+from netkeep.worker import session_probe as _session_probe
 
 #: test_browser_safety.py's syntax-tree caches, emptied when this module ends (#478).
 ast_caches = browser_safety.ast_caches
@@ -278,35 +278,33 @@ def test_the_profile_row_without_a_probe_says_every_attach_checks(
 
     assert row.status is Status.ON
     assert row.warnings == ()
-    assert row.value == "checked at every attach; netkeeper's Chrome isn't running"
+    assert row.value == "checked at every attach; netkeep's Chrome isn't running"
     assert row.summary == "checked at every attach"
     assert row.key == KEY_DEDICATED_PROFILE == "dedicated_profile"
 
 
-def test_the_profile_row_says_netkeepers_chrome_is_running_without_a_probe(
+def test_the_profile_row_says_netkeeps_chrome_is_running_without_a_probe(
     writer: Session, user: User, tmp_path: Path
 ) -> None:
     """#599: from the profile's lock file alone, so it shows with ``--no-probe``."""
-    from netkeeper.paths import data_dir
+    from netkeep.paths import data_dir
 
     hold_profile(data_dir() / "chrome-profile", os.getpid())  # a live pid
     report = _report(writer, user, probe=None)
     row = _row(report, "dedicated chrome profile")
-    assert (
-        row.value == f"checked at every attach; netkeeper's Chrome is running (pid {os.getpid()})"
-    )
+    assert row.value == f"checked at every attach; netkeep's Chrome is running (pid {os.getpid()})"
     assert row.status is Status.ON and row.warnings == ()
 
 
 def test_a_stale_profile_lock_isnt_a_running_chrome(
     writer: Session, user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from netkeeper.paths import data_dir
+    from netkeep.paths import data_dir
 
     hold_profile(data_dir() / "chrome-profile", 4_000_002)
     monkeypatch.setattr(activity_lock, "pid_alive", lambda pid: False)
     row = _row(_report(writer, user, probe=None), "dedicated chrome profile")
-    assert row.value.endswith("netkeeper's Chrome isn't running")
+    assert row.value.endswith("netkeep's Chrome isn't running")
 
 
 def test_the_profile_row_names_the_dedicated_profile(
@@ -320,7 +318,7 @@ def test_the_profile_row_names_the_dedicated_profile(
     row = _row(report, "dedicated chrome profile")
     assert row.status is Status.ON
     assert row.warnings == ()
-    assert row.value == f"netkeeper's profile, pid {FAKE_CHROME_PID}"
+    assert row.value == f"netkeep's profile, pid {FAKE_CHROME_PID}"
     assert report.ok
 
 
@@ -340,7 +338,7 @@ def test_a_refused_profile_is_a_posture_warning(
     row = _row(report, "dedicated chrome profile")
     assert row.value == value
     (warning,) = row.warnings
-    assert "netkeeper refuses to attach and no run can start" in warning
+    assert "netkeep refuses to attach and no run can start" in warning
     assert str(tmp_path) in warning
     assert not report.ok
 
@@ -403,7 +401,7 @@ def _held(
     *,
     holder: Any = _UNSET,
     pid: int | None = None,
-    command: str = "netkeeper serve",
+    command: str = "netkeep serve",
     since: datetime | None = None,
 ) -> activity_lock.LockState:
     """The lock as posture would inspect it while a run holds it. Alive, ours, recent."""
@@ -547,7 +545,7 @@ CASES = [
     ),
     Case(
         # A note, not a warning (#319 review S1): the report stays clear.
-        id="profile visits above the 100 a day netkeeper was designed around (#318)",
+        id="profile visits above the 100 a day netkeep was designed around (#318)",
         settings=_budget(profile_visits_per_day=101),
         warns=(),
         expect_ok=True,
@@ -692,7 +690,7 @@ CASES = [
         warns=("one browser client",),
     ),
     Case(
-        id="an activity lock held by something that is not netkeeper",
+        id="an activity lock held by something that is not netkeep",
         lock=_held(command="python3 some-other-tool.py"),
         warns=("one browser client",),
     ),
@@ -885,7 +883,7 @@ def test_several_protections_off_at_once_all_warn(writer: Session, user: User) -
 
 
 def _callers_of(function: str, *, live_only: bool = True) -> set[Path]:
-    """Every file under ``netkeeper/`` with a call that resolves to ``function``.
+    """Every file under ``netkeep/`` with a call that resolves to ``function``.
 
     Resolves each call through the file's imports (``call_targets``, #162) and
     matches ``function`` fully qualified, so it sees the call however the
@@ -905,7 +903,7 @@ def _callers_of(function: str, *, live_only: bool = True) -> set[Path]:
     than let the list shrink on its own.
 
     With ``live_only`` (the default), a caller also has to be *live*: reached,
-    through imports, from something netkeeper actually runs (:func:`_live_modules`).
+    through imports, from something netkeep actually runs (:func:`_live_modules`).
     A job that exists but that no command, route, or server start ever reaches
     enforces nothing yet -- the connections sync runner (P2-06) called
     ``consume``, ``raise_heat``, and ``flag_session`` for real, and nothing
@@ -934,7 +932,7 @@ def _not_production(package: Path) -> set[Path]:
 
 
 def _entry_points() -> set[Path]:
-    """What netkeeper runs: the CLI (``[project.scripts]``), the app factory ``serve``
+    """What netkeep runs: the CLI (``[project.scripts]``), the app factory ``serve``
     starts, and the API modules that factory discovers by package scan rather than
     by import (so no import edge would reach them)."""
     package = Path(browser_safety.PACKAGE)
@@ -943,9 +941,9 @@ def _entry_points() -> set[Path]:
 
 
 def _module_file(name: str) -> Path | None:
-    """The file a dotted ``netkeeper.*`` name is, or lives in; None outside the package."""
+    """The file a dotted ``netkeep.*`` name is, or lives in; None outside the package."""
     parts = name.split(".")
-    if parts[0] != "netkeeper":
+    if parts[0] != "netkeep":
         return None
     root = Path(browser_safety.REPO_ROOT)
     while parts:
@@ -970,8 +968,8 @@ def _live_modules(also_unfollowed: frozenset[Path] = frozenset()) -> frozenset[P
     scan has established.
 
     The rehearsal and report modules (:func:`_not_production`) are reached but not
-    followed: ``netkeeper simulate`` importing the scheduler runs a *simulated*
-    schedule, and ``netkeeper posture`` importing it reads constants. Neither makes
+    followed: ``netkeep simulate`` importing the scheduler runs a *simulated*
+    schedule, and ``netkeep posture`` importing it reads constants. Neither makes
     the scheduler part of a live run. ``also_unfollowed`` adds modules to that
     set, for a test showing which path makes something live.
 
@@ -1080,23 +1078,23 @@ def test_the_scanner_can_actually_find_a_caller() -> None:
     live caller of something else: the CLI calls ``ensure_local_user``.
     """
     package = Path(browser_safety.PACKAGE)
-    assert package / "cli.py" in _callers_of("netkeeper.services.users.ensure_local_user")
-    assert _callers_of("netkeeper.linkedin.pacing.is_active_at", live_only=False) == {
+    assert package / "cli.py" in _callers_of("netkeep.services.users.ensure_local_user")
+    assert _callers_of("netkeep.linkedin.pacing.is_active_at", live_only=False) == {
         package / "services" / "scheduler.py",
         package / "services" / "enrichment.py",
         package / "services" / "runs.py",  # a manual run refused outside the window (#213)
     }
-    assert not _callers_of("netkeeper.linkedin.pacing.a_function_nobody_wrote", live_only=False)
+    assert not _callers_of("netkeep.linkedin.pacing.a_function_nobody_wrote", live_only=False)
 
 
 def test_a_caller_nothing_starts_is_not_live() -> None:
     """Liveness is reachability from an entry point, and the worker is the one path.
 
-    Since P2-10 the runners are live: ``netkeeper.worker`` reaches them from the
+    Since P2-10 the runners are live: ``netkeep.worker`` reaches them from the
     CLI (``linkedin sync``/``enrich``) and from ``serve`` (the scheduler and the
     runs API hold it as an executor). Take the worker out of the walk and the
     enrichment job and the connections sync runner fall out of it: nothing else
-    netkeeper runs imports them, so no route or report is a hidden path to the
+    netkeep runs imports them, so no route or report is a hidden path to the
     browser work (#167's review, still load-bearing).
     """
     package = Path(browser_safety.PACKAGE)
@@ -1116,14 +1114,14 @@ def test_a_caller_nothing_starts_is_not_live() -> None:
     assert package / "linkedin" / "enrich.py" not in without_worker
     assert package / "services" / "users.py" in live  # the CLI and the app both reach it
     assert package / "web" / "api" / "contacts.py" in live  # discovered, not imported
-    assert _callers_of("netkeeper.services.heat.raise_heat", live_only=False) == {
+    assert _callers_of("netkeep.services.heat.raise_heat", live_only=False) == {
         package / "services" / "connections_sync.py",
         package / "services" / "enrichment.py",
         package / "services" / "inbox_poll.py",  # P4-08
         package / "services" / "message_send.py",  # P4-03
         package / "services" / "message_check.py",  # #473: a wall at the checked profile
     }
-    assert _callers_of("netkeeper.services.heat.raise_heat") == {
+    assert _callers_of("netkeep.services.heat.raise_heat") == {
         package / "services" / "connections_sync.py",
         package / "services" / "enrichment.py",
         package / "services" / "inbox_poll.py",
@@ -1140,8 +1138,8 @@ def test_a_caller_nothing_starts_is_not_live() -> None:
 
 # The scanner, shown snippets as if they were a file in the package (#162).
 _CALLER = Path(browser_safety.PACKAGE) / "services" / "some_job.py"
-_CONSUME = "netkeeper.services.budgets.consume"
-_PLAN = "netkeeper.linkedin.pacing.plan_enrichment"
+_CONSUME = "netkeep.services.budgets.consume"
+_PLAN = "netkeep.linkedin.pacing.plan_enrichment"
 
 
 def test_an_unrelated_consume_method_is_not_enforcement() -> None:
@@ -1154,7 +1152,7 @@ def test_an_unrelated_consume_method_is_not_enforcement() -> None:
 
 def test_an_aliased_call_is_enforcement() -> None:
     source = (
-        "from netkeeper.services.budgets import consume as spend\n"
+        "from netkeep.services.budgets import consume as spend\n"
         "def run(session):\n"
         "    spend(session)\n"
     )
@@ -1163,13 +1161,13 @@ def test_an_aliased_call_is_enforcement() -> None:
 
 def test_every_spelling_of_the_real_call_is_enforcement() -> None:
     spellings = (
-        "from netkeeper.services.budgets import consume\nconsume()\n",
-        "from netkeeper.services import budgets\nbudgets.consume()\n",
-        "import netkeeper.services.budgets as b\nb.consume()\n",
-        "import netkeeper.services.budgets\nnetkeeper.services.budgets.consume()\n",
+        "from netkeep.services.budgets import consume\nconsume()\n",
+        "from netkeep.services import budgets\nbudgets.consume()\n",
+        "import netkeep.services.budgets as b\nb.consume()\n",
+        "import netkeep.services.budgets\nnetkeep.services.budgets.consume()\n",
         "from . import budgets\nbudgets.consume()\n",
         "from .budgets import consume\nconsume()\n",
-        "def run():\n    from netkeeper.services import budgets\n    budgets.consume()\n",
+        "def run():\n    from netkeep.services import budgets\n    budgets.consume()\n",
     )
     for source in spellings:
         assert _calls(source, _CALLER, _CONSUME), source
@@ -1178,7 +1176,7 @@ def test_every_spelling_of_the_real_call_is_enforcement() -> None:
 def test_a_file_with_its_own_consume_still_counts_its_real_call() -> None:
     """Used to be skipped outright on the text ``def consume(``."""
     source = (
-        "from netkeeper.services import budgets\n"
+        "from netkeep.services import budgets\n"
         "def consume(message):\n"
         "    return message\n"
         "def run(session):\n"
@@ -1190,13 +1188,13 @@ def test_a_file_with_its_own_consume_still_counts_its_real_call() -> None:
 def test_a_local_consume_is_not_the_real_one() -> None:
     """The bare name resolves to whatever it is bound to last, as Python would."""
     shadowed = (
-        "from netkeeper.services.budgets import consume\n"
+        "from netkeep.services.budgets import consume\n"
         "def consume(message):\n"
         "    return message\n"
         "consume(1)\n"
     )
     local_variable = (
-        "from netkeeper.services.budgets import consume\ndef run(consume):\n    consume()\n"
+        "from netkeep.services.budgets import consume\ndef run(consume):\n    consume()\n"
     )
     assert not _calls(shadowed, _CALLER, _CONSUME)
     assert not _calls(local_variable, _CALLER, _CONSUME)
@@ -1210,30 +1208,30 @@ def test_the_defining_module_is_not_its_own_caller() -> None:
 def test_a_passed_reference_is_enforcement() -> None:
     """Handler injection: the function handed over, not called here."""
     spellings = (
-        "import functools\nfrom netkeeper.services import budgets\n"
+        "import functools\nfrom netkeep.services import budgets\n"
         "spend = functools.partial(budgets.consume, action=1)\n",
-        "from netkeeper.services.budgets import consume\n"
+        "from netkeep.services.budgets import consume\n"
         "def build(runner):\n    runner.register(on_visit=consume)\n",
-        "from netkeeper.services import budgets\nclass Job:\n    charge = budgets.consume\n",
+        "from netkeep.services import budgets\nclass Job:\n    charge = budgets.consume\n",
     )
     for source in spellings:
         assert _calls(source, _CALLER, _CONSUME), source
 
 
 def test_an_import_alone_is_not_enforcement() -> None:
-    assert not _calls("from netkeeper.services.budgets import consume\n", _CALLER, _CONSUME)
+    assert not _calls("from netkeep.services.budgets import consume\n", _CALLER, _CONSUME)
 
 
 def test_pacing_is_enforced_by_the_plan_not_by_scrolling() -> None:
     """A job that plans its visits paces them; one that only scrolls pages does
     not, although ``scroll_like_a_person`` calls ``human_delay`` for its dwell."""
     planned = (
-        "from netkeeper.linkedin import pacing\n"
+        "from netkeep.linkedin import pacing\n"
         "def run(rng):\n"
         "    return pacing.plan_enrichment(rng, 10)\n"
     )
     scrolled = (
-        "from netkeeper.linkedin import pacing\n"
+        "from netkeep.linkedin import pacing\n"
         "async def sync(page, rng):\n"
         "    await pacing.scroll_like_a_person(page, rng)\n"
     )
@@ -1244,7 +1242,7 @@ def test_pacing_is_enforced_by_the_plan_not_by_scrolling() -> None:
 def test_human_like_pacing_is_keyed_on_the_plan_alone() -> None:
     """Keyed on a helper (``human_delay``), a scroll-only job would close the gap."""
     keys = {function for function, names in ENFORCED_BY.items() if "human-like pacing" in names}
-    assert keys == {"netkeeper.linkedin.pacing.plan_enrichment"}
+    assert keys == {"netkeep.linkedin.pacing.plan_enrichment"}
 
 
 def test_the_rehearsal_is_ignored_because_it_does_pace() -> None:
@@ -1252,14 +1250,14 @@ def test_the_rehearsal_is_ignored_because_it_does_pace() -> None:
     enrichment job itself (P2-07), and the job's ``plan_enrichment`` would mark
     human-like pacing as enforced by a live job the moment the CLI imported it.
 
-    ``rehearse.py`` is reached (``netkeeper rehearse``) but not followed, so the job
+    ``rehearse.py`` is reached (``netkeep rehearse``) but not followed, so the job
     it imports is not live on its account.
     """
     package = Path(browser_safety.PACKAGE)
     rehearse = package / "linkedin" / "rehearse.py"
     job = package / "linkedin" / "enrich.py"
     imported = {name for _, name in browser_safety.imported_names(rehearse.read_text(), rehearse)}
-    assert any(name.startswith("netkeeper.linkedin.enrich") for name in imported)
+    assert any(name.startswith("netkeep.linkedin.enrich") for name in imported)
     assert _calls(job.read_text(encoding="utf-8"), job, _PLAN)
     # Since P2-10 the worker makes the job live on its own account, so the
     # rehearsal's part is shown with the worker taken out of the walk.
@@ -1320,18 +1318,18 @@ def test_a_clean_report_claims_configuration_and_not_enforcement(
     assert "never callers" in text
     # P4-04 (#384): every budget now has a live caller, and the gap says so.
     covered = " ".join(text.split("not covered by this report:")[1].split())
-    assert "Every budget it lists has an enforcing caller that netkeeper runs." in covered
+    assert "Every budget it lists has an enforcing caller that netkeep runs." in covered
 
 
 def test_the_gap_lists_the_protections_nothing_enforces_yet(writer: Session, user: User) -> None:
     gaps = " ".join(_report(writer, user).gaps)
 
-    # Since P2-10 the runners and the scheduler are live (netkeeper.worker), since P4-08
+    # Since P2-10 the runners and the scheduler are live (netkeep.worker), since P4-08
     # the inbox poll's runner, since P4-03 the prefill's, and since P4-04 (#384) the same
     # runner spends li_messages_auto for an auto-send: nothing is left unwired.
     assert UNENFORCED_TODAY == ()
-    assert "no enforcing caller that netkeeper runs yet" not in gaps
-    assert "Every budget it lists has an enforcing caller that netkeeper runs." in gaps
+    assert "no enforcing caller that netkeep runs yet" not in gaps
+    assert "Every budget it lists has an enforcing caller that netkeep runs." in gaps
     unwired = ""
     for name in (
         "budget li_prefills",
@@ -1347,11 +1345,11 @@ def test_the_gap_lists_the_protections_nothing_enforces_yet(writer: Session, use
     assert "sync and enrichment runners are wired" in gaps
     assert "inbox poll's runner spends `inbox_polls`" in gaps
     assert "no page source yet" not in gaps
-    assert "`netkeeper serve`'s scheduler reach it" in gaps
+    assert "`netkeep serve`'s scheduler reach it" in gaps
 
 
-_CONNECTION_PAGES = f"{_CONSUME}[netkeeper.services.budgets.ActionClass.CONNECTION_PAGES]"
-_PROFILE_VISITS = f"{_CONSUME}[netkeeper.services.budgets.ActionClass.PROFILE_VISITS]"
+_CONNECTION_PAGES = f"{_CONSUME}[netkeep.services.budgets.ActionClass.CONNECTION_PAGES]"
+_PROFILE_VISITS = f"{_CONSUME}[netkeep.services.budgets.ActionClass.PROFILE_VISITS]"
 
 
 def test_a_budget_is_enforced_per_action_class() -> None:
@@ -1362,8 +1360,8 @@ def test_a_budget_is_enforced_per_action_class() -> None:
     spent one.
     """
     source = (
-        "from netkeeper.services import budgets\n"
-        "from netkeeper.services.budgets import ActionClass\n"
+        "from netkeep.services import budgets\n"
+        "from netkeep.services.budgets import ActionClass\n"
         "def page(session):\n"
         "    budgets.consume(session, ActionClass.CONNECTION_PAGES)\n"
     )
@@ -1373,7 +1371,7 @@ def test_a_budget_is_enforced_per_action_class() -> None:
 
 def test_a_named_action_class_without_consume_is_not_enforcement() -> None:
     source = (
-        "from netkeeper.services import budgets\n"
+        "from netkeep.services import budgets\n"
         "def page(session):\n"
         "    budgets.status(session, budgets.ActionClass.CONNECTION_PAGES)\n"
     )
@@ -1779,8 +1777,8 @@ def test_the_report_states_the_gaps_it_cannot_see(writer: Session, user: User) -
     gaps = " ".join(_report(writer, user).gaps)
 
     assert "scheduler" in gaps
-    assert "different NETKEEPER_DATA" in gaps, "the file lock's scope is stated"
-    assert "Deleting `locks/` or the file while netkeeper holds the browser" in gaps
+    assert "different NETKEEP_DATA" in gaps, "the file lock's scope is stated"
+    assert "Deleting `locks/` or the file while netkeep holds the browser" in gaps
     assert "only a manual `rm` can cause this" in gaps
     assert posture_module.GAPS  # a report with no gaps listed would pass the two above
 
@@ -1805,7 +1803,7 @@ def test_a_free_activity_lock_reads_as_free(writer: Session, user: User) -> None
 
 
 def test_a_held_activity_lock_names_its_holder(writer: Session, user: User) -> None:
-    """While `netkeeper serve` runs a job, posture says so -- by pid, from the lock itself."""
+    """While `netkeep serve` runs a job, posture says so -- by pid, from the lock itself."""
     claim = activity_lock.try_claim(activity_lock.SINGLE_ACCOUNT_KEY)
     assert claim is not None
     try:
@@ -1937,7 +1935,7 @@ def test_a_tripped_contact_info_breaker_warns(writer: Session, user: User) -> No
     assert len(row.warnings) == 1
     warning = row.warnings[0]
     assert "scheduled enrichment runs are skipped" in warning
-    assert "netkeeper linkedin enrich" in warning and "reset-breaker" in warning
+    assert "netkeep linkedin enrich" in warning and "reset-breaker" in warning
     assert not report.ok
 
 
@@ -1955,7 +1953,7 @@ def test_a_corrupt_contact_info_row_warns_unknown(writer: Session, user: User) -
 
 
 def _served_user(writer: Session) -> User:
-    """A user whose schedule is what ``netkeeper serve`` establishes: the served kinds."""
+    """A user whose schedule is what ``netkeep serve`` establishes: the served kinds."""
     user = _make_user(writer, schedule=False)
     sync_account_schedule(
         writer, user, ACCOUNT, now=NOW, schedules=SERVED_SCHEDULES, rng=random.Random(4), tz=ZONE
@@ -1989,7 +1987,7 @@ def test_a_missing_served_kind_is_off_and_says_what_that_means(writer: Session) 
     assert "enrich missing" in row.value and "inbox scheduled" in row.value
     [warning] = row.warnings
     assert "enrich: enrichment never runs on its own" in warning
-    assert "`netkeeper linkedin schedule arm`" in warning
+    assert "`netkeep linkedin schedule arm`" in warning
 
 
 def test_every_served_kind_has_a_meaning_when_missing() -> None:
@@ -2167,7 +2165,7 @@ def test_the_summary_shows_every_warning_and_leaves_the_details_out(
     assert "JOB" not in text and "not covered by this report" not in text
     assert "hard max" not in text
     assert (
-        "run `netkeeper posture --details` for 1 note, each row's detail, the schedule,"
+        "run `netkeep posture --details` for 1 note, each row's detail, the schedule,"
         " and what this report cannot see"
     ) in flat
     assert all(len(line) <= 88 for line in text.splitlines() if "--details" in line)
@@ -2222,7 +2220,7 @@ def test_the_next_campaign_send_names_the_soonest_and_the_serve_reminder(
     assert row.status is Status.ON and row.warnings == ()
     assert row.value.startswith("'Autumn' step 1 at ")
     assert f"({soonest:%Y-%m-%d %H:%M} UTC)" in row.value
-    assert "netkeeper sends only while `serve` is running and this Mac is awake." in row.value
+    assert "netkeep sends only while `serve` is running and this Mac is awake." in row.value
 
 
 def test_an_overdue_next_campaign_send_shows_where_it_will_really_go(
@@ -2361,7 +2359,7 @@ def test_a_tripped_inbox_breaker_warns_why_and_how_to_release_it(
     # No LinkedIn campaign here, so no hold applies and the warning claims none; the
     # linked text is tested where a LinkedIn campaign exists (test_inbox_poll.py).
     assert "inbox hold" not in warning
-    assert "netkeeper linkedin inbox" in warning and "releases the breaker" in warning
+    assert "netkeep linkedin inbox" in warning and "releases the breaker" in warning
     assert "reset-breaker" in warning
     assert not report.ok
 
@@ -2438,7 +2436,7 @@ def test_a_tripped_inbox_owner_breaker_names_the_recorded_owner_fix(
     assert "sign back in to yours" in warning
     assert (
         "otherwise click **Forget inbox owner** under Posture on the Settings page, or run"
-        " `netkeeper linkedin inbox-forget-owner`"
+        " `netkeep linkedin inbox-forget-owner`"
     ) in warning
     assert "releases the breaker" in warning and "reset-breaker" in warning
     assert not report.ok
@@ -2449,7 +2447,7 @@ def test_a_tripped_inbox_owner_breaker_names_the_recorded_owner_fix(
 def test_a_tripped_inbox_owner_breaker_names_the_self_contact_when_its_urn_is_set(
     writer: Session, user: User
 ) -> None:
-    from netkeeper.crm.self_contact import ensure_self_contact
+    from netkeep.crm.self_contact import ensure_self_contact
 
     ensure_self_contact(writer, user).li_urn = "urn:li:fsd_profile:INVENTED"
     _owner_mismatches(writer, user, 2)
@@ -2573,7 +2571,7 @@ def test_the_session_flag_fix_depends_on_the_outcome(writer: Session, user: User
     logged_out = _row(_report(writer, user, probe=None), "session flag").fix
 
     assert checkpoint is not None and "**Clear flag**" in checkpoint
-    assert logged_out is not None and "netkeeper preflight" in logged_out
+    assert logged_out is not None and "netkeep preflight" in logged_out
     assert "**Clear flag**" not in logged_out
 
 
@@ -2588,7 +2586,7 @@ def test_a_settings_read_failure_makes_the_row_a_problem_with_a_fix(
 
     assert hours.severity.value == other.severity.value == "problem"
     assert hours.fix == other.fix == posture_module.READ_FAILURE_FIX
-    assert "Restart `netkeeper serve`" in posture_module.READ_FAILURE_FIX
+    assert "Restart `netkeep serve`" in posture_module.READ_FAILURE_FIX
 
 
 def test_every_protection_construction_decides_its_fix() -> None:
@@ -2635,7 +2633,7 @@ def test_every_protection_construction_decides_its_fix() -> None:
     assert undecided == [], f"Protection(...) at lines {undecided} has no fix decision"
 
 
-FIXES_NAMING = re.compile(r"`netkeeper ([a-z-]+(?: [a-z-]+)*)")
+FIXES_NAMING = re.compile(r"`netkeep ([a-z-]+(?: [a-z-]+)*)")
 BOLD = re.compile(r"\*\*([^*]+)\*\*")
 
 
@@ -2687,7 +2685,7 @@ def test_every_command_a_fix_names_exists(writer: Session) -> None:
     """A fix that names a command which does not exist is worse than none."""
     import typer
 
-    from netkeeper.cli import app
+    from netkeep.cli import app
 
     root: Any = typer.main.get_command(app)
     seen = 0
@@ -2717,7 +2715,7 @@ def test_every_command_a_fix_names_exists(writer: Session) -> None:
 
 def test_every_page_or_button_a_fix_names_exists(writer: Session) -> None:
     """Each **bold** name is a button or a Settings field in the frontend source."""
-    from netkeeper.services.ui_settings import FIELDS
+    from netkeep.services.ui_settings import FIELDS
 
     root = Path(__file__).resolve().parent.parent / "frontend" / "src"
     source = "\n".join(
@@ -2756,7 +2754,7 @@ def test_render_prints_no_fix_for_a_clean_report(writer: Session, user: User) ->
 def test_severity_values_match_the_api_type() -> None:
     from typing import get_args
 
-    from netkeeper.web.schemas import SeverityName
+    from netkeep.web.schemas import SeverityName
 
     assert {severity.value for severity in posture_module.Severity} == set(get_args(SeverityName))
 

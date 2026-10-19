@@ -1,4 +1,4 @@
-"""netkeeper.linkedin.pacing: human-like pacing for the extractor, spec 9.5, item P2-04.
+"""netkeep.linkedin.pacing: human-like pacing for the extractor, spec 9.5, item P2-04.
 
 Two things this module has to get right, and that this file exists to prove:
 
@@ -30,7 +30,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from netkeeper.linkedin import pacing
+from netkeep.linkedin import pacing
 
 # 2026 US transitions in America/New_York: spring forward 2026-03-08 02:00 EST -> 03:00 EDT,
 # fall back 2026-11-01 02:00 EDT -> 01:00 EST. Used only by the next_window_start DST tests.
@@ -821,7 +821,7 @@ def test_plan_enrichment_same_seed_is_identical_across_processes() -> None:
     def run(seed: int) -> str:
         script = (
             "import random\n"
-            "from netkeeper.linkedin import pacing\n"
+            "from netkeep.linkedin import pacing\n"
             f"plan = pacing.plan_enrichment(random.Random({seed}), 25)\n"
             "print(repr(plan))\n"
         )

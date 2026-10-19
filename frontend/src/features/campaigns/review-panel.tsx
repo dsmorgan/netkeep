@@ -535,9 +535,9 @@ function TestSendSection({
         Each email step goes once to your own address, {to}, with a [Test] subject, filled in with
         your own details from Settings, About you, never a contact&apos;s. It never goes to a
         contact and counts toward no cap. Arm Gmail in Settings first. Armed for drafts, the test is
-        a draft in your Drafts, and netkeeper never sends it. Armed to send, it&apos;s sent to you.
-        A reply you send from your own mailbox isn&apos;t counted; to test reply detection, reply
-        from a different Gmail account.
+        a draft in your Drafts, and netkeep never sends it. Armed to send, it&apos;s sent to you. A
+        reply you send from your own mailbox isn&apos;t counted; to test reply detection, reply from
+        a different Gmail account.
       </p>
       {emailSteps.length === 0 ? (
         <p className="text-sm text-muted-foreground">No email steps, so no test send is needed.</p>

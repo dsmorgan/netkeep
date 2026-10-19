@@ -15,15 +15,15 @@ from local_api import LocalKey
 from sqlalchemy import Engine, delete, select
 from typer.testing import CliRunner
 
-from netkeeper import __version__, migrations
-from netkeeper.cli import app as cli
-from netkeeper.config import LinkedInSettings, Settings
-from netkeeper.db import make_session_factory
-from netkeeper.models import User, UserKind
-from netkeeper.services.local_api_key import LocalApiKey
-from netkeeper.web.api import health
-from netkeeper.web.app import API_PREFIX, create_app, discover_routers, openapi_json
-from netkeeper.worker import dev_app, serve_app
+from netkeep import __version__, migrations
+from netkeep.cli import app as cli
+from netkeep.config import LinkedInSettings, Settings
+from netkeep.db import make_session_factory
+from netkeep.models import User, UserKind
+from netkeep.services.local_api_key import LocalApiKey
+from netkeep.web.api import health
+from netkeep.web.app import API_PREFIX, create_app, discover_routers, openapi_json
+from netkeep.worker import dev_app, serve_app
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 API_PATHS = {
@@ -239,7 +239,7 @@ async def test_me_without_a_local_user_is_a_clear_500(
         session.commit()
     response = await client.get("/api/v1/me")
     assert response.status_code == 500
-    assert "netkeeper db upgrade" in response.json()["detail"]
+    assert "netkeep db upgrade" in response.json()["detail"]
 
 
 # --- lifespan ---------------------------------------------------------------
@@ -292,13 +292,13 @@ def test_dev_app_sets_up_logging_then_builds_the_app(
 ) -> None:
     """The --reload worker imports this factory without going through the CLI callback."""
     monkeypatch.chdir(tmp_path)  # no config.toml in reach
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", str(tmp_path / "no-dist"))
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", str(tmp_path / "no-dist"))
     root = logging.getLogger()
     before = list(root.handlers)
     try:
         app = dev_app()
         assert isinstance(app, FastAPI)
-        assert any(handler.get_name() == "netkeeper" for handler in root.handlers)
+        assert any(handler.get_name() == "netkeep" for handler in root.handlers)
     finally:
         root.handlers[:] = before
 
@@ -312,7 +312,7 @@ def test_serve_app_logs_the_profile_visit_risk_once_above_100_a_day(
     warns: bool,
 ) -> None:
     """#318: serve's startup says so once at WARNING; building the app attaches nothing."""
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", str(tmp_path / "no-dist"))
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", str(tmp_path / "no-dist"))
     base = Settings()
     settings = replace(
         base,
@@ -320,12 +320,12 @@ def test_serve_app_logs_the_profile_visit_risk_once_above_100_a_day(
             base.linkedin, budget=replace(base.linkedin.budget, profile_visits_per_day=per_day)
         ),
     )
-    with caplog.at_level(logging.WARNING, logger="netkeeper.worker"):
+    with caplog.at_level(logging.WARNING, logger="netkeep.worker"):
         serve_app(settings)
     risk = [
         record
         for record in caplog.records
-        if record.name == "netkeeper.worker" and "Profile visits are set to" in record.getMessage()
+        if record.name == "netkeep.worker" and "Profile visits are set to" in record.getMessage()
     ]
     if warns:
         assert len(risk) == 1 and risk[0].levelno == logging.WARNING
@@ -345,18 +345,18 @@ def test_serve_app_logs_the_linkedin_message_risk_once_above_20_a_day(
     warns: bool,
 ) -> None:
     """#447: serve's startup logs a message budget above 20 a day once, per budget."""
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", str(tmp_path / "no-dist"))
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", str(tmp_path / "no-dist"))
     base = Settings()
     settings = replace(
         base,
         linkedin=replace(base.linkedin, budget=replace(base.linkedin.budget, **{field: per_day})),
     )
-    with caplog.at_level(logging.WARNING, logger="netkeeper.worker"):
+    with caplog.at_level(logging.WARNING, logger="netkeep.worker"):
         serve_app(settings)
     risk = [
         r
         for r in caplog.records
-        if r.name == "netkeeper.worker" and "a day, above 20 a day" in r.getMessage()
+        if r.name == "netkeep.worker" and "a day, above 20 a day" in r.getMessage()
     ]
     if warns:
         assert len(risk) == 1 and risk[0].levelno == logging.WARNING
@@ -478,10 +478,10 @@ async def test_serves_the_built_frontend(
 ) -> None:
     dist = tmp_path / "dist"
     (dist / "assets").mkdir(parents=True)
-    (dist / "index.html").write_text("<!doctype html><title>netkeeper</title>")
+    (dist / "index.html").write_text("<!doctype html><title>netkeep</title>")
     (dist / "assets" / "app.js").write_text("console.log(1)")
     (dist / "favicon.svg").write_text("<svg/>")
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", str(dist))
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", str(dist))
     app = create_app(Settings(), engine=bare_engine)
 
     async with _static_client(app) as client:
@@ -489,7 +489,7 @@ async def test_serves_the_built_frontend(
             response = await client.get(path)
             assert response.status_code == 200, path
             assert response.headers["content-type"].startswith("text/html")
-            assert response.text == "<!doctype html><title>netkeeper</title>"
+            assert response.text == "<!doctype html><title>netkeep</title>"
 
         asset = await client.get("/assets/app.js")
         assert asset.status_code == 200
@@ -541,7 +541,7 @@ def test_openapi_export_writes_the_app_schema(tmp_path: Path) -> None:
     parsed = json.loads(text)
     assert list(parsed) == sorted(parsed)
     assert parsed["info"] == {
-        "title": "netkeeper",
+        "title": "netkeep",
         "version": __version__,
         "description": "Keep your professional network warm.",
     }
@@ -559,9 +559,9 @@ async def test_built_frontend_never_serves_files_outside_dist(
 ) -> None:
     dist = tmp_path / "dist"
     (dist / "assets").mkdir(parents=True)
-    (dist / "index.html").write_text("<!doctype html><title>netkeeper</title>")
+    (dist / "index.html").write_text("<!doctype html><title>netkeep</title>")
     (tmp_path / "secret.txt").write_text("OUTSIDE-DIST-MARKER")
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", str(dist))
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", str(dist))
     app = create_app(Settings(), engine=bare_engine)
 
     attempts = (
@@ -577,7 +577,7 @@ async def test_built_frontend_never_serves_files_outside_dist(
             response = await client.get(path)
             # A rejected path is a 404; a path that normalizes to an SPA route gets the
             # index page. Either way nothing outside dist is ever served.
-            served_index = response.text == "<!doctype html><title>netkeeper</title>"
+            served_index = response.text == "<!doctype html><title>netkeep</title>"
             assert response.status_code in (400, 404) or served_index, path
             assert "OUTSIDE-DIST-MARKER" not in response.text, path
 
@@ -594,7 +594,7 @@ def _fake_build(path: Path) -> Path:
 def test_frontend_dist_prefers_the_override_then_the_packaged_build(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from netkeeper.web import frontend
+    from netkeep.web import frontend
 
     packaged = _fake_build(tmp_path / "ui")
     monkeypatch.setattr(frontend, "PACKAGED_DIST", packaged)
@@ -609,7 +609,7 @@ def test_frontend_dist_prefers_the_override_then_the_packaged_build(
 def test_frontend_dist_falls_back_to_the_dev_checkout_build(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from netkeeper.web import frontend
+    from netkeep.web import frontend
 
     monkeypatch.setattr(frontend, "PACKAGED_DIST", tmp_path / "no-ui")
     monkeypatch.delenv(frontend.FRONTEND_DIST_ENV, raising=False)
@@ -619,7 +619,7 @@ def test_frontend_dist_falls_back_to_the_dev_checkout_build(
 async def test_packaged_build_is_served_and_missing_both_says_how_to_build(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bare_engine: Engine
 ) -> None:
-    from netkeeper.web import frontend
+    from netkeep.web import frontend
 
     packaged = _fake_build(tmp_path / "ui")
     monkeypatch.setattr(frontend, "PACKAGED_DIST", packaged)

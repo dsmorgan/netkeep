@@ -339,7 +339,7 @@ export function startOptions(overrides: Partial<StartOptions> = {}): StartOption
     default_start: DEFAULT_START,
     suggestion: 'Most effective: Tue–Thu mornings.',
     reminder:
-      'netkeeper sends only while `serve` is running and this Mac is awake. Keep it running from the start time until the batch finishes.',
+      'netkeep sends only while `serve` is running and this Mac is awake. Keep it running from the start time until the batch finishes.',
     sending_hours:
       'Sending hours: Mon to Fri, 09:00 to 17:00. The first batch starts at the start you choose; the rest of it, and every later step, sends only inside these hours.',
     at: null,

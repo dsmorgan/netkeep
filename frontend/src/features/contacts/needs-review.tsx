@@ -1,8 +1,8 @@
 /**
- * A contact netkeeper read off a card on the LinkedIn connections page (#184).
+ * A contact netkeep read off a card on the LinkedIn connections page (#184).
  *
  * When LinkedIn's own data is unavailable, the connections sync reads the page
- * instead, and a card for somebody netkeeper has never seen becomes a contact
+ * instead, and a card for somebody netkeep has never seen becomes a contact
  * marked needs review. The card's name and headline are all it has, and nothing
  * confirms the card is who its link says, so the contact waits: never enriched,
  * never put in a campaign, never counted as a connection, until the person
@@ -79,11 +79,10 @@ export function NeedsReviewNotice({
       className="flex flex-col gap-2 rounded-lg bg-muted/60 px-3 py-2 text-sm ring-1 ring-foreground/10"
     >
       <p>
-        <span className="font-medium">Needs review.</span> netkeeper created this contact from a
-        card on your LinkedIn connections page, read while LinkedIn&apos;s own data was unavailable.
-        The name and headline are what the card showed. Until you confirm it, or a later sync
-        matches it, netkeeper won&apos;t enrich it, add it to a campaign, or count it as a
-        connection.
+        <span className="font-medium">Needs review.</span> netkeep created this contact from a card
+        on your LinkedIn connections page, read while LinkedIn&apos;s own data was unavailable. The
+        name and headline are what the card showed. Until you confirm it, or a later sync matches
+        it, netkeep won&apos;t enrich it, add it to a campaign, or count it as a connection.
       </p>
       {archived && (
         <p className="text-muted-foreground">

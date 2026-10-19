@@ -12,7 +12,7 @@ function message(error: unknown): string {
 }
 
 /**
- * The Gmail background checks `netkeeper serve` runs (#401): the reply poll and the
+ * The Gmail background checks `netkeep serve` runs (#401): the reply poll and the
  * drafts poll, each with its interval, when it last ran and runs next, and why it
  * cannot when it cannot (a blocked mailbox, a locked Keychain, `serve` not running).
  * Read from `GET /poll-status`, which never starts a check. **Check now** (#409) asks
@@ -29,7 +29,7 @@ export function ReplyPollCard() {
       <CardHeader>
         <CardTitle level={2}>Reply poll</CardTitle>
         <CardDescription>
-          How netkeeper finds replies, and keeps track of the drafts it made.
+          How netkeep finds replies, and keeps track of the drafts it made.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
@@ -37,7 +37,7 @@ export function ReplyPollCard() {
         {status.isError && <p role="alert">{message(status.error)}</p>}
         {status.isSuccess && !status.data.background_running && (
           <p role="note" className="rounded-lg bg-warn-soft px-3 py-2 text-warn-ink">
-            netkeeper serve isn’t running, so nothing is checked in the background.
+            netkeep serve isn’t running, so nothing is checked in the background.
           </p>
         )}
         {status.isSuccess && checks.length === 0 && (

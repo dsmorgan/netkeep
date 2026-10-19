@@ -473,7 +473,7 @@ function ModePicker({
       <legend className="text-sm font-medium">Mode</legend>
       {value === null && (
         <p className="text-xs text-muted-foreground">
-          Pick one. netkeeper doesn&apos;t pick a mode for you.
+          Pick one. netkeep doesn&apos;t pick a mode for you.
         </p>
       )}
       {modes.map((m) => (

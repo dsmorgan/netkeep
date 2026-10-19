@@ -23,7 +23,7 @@ const LINKEDIN_STEP: Campaign['steps'][number] = {
 }
 
 const CONFIRM_TEXT =
-  "netkeeper sends this step's messages itself, within your active hours, spacing and budget."
+  "netkeep sends this step's messages itself, within your active hours, spacing and budget."
 
 function preview(overrides: Partial<StepModePreview> = {}): StepModePreview {
   return {

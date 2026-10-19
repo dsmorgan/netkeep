@@ -1,4 +1,4 @@
-"""How the Chrome launcher is reached (#636): ``serve``'s wiring, the route, ``netkeeper open``.
+"""How the Chrome launcher is reached (#636): ``serve``'s wiring, the route, ``netkeep open``.
 
 The launcher's own checks and arguments are in ``tests/test_chrome_spawn.py``; this file
 covers its callers. Fakes only: no test starts Chrome or knocks on a port.
@@ -20,28 +20,28 @@ from fastapi import FastAPI
 from isolation.harness import FixedUser
 from typer.testing import CliRunner
 
-from netkeeper import chrome_spawn, worker
-from netkeeper import cli as cli_module
-from netkeeper.chrome_spawn import ChromeLaunch, ChromeLauncher
-from netkeeper.cli import app as cli
-from netkeeper.config import Settings
-from netkeeper.db import session_scope
-from netkeeper.linkedin import activity_lock
-from netkeeper.linkedin.browser import ActivityLocks, AttachBrowserProvider
-from netkeeper.models import UserKind
-from netkeeper.paths import data_dir
-from netkeeper.services import runs
-from netkeeper.services.chrome_launch import (
+from netkeep import chrome_spawn, worker
+from netkeep import cli as cli_module
+from netkeep.chrome_spawn import ChromeLaunch, ChromeLauncher
+from netkeep.cli import app as cli
+from netkeep.config import Settings
+from netkeep.db import session_scope
+from netkeep.linkedin import activity_lock
+from netkeep.linkedin.browser import ActivityLocks, AttachBrowserProvider
+from netkeep.models import UserKind
+from netkeep.paths import data_dir
+from netkeep.services import runs
+from netkeep.services.chrome_launch import (
     LAUNCH_EVENT,
     LaunchResult,
     LaunchStatus,
     PortProbe,
     Refusal,
 )
-from netkeeper.services.events import Event
-from netkeeper.worker import launcher_probe, serve_app
+from netkeep.services.events import Event
+from netkeep.worker import launcher_probe, serve_app
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 START = "/api/v1/linkedin/browser/start"
 CDP_URL = "http://127.0.0.1:9333"
 
@@ -206,7 +206,7 @@ async def test_the_route_refuses_unknown_fields(
     assert response.status_code == 422
 
 
-# --- netkeeper open ---------------------------------------------------------------------
+# --- netkeep open ---------------------------------------------------------------------
 
 
 @dataclass
@@ -233,10 +233,10 @@ def _config(tmp_path: Path) -> list[str]:
     return ["--config", str(config)]
 
 
-def test_netkeeper_open_opens_the_ui_in_netkeepers_chrome(
+def test_netkeep_open_opens_the_ui_in_netkeeps_chrome(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # netkeeper's Chrome is up: this test process stands in for it, holding the profile.
+    # netkeep's Chrome is up: this test process stands in for it, holding the profile.
     chrome = os.getpid()
     profile = data_dir() / "chrome-profile"
     profile.mkdir(parents=True)
@@ -251,7 +251,7 @@ def test_netkeeper_open_opens_the_ui_in_netkeepers_chrome(
     monkeypatch.setattr(cli_module, "launcher_probe", probe)
     result = CliRunner().invoke(cli, [*_config(tmp_path), "open", "--port", "8125"])
     assert result.exit_code == 0, result.output
-    assert "opened the UI in netkeeper's Chrome on port 9333" in result.output
+    assert "opened the UI in netkeep's Chrome on port 9333" in result.output
     [launch] = spawned.launches
     assert launch.port == 9333 and not launch.first_run
     assert launch.profile == data_dir() / "chrome-profile"
@@ -261,7 +261,7 @@ def test_netkeeper_open_opens_the_ui_in_netkeepers_chrome(
     assert link != launch.app_url and link.startswith("http://127.0.0.1:8125/")
 
 
-def test_netkeeper_open_says_why_it_refused_and_still_prints_the_link(
+def test_netkeep_open_says_why_it_refused_and_still_prints_the_link(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     spawned = _Spawned()
@@ -279,7 +279,7 @@ def test_netkeeper_open_says_why_it_refused_and_still_prints_the_link(
     assert spawned.launches == []
 
 
-def test_netkeeper_open_link_only_starts_nothing() -> None:
+def test_netkeep_open_link_only_starts_nothing() -> None:
     # conftest's blocked spawn_chrome and port_answers would raise if either ran.
     result = CliRunner().invoke(cli, ["open", "--link-only"])
     assert result.exit_code == 0, result.output
@@ -385,7 +385,7 @@ async def test_a_busy_legacy_lock_never_trusts_a_note_left_on_the_free_account_l
     # A crash left a note naming a Chrome on the account's lock file; nobody holds it.
     activity_lock.lock_path(key, tmp_path).parent.mkdir(parents=True, exist_ok=True)
     activity_lock.lock_path(key, tmp_path).write_text(
-        '{"pid": 1, "command": "netkeeper serve", "browser_pid": 4242}'
+        '{"pid": 1, "command": "netkeep serve", "browser_pid": 4242}'
     )
     legacy = activity_lock.try_claim(activity_lock.LEGACY_SHARED_KEY, tmp_path)
     assert legacy is not None
@@ -408,7 +408,7 @@ async def test_a_busy_legacy_lock_never_trusts_a_note_left_on_the_free_account_l
         (21, 1, "Chrome refused the hand-off: the profile is in use"),
     ],
 )
-def test_netkeeper_open_exits_by_what_the_hand_off_showed(
+def test_netkeep_open_exits_by_what_the_hand_off_showed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, exits: int, code: int, words: str
 ) -> None:
     chrome = os.getpid()

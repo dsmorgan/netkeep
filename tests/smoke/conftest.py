@@ -1,7 +1,7 @@
 """Make a stalled smoke test fail instead of hanging the terminal.
 
 Every test in this directory drives a real Chrome, and a real Chrome can stop
-answering without closing the connection. The likeliest case is a netkeeper
+answering without closing the connection. The likeliest case is a netkeep
 window that is minimized or fully covered: Chrome stops rendering it, and a
 test waiting on a scroll or a paint waits forever. The offline suite cannot
 hang this way, and nothing in pytest's default setup turns a stall into a
@@ -34,8 +34,8 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from netkeeper.paths import data_dir
-from netkeeper.services.browser_launch import CHROME_PROFILE_DIRNAME
+from netkeep.paths import data_dir
+from netkeep.services.browser_launch import CHROME_PROFILE_DIRNAME
 
 if TYPE_CHECKING:
     from _pytest.capture import CaptureManager
@@ -46,7 +46,7 @@ SMOKE_TEST_TIMEOUT_S = 60.0
 SMOKE_BACKSTOP_S = 120.0
 
 _STALLED = (
-    "did not finish within {limit:.0f}s. The usual cause is the netkeeper Chrome "
+    "did not finish within {limit:.0f}s. The usual cause is the netkeep Chrome "
     "window being minimized or covered: Chrome stops rendering it, and a test waiting "
     "on a real scroll waits forever. Bring that window to the front and run the suite again."
 )
@@ -94,19 +94,19 @@ def _blocked(name: str, capture: CaptureManager | None) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _isolated_profile(_clean_netkeeper_env: None) -> None:
+def _isolated_profile(_clean_netkeep_env: None) -> None:
     """Point each test's dedicated profile at the isolated Chrome's own (#624).
 
     Every attach refuses a Chrome that doesn't hold ``<data dir>/chrome-profile``, and
-    the data directory is a fresh one per test. ``NETKEEPER_SMOKE_PROFILE`` names the
+    the data directory is a fresh one per test. ``NETKEEP_SMOKE_PROFILE`` names the
     isolated Chrome's ``--user-data-dir``; the test's profile becomes a link to it. Unset,
     the test skips and says so, since every attach would be refused.
     """
-    isolated = os.environ.get("NETKEEPER_SMOKE_PROFILE")
+    isolated = os.environ.get("NETKEEP_SMOKE_PROFILE")
     if not isolated:
         pytest.skip(
-            "set NETKEEPER_SMOKE_PROFILE to the isolated Chrome's --user-data-dir: every"
-            " attach refuses a Chrome that isn't netkeeper's dedicated profile (#624)"
+            "set NETKEEP_SMOKE_PROFILE to the isolated Chrome's --user-data-dir: every"
+            " attach refuses a Chrome that isn't netkeep's dedicated profile (#624)"
         )
     profile = data_dir() / CHROME_PROFILE_DIRNAME
     profile.parent.mkdir(parents=True, exist_ok=True)
