@@ -83,6 +83,23 @@ def test_runs_on_a_version_tag_or_by_hand_only(release: dict[str, Any]) -> None:
     assert on["workflow_dispatch"] is None
 
 
+def test_dry_runs_and_tag_runs_queue_apart(release: dict[str, Any]) -> None:
+    # Keyed on the event: a manual dry run can't cancel or displace a pending tag run,
+    # and no run is cancelled halfway through publishing.
+    assert release["concurrency"] == {
+        "group": "release-${{ github.event_name }}",
+        "cancel-in-progress": False,
+    }
+
+
+def test_no_expression_is_spliced_into_a_shell_step(jobs: dict[str, dict[str, Any]]) -> None:
+    # Values reach `run:` through `env:` only, so nothing a tag name or another input
+    # carries can become shell text (template injection).
+    for name, job in jobs.items():
+        for step in _steps(job):
+            assert "${{" not in str(step.get("run", "")), (name, step.get("name"))
+
+
 def test_nothing_has_write_access_by_default(release: dict[str, Any]) -> None:
     assert release["permissions"] == {}
 
@@ -367,3 +384,11 @@ def test_the_install_smoke_is_a_pinned_uv_tool_install_on_scratch_paths() -> Non
         assert f'export {variable}="$work/' in script, variable
     assert '"$netkeep" version' in script
     assert '"$netkeep" config show' in script
+    assert '"$netkeep" db upgrade' in script
+
+
+def test_the_install_smoke_checks_the_cryptography_side_for_the_machine() -> None:
+    script = (ROOT / "scripts" / "smoke-tool-install.sh").read_text(encoding="utf-8")
+    assert 'if [ "$(uname -s)" = Darwin ] && [ "$machine" = x86_64 ]; then' in script
+    assert '[ "$crypto_major" -lt 49 ] ||' in script
+    assert '[ "$crypto_major" -ge 49 ] ||' in script
