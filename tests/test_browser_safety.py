@@ -2837,15 +2837,44 @@ def test_the_identity_read_reaches_only_its_pinned_transport_calls() -> None:
 IDENTITY_TRANSPORT_FILE = Path(__file__).parent / "identity_read_transport.txt"
 
 
+#: The functions the whole-function pin holds: the two transports, and the two checks
+#: that decide what they read (the answer's length, and which websocket is opened).
+IDENTITY_PINNED_FUNCTIONS = frozenset(
+    {"_browser_websocket_url", "_read_process_info", "_ok_content_length", "_is_browser_websocket"}
+)
+
+
 def identity_transport_source(source: str) -> str:
-    """The two transport functions in ``source``, normalized, in file order."""
+    """The pinned functions in ``source``, normalized, in file order.
+
+    A module-level name bound twice (a second ``def``, a class, an assignment or an
+    import of the same name) prints a marker line, so a later definition that would
+    replace the pinned one at import time fails the pin too."""
     printed = []
+    bound: dict[str, int] = {}
     for node in parse(source).body:
-        if isinstance(node, ast.AsyncFunctionDef) and node.name in IDENTITY_TRANSPORT_REACHES:
+        names: list[str] = []
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            names = [node.name]
+        elif isinstance(node, ast.Assign | ast.AnnAssign | ast.AugAssign):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            names = [n.id for t in targets for n in walk(t) if isinstance(n, ast.Name)]
+        elif isinstance(node, ast.Import | ast.ImportFrom):
+            names = [(a.asname or a.name).split(".")[0] for a in node.names]
+        for name in names:
+            if name in IDENTITY_PINNED_FUNCTIONS:
+                bound[name] = bound.get(name, 0) + 1
+                if bound[name] > 1:
+                    printed.append(f"# {name} is bound a second time")
+        if (
+            isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+            and node.name in IDENTITY_PINNED_FUNCTIONS
+            and bound[node.name] == 1
+        ):
             body = node.body
             if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
                 body = body[1:]
-            printed.append(ast.unparse(ast.AsyncFunctionDef(**{**vars(node), "body": body})))
+            printed.append(ast.unparse(type(node)(**{**vars(node), "body": body})))
     return "\n\n".join(printed) + "\n"
 
 
@@ -2916,6 +2945,39 @@ def test_the_whole_function_pin_catches_a_change_the_reach_pin_cant(old: str, ne
     )
 
 
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ('if name.strip().lower() == "transfer-encoding":', "if False:"),
+        ("return length if length <= IDENTITY_READ_MAX_BYTES else None", "return length"),
+        ("and parts.netloc == netloc", "and True"),
+        ('r"/devtools/browser/[A-Za-z0-9-]+"', 'r"/devtools/.+"'),
+    ],
+)
+def test_the_whole_function_pin_holds_the_two_checks(old: str, new: str) -> None:
+    source = read_source(LINKEDIN / "browser.py")
+    assert source.count(old) == 1, old
+    assert identity_transport_source(source.replace(old, new, 1)) != (
+        IDENTITY_TRANSPORT_FILE.read_text()
+    )
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "def _ok_content_length(head: str) -> int | None:\n    return 0\n",
+        "async def _read_process_info(ws_url: str) -> object:\n    return None\n",
+        "def _is_browser_websocket(ws_url: str, netloc: str) -> bool:\n    return True\n",
+        "_browser_websocket_url = None\n",
+        "class _read_process_info:\n    pass\n",
+        "from os import path as _is_browser_websocket\n",
+    ],
+)
+def test_the_whole_function_pin_catches_a_second_definition(line: str) -> None:
+    source = read_source(LINKEDIN / "browser.py") + "\n\n" + line
+    assert identity_transport_source(source) != IDENTITY_TRANSPORT_FILE.read_text()
+
+
 def test_the_whole_function_pin_ignores_docstrings_and_comments() -> None:
     source = read_source(LINKEDIN / "browser.py")
     anchor = "    from websockets.asyncio.client import connect\n"
@@ -2958,6 +3020,14 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
     for path, source in sources.items():
         tree = parse(source)
         scopes = _scoped(tree)
+        # Every name the socket module is bound to here: ``import socket as _s`` too.
+        modules = {"socket"} | {
+            alias.asname
+            for node in walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+            if alias.name == "socket" and alias.asname
+        }
         for node in walk(tree):
             where = scopes.get(id(node), "")
             if isinstance(node, ast.Attribute):
@@ -2966,7 +3036,7 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
                 elif (
                     node.attr == "socket"
                     and isinstance(node.value, ast.Name)
-                    and node.value.id == "socket"
+                    and node.value.id in modules
                 ):
                     add(path, where, "socket.socket")
             elif isinstance(node, ast.ImportFrom):
@@ -2981,6 +3051,13 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
                         for part in arg.value.split("."):
                             if part in RAW_CONNECTION_NAMES:
                                 add(path, where, part)
+                        held = node.args[0] if node.args else None
+                        if (
+                            "socket" in arg.value.split(".")
+                            and isinstance(held, ast.Name)
+                            and held.id in modules
+                        ):
+                            add(path, where, "socket.socket")
     return found
 
 
@@ -3003,6 +3080,10 @@ def test_only_the_reviewed_sites_open_a_raw_connection() -> None:
         "async def f(loop, s):\n    await loop.sock_connect(s, ('127.0.0.1', 1))\n",
         "async def f(loop):\n    await loop.create_connection(object, '127.0.0.1', 1)\n",
         "import asyncio\nopener = getattr(asyncio, 'open_connection')\n",
+        "import socket as _s\nconn = _s.socket()\n",
+        "from socket import socket as S\n",
+        "from socket import *\n",
+        "import socket as _s\nmade = getattr(_s, 'socket')\n",
     ],
 )
 def test_the_raw_connection_pin_catches_a_new_opener(line: str) -> None:
