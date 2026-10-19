@@ -579,7 +579,7 @@ def walk(tree: ast.AST) -> tuple[ast.AST, ...]:
 
 def clear_caches() -> None:
     """Drop every read file, parsed tree, tree walk and scope map."""
-    for cached in (read_source, _parse_cached, _walk_cached, _scoped):
+    for cached in (read_source, _parse_cached, _walk_cached, _scoped, _reader_aliases):
         cached.cache_clear()
 
 
@@ -647,7 +647,7 @@ def reached_names(source: str, path: Path = MEMORY) -> Iterator[tuple[int, str]]
             for alias in node.names:
                 yield node.lineno, alias.name
         elif isinstance(node, ast.Call):
-            for arg in _attribute_name_arguments(node):
+            for arg in _attribute_name_arguments(node, _reader_aliases(parse(source))):
                 if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                     for part in arg.value.split("."):
                         yield node.lineno, part
@@ -656,15 +656,40 @@ def reached_names(source: str, path: Path = MEMORY) -> Iterator[tuple[int, str]]
                 yield node.lineno, attr
 
 
-def _attribute_name_arguments(node: ast.Call) -> list[ast.expr]:
+@cache
+def _reader_aliases(tree: ast.AST) -> dict[str, str]:
+    """The local names a ``from`` import binds to an attribute reader, renamed or not:
+    ``from operator import attrgetter as ag`` maps ``ag`` to ``attrgetter`` (#673 review).
+    Cached per tree, and the result is shared: read it, never write to it."""
+    return {
+        alias.asname or alias.name: alias.name
+        for node in walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+        if alias.name in DYNAMIC_ATTRIBUTE_READERS
+    }
+
+
+def _reader_name(node: ast.Call, aliases: dict[str, str] | None = None) -> str | None:
+    """The reader a call names: its attribute or bare name, through a ``from`` alias."""
+    func = node.func
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    name = getattr(func, "id", None)
+    return (aliases or {}).get(name, name) if isinstance(name, str) else None
+
+
+def _attribute_name_arguments(
+    node: ast.Call, aliases: dict[str, str] | None = None
+) -> list[ast.expr]:
     """The arguments that name an attribute, for the calls that take one by string.
 
     ``getattr(obj, "name", default)`` names it second and only second;
     ``operator.methodcaller("name", *args)`` names it first; ``attrgetter`` takes
-    any number, each possibly dotted (``attrgetter("chromium.launch")``).
+    any number, each possibly dotted (``attrgetter("chromium.launch")``). ``aliases``
+    (:func:`_reader_aliases`) reads a reader imported under another name as itself.
     """
-    func = node.func
-    name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+    name = _reader_name(node, aliases)
     if name in ("getattr", "getattr_static"):
         return node.args[1:2]
     if name == "methodcaller":
@@ -684,16 +709,17 @@ DYNAMIC_ATTRIBUTE_READERS = frozenset(
 
 def _dynamic_attribute_nodes(tree: ast.AST) -> Iterator[tuple[ast.AST, str]]:
     """Each node of :func:`dynamic_attribute_reads`, with what is wrong with it."""
+    aliases = _reader_aliases(tree)
     called: set[int] = set()
     for node in walk(tree):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
-        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+        name = _reader_name(node, aliases)
         if name not in DYNAMIC_ATTRIBUTE_READERS:
             continue
         called.add(id(func))
-        names = _attribute_name_arguments(node)
+        names = _attribute_name_arguments(node, _reader_aliases(tree))
         literal = [a for a in names if isinstance(a, ast.Constant) and isinstance(a.value, str)]
         starred = any(isinstance(a, ast.Starred) for a in node.args)
         if name == "__getattribute__":
@@ -705,7 +731,10 @@ def _dynamic_attribute_nodes(tree: ast.AST) -> Iterator[tuple[ast.AST, str]]:
     for node in walk(tree):
         if id(node) in called:
             continue
-        if isinstance(node, ast.Name) and node.id in DYNAMIC_ATTRIBUTE_READERS:
+        if (
+            isinstance(node, ast.Name)
+            and aliases.get(node.id, node.id) in DYNAMIC_ATTRIBUTE_READERS
+        ):
             yield node, f"{node.id} held, not called"
         elif isinstance(node, ast.Attribute) and node.attr in DYNAMIC_ATTRIBUTE_READERS:
             yield node, f"{node.attr} held, not called"
@@ -808,6 +837,7 @@ DYNAMIC_ATTRIBUTES = frozenset(
         "get_objects",
         "get_referrers",
         "getmembers",
+        "get_field",
         "getmembers_static",
         "globals",
         "import_from_string",
@@ -885,6 +915,10 @@ ALLOWED_DYNAMIC_ACCESS: dict[tuple[Path, str, str], int] = {
     (PACKAGE / "crm" / "triage.py", "_snapshot", COMPUTED_GETATTR): 1,
     (PACKAGE / "services" / "field_changes.py", "field_changes", COMPUTED_GETATTR): 2,
     (PACKAGE / "web" / "api" / "contacts.py", "_detail", COMPUTED_GETATTR): 1,
+    # The one fed from a request: the names are the body's `columns`, validated as
+    # `list[ContactColumn]` (a Literal of scalar columns), so Pydantic refuses a method
+    # name before it gets here; the value is read and never called. Loosening that type
+    # must come through review.
     (PACKAGE / "web" / "api" / "contacts.py", "_row", COMPUTED_GETATTR): 1,
 }
 
@@ -905,8 +939,13 @@ def dynamic_access(source: str, path: Path = MEMORY) -> Iterator[Input]:
       string the package hands it, through a helper not named above; and the processes a
       dependency starts itself (Playwright's own driver).
     - **A string read as an attribute path by a formatter or a template**:
-      ``"{0.create_subprocess_exec}".format(asyncio)``. Templates go through
+      ``"{0.create_subprocess_exec}".format(asyncio)``. ``str.format`` only stringifies
+      what it reads, so it hands back no object to call; ``string.Formatter`` and its
+      ``get_field``, which do, are refused above. Templates go through
       ``campaigns/render.py``'s sandbox, which refuses attribute access.
+    - **A positional ``match`` class pattern** whose class has a custom
+      ``__instancecheck__`` and a built ``__match_args__``. Defining that class is
+      itself heavy, deliberate obfuscation a review reads.
     - **A write by a computed name**: ``setattr(obj, name, value)``. It reaches nothing
       by itself; the launcher reads it would need are pinned
       (:func:`launcher_flow_problems`).
@@ -929,12 +968,27 @@ def dynamic_access(source: str, path: Path = MEMORY) -> Iterator[Input]:
             for alias in node.names:
                 if alias.name in DYNAMIC_ATTRIBUTES | DYNAMIC_BUILTINS:
                     yield Input(path, node.lineno, where, f".{alias.name}")
+                # A reader imported by name (#673 review): every later call is a bare
+                # name the call checks would otherwise read as something else.
+                if alias.name in DYNAMIC_ATTRIBUTE_READERS:
+                    yield Input(path, node.lineno, where, f"from-imports {alias.name}")
+                if base == "string" and alias.name == "Formatter":
+                    yield Input(path, node.lineno, where, ".Formatter")
         elif isinstance(node, ast.Name) and node.id in DYNAMIC_BUILTINS:
             yield Input(path, node.lineno, where, node.id)
         elif isinstance(node, ast.Attribute) and node.attr in DYNAMIC_ATTRIBUTES:
             yield Input(path, node.lineno, where, f".{node.attr}")
+        elif (
+            isinstance(node, ast.Attribute)
+            and node.attr == "Formatter"
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "string"
+        ):
+            # ``string.Formatter().get_field("0.sys" + "tem", (os,), {})`` hands back the
+            # live attribute. Only the ``string`` one: ``logging.Formatter`` is a log format.
+            yield Input(path, node.lineno, where, ".Formatter")
         elif isinstance(node, ast.Call):
-            for arg in _attribute_name_arguments(node):
+            for arg in _attribute_name_arguments(node, _reader_aliases(tree)):
                 if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                     for part in arg.value.split("."):
                         if part in DYNAMIC_ATTRIBUTES:
@@ -1175,7 +1229,7 @@ def page_inputs(
                 if alias.name in names:
                     yield Input(path, node.lineno, where, alias.name)
         elif isinstance(node, ast.Call):
-            for arg in _attribute_name_arguments(node):
+            for arg in _attribute_name_arguments(node, _reader_aliases(tree)):
                 if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                     for part in arg.value.split("."):
                         if part in names:
@@ -2337,7 +2391,7 @@ def cdp_sends(source: str, path: Path = MEMORY) -> Iterator[CdpSend]:
             )
             yield CdpSend(where, method, _param_keys(call.args[1:2]))
         elif isinstance(node, ast.Call):
-            for arg in _attribute_name_arguments(node):
+            for arg in _attribute_name_arguments(node, _reader_aliases(tree)):
                 if (
                     isinstance(arg, ast.Constant)
                     and isinstance(arg.value, str)
@@ -2445,7 +2499,7 @@ def name_reaches(source: str, name: str, path: Path = MEMORY) -> Iterator[tuple[
                 if alias.name == name:
                     yield Input(path, node.lineno, where, name), False
         elif isinstance(node, ast.Call):
-            for arg in _attribute_name_arguments(node):
+            for arg in _attribute_name_arguments(node, _reader_aliases(tree)):
                 if (
                     isinstance(arg, ast.Constant)
                     and isinstance(arg.value, str)
@@ -2902,6 +2956,65 @@ def test_router_discovery_imports_only_the_api_package() -> None:
         if isinstance(node, ast.FunctionDef) and node.name == "discover_routers"
     ]
     assert [ast.unparse(d) for d in define.args.defaults] == ["api_package"]
+    assert discover_routers_problems(read_source(WEB / "app.py")) == []
+
+
+#: The loop and the one import inside ``discover_routers``, exactly (#673 review): the
+#: names come from ``pkgutil``'s listing of the package's own directory, joined to the
+#: package's own name.
+_ROUTER_LOOP = "sorted(pkgutil.iter_modules(package.__path__), key=lambda item: item.name)"
+_ROUTER_IMPORT = "importlib.import_module(f'{package.__name__}.{info.name}')"
+
+
+def discover_routers_problems(source: str) -> list[str]:
+    """Why ``discover_routers`` could import something other than ``package``'s modules."""
+    tree = parse(source)
+    defs = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "discover_routers"
+    ]
+    if len(defs) != 1:
+        return ["not exactly one top-level `def discover_routers`"]
+    define = defs[0]
+    problems: list[str] = []
+    loops = [node for node in walk(define) if isinstance(node, ast.For)]
+    if len(loops) != 1 or ast.unparse(loops[0].iter) != _ROUTER_LOOP:
+        problems.append(f"the loop is not `for info in {_ROUTER_LOOP}`")
+    elif ast.unparse(loops[0].target) != "info":
+        problems.append("the loop does not bind `info`")
+    imports = [node for node in walk(define) if _called(node, "import_module")]
+    if [ast.unparse(node) for node in imports] != [_ROUTER_IMPORT]:
+        problems.append(f"the import is not exactly `{_ROUTER_IMPORT}`")
+    elif loops and imports[0] not in walk(loops[0]):
+        problems.append("the import is outside the loop")
+    for node in walk(define):
+        if (
+            isinstance(node, ast.Name)
+            and node.id in ("package", "info", "importlib", "pkgutil")
+            and not isinstance(node.ctx, ast.Load)
+            and not (loops and node is loops[0].target)
+        ):
+            problems.append(f"line {node.lineno}: {node.id} is rebound")
+    return problems
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        (_ROUTER_IMPORT.replace("'", '"'), 'importlib.import_module(os.environ["X"])'),
+        (
+            _ROUTER_IMPORT.replace("'", '"'),
+            'importlib.import_module(f"{package.__name__}.{info.name}" + suffix)',
+        ),
+        ("pkgutil.iter_modules(package.__path__)", "pkgutil.iter_modules(extra_paths)"),
+        ("    found: list", "    package = other\n    found: list"),
+    ],
+)
+def test_the_router_discovery_pin_catches_a_foreign_name(old: str, new: str) -> None:
+    source = read_source(WEB / "app.py")
+    assert source.count(old) == 1, old
+    assert discover_routers_problems(source.replace(old, new)) != []
 
 
 #: Each escape #660 lists, as a snippet: before #660, ``process_starts`` found none of
@@ -2938,6 +3051,13 @@ _PROCESS_ESCAPES = [
     "[c for c in object.__subclasses__() if c.__name__ == 'Po' + 'pen']\n",
     "match asyncio:\n    case object(create_subprocess_exec=run):\n        pass\n",
     "uvicorn.importer.import_from_string('sub' + 'process:Popen')\n",
+    # The #673 review: a reader imported under another name, and the formatter that hands
+    # back the attribute it reads.
+    "from operator import attrgetter as ag\nag('sys' + 'tem')(os)\n",
+    "from operator import methodcaller as mc\nmc('sys' + 'tem', 'x')(os)\n",
+    "from inspect import getattr_static as gs\ngs(os, 'system')\n",
+    "string.Formatter().get_field('0.sys' + 'tem', (os,), {})[0]\n",
+    "from string import Formatter\n",
 ]
 
 
