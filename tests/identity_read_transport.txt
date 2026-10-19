@@ -1,0 +1,29 @@
+async def _browser_websocket_url(address: str, port: int, netloc: str) -> str | None:
+    async with asyncio.timeout(PROBE_STEP_TIMEOUT_S):
+        stream, writer = await asyncio.open_connection(address, port, limit=IDENTITY_READ_MAX_BYTES)
+        try:
+            writer.write(VERSION_REQUEST.format(netloc=netloc).encode('ascii'))
+            head = (await stream.readuntil(b'\r\n\r\n')).decode('latin-1')
+            length = _ok_content_length(head)
+            if length is None:
+                return None
+            body = json.loads(await stream.readexactly(length))
+        finally:
+            writer.close()
+    found = body.get('webSocketDebuggerUrl') if isinstance(body, dict) else None
+    return found if isinstance(found, str) else None
+
+async def _read_process_info(ws_url: str) -> object:
+    from websockets.asyncio.client import connect
+
+    class NoRedirect(connect):
+
+        def process_redirect(self, exc: Exception) -> Exception:
+            return exc
+    async with asyncio.timeout(PROBE_STEP_TIMEOUT_S):
+        async with NoRedirect(ws_url, proxy=None, compression=None, max_size=IDENTITY_READ_MAX_BYTES) as ws:
+            await ws.send(json.dumps({'id': 1, 'method': 'SystemInfo.getProcessInfo'}))
+            while True:
+                message = json.loads(await ws.recv())
+                if isinstance(message, dict) and message.get('id') == 1:
+                    return message.get('result')

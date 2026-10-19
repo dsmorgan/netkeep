@@ -26,6 +26,7 @@ are the other two layers.
 from __future__ import annotations
 
 import ast
+import difflib
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from functools import cache
@@ -2830,6 +2831,38 @@ def test_the_identity_read_reaches_only_its_pinned_transport_calls() -> None:
     assert identity_transport_reaches(source) == IDENTITY_TRANSPORT_REACHES
 
 
+#: #675 re-review: the whole of the identity read's two transport functions, as
+#: ``ast.unparse`` prints each with its docstring removed (so comments, docstrings and
+#: formatting don't count, and every argument, branch and call does).
+IDENTITY_TRANSPORT_FILE = Path(__file__).parent / "identity_read_transport.txt"
+
+
+def identity_transport_source(source: str) -> str:
+    """The two transport functions in ``source``, normalized, in file order."""
+    printed = []
+    for node in parse(source).body:
+        if isinstance(node, ast.AsyncFunctionDef) and node.name in IDENTITY_TRANSPORT_REACHES:
+            body = node.body
+            if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
+                body = body[1:]
+            printed.append(ast.unparse(ast.AsyncFunctionDef(**{**vars(node), "body": body})))
+    return "\n\n".join(printed) + "\n"
+
+
+def test_the_identity_transport_functions_are_exactly_the_reviewed_ones() -> None:
+    """Any change to what ``_browser_websocket_url`` or ``_read_process_info`` does, an
+    argument included, fails here until the expected text changes in the same, reviewed
+    PR. To update it, write ``identity_transport_source(read_source(LINKEDIN /
+    "browser.py"))`` to ``tests/identity_read_transport.txt`` and explain the change."""
+    found = identity_transport_source(read_source(LINKEDIN / "browser.py"))
+    expected = IDENTITY_TRANSPORT_FILE.read_text()
+    assert found == expected, (
+        "the identity read's transport changed. If that's intended, regenerate"
+        f" {IDENTITY_TRANSPORT_FILE.name} (see this test's docstring) and say why in the PR:\n"
+        + "".join(difflib.unified_diff(expected.splitlines(True), found.splitlines(True)))
+    )
+
+
 _WS_SEND = "            await ws.send(json.dumps("
 _STREAM_WRITE = "            writer.write(VERSION_REQUEST"
 
@@ -2852,6 +2885,130 @@ def test_the_identity_transport_pin_catches_another_send(anchor: str, line: str)
     assert source.count(anchor) == 1, anchor
     mutated = source.replace(anchor, line + anchor, 1)
     assert identity_transport_reaches(mutated) != IDENTITY_TRANSPORT_REACHES
+    assert identity_transport_source(mutated) != IDENTITY_TRANSPORT_FILE.read_text()
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        # The re-review's: the same attributes, another request on a branch.
+        (
+            'writer.write(VERSION_REQUEST.format(netloc=netloc).encode("ascii"))',
+            'writer.write(VERSION_REQUEST.format(netloc=netloc).encode("ascii") if port'
+            ' else b"PUT /json/new?about:blank HTTP/1.1\\r\\n\\r\\n")',
+        ),
+        ('.encode("ascii")', '.encode("utf-8")'),
+        ("format(netloc=netloc)", "format(netloc=address)"),
+        (
+            '"method": "SystemInfo.getProcessInfo"}',
+            '"method": "SystemInfo.getProcessInfo", "x": 1}',
+        ),
+        ("proxy=None, compression=None", "proxy=True, compression=None"),
+        ("            return exc  #", "            return super().process_redirect(exc)  #"),
+        ('message.get("id") == 1', 'message.get("id") is not None'),
+    ],
+)
+def test_the_whole_function_pin_catches_a_change_the_reach_pin_cant(old: str, new: str) -> None:
+    source = read_source(LINKEDIN / "browser.py")
+    assert source.count(old) == 1, old
+    assert identity_transport_source(source.replace(old, new, 1)) != (
+        IDENTITY_TRANSPORT_FILE.read_text()
+    )
+
+
+def test_the_whole_function_pin_ignores_docstrings_and_comments() -> None:
+    source = read_source(LINKEDIN / "browser.py")
+    anchor = "    from websockets.asyncio.client import connect\n"
+    reworded = source.replace(anchor, "    # a comment\n" + anchor, 1)
+    assert identity_transport_source(reworded) == IDENTITY_TRANSPORT_FILE.read_text()
+
+
+#: #675 re-review: the names that open a raw connection. Anywhere in the package, a
+#: reach of one (an attribute, a ``from`` import, a ``getattr`` literal) must be one of
+#: :data:`ALLOWED_RAW_CONNECTIONS`.
+RAW_CONNECTION_NAMES = frozenset(
+    {
+        "create_connection",
+        "create_unix_connection",
+        "open_connection",
+        "open_unix_connection",
+        "sock_connect",
+        "socketpair",
+        "fromfd",
+    }
+)
+#: Every raw connection the package opens, by (file, function, name): count.
+ALLOWED_RAW_CONNECTIONS = {
+    # The launcher's port check: connects to loopback and sends nothing (#636).
+    (PACKAGE / "chrome_spawn.py", "port_answers", "create_connection"): 1,
+    # The identity read's one GET of Chrome's /json/version (#675), pinned in full by
+    # test_the_identity_transport_functions_are_exactly_the_reviewed_ones.
+    (LINKEDIN / "browser.py", "_browser_websocket_url", "open_connection"): 1,
+}
+
+
+def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int]:
+    """Each reach of a :data:`RAW_CONNECTION_NAMES` name, and of ``socket.socket``
+    (``socket`` read on the module, or imported from it), by file and function."""
+    found: dict[tuple[Path, str, str], int] = {}
+
+    def add(path: Path, where: str, name: str) -> None:
+        found[(path, where, name)] = found.get((path, where, name), 0) + 1
+
+    for path, source in sources.items():
+        tree = parse(source)
+        scopes = _scoped(tree)
+        for node in walk(tree):
+            where = scopes.get(id(node), "")
+            if isinstance(node, ast.Attribute):
+                if node.attr in RAW_CONNECTION_NAMES:
+                    add(path, where, node.attr)
+                elif (
+                    node.attr == "socket"
+                    and isinstance(node.value, ast.Name)
+                    and node.value.id == "socket"
+                ):
+                    add(path, where, "socket.socket")
+            elif isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    if alias.name in RAW_CONNECTION_NAMES:
+                        add(path, where, alias.name)
+                    elif node.module == "socket" and alias.name in ("socket", "*"):
+                        add(path, where, "socket.socket")
+            elif isinstance(node, ast.Call):
+                for arg in _attribute_name_arguments(node):
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                        for part in arg.value.split("."):
+                            if part in RAW_CONNECTION_NAMES:
+                                add(path, where, part)
+    return found
+
+
+def test_only_the_reviewed_sites_open_a_raw_connection() -> None:
+    """#675 re-review: a raw socket or stream is a way to talk to Chrome (or anything)
+    that no other rule here reads. Only the launcher's port check and the identity
+    read's GET open one."""
+    assert raw_connections(package_sources()) == ALLOWED_RAW_CONNECTIONS
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "import socket\ns = socket.socket()\n",
+        "from socket import socket\n",
+        "from socket import create_connection\n",
+        "import socket\nsocket.create_connection(('127.0.0.1', 1))\n",
+        "import asyncio\nasyncio.open_connection('127.0.0.1', 1)\n",
+        "import asyncio\nasyncio.open_unix_connection('/tmp/x')\n",
+        "async def f(loop, s):\n    await loop.sock_connect(s, ('127.0.0.1', 1))\n",
+        "async def f(loop):\n    await loop.create_connection(object, '127.0.0.1', 1)\n",
+        "import asyncio\nopener = getattr(asyncio, 'open_connection')\n",
+    ],
+)
+def test_the_raw_connection_pin_catches_a_new_opener(line: str) -> None:
+    sources = package_sources()
+    sources[PACKAGE / "services" / "chrome_launch.py"] += "\n" + line
+    assert raw_connections(sources) != ALLOWED_RAW_CONNECTIONS
 
 
 def test_no_code_path_alters_or_answers_a_request() -> None:
