@@ -13790,6 +13790,90 @@
         "title": "SessionOut",
         "type": "object"
       },
+      "SetupOut": {
+        "properties": {
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/SetupStepOut"
+            },
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "steps",
+          "complete"
+        ],
+        "title": "SetupOut",
+        "type": "object"
+      },
+      "SetupStepOut": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "needs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Needs",
+            "type": "array"
+          },
+          "needs_any": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Needs Any",
+            "type": "array"
+          },
+          "next": {
+            "title": "Next",
+            "type": "boolean"
+          },
+          "optional": {
+            "title": "Optional",
+            "type": "boolean"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/components/schemas/StepState"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "title",
+          "state",
+          "next",
+          "needs",
+          "needs_any",
+          "reason",
+          "target",
+          "optional",
+          "skipped"
+        ],
+        "title": "SetupStepOut",
+        "type": "object"
+      },
       "Severity": {
         "enum": [
           "error",
@@ -14526,6 +14610,17 @@
         ],
         "title": "StepScheduleIn",
         "type": "object"
+      },
+      "StepState": {
+        "enum": [
+          "done",
+          "in_progress",
+          "todo",
+          "blocked",
+          "skipped"
+        ],
+        "title": "StepState",
+        "type": "string"
       },
       "SupportLevelOut": {
         "properties": {
@@ -25131,6 +25226,127 @@
         "summary": "Set Sending Hours",
         "tags": [
           "settings"
+        ]
+      }
+    },
+    "/api/v1/setup": {
+      "get": {
+        "description": "Every setup step in order, with its state, from what netkeeper already stores.",
+        "operationId": "get_setup",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Only the local owner account reads setup"
+          }
+        },
+        "summary": "Get Setup",
+        "tags": [
+          "setup"
+        ]
+      }
+    },
+    "/api/v1/setup/steps/{key}/skip": {
+      "delete": {
+        "description": "Clear a step's skip.",
+        "operationId": "unskip_setup_step",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Only the local owner account reads setup"
+          },
+          "404": {
+            "description": "No setup step has that key"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unskip Setup Step",
+        "tags": [
+          "setup"
+        ]
+      },
+      "post": {
+        "description": "Skip a step. It stays listed as a reminder; done and blocked still win.",
+        "operationId": "skip_setup_step",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Only the local owner account reads setup"
+          },
+          "404": {
+            "description": "No setup step has that key"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Skip Setup Step",
+        "tags": [
+          "setup"
         ]
       }
     },

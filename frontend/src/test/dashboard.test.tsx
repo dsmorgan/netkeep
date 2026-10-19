@@ -380,7 +380,7 @@ describe('dashboard: an account with contacts', () => {
     // The old "Event stream" card asserted "Disconnected"; jsdom's EventSource
     // never connects, so the inline indicator that replaced the card reads the
     // same way here.
-    expect(main.getByText('Live updates disconnected')).toBeInTheDocument()
+    expect(await main.findByText('Live updates disconnected')).toBeInTheDocument()
   })
 })
 

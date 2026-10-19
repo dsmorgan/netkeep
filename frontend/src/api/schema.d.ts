@@ -3371,6 +3371,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Setup
+         * @description Every setup step in order, with its state, from what netkeeper already stores.
+         */
+        get: operations["get_setup"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/setup/steps/{key}/skip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Skip Setup Step
+         * @description Skip a step. It stays listed as a reminder; done and blocked still win.
+         */
+        post: operations["skip_setup_step"];
+        /**
+         * Unskip Setup Step
+         * @description Clear a step's skip.
+         */
+        delete: operations["unskip_setup_step"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/support/bundle": {
         parameters: {
             query?: never;
@@ -8905,6 +8949,35 @@ export interface components {
             /** Persisted */
             persisted: boolean;
         };
+        /** SetupOut */
+        SetupOut: {
+            /** Complete */
+            complete: boolean;
+            /** Steps */
+            steps: components["schemas"]["SetupStepOut"][];
+        };
+        /** SetupStepOut */
+        SetupStepOut: {
+            /** Key */
+            key: string;
+            /** Needs */
+            needs: string[];
+            /** Needs Any */
+            needs_any: string[];
+            /** Next */
+            next: boolean;
+            /** Optional */
+            optional: boolean;
+            /** Reason */
+            reason: string;
+            /** Skipped */
+            skipped: boolean;
+            state: components["schemas"]["StepState"];
+            /** Target */
+            target: string;
+            /** Title */
+            title: string;
+        };
         /**
          * Severity
          * @enum {string}
@@ -9184,6 +9257,11 @@ export interface components {
             /** Send Time */
             send_time?: string | null;
         };
+        /**
+         * StepState
+         * @enum {string}
+         */
+        StepState: "done" | "in_progress" | "todo" | "blocked" | "skipped";
         /** SupportLevelOut */
         SupportLevelOut: {
             /** Default Since Days */
@@ -16804,6 +16882,123 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_setup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetupOut"];
+                };
+            };
+            /** @description Only the local owner account reads setup */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    skip_setup_step: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetupOut"];
+                };
+            };
+            /** @description Only the local owner account reads setup */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No setup step has that key */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unskip_setup_step: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetupOut"];
+                };
+            };
+            /** @description Only the local owner account reads setup */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No setup step has that key */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

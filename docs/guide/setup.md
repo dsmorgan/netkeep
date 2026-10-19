@@ -6,6 +6,10 @@ You use one Chrome for netkeeper: **netkeeper's Chrome**, a Chrome with its own 
 
 The first time, you open the UI at <http://127.0.0.1:8000> yourself, in Chrome. The UI requires Chrome.
 
+## The Steps tab
+
+The dashboard opens on **Steps** until setup is done: a diagram with a box for each step and an arrow from each step that has to come first. A green box is done, a highlighted box is the one to do now, and a faded box waits for the step its arrow comes from. Each box says in one line why, and links to the page where you do it. **Skip** marks a step you don't plan to do; it stays on the diagram, and **Un-skip** brings it back. Once every required step is done or skipped, the dashboard opens on **Overview**, and it remembers the tab you pick last.
+
 ## 1. Install
 
 Install the prerequisites in the README's [Requirements](../../README.md#requirements), then:
