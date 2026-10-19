@@ -12,6 +12,7 @@ Still stuck? Open an issue with a support bundle and screenshots: see [Reporting
 
 | What you see | What to do |
 |---|---|
+| "both ... hold a database; netkeep won't pick one" | Both `.../netkeeper` and `.../netkeep` hold a database, usually after going back to netkeeper by restoring a backup. The message shows when each was last written. Move the one you don't want aside, then start again. If the login item runs netkeep, it retries every 10 seconds and the message is in `<data>/logs/serve.err.log`. |
 | "netkeep can't move netkeeper's data yet" | The one-time move to the new name refused. The message says why; [Upgrading from netkeeper](upgrading-from-netkeeper.md#when-it-refuses) lists each case. |
 | The browser asks you to connect after the upgrade | Run `netkeep open`. The rename changed the cookie's name, and the old one works only until the next release. |
 | "The frontend is not built" | Run `make build-ui`, then reload. Run it again after each `git pull`. |

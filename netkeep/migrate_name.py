@@ -211,6 +211,9 @@ def _check_move(
     result: Plan, legacy: Path, env: Mapping[str, str], *, holding: str | None = None
 ) -> None:
     new = result.data
+    if holds_database(legacy) and ((new / MARKER_FILENAME).exists() or holds_database(new)):
+        result.refusals.append(both_hold_a_database(legacy, new))
+        return
     if (new / MARKER_FILENAME).exists():
         result.refusals.append(
             f"{legacy} is back, but your data was already moved to {new}, which netkeep"
@@ -624,10 +627,7 @@ def auto(command: str | None, *, serving: bool = False) -> AutoResult:
     new = paths.default_data_dir()
     if legacy is not None and legacy.exists() and (new / MARKER_FILENAME).exists():
         if holds_database(legacy):
-            raise Refused(
-                f"both {legacy} and {new} hold a database; netkeep won't pick one. Move the"
-                " one you don't want aside, then start again"
-            )
+            raise Refused(both_hold_a_database(legacy, new))
         # Already migrated: the data is safe in the new folder, so the old one coming back
         # is a warning, never a refusal (the login item's serve would crash-loop under
         # KeepAlive). `netkeep migrate` says how to clean it up.
@@ -677,6 +677,28 @@ def _follow_moved_folder(env: MutableMapping[str, str]) -> None:
     moved = (new / MARKER_FILENAME).exists() and not holds_database(legacy)
     if moved or (not legacy.exists() and new.is_dir()):
         _point_env_at(env, new)
+
+
+def both_hold_a_database(legacy: Path, new: Path) -> str:
+    """The one neutral message when both folders may hold your data (an undo restored a
+    backup to the old one): it never says which to keep, only when each was last written."""
+    return (
+        f"both {legacy} ({_last_written(legacy)}) and {new} ({_last_written(new)}) hold a"
+        " database; netkeep won't pick one. Move the one you don't want aside, then start"
+        " again"
+    )
+
+
+def _last_written(folder: Path) -> str:
+    """When ``folder``'s database (or its ``-wal``) was last written, in local time."""
+    times = [
+        (folder / f"{DATABASE_FILENAME}{suffix}").stat().st_mtime
+        for suffix in ("", "-wal", "-shm")
+        if (folder / f"{DATABASE_FILENAME}{suffix}").exists()
+    ]
+    if not times:
+        return "no database"
+    return "database last written " + datetime.fromtimestamp(max(times)).strftime("%Y-%m-%d %H:%M")
 
 
 def holds_database(folder: Path) -> bool:
