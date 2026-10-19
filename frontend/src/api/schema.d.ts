@@ -8310,12 +8310,16 @@ export interface components {
              * @default []
              */
             actions: string[];
+            /** Fix */
+            fix?: string | null;
             /** Key */
             key?: string | null;
             /** Name */
             name: string;
             /** Notes */
             notes: string[];
+            /** Severity */
+            severity: string;
             /** Status */
             status: string;
             /** Summary */

@@ -27,11 +27,13 @@ Two traps this project keeps hitting, both guarded here:
 
 from __future__ import annotations
 
+import ast
 import functools
 import importlib
 import math
 import os
 import random
+import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -2466,3 +2468,272 @@ def test_a_corrupt_inbox_owner_row_warns_unknown(writer: Session, user: User) ->
     assert row.status is Status.UNKNOWN
     assert row.warnings and "Scheduled inbox polls are skipped" in row.warnings[0]
     assert not report.ok
+
+
+# --- severity and fix (#654) ---------------------------------------------------
+
+
+def _every_row_of_every_case(writer: Session) -> list[Protection]:
+    """Each case's report built in turn (a fresh user each), every row of every one."""
+    rows: list[Protection] = []
+    for case in CASES:
+        user = _make_user(writer, timezone=case.user_timezone, schedule=case.schedule)
+        if case.prepare is not None:
+            case.prepare(writer, user)
+        rows.extend(
+            _report(
+                writer,
+                user,
+                settings=case.settings,
+                probe=case.probe,
+                browser_mode=case.browser_mode,
+                now=case.now,
+                heat_gate=case.heat_gate,
+                lock=case.lock,
+            ).protections
+        )
+    return rows
+
+
+def test_each_status_maps_to_its_severity() -> None:
+    on = Protection(name="x", status=Status.ON, value="fine")
+    warned = Protection(name="x", status=Status.ON, value="fine", warnings=("hm",))
+    off = Protection(name="x", status=Status.OFF, value="off", warnings=("hm",), fix="Do it.")
+    unknown = Protection(name="x", status=Status.UNKNOWN, value="?", warnings=("hm",), fix="Do it.")
+
+    assert on.severity.value == "on"
+    assert warned.severity.value == "warning"
+    assert off.severity.value == "problem"
+    assert unknown.severity.value == "problem"
+
+
+def test_a_row_that_is_not_in_force_cannot_be_built_without_a_fix() -> None:
+    for status in (Status.OFF, Status.UNKNOWN):
+        with pytest.raises(ValueError, match="with no fix"):
+            Protection(name="x", status=status, value="?", warnings=("hm",))
+        with pytest.raises(ValueError, match="with no fix"):
+            Protection(name="x", status=status, value="?", warnings=("hm",), fix="")
+
+
+def test_a_row_with_nothing_to_say_cannot_carry_a_fix() -> None:
+    with pytest.raises(ValueError, match="has no fix"):
+        Protection(name="x", status=Status.ON, value="fine", fix="Do it.")
+    # A warning with a fix, and a warning without one, are both fine.
+    assert Protection(name="x", status=Status.ON, value="f", warnings=("hm",), fix="Do.").fix
+    assert Protection(name="x", status=Status.ON, value="f", warnings=("hm",)).fix is None
+
+
+def test_a_clean_report_has_no_fix_and_every_row_is_on(writer: Session, user: User) -> None:
+    report = _report(writer, user)
+
+    assert report.ok
+    assert {row.severity.value for row in report.protections} == {"on"}
+    assert [row.fix for row in report.protections if row.fix is not None] == []
+
+
+def test_severity_and_fix_hold_in_every_case(writer: Session) -> None:
+    """Over every state the cases build: a row that is not in force is a problem with a fix,
+    a row in force with a warning is a warning, and a quiet row is on and has no fix."""
+    rows = _every_row_of_every_case(writer)
+    assert {row.severity.value for row in rows} == {"problem", "warning", "on"}
+    for row in rows:
+        if row.status is not Status.ON:
+            assert row.severity.value == "problem", row.name
+            assert row.fix, f"{row.name} is {row.status.value} and has no fix"
+        elif row.warnings:
+            assert row.severity.value == "warning", row.name
+        else:
+            assert row.severity.value == "on", row.name
+            assert row.fix is None, row.name
+
+
+def test_each_problem_the_cases_build_has_its_own_fix(writer: Session) -> None:
+    """The fix is the row's own, not one sentence for every problem."""
+    problems = [row for row in _every_row_of_every_case(writer) if row.status is not Status.ON]
+    assert len({row.name for row in problems}) > 5
+    assert len({row.fix for row in problems}) > 5
+
+
+def test_a_tripped_breaker_row_has_a_fix_and_a_clear_one_does_not(
+    writer: Session, user: User
+) -> None:
+    for _ in range(route_breaker.THRESHOLD):
+        route_breaker.record(writer, user, ACCOUNT, route_changed=True, succeeded=False, now=NOW)
+    row = _row(_report(writer, user), "route-changed breaker")
+
+    assert row.severity.value == "warning"
+    assert row.fix is not None and "**Reset breaker**" in row.fix and "linkedin sync" in row.fix
+    assert _row(_report(writer, user), "Contact info breaker").fix is None
+
+
+def test_the_session_flag_fix_depends_on_the_outcome(writer: Session, user: User) -> None:
+    flag_session(writer, user, Outcome.CHECKPOINT, url="https://www.linkedin.com/checkpoint")
+    checkpoint = _row(_report(writer, user, probe=None), "session flag").fix
+    flag_session(writer, user, Outcome.LOGGED_OUT, url="https://www.linkedin.com/login")
+    logged_out = _row(_report(writer, user, probe=None), "session flag").fix
+
+    assert checkpoint is not None and "**Clear flag**" in checkpoint
+    assert logged_out is not None and "netkeeper preflight" in logged_out
+    assert "**Clear flag**" not in logged_out
+
+
+def test_a_settings_read_failure_makes_the_row_a_problem_with_a_fix(
+    writer: Session, user: User
+) -> None:
+    report = posture_module.with_read_failures(
+        _report(writer, user), {"active hours": "cannot read it", "another read": "cannot too"}
+    )
+    hours = _row(report, "active hours")
+    other = _row(report, "another read")
+
+    assert hours.severity.value == other.severity.value == "problem"
+    assert hours.fix == other.fix == posture_module.READ_FAILURE_FIX
+    assert "Restart `netkeeper serve`" in posture_module.READ_FAILURE_FIX
+
+
+def test_every_protection_construction_decides_its_fix() -> None:
+    """A new posture row cannot be added without a severity and fix decision (#654).
+
+    Every ``Protection(...)`` in the module either passes ``fix=`` (a sentence, or an
+    explicit ``None`` for a warning that has no useful fix), or is a row built ``ON`` with
+    no ``warnings`` at all, which is a row with nothing to say and so no fix. Anything else
+    is a row that can warn or be off and nobody decided what to tell the person. (The type
+    already refuses an off row with no fix and a quiet one with a fix; this catches the
+    warning-only row that has not decided either way, which no state in the cases hits.)
+    """
+    tree = ast.parse(Path(posture_module.__file__).read_text())
+    undecided: list[int] = []
+    constructions = 0
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "Protection"
+        ):
+            continue
+        constructions += 1
+        keywords = {kw.arg: kw.value for kw in node.keywords}
+        status = keywords.get("status")
+        quiet = (
+            isinstance(status, ast.Attribute) and status.attr == "ON" and "warnings" not in keywords
+        )
+        if "fix" not in keywords and not quiet:
+            undecided.append(node.lineno)
+    assert constructions > 40  # the walk really found the module's rows
+    assert undecided == [], f"Protection(...) at lines {undecided} has no fix decision"
+
+
+FIXES_NAMING = re.compile(r"`netkeeper ([a-z-]+(?: [a-z-]+)*)")
+BOLD = re.compile(r"\*\*([^*]+)\*\*")
+
+
+def _fix_sentences(writer: Session) -> set[str]:
+    rows = _every_row_of_every_case(writer)
+    flagged = _make_user(writer)
+    for outcome in (Outcome.CHECKPOINT, Outcome.LOGGED_OUT):
+        flag_session(writer, flagged, outcome, url="https://www.linkedin.com/x")
+        rows += _report(writer, flagged, probe=None).protections
+    # Every breaker tripped, and then every breaker's stored state unreadable.
+    for _ in range(route_breaker.THRESHOLD):
+        route_breaker.record(writer, flagged, ACCOUNT, route_changed=True, succeeded=False, now=NOW)
+    _lose_answers(
+        writer, flagged, route_breaker.ANSWER_LOST_THRESHOLD, SyncRunKind.CONNECTIONS_FULL
+    )
+    _lose_contact_info(writer, flagged, route_breaker.CONTACT_INFO_THRESHOLD)
+    _inbox_changed(writer, flagged, route_breaker.INBOX_THRESHOLD)
+    _owner_mismatches(writer, flagged, route_breaker.INBOX_OWNER_THRESHOLD)
+    rows += _report(writer, flagged).protections
+    corrupt = _make_user(writer)
+    for key in (
+        f"linkedin.route_changed_breaker.{ACCOUNT}",
+        f"linkedin.contact_info_breaker.{ACCOUNT}",
+        f"linkedin.inbox_route_changed_breaker.{ACCOUNT}",
+        f"linkedin.inbox_owner_mismatch_breaker.{ACCOUNT}",
+    ):
+        set_setting(writer, corrupt, key, "not an object")
+    rows += _report(writer, corrupt).protections
+    fixes = {row.fix for row in rows if row.fix is not None}
+    fixes.add(posture_module.READ_FAILURE_FIX)
+    fixes.add(posture_module.SIGN_IN_FIX)
+    return fixes
+
+
+def test_fixes_are_plain_second_person_sentences(writer: Session) -> None:
+    fixes = _fix_sentences(writer)
+    assert len(fixes) > 10
+    for fix in fixes:
+        assert fix[0].isupper() and fix.endswith("."), fix
+        assert fix.count(". ") == 0, f"more than one sentence: {fix}"
+        lowered = fix.lower()
+        for word in ("simply", "just", "you are safe", "please"):
+            assert word not in lowered, f"{word!r} in {fix}"
+        assert "check connection" not in lowered  # an API with no button yet (#652)
+        assert not fix.lower().startswith(("you should", "we "))
+
+
+def test_every_command_a_fix_names_exists(writer: Session) -> None:
+    """A fix that names a command which does not exist is worse than none."""
+    import typer
+
+    from netkeeper.cli import app
+
+    root: Any = typer.main.get_command(app)
+    seen = 0
+    for fix in _fix_sentences(writer):
+        for match in FIXES_NAMING.finditer(fix):
+            first = match.group(1).split()[0]
+            assert first in root.commands, fix
+            seen += 1
+    # Exact commands that must resolve, whatever the fixes say today.
+    for path in (
+        ("preflight",),
+        ("linkedin", "clear-flag"),
+        ("linkedin", "sync"),
+        ("linkedin", "enrich"),
+        ("linkedin", "inbox"),
+        ("linkedin", "run"),
+        ("campaigns", "sending-hours"),
+        ("campaigns", "adopt-template"),
+        ("campaigns", "linkedin", "discard"),
+        ("serve",),
+    ):
+        command: Any = root
+        for word in path:
+            assert word in command.commands, path
+            command = command.commands[word]
+
+
+def test_every_page_or_button_a_fix_names_exists(writer: Session) -> None:
+    """Each **bold** name is a button or a Settings field in the frontend source."""
+    from netkeeper.services.ui_settings import FIELDS
+
+    root = Path(__file__).resolve().parent.parent / "frontend" / "src"
+    source = "\n".join(
+        path.read_text() for path in root.rglob("*.tsx") if ".test." not in path.name
+    )
+    labels = {spec.label for spec in FIELDS}
+    names = {name for fix in _fix_sentences(writer) for name in BOLD.findall(fix)}
+    assert {"Start Chrome", "Clear flag", "Reset breaker", "Clear heat"} <= names
+    for name in names:
+        assert name in labels or name in source, f"{name!r} is not a button or a Settings field"
+
+
+def test_the_verdict_still_never_claims_safety(writer: Session, user: User) -> None:
+    clean = verdict(_report(writer, user))
+    assert clean.startswith("nothing is misconfigured")
+    assert "safe" not in clean.lower()
+
+
+def test_render_prints_each_fix_under_the_warnings(writer: Session, user: User) -> None:
+    report = _report(writer, user, probe=None)
+    row = _row(report, "linkedin session")
+    out = render(report)
+
+    assert row.fix is not None
+    assert "fix: linkedin session: Run `netkeeper preflight`" in out
+    assert out.index("warning: linkedin session") < out.index("fix: linkedin session")
+    assert out.rstrip().endswith(verdict(report))  # the verdict stays last
+
+
+def test_render_prints_no_fix_for_a_clean_report(writer: Session, user: User) -> None:
+    assert "fix:" not in render(_report(writer, user))

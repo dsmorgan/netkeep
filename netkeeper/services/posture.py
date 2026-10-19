@@ -262,6 +262,19 @@ class Status(enum.StrEnum):
     UNKNOWN = "unknown"
 
 
+class Severity(enum.StrEnum):
+    """How much a row needs you, for a page that groups rows (#654).
+
+    Derived from the row, never stored: ``PROBLEM`` is a protection that is not in force
+    (:attr:`Status.OFF` or :attr:`Status.UNKNOWN`), ``WARNING`` is one in force that still
+    warns, and ``ON`` is one in force with nothing to say.
+    """
+
+    PROBLEM = "problem"
+    WARNING = "warning"
+    ON = "on"
+
+
 KEY_DEDICATED_PROFILE: Final = "dedicated_profile"
 """The key of the dedicated Chrome profile row (#624)."""
 KEY_MANUAL_LINKEDIN_SENDS: Final = "manual_linkedin_sends"
@@ -326,6 +339,19 @@ class Protection:
     actions: tuple[str, ...] = ()
     """The buttons this row offers right now (#583): :data:`ACTION_RESET_BREAKER`,
     :data:`ACTION_FORGET_INBOX_OWNER`. Empty when none applies."""
+    fix: str | None = None
+    """What to do about this row, in one plain sentence (#654), or None. A row that is not
+    in force must have one; a row with nothing to say must not; a row that is in force
+    with a warning may have one. It explains and ``actions`` are the buttons. Only commands
+    and pages that exist are named: a fix that names a button the person cannot find is
+    worse than none. It describes; it never changes what the row checks."""
+
+    @property
+    def severity(self) -> Severity:
+        """:class:`Severity` of this row: problem, warning, or on."""
+        if self.status is not Status.ON:
+            return Severity.PROBLEM
+        return Severity.WARNING if self.warnings else Severity.ON
 
     @property
     def summary(self) -> str:
@@ -339,6 +365,13 @@ class Protection:
                 " report that can read as all-clear while a protection is off is worse"
                 " than no report"
             )
+        if self.severity is Severity.PROBLEM and not self.fix:
+            raise ValueError(
+                f"protection {self.name!r} is {self.status.value} with no fix; a row that"
+                " is not in force has to say what to do about it"
+            )
+        if self.severity is Severity.ON and self.fix is not None:
+            raise ValueError(f"protection {self.name!r} has nothing to say, so it has no fix")
 
 
 @dataclass(frozen=True, slots=True)
@@ -513,6 +546,13 @@ _READ_FAILURE_ROWS: Final = {
 }
 
 
+READ_FAILURE_FIX: Final = (
+    "Restart `netkeeper serve`, and if the warning comes back, save the setting again on"
+    " the Settings page."
+)
+"""The fix for a settings read ``serve`` cannot make (#464, #654)."""
+
+
 def with_read_failures(report: PostureReport, failures: Mapping[str, str]) -> PostureReport:
     """``report`` with each settings read ``serve`` cannot make (#464) shown on the row it
     governs: that row is not in force and carries the plain reason, so ``ok``, the warnings
@@ -532,11 +572,19 @@ def with_read_failures(report: PostureReport, failures: Mapping[str, str]) -> Po
         else:
             extra.setdefault(index, []).append(sentence)
     rows = [
-        replace(row, status=Status.OFF, warnings=(*row.warnings, *extra[i])) if i in extra else row
+        replace(row, status=Status.OFF, warnings=(*row.warnings, *extra[i]), fix=READ_FAILURE_FIX)
+        if i in extra
+        else row
         for i, row in enumerate(report.protections)
     ]
     rows.extend(
-        Protection(name=what, status=Status.OFF, value="unreadable", warnings=(sentence,))
+        Protection(
+            name=what,
+            status=Status.OFF,
+            value="unreadable",
+            warnings=(sentence,),
+            fix=READ_FAILURE_FIX,
+        )
         for what, sentence in unplaced
     )
     return replace(report, protections=tuple(rows))
@@ -832,11 +880,23 @@ def _browser_mode(mode: str, cdp_url: str) -> Protection:
             f"linkedin.cdp_url points at {host or 'no host'}, not this machine's loopback."
             " Chrome's debug port is only ever reachable on its own loopback address"
         )
+    fix = None
+    if status is Status.OFF:
+        fix = (
+            "Remove any local change to the browser provider, so that netkeeper attaches to"
+            " the Chrome you started instead of launching its own."
+        )
+    elif warnings:
+        fix = (
+            "Set **Chrome debug address** on the Settings page to an address on this"
+            " machine, such as `http://127.0.0.1:9222`."
+        )
     return Protection(
         name="attach-only browser",
         status=status,
         value=f"{mode} over CDP to {cdp_url}",
         warnings=tuple(warnings),
+        fix=fix,
     )
 
 
@@ -896,6 +956,10 @@ def _dedicated_profile(probe: SessionProbe | None, running_pid: int | None) -> P
             " then start netkeeper's with the command `netkeeper browser launch` prints",
         ),
         key=KEY_DEDICATED_PROFILE,
+        fix=(
+            "Quit the Chrome that is using the debug port, then click **Start Chrome** on the"
+            " LinkedIn page."
+        ),
     )
 
 
@@ -928,6 +992,10 @@ def _activity_lock(
                     f"could not inspect the activity lock ({exc}), so whether another"
                     " netkeeper process holds the browser is unknown",
                 ),
+                fix=(
+                    "Make sure your user account can read and write netkeeper's data folder,"
+                    " then check again."
+                ),
             )
     if not state.held:
         return Protection(
@@ -937,11 +1005,17 @@ def _activity_lock(
         )
     holder = state.holder
     who = holder.describe() if holder is not None else "a holder that left no note"
+    suspicious = _suspicious_holder(holder, state.path, now=now)
     return Protection(
         name=name,
         status=Status.ON,
         value=f"held by {who}; anything else that tries to attach answers busy",
-        warnings=_suspicious_holder(holder, state.path, now=now),
+        warnings=suspicious,
+        fix=(
+            "Quit the process that holds the activity lock, then check again."
+            if suspicious
+            else None
+        ),
     )
 
 
@@ -985,6 +1059,26 @@ def _suspicious_holder(
     return tuple(warnings)
 
 
+SIGN_IN_FIX: Final = (
+    "Sign in to LinkedIn in the netkeeper Chrome window, then run `netkeeper preflight`."
+)
+"""The fix for a Chrome profile with no LinkedIn session (#654)."""
+
+
+def _flag_fix(outcome: Outcome) -> str:
+    """What to do about a raised session flag (#654): a logged-out flag clears itself on a
+    preflight that finds a session; a checkpoint is cleared by hand."""
+    if outcome is Outcome.LOGGED_OUT:
+        return (
+            "Sign in to LinkedIn in the netkeeper Chrome window, then run `netkeeper"
+            " preflight`, which clears this flag when it finds your session."
+        )
+    return (
+        "Open LinkedIn in the netkeeper Chrome window and confirm the account is healthy,"
+        " then click **Clear flag** on the LinkedIn page."
+    )
+
+
 def _linkedin_session(
     probe: SessionProbe | None,
     *,
@@ -1013,6 +1107,9 @@ def _linkedin_session(
             value="not attached",
             warnings=probe.problems
             or ("could not attach to Chrome, so the LinkedIn session could not be read",),
+            fix=(
+                "Click **Start Chrome** on the LinkedIn page, then run `netkeeper preflight` again."
+            ),
         )
     if probe.logged_in is None:
         return Protection(
@@ -1020,6 +1117,10 @@ def _linkedin_session(
             status=Status.UNKNOWN,
             value="cookie jar unreadable",
             warnings=("the browser's cookie jar could not be read, so the login state is unknown",),
+            fix=(
+                "Quit netkeeper's Chrome, click **Start Chrome** on the LinkedIn page, then run"
+                " `netkeeper preflight` again."
+            ),
         )
     if not probe.logged_in:
         return Protection(
@@ -1030,6 +1131,7 @@ def _linkedin_session(
                 "this Chrome profile holds no live LinkedIn session, so no job can run."
                 " Log in once in the window `netkeeper browser launch` describes",
             ),
+            fix=SIGN_IN_FIX,
         )
     names = ", ".join(probe.cookie_names) or "no named cookies"
     return Protection(
@@ -1066,6 +1168,7 @@ def _session_from_evidence(
                 " and no run that read LinkedIn. Run `netkeeper preflight` in a terminal;"
                 " this report shows what it finds",
             ),
+            fix="Run `netkeeper preflight` in a terminal to check the LinkedIn session.",
         )
     if flag is not None:
         when = f"{local_time_of(flag.flagged_at, zone):%Y-%m-%d %H:%M}"
@@ -1079,6 +1182,7 @@ def _session_from_evidence(
                 " the session flag row of the posture report: Settings, Posture, or"
                 " `netkeeper posture`)",
             ),
+            fix=_flag_fix(flag.outcome),
         )
     assert evidence is not None
     when = f"{local_time_of(evidence.observed_at, zone):%Y-%m-%d %H:%M}"
@@ -1094,6 +1198,7 @@ def _session_from_evidence(
                 " this Chrome profile, so no job can run. Log in once in the netkeeper"
                 " Chrome profile, then run `netkeeper preflight`",
             ),
+            fix=SIGN_IN_FIX,
         )
     value = f"last confirmed logged in {when} by {evidence.source} ({ago})"
     if age <= SESSION_EVIDENCE_FRESH_FOR:
@@ -1108,6 +1213,7 @@ def _session_from_evidence(
             " may have expired since. `netkeeper preflight` checks it again, and this"
             " report shows the result",
         ),
+        fix="Run `netkeeper preflight` in a terminal to check the LinkedIn session again.",
     )
 
 
@@ -1163,6 +1269,7 @@ def _session_flag(session: Session, user: User) -> Protection:
             f"the session was flagged {flag.outcome.value} on"
             f" {flag.flagged_at:%Y-%m-%d %H:%M UTC}. Runs stop while a flag is up; {advice}",
         ),
+        fix=_flag_fix(flag.outcome),
     )
 
 
@@ -1192,6 +1299,10 @@ def _active_hours(
                 "linkedin.active_hours is not two HH:MM times, so no window can be"
                 " enforced from it",
             ),
+            fix=(
+                "Set **Active hours** on the Settings page to a start and an end time in"
+                " HH:MM form."
+            ),
         )
     start, end = window
     on_or_off, window_warnings = active_window_check(start, end)
@@ -1206,7 +1317,14 @@ def _active_hours(
         else f"{start:%H:%M}-{end:%H:%M} {timezone_name}; outside, opens {opens:%a %H:%M}"
     )
     value += f"; set in {source}"
-    return Protection(name="active hours", status=status, value=value, warnings=tuple(warnings))
+    fix = None
+    if status is Status.OFF:
+        fix = "Set **Active hours** on the Settings page to the hours you are usually online."
+    elif zone_warning is not None:
+        fix = "Set **Time zone** on the Settings page to a zone name such as America/New_York."
+    return Protection(
+        name="active hours", status=status, value=value, warnings=tuple(warnings), fix=fix
+    )
 
 
 def active_hours_source(settings: Settings) -> str:
@@ -1257,6 +1375,7 @@ def _account_timezone(user: User, configured: str) -> Protection:
             f" are read in {configured}. Set linkedin.timezone and the user's timezone to"
             " the same zone, or a day's budget resets at an hour the window is open",
         ),
+        fix="Save **Time zone** on the Settings page again, so budgets and hours use one zone.",
     )
 
 
@@ -1269,7 +1388,13 @@ def _weekend_damping(multiplier: float, local_now: datetime) -> Protection:
         value += " (applied)"
     warnings = weekend_multiplier_warnings(multiplier)
     if warnings:
-        return Protection(name="weekend damping", status=Status.OFF, value=value, warnings=warnings)
+        return Protection(
+            name="weekend damping",
+            status=Status.OFF,
+            value=value,
+            warnings=warnings,
+            fix="Set **Weekend multiplier** on the Settings page to a value below 1, such as 0.5.",
+        )
     return Protection(name="weekend damping", status=Status.ON, value=value)
 
 
@@ -1287,6 +1412,10 @@ def _warmup_ramp(settings: Settings, today: TodaysBudget) -> Protection:
                 f"the ramp starts at {budget.warmup_start}, at or above the {cap}-visit"
                 " cap, so a fresh install gets its full daily budget on day one. Spec 9.5"
                 " ramps from 20 by 10 a day precisely because a new device does not",
+            ),
+            fix=(
+                "Lower **Warm-up: profile visits on day one** on the Settings page below your"
+                " daily profile-visit limit."
             ),
         )
     return Protection(
@@ -1388,6 +1517,12 @@ def _pacing(pacing: PacingSettings, cap: int) -> Protection:
             f" then {break_low:g}-{break_high:g}s"
         ),
         warnings=tuple(warnings),
+        fix=(
+            "Set the values under `[linkedin.pacing]` in config.toml back to the ones in"
+            " `config.example.toml`, or remove that section."
+            if warnings
+            else None
+        ),
     )
 
 
@@ -1415,6 +1550,10 @@ def _auto_send(settings: Settings, hold: AutoSendHold | None = None) -> Protecti
                 if hold is None
                 else (f"auto-send is held: {hold.reason}. {AUTO_SEND_HOLD_CLEAR}",)
             ),
+        ),
+        fix=(
+            "Turn off **LinkedIn auto-send** on the Settings page if you want to send each"
+            " LinkedIn message yourself."
         ),
     )
 
@@ -1466,6 +1605,9 @@ def _budget(action: ActionClass, snapshot: BudgetSnapshot, settings: Settings) -
     ceiling = f"hard max {hard_day}/day"
     if hard_week is not None:
         ceiling += f", {hard_week}/week"
+    above_max = (asked_day is not None and asked_day > hard_day) or (
+        hard_week is not None and asked_week is not None and asked_week > hard_week
+    )
     return Protection(
         name=f"budget {action.value}",
         status=Status.ON,
@@ -1473,6 +1615,13 @@ def _budget(action: ActionClass, snapshot: BudgetSnapshot, settings: Settings) -
         warnings=tuple(warnings),
         notes=tuple(notes),
         brief=", ".join(parts),
+        # A count past its limit is the limit working: it clears when the day or week rolls over.
+        fix=(
+            "Lower this limit on the Settings page, or under `[linkedin.budget]` in"
+            " config.toml, to the hard max or below."
+            if above_max
+            else None
+        ),
     )
 
 
@@ -1494,6 +1643,10 @@ def _heat_skip_gate(gate: HeatGate) -> Protection:
                 " however warm the account is. Spec 9.7 makes the skip unconditional:"
                 " above the threshold the scheduler skips browser jobs entirely, and"
                 " with this off a throttled account keeps being asked for more",
+            ),
+            fix=(
+                "Remove the code that passes `HEAT_SKIP_DISABLED` to the scheduler, then restart"
+                " `netkeeper serve`."
             ),
         )
     return Protection(
@@ -1546,6 +1699,7 @@ def _scheduled_jobs(scheduler: SchedulerPosture) -> Protection:
                 " nothing to act on. That is the expected state until `netkeeper serve`"
                 " establishes a schedule",
             ),
+            fix="Start `netkeeper serve`, which gives each job its first due time when it starts.",
         )
     meaning = "; ".join(
         f"{kind}: {MISSING_MEANS.get(JobKind(kind), 'it never runs on its own')}"
@@ -1560,6 +1714,10 @@ def _scheduled_jobs(scheduler: SchedulerPosture) -> Protection:
             f"these job kinds have no due time, so they never run ({meaning})."
             " `netkeeper serve` gives a missing kind its first due time when it starts,"
             " and `netkeeper linkedin schedule arm` does it at once",
+        ),
+        fix=(
+            "Restart `netkeeper serve`, which gives each missing job its first due time when it"
+            " starts."
         ),
     )
 
@@ -1611,6 +1769,10 @@ def _sending_hours(session: Session, user: User) -> Protection:
                 "The stored sending hours cannot be read, so no campaign sends. Set them"
                 " again on the Settings page or with `netkeeper campaigns sending-hours`",
             ),
+            fix=(
+                "Set the sending hours again on the Settings page, or run `netkeeper campaigns"
+                " sending-hours`."
+            ),
         )
     if not hours.enabled:
         return Protection(
@@ -1644,6 +1806,10 @@ def _campaign_templates(session: Session, user: User) -> Protection:
         status=Status.ON,
         value=f"{len(blocked)} active or paused campaign(s) blocked by a removed merge field",
         warnings=(describe_removed_field_campaigns(blocked),),
+        fix=(
+            "Fix the template, then click **Use newest version** on the campaign page, or run"
+            " `netkeeper campaigns adopt-template`."
+        ),
     )
 
 
@@ -1685,6 +1851,12 @@ def _send_records(session: Session, user: User, *, now: datetime) -> Protection:
         status=Status.ON,
         value=f"{emails} email and {linkedin} LinkedIn send(s) with no recorded outcome",
         warnings=tuple(warnings),
+        fix=(
+            "Open each LinkedIn conversation to see whether the message went out, then run"
+            " `netkeeper campaigns linkedin discard <message ID>` once its run has ended."
+            if linkedin
+            else "Keep `netkeeper serve` running, which settles each email send by its Message-ID."
+        ),
     )
 
 
@@ -1897,6 +2069,12 @@ def _linkedin_reply_poll(session: Session, user: User, *, now: datetime) -> Prot
         notes=tuple(notes),
         warnings=warnings,
         actions=actions,
+        fix=(
+            "Check your older LinkedIn replies by hand, then click **Acknowledge** under"
+            " Posture on the Settings page."
+            if warnings
+            else None
+        ),
     )
 
 
@@ -2033,6 +2211,10 @@ def _route_changed_breaker(session: Session, user: User, account_id: int) -> Pro
                 " and repair it, or clear it directly:"
                 f" {RESET_BREAKER_HOW}",
             ),
+            fix=(
+                "Run `netkeeper linkedin sync` by hand to check whether the page still changes,"
+                " or click **Reset breaker** under Posture on the Settings page."
+            ),
         )
     if current.count == 0:
         return Protection(
@@ -2058,6 +2240,10 @@ def _route_changed_breaker(session: Session, user: User, account_id: int) -> Pro
             " scheduled connections runs are skipped until this clears. Run one by hand"
             " (`netkeeper linkedin sync`) to check whether the wall is still there, or"
             f" clear it directly: {RESET_BREAKER_HOW}",
+        ),
+        fix=(
+            "Run `netkeeper linkedin sync` by hand to check whether the page still changes,"
+            " or click **Reset breaker** under Posture on the Settings page."
         ),
     )
 
@@ -2085,6 +2271,10 @@ def _answer_lost_limit(session: Session, user: User, account_id: int) -> Protect
                 " is next written (fail closed) -- run one by hand (`netkeeper linkedin"
                 " sync`) to check and repair it, or clear it directly:"
                 f" {RESET_BREAKER_HOW}",
+            ),
+            fix=(
+                "Run `netkeeper linkedin sync` by hand to check whether the page still changes,"
+                " or click **Reset breaker** under Posture on the Settings page."
             ),
         )
     if all(state.count == 0 for state in states.values()):
@@ -2120,6 +2310,10 @@ def _answer_lost_limit(session: Session, user: User, account_id: int) -> Protect
             " full sync) to check whether they still do, or clear it directly:"
             f" {RESET_BREAKER_HOW}",
         ),
+        fix=(
+            "Run `netkeeper linkedin sync` by hand to check whether the page still changes,"
+            " or click **Reset breaker** under Posture on the Settings page."
+        ),
     )
 
 
@@ -2143,6 +2337,10 @@ def _contact_info_breaker(session: Session, user: User, account_id: int) -> Prot
                 " closed) -- run one by hand (`netkeeper linkedin enrich`) to check and"
                 " repair it, or clear it directly:"
                 f" {RESET_BREAKER_HOW}",
+            ),
+            fix=(
+                "Run `netkeeper linkedin enrich` by hand to check whether Contact info reads"
+                " again, or click **Reset breaker** under Posture on the Settings page."
             ),
         )
     if current.count == 0:
@@ -2173,6 +2371,10 @@ def _contact_info_breaker(session: Session, user: User, account_id: int) -> Prot
             " skipped until this clears. Run one by hand (`netkeeper linkedin enrich`) to"
             " check whether Contact info reads again, or clear it directly:"
             f" {RESET_BREAKER_HOW}",
+        ),
+        fix=(
+            "Run `netkeeper linkedin enrich` by hand to check whether Contact info reads"
+            " again, or click **Reset breaker** under Posture on the Settings page."
         ),
     )
 
@@ -2211,6 +2413,10 @@ def _inbox_breaker(session: Session, user: User, account_id: int, *, now: dateti
                 " Scheduled inbox polls are skipped until it is next written (fail closed)."
                 f"{waits} To check and repair it, {release}",
             ),
+            fix=(
+                "Run `netkeeper linkedin inbox` by hand to check whether the messaging page"
+                " reads again, or click **Reset breaker** under Posture on the Settings page."
+            ),
         )
     if current.count == 0:
         return Protection(
@@ -2239,6 +2445,10 @@ def _inbox_breaker(session: Session, user: User, account_id: int, *, now: dateti
             f" changed or could not be read{since}. Scheduled inbox polls are skipped,"
             f" and connections syncs are unaffected.{waits} To check whether the page"
             f" reads again, {release}",
+        ),
+        fix=(
+            "Run `netkeeper linkedin inbox` by hand to check whether the messaging page"
+            " reads again, or click **Reset breaker** under Posture on the Settings page."
         ),
     )
 
@@ -2275,6 +2485,10 @@ def _inbox_owner_breaker(
                 f"{waits} To check and repair it, run `netkeeper linkedin inbox` by hand:"
                 f" {release}",
             ),
+            fix=(
+                "Run `netkeeper linkedin inbox` by hand, or click **Reset breaker** under"
+                " Posture on the Settings page."
+            ),
         )
     if current.count == 0:
         return Protection(
@@ -2309,6 +2523,7 @@ def _inbox_owner_breaker(
             f" is not, and connections syncs are unaffected.{waits} To fix it: {fix}."
             f" {then}",
         ),
+        fix=f"{fix[0].upper()}{fix[1:]}.",
     )
 
 
@@ -2339,6 +2554,7 @@ def _network_aging(session: Session, user: User) -> Protection:
             f" {refused}. Removed connections are not being recorded while this holds;"
             " check the run (`netkeeper linkedin run " + str(latest.id) + "`)",
         ),
+        fix=f"Run `netkeeper linkedin run {latest.id}` to see why the sync refused to age anyone.",
     )
 
 
@@ -2382,6 +2598,7 @@ def _heat(posture_of_heat: HeatPosture, heat_settings: HeatSettings) -> Protecti
                 f" {MAX_BLOCKS_BEFORE_SKIP} this report treats as a brake. Appendix C's"
                 " defaults need 3"
             )
+    config_unsafe = bool(warnings)
     if posture_of_heat.tripped:
         resumes = (
             f" until {posture_of_heat.resumes_at:%Y-%m-%d %H:%M UTC}"
@@ -2406,8 +2623,19 @@ def _heat(posture_of_heat: HeatPosture, heat_settings: HeatSettings) -> Protecti
             f" (x{posture_of_heat.multiplier:.2f})"
         )
     )
+    fix = None
+    if config_unsafe:
+        fix = (
+            "Set the values under `[linkedin.heat]` in config.toml back to the ones in"
+            " `config.example.toml`."
+        )
+    elif posture_of_heat.tripped:
+        fix = (
+            "Wait for the score to cool, or click **Clear heat** on the LinkedIn page if the"
+            " block was something else."
+        )
     return Protection(
-        name="heat", status=status, value=f"{level}, {raised}", warnings=tuple(warnings)
+        name="heat", status=status, value=f"{level}, {raised}", warnings=tuple(warnings), fix=fix
     )
 
 
@@ -2653,6 +2881,7 @@ def render(report: PostureReport) -> str:
         lines.append("")
         for warning in report.warnings:
             lines.extend(_wrapped(warning, first="warning: ", rest="         "))
+    lines.extend(_fix_lines(report))
     if report.notes:
         lines.append("")
         for note in report.notes:
@@ -2688,6 +2917,7 @@ def render_summary(report: PostureReport) -> str:
         lines.append("")
         for warning in report.warnings:
             lines.extend(_wrapped(warning, first="warning: ", rest="         "))
+    lines.extend(_fix_lines(report))
     lines.append("")
     hidden = []
     if report.notes:
@@ -2700,6 +2930,17 @@ def render_summary(report: PostureReport) -> str:
     lines.append("")
     lines.append(verdict(report))
     return "".join(f"{line}\n" for line in lines)
+
+
+def _fix_lines(report: PostureReport) -> list[str]:
+    """What to do about each row that has a fix (#654), under the warnings, one line each."""
+    rows = [p for p in report.protections if p.fix is not None]
+    if not rows:
+        return []
+    lines = [""]
+    for row in rows:
+        lines.extend(_wrapped(f"{row.name}: {row.fix}", first="fix: ", rest="     "))
+    return lines
 
 
 def _summary_cell(protection: Protection) -> str:
