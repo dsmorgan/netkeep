@@ -36,7 +36,7 @@ netkeep moves nothing, and says what to do, when:
 - **`NETKEEP_DATABASE_URL` or `NETKEEP_CONFIG` points inside the old folder.** Point it at the new folder first.
 - **The rename itself fails,** for example because the folder is on another volume. Nothing moves; the message says why.
 
-If the old folder comes back after a migration, netkeep says that your data is already in the new folder and the old one isn't used. Check what's in it and move it aside; don't move the new one.
+If the old folder comes back after a migration, netkeep keeps running on the new folder and warns that the old one is ignored. `netkeep migrate` explains it: check what's in the old folder and move it aside; don't move the new one. `reset-data.sh` and `chrome.sh` never recreate it, and never use the new folder before the move.
 
 The migration holds the serve lock from its checks to its last step, so no `serve` starts on either folder halfway through.
 

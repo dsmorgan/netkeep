@@ -621,6 +621,18 @@ def auto(command: str | None, *, serving: bool = False) -> AutoResult:
     if not needed():
         return AutoResult()
     legacy = paths.legacy_default_data_dir()
+    new = paths.default_data_dir()
+    if legacy is not None and legacy.exists() and (new / MARKER_FILENAME).exists():
+        # Already migrated: the data is safe in the new folder, so the old one coming back
+        # is a warning, never a refusal (the login item's serve would crash-loop under
+        # KeepAlive). `netkeep migrate` says how to clean it up.
+        warning = (
+            f"warning: {legacy} is back, but your data was moved to {new}, which netkeep"
+            " uses; the old folder is ignored. Run netkeep migrate --dry-run to see how to"
+            " clean it up"
+        )
+        log.warning("migrate: %s", warning)
+        return AutoResult([warning])
     if (legacy is None or not legacy.exists()) and _serve_lock_held(paths.default_data_dir()):
         # Nothing to move, and a serve runs here: the retry of a step left for later
         # (the Keychain) waits for the next start, without reading anything now.
@@ -653,7 +665,9 @@ def _follow_moved_folder(env: MutableMapping[str, str]) -> None:
         return
     path_guard(legacy)
     new = paths.default_data_dir()
-    if not legacy.exists() and new.is_dir():
+    # Moved (the marker), or gone and the new one there: the old name means the new folder,
+    # even if something brought an old folder back.
+    if (new / MARKER_FILENAME).exists() or (not legacy.exists() and new.is_dir()):
         _point_env_at(env, new)
 
 

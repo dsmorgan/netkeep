@@ -78,6 +78,36 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# One spelling of a path whose folder may not exist yet: its parent, resolved.
+normalized() {
+  case $1 in
+    /*) path=$1 ;;
+    *) path="$PWD/$1" ;;
+  esac
+  path=${path%/}
+  if [ -d "$path" ]; then
+    (cd "$path" && pwd -P)
+  elif [ -d "$(dirname "$path")" ]; then
+    printf '%s/%s\n' "$(cd "$(dirname "$path")" && pwd -P)" "$(basename "$path")"
+  else
+    printf '%s\n' "$path"
+  fi
+}
+
+# The rename's one-time move (#661): never work on the new default folder while the old
+# one waits to move, and never bring the old one back once it has moved.
+old_default=$(normalized "$HOME/Library/Application Support/netkeeper")
+new_default=$(normalized "$HOME/Library/Application Support/netkeep")
+chosen=$(normalized "$data_dir")
+moved=no
+[ -e "$new_default/migrated-from-netkeeper.json" ] && moved=yes
+if [ "$chosen" = "$new_default" ] && [ -d "$old_default" ] && [ "$moved" = no ]; then
+  die "netkeeper's data in $old_default hasn't moved to $new_default yet; run netkeep migrate first"
+fi
+if [ "$chosen" = "$old_default" ] && [ "$moved" = yes ]; then
+  die "netkeeper's data moved to $new_default; use --data-dir \"$new_default\" (or unset NETKEEPER_DATA)"
+fi
+
 db="$data_dir/$DB_NAME"
 archives="$data_dir/$ARCHIVES_DIRNAME"
 

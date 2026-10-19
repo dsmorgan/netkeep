@@ -941,3 +941,54 @@ def test_a_retry_skips_while_a_serve_holds_the_lock(
     finally:
         serve.release()
     assert not (new / MARKER_FILENAME).exists()
+
+
+# -- the third review: an old folder coming back after the migration ------------------
+
+
+def migrated_with_the_old_folder_back(old: Path, new: Path) -> None:
+    new.mkdir()
+    (new / MARKER_FILENAME).write_text("{}")
+    (old / "logs").mkdir(parents=True)  # brought back by an old script or a restore
+
+
+def test_the_new_login_items_serve_warns_and_keeps_running(
+    old: Path, new: Path, monkeypatch: pytest.MonkeyPatch, memory_keyring: MemoryKeyring
+) -> None:
+    """Under the new plist (NETKEEP_DATA=<new>), a refusal would crash-loop under KeepAlive."""
+    migrated_with_the_old_folder_back(old, new)
+    monkeypatch.setenv("NETKEEP_DATA", str(new))
+    memory_keyring.broken = True  # nothing is read
+    result = migrate_name.auto("serve")
+    assert len(result.lines) == 1
+    assert "is back" in result.lines[0] and "ignored" in result.lines[0]
+    assert not result.handed_over
+    assert paths.data_dir() == new
+    assert old.is_dir()  # left alone
+
+
+def test_a_terminal_command_warns_and_carries_on(
+    old: Path, new: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    migrated_with_the_old_folder_back(old, new)
+    monkeypatch.setattr(cli, "_auto_migrate", REAL_AUTO)
+    result = CliRunner().invoke(cli.app, ["config", "show"])
+    assert result.exit_code == 0, result.output
+    assert "is back" in result.output
+    assert old.is_dir()
+
+
+def test_the_old_name_for_the_folder_follows_the_move_even_when_it_is_back(
+    old: Path, new: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    migrated_with_the_old_folder_back(old, new)
+    monkeypatch.setenv("NETKEEPER_DATA", str(old))
+    migrate_name.auto("serve")
+    assert paths.data_dir() == new
+
+
+def test_migrate_still_explains_how_to_clean_up(old: Path, new: Path) -> None:
+    migrated_with_the_old_folder_back(old, new)
+    result = CliRunner().invoke(cli.app, ["migrate", "--dry-run"])
+    assert result.exit_code == 1
+    assert "already moved" in result.output and "don't move the new one" in result.output
