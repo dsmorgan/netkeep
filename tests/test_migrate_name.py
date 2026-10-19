@@ -800,7 +800,8 @@ def test_a_custom_data_directory_is_never_migrated_automatically(
 def test_a_folder_that_came_back_after_the_migration_is_named_as_unused(
     old: Path, new: Path, factory: migrate_name.LoginItemFactory
 ) -> None:
-    make_netkeeper_install(old)
+    old.mkdir()
+    (old / "logs").mkdir()  # back, but holding no database
     new.mkdir()
     (new / MARKER_FILENAME).write_text("{}")
     refusals = migrate_name.plan(macos=True, login_factory=factory).refusals
@@ -1020,3 +1021,37 @@ def test_a_terminal_command_refuses_when_both_hold_a_database(
     result = CliRunner().invoke(cli.app, ["config", "show"])
     assert result.exit_code == 1
     assert "Move the one you don't want aside" in result.output
+
+
+@pytest.mark.parametrize("environment", ["none", "new plist", "old plist"])
+def test_migrate_never_picks_a_side_when_both_hold_a_database(
+    old: Path, new: Path, monkeypatch: pytest.MonkeyPatch, environment: str
+) -> None:
+    """The stale-marker case (an undo restored a backup to the old folder): ``migrate``
+    and ``--dry-run`` give the startup refusal's neutral advice, with each database's
+    last write, and never say to keep the new folder (#661 review)."""
+    from datetime import datetime
+
+    make_netkeeper_install(old)
+    new.mkdir()
+    (new / MARKER_FILENAME).write_text("{}")
+    (new / "netkeeper.sqlite3").write_bytes(b"")
+    older = datetime(2026, 10, 1, 9, 30).timestamp()
+    newer = datetime(2026, 10, 18, 17, 5).timestamp()
+    os.utime(new / "netkeeper.sqlite3", (older, older))
+    os.utime(old / "netkeeper.sqlite3", (newer, newer))
+    if environment == "new plist":
+        monkeypatch.setenv("NETKEEP_DATA", str(new))
+    elif environment == "old plist":
+        monkeypatch.setenv("NETKEEPER_DATA", str(old))
+    for args in (["migrate", "--dry-run"], ["migrate"]):
+        result = CliRunner().invoke(cli.app, args)
+        assert result.exit_code == 1, result.output
+        text = " ".join(result.output.split())
+        assert "hold a database; netkeep won't pick one" in text
+        assert "Move the one you don't want aside" in text
+        assert "database last written 2026-10-18 17:05" in text
+        assert "database last written 2026-10-01 09:30" in text
+        assert "don't move the new one" not in text
+        assert "not used" not in text
+    assert (old / "netkeeper.sqlite3").exists() and (new / "netkeeper.sqlite3").exists()
