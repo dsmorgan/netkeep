@@ -2751,10 +2751,32 @@ IDENTITY_READ_MAX_BYTES: Final = 64 * 1024
 PROBE_STEP_TIMEOUT_S: Final = 5.0
 
 
-class PidReader(Protocol):
-    """How the launcher's probe learns which process the Chrome on a port is (#675)."""
+#: #678: how long the identity read's second step, listing the targets and bringing an
+#: open UI window to the front, may take. A step that runs out is no window fronted, and
+#: the launcher hands off as before; the pid already read stands.
+FRONT_STEP_TIMEOUT_S: Final = 2.0
 
-    async def read_pid(self, cdp_url: str) -> int | None: ...
+
+@dataclass(frozen=True, slots=True)
+class IdentityRead:
+    """What the identity read found: the browser's pid, and whether it brought an open
+    UI window to the front on the same connection (#678)."""
+
+    pid: int | None
+    fronted: bool = False
+
+
+class PidReader(Protocol):
+    """How the launcher's probe learns which process the Chrome on a port is (#675), and,
+    when asked, brings an open UI window on ``ui_port`` to the front (#678)."""
+
+    async def read(
+        self,
+        cdp_url: str,
+        *,
+        ui_port: int | None = None,
+        dedicated: Callable[[int], bool] | None = None,
+    ) -> IdentityRead: ...
 
 
 class CdpIdentityReader:
@@ -2775,12 +2797,29 @@ class CdpIdentityReader:
     answer that points anywhere else is no pid.
     Everything that fails is ``None``, which the launcher refuses, as before.
 
+    #678: :meth:`read` with ``ui_port`` and ``dedicated`` goes one step further on the
+    same websocket, and only once ``dedicated(pid)`` says the pid is netkeep's Chrome:
+    one ``Target.getTargets``, and, when a page target's URL is on netkeep's UI origin
+    (:func:`ui_window_target`), one ``Target.activateTarget`` of that target. Anything
+    that fails in that step is no window fronted, and the pid stands.
+
     A run never uses this: it attaches through :class:`PlaywrightCdpConnector`, and reads
     the pid on that same connection (#624).
     """
 
     async def read_pid(self, cdp_url: str) -> int | None:
         """The browser process's pid that the Chrome on ``cdp_url`` names, or ``None``."""
+        return (await self.read(cdp_url)).pid
+
+    async def read(
+        self,
+        cdp_url: str,
+        *,
+        ui_port: int | None = None,
+        dedicated: Callable[[int], bool] | None = None,
+    ) -> IdentityRead:
+        """The pid the Chrome on ``cdp_url`` names and, when ``ui_port`` and ``dedicated``
+        are given, whether an open UI window was brought to the front (#678)."""
         parts = urlsplit(cdp_url)
         try:
             port = parts.port
@@ -2788,7 +2827,7 @@ class CdpIdentityReader:
             port = None
         if parts.scheme != "http" or not parts.hostname or port is None or not 0 < port < 65536:
             log.info("the identity read takes http://<host>:<port>, not %s", cdp_url)
-            return None
+            return IdentityRead(None)
         try:
             # Resolved once. The GET tries each address in turn (``localhost`` may be
             # ::1 first, and Chrome listens on 127.0.0.1); the websocket then goes to
@@ -2806,14 +2845,14 @@ class CdpIdentityReader:
                 break
             if ws_url is None or not _is_browser_websocket(ws_url, netloc):
                 log.warning("the Chrome on %s named an unexpected websocket", cdp_url)
-                return None
-            answer = await _read_process_info(ws_url)
+                return IdentityRead(None)
+            pid, fronted = await _read_process_info(ws_url, ui_port, dedicated)
         except Exception as exc:
             log.info(
                 "could not read which process the Chrome on %s is: %s", cdp_url, personal_exc(exc)
             )
-            return None
-        return browser_pid_from_process_info(answer) if isinstance(answer, Mapping) else None
+            return IdentityRead(None)
+        return IdentityRead(pid, fronted)
 
 
 #: #675: the one request the identity read writes: Chrome's own DevTools version
@@ -2874,13 +2913,49 @@ def _is_browser_websocket(ws_url: str, netloc: str) -> bool:
     )
 
 
-async def _read_process_info(ws_url: str) -> object:
-    """``SystemInfo.getProcessInfo``'s result, over the browser target's own websocket.
+def ui_window_target(answer: object, ui_port: int) -> str | None:
+    """The first page target in ``Target.getTargets``' answer that is netkeep's UI (#678).
 
-    One message, then the connection closes. No proxy, no compression, no redirect (a
-    handshake answered with one fails), and an answer over
-    :data:`IDENTITY_READ_MAX_BYTES` is refused. Events (none are subscribed to) and any
-    other id are skipped until the answer arrives or the step times out.
+    A target counts only when its ``type`` is ``page`` and its URL's scheme is ``http``
+    and its netloc is exactly ``127.0.0.1:<ui_port>`` or ``localhost:<ui_port>``: no
+    userinfo, no other port, no ``https``, and no worker, frame or extension. A run's
+    tab is on LinkedIn, so it never matches. Anything malformed is skipped, and no match
+    is ``None``.
+    """
+    infos = answer.get("targetInfos") if isinstance(answer, Mapping) else None
+    if not isinstance(infos, list) or not 0 < ui_port < 65536:
+        return None
+    origins = {f"127.0.0.1:{ui_port}", f"localhost:{ui_port}"}
+    for info in infos:
+        if not isinstance(info, Mapping) or info.get("type") != "page":
+            continue
+        url, target_id = info.get("url"), info.get("targetId")
+        if not isinstance(url, str) or not isinstance(target_id, str):
+            continue
+        parts = urlsplit(url)
+        if (
+            parts.scheme == "http"
+            and parts.netloc in origins
+            and re.fullmatch(r"[A-Za-z0-9-]{1,64}", target_id) is not None
+        ):
+            return target_id
+    return None
+
+
+async def _read_process_info(
+    ws_url: str, ui_port: int | None = None, dedicated: Callable[[int], bool] | None = None
+) -> tuple[int | None, bool]:
+    """The browser's pid, over its own websocket, and whether a UI window was fronted.
+
+    ``SystemInfo.getProcessInfo``, for the pid. Then, only when ``ui_port`` and
+    ``dedicated`` are given and ``dedicated(pid)`` is true (#678): ``Target.getTargets``,
+    and, for the target :func:`ui_window_target` picks, ``Target.activateTarget``. Each
+    is answered before the next is sent, and nothing else is ever sent. Then the
+    connection closes. No proxy, no compression, no redirect (a handshake answered with
+    one fails), and an answer over :data:`IDENTITY_READ_MAX_BYTES` is refused. Events
+    (none are subscribed to) and any other id are skipped until the answer arrives or
+    the step times out. The front step has its own deadline,
+    :data:`FRONT_STEP_TIMEOUT_S`, and anything that fails in it is no window fronted.
     """
     from websockets.asyncio.client import connect
 
@@ -2888,15 +2963,48 @@ async def _read_process_info(ws_url: str) -> object:
         def process_redirect(self, exc: Exception) -> Exception:
             return exc  # never followed: the websocket stays where it was checked
 
-    async with asyncio.timeout(PROBE_STEP_TIMEOUT_S):
+    async def answer(ws: Any, number: int) -> Mapping[str, Any]:
+        while True:
+            message = json.loads(await ws.recv())
+            if isinstance(message, dict) and message.get("id") == number:
+                return message
+
+    async with asyncio.timeout(PROBE_STEP_TIMEOUT_S) as deadline:
         async with NoRedirect(
             ws_url, proxy=None, compression=None, max_size=IDENTITY_READ_MAX_BYTES
         ) as ws:
             await ws.send(json.dumps({"id": 1, "method": "SystemInfo.getProcessInfo"}))
-            while True:
-                message = json.loads(await ws.recv())
-                if isinstance(message, dict) and message.get("id") == 1:
-                    return message.get("result")
+            info = (await answer(ws, 1)).get("result")
+            pid = browser_pid_from_process_info(info) if isinstance(info, Mapping) else None
+            if pid is None or ui_port is None or dedicated is None:
+                return pid, False
+            # The front step's own deadline, then the close's: a slow front is no
+            # window fronted, never a lost pid.
+            deadline.reschedule(None)
+            try:
+                if not dedicated(pid):
+                    return pid, False
+                async with asyncio.timeout(FRONT_STEP_TIMEOUT_S):
+                    await ws.send(json.dumps({"id": 2, "method": "Target.getTargets"}))
+                    target_id = ui_window_target((await answer(ws, 2)).get("result"), ui_port)
+                    if target_id is None:
+                        return pid, False
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "id": 3,
+                                "method": "Target.activateTarget",
+                                "params": {"targetId": target_id},
+                            }
+                        )
+                    )
+                    done = await answer(ws, 3)
+            except Exception as exc:
+                log.info("could not bring netkeep's window to the front: %s", personal_exc(exc))
+                return pid, False
+            finally:
+                deadline.reschedule(asyncio.get_running_loop().time() + FRONT_STEP_TIMEOUT_S)
+            return pid, "error" not in done and isinstance(done.get("result"), Mapping)
 
 
 class ActivityLocks:

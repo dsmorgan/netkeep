@@ -42,6 +42,15 @@ Chrome's singleton can replace a running Chrome that doesn't answer in time, so 
 the settle the launcher reads the profile's lock again and reports a success only when
 it names the process it expected.
 
+**An open window first (#678).** Before a hand-off, the probe's identity read, on its
+one connection and under the browser lock, lists the running Chrome's targets once
+the pid is shown to be netkeep's. When a page there is on the UI's own origin
+(``http://127.0.0.1:<serve's port>`` or ``localhost``), it brings that window to the
+front (``Target.activateTarget``) and the launch is ``shown``: nothing is spawned. With
+no such page, or any failure in that step, the launch hands off as before. It never
+asks on the first-run path, or while a run holds a browser lock, so a run's window is
+never brought forward.
+
 **Detached.** Chrome runs in its own session with its standard streams on
 ``/dev/null``, so it outlives ``serve`` and a terminal's Ctrl-C.
 
@@ -76,7 +85,13 @@ from urllib.parse import urlsplit, urlunsplit
 from netkeep.chrome_profile import check_dedicated_profile, profile_lock_pid
 from netkeep.logging_setup import personal_exc
 from netkeep.services.browser_launch import chrome_flags, remote_host_note
-from netkeep.services.chrome_launch import LaunchResult, LaunchStatus, PortProbe, Refusal
+from netkeep.services.chrome_launch import (
+    LaunchResult,
+    LaunchStatus,
+    PortProbe,
+    Refusal,
+    UiFront,
+)
 
 log = logging.getLogger(__name__)
 
@@ -227,8 +242,9 @@ class ChromeLauncher:
     Every input is the caller's: ``cdp_url`` (the address in force, read at each launch),
     ``profile`` (the dedicated profile), ``app_url`` (a fresh connect link per launch) and
     ``ui_port`` (serve's port, which that link must name), ``probe`` (what the Chrome on
-    the port names for itself, read through the attach's connector under the browser
-    lock, or the pid a run holding it verified: :func:`netkeep.worker.launcher_probe`),
+    the port names for itself, read under the browser lock, or the pid a run holding it
+    verified: :func:`netkeep.worker.launcher_probe`, given the :class:`UiFront` ask or
+    ``None``),
     ``run_holds_browser`` (whether a run holds a browser lock:
     :func:`netkeep.services.runs.any_browser_lock_held`) and ``pid_alive``.
     ``spawn`` and ``answers`` default to :func:`spawn_chrome` and :func:`port_answers`,
@@ -242,7 +258,7 @@ class ChromeLauncher:
         profile: Path,
         app_url: Callable[[], str],
         ui_port: int,
-        probe: Callable[[str], Awaitable[PortProbe]],
+        probe: Callable[[str, UiFront | None], Awaitable[PortProbe]],
         run_holds_browser: Callable[[], bool],
         pid_alive: Callable[[int], bool],
         spawn: Spawn | None = None,
@@ -265,7 +281,8 @@ class ChromeLauncher:
         self._platform = platform
 
     async def start(self, *, first_run: bool = False) -> LaunchResult:
-        """Look, then start netkeep's Chrome or hand the UI's window to it, or refuse."""
+        """Look, then start netkeep's Chrome, bring its open UI window to the front or
+        hand the UI's window to it, or refuse."""
         cdp_url = await self._cdp_url()
         note = remote_host_note(cdp_url)
         if note is not None:
@@ -280,9 +297,19 @@ class ChromeLauncher:
         answers = port_answers if self._answers is None else self._answers
         expected: int | None
         if await asyncio.to_thread(answers, port):
-            verified = await self._dedicated_pid(cdp_url, port)
+            front = None if first_run else await self._ui_front()
+            probe = await self._probe(cdp_url, front)
+            verified = self._dedicated_pid(probe, port)
             if isinstance(verified, LaunchResult):
                 return verified
+            if front is not None and not probe.busy and probe.fronted:
+                log.info("brought netkeep's open window to the front on port %d", port)
+                return LaunchResult(
+                    LaunchStatus.SHOWN,
+                    f"brought netkeep's open window to the front in netkeep's Chrome on port"
+                    f" {port}",
+                    pid=verified,
+                )
             expected = verified
         else:
             lock_pid = profile_lock_pid(self.profile)
@@ -317,7 +344,28 @@ class ChromeLauncher:
             return LaunchResult(LaunchStatus.FAILED, f"couldn't start Chrome: {exc}")
         return await self._settle(process, expected=expected, port=port)
 
-    async def _dedicated_pid(self, cdp_url: str, port: int) -> int | LaunchResult:
+    async def _ui_front(self) -> UiFront | None:
+        """#678: the probe's ask to bring an open UI window to the front, or ``None``.
+
+        :meth:`start` asks for none on the first-run path, whose hand-off also opens
+        LinkedIn's sign-in page. ``None`` for a ``ui_port`` that isn't a port, and while
+        a run holds a browser lock, so a run's window is never brought forward (#645).
+        The probe holds the account's lock for its whole read, so no run of that account
+        attaches in between. ``dedicated`` is #624's check of the pid, the same one
+        :meth:`_dedicated_pid` makes after the probe.
+        """
+        if not 0 < self.ui_port < 65536:
+            return None
+        if await asyncio.to_thread(self._run_holds_browser):
+            return None
+        profile = self.profile
+
+        def dedicated(pid: int) -> bool:
+            return check_dedicated_profile(profile, pid).dedicated
+
+        return UiFront(ui_port=self.ui_port, dedicated=dedicated)
+
+    def _dedicated_pid(self, probe: PortProbe, port: int) -> int | LaunchResult:
         """The pid of netkeep's Chrome on ``port``, or the refusal when it isn't shown to be.
 
         #624's check, on the pid the Chrome on the port names for itself. While a run
@@ -325,7 +373,6 @@ class ChromeLauncher:
         connects to nothing and hands back the pid that run's attach verified: it must
         be the pid in the profile's ``SingletonLock``, and alive. Anything else refuses.
         """
-        probe = await self._probe(cdp_url)
         lock_pid = profile_lock_pid(self.profile)
         if not probe.busy:
             check = check_dedicated_profile(self.profile, probe.browser_pid)

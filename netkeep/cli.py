@@ -131,7 +131,7 @@ from netkeep.services.backup import (
     restore_backup,
 )
 from netkeep.services.browser_launch import cdp_port, chrome_launch_command, remote_host_note
-from netkeep.services.chrome_launch import PortProbe
+from netkeep.services.chrome_launch import PortProbe, UiFront
 from netkeep.services.events import EventBus
 from netkeep.services.linkedin_accounts import (
     account_id_for,
@@ -451,8 +451,9 @@ def open_command(
     """Open netkeep's UI in netkeep's Chrome, starting that Chrome if it's down.
 
     The UI opens as an app window in netkeep's own Chrome: its dedicated profile, on
-    the configured debugging port (ADR 0012). When that Chrome is running, it opens the
-    window there; when it isn't, this starts it. It refuses, and says why, when the port
+    the configured debugging port (ADR 0012). When that Chrome is running, it brings the
+    UI's open window there to the front, or opens one when none is open; when it isn't,
+    this starts it. It refuses, and says why, when the port
     answers as another Chrome, when that profile is open without the port, or, for a
     start, while a run holds the browser.
 
@@ -501,10 +502,10 @@ def _open_launcher(cdp_url: str, base: str, key: str) -> ChromeLauncher:
     async def address() -> str:
         return cdp_url
 
-    async def probe(url: str) -> PortProbe:
+    async def probe(url: str, front: UiFront | None) -> PortProbe:
         account = _browser_lock_key()
         return await launcher_probe(
-            url, locks=ActivityLocks(legacy_partner=account), account=account
+            url, locks=ActivityLocks(legacy_partner=account), account=account, front=front
         )
 
     ui_port = configured_port(base)

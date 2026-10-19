@@ -195,7 +195,9 @@ READ_ONLY_CDP_METHODS: dict[str, frozenset[str]] = {
 #: - ``Target.closeTarget``: only the target id ``Target.createTarget`` just answered,
 #:   when that tab never showed up as a page.
 #:
-#: ``Page.bringToFront`` and ``Target.activateTarget`` are deliberately absent.
+#: ``Page.bringToFront`` is deliberately absent, and so is ``Target.activateTarget`` from
+#: every run's site: only the launcher's identity read sends it, for the UI's window
+#: (``UI_FRONT_CDP_METHODS``).
 TAB_CDP_METHODS: dict[str, frozenset[str]] = {
     "Target.createTarget": frozenset({"url", "newWindow", "background"}),
     "Target.getTargetInfo": frozenset(),
@@ -215,11 +217,25 @@ COOKIE_CDP_METHODS: dict[str, frozenset[str]] = {"Network.getCookies": frozenset
 IDENTITY_CDP_METHODS: dict[str, frozenset[str]] = {
     "SystemInfo.getProcessInfo": frozenset(),
 }
+#: #678, the launcher's "bring the open window forward", on the identity read's own
+#: websocket (``_read_process_info``) and only after the pid is shown to be netkeep's
+#: Chrome, never while a run holds the browser:
+#:
+#: - ``Target.getTargets`` with no params: every target's id, type and URL, read to find
+#:   a page on the UI's own origin. It opens, attaches to and reads into nothing.
+#: - ``Target.activateTarget`` with ``targetId`` only: the one page target
+#:   ``ui_window_target`` picked, whose URL is ``http://127.0.0.1:<ui port>`` or
+#:   ``http://localhost:<ui port>``. A run's tab is on LinkedIn, so it never qualifies.
+UI_FRONT_CDP_METHODS: dict[str, frozenset[str]] = {
+    "Target.getTargets": frozenset(),
+    "Target.activateTarget": frozenset({"targetId"}),
+}
 ALLOWED_CDP_METHODS = {
     **READ_ONLY_CDP_METHODS,
     **TAB_CDP_METHODS,
     **COOKIE_CDP_METHODS,
     **IDENTITY_CDP_METHODS,
+    **UI_FRONT_CDP_METHODS,
 }
 #: The functions whose ``send`` calls reach a CDP session, and how many each makes.
 CDP_SENDERS = {
@@ -235,8 +251,9 @@ CDP_SENDERS = {
     (LINKEDIN / "browser.py", "BrowserRun._target_id"): 1,
     (LINKEDIN / "preflight.py", "_read_session_cookies"): 1,
     (LINKEDIN / "browser.py", "read_browser_pid"): 1,
-    # #675: the launcher probe's pid read, on the browser target's own websocket.
-    (LINKEDIN / "browser.py", "_read_process_info"): 1,
+    # #675: the launcher probe's pid read, on the browser target's own websocket, and
+    # #678's target list and front of the UI's window on that same websocket.
+    (LINKEDIN / "browser.py", "_read_process_info"): 3,
 }
 #: Which of those methods each function may send: neither borrows the other's.
 CDP_SENDER_METHODS = {
@@ -268,7 +285,9 @@ CDP_SENDER_METHODS = {
     (LINKEDIN / "browser.py", "BrowserRun._target_id"): frozenset({"Target.getTargetInfo"}),
     (LINKEDIN / "preflight.py", "_read_session_cookies"): frozenset({"Network.getCookies"}),
     (LINKEDIN / "browser.py", "read_browser_pid"): frozenset({"SystemInfo.getProcessInfo"}),
-    (LINKEDIN / "browser.py", "_read_process_info"): frozenset({"SystemInfo.getProcessInfo"}),
+    (LINKEDIN / "browser.py", "_read_process_info"): frozenset(
+        {"SystemInfo.getProcessInfo", "Target.getTargets", "Target.activateTarget"}
+    ),
 }
 #: The only observations that open the body tap, each once (ADR 0006's amendment):
 #: the connections sync's (#200) and each enrichment visit's, whose tap streams only
@@ -2696,8 +2715,10 @@ def test_the_cdp_send_scanner_reads_a_raw_websocket_frame() -> None:
 #: the launcher's probe (and named by the worker's import).
 IDENTITY_READ_REACHES = {
     "websockets": {(LINKEDIN / "browser.py", "_read_process_info"): 1},
-    "_read_process_info": {(LINKEDIN / "browser.py", "CdpIdentityReader.read_pid"): 1},
-    "_browser_websocket_url": {(LINKEDIN / "browser.py", "CdpIdentityReader.read_pid"): 1},
+    "_read_process_info": {(LINKEDIN / "browser.py", "CdpIdentityReader.read"): 1},
+    "_browser_websocket_url": {(LINKEDIN / "browser.py", "CdpIdentityReader.read"): 1},
+    # #678: which target is the UI's window, picked only inside the identity read.
+    "ui_window_target": {(LINKEDIN / "browser.py", "_read_process_info"): 1},
     "CdpIdentityReader": {
         (PACKAGE / "worker.py", ""): 1,
         (PACKAGE / "worker.py", "launcher_probe"): 1,
@@ -2794,19 +2815,47 @@ IDENTITY_TRANSPORT_REACHES = {
         ),
         sorted(["_ok_content_length", "isinstance", "isinstance"]),
     ),
+    # #678: the pid's frame, then the target list's and the front's, each answered by
+    # id before the next; the deadline moved for the front step; its failure logged.
     "_read_process_info": (
         sorted(
             [
+                "(await answer(ws, 1)).get",
+                "(await answer(ws, 2)).get",
+                "asyncio.get_running_loop",
+                "asyncio.get_running_loop().time",
                 "asyncio.timeout",
+                "asyncio.timeout",
+                "deadline.reschedule",
+                "deadline.reschedule",
+                "done.get",
+                "json.dumps",
+                "json.dumps",
                 "json.dumps",
                 "json.loads",
-                "message.get",
+                "log.info",
                 "message.get",
                 "ws.recv",
                 "ws.send",
+                "ws.send",
+                "ws.send",
             ]
         ),
-        sorted(["NoRedirect", "isinstance"]),
+        sorted(
+            [
+                "NoRedirect",
+                "answer",
+                "answer",
+                "answer",
+                "browser_pid_from_process_info",
+                "dedicated",
+                "isinstance",
+                "isinstance",
+                "isinstance",
+                "personal_exc",
+                "ui_window_target",
+            ]
+        ),
     ),
 }
 
@@ -2837,10 +2886,17 @@ def test_the_identity_read_reaches_only_its_pinned_transport_calls() -> None:
 IDENTITY_TRANSPORT_FILE = Path(__file__).parent / "identity_read_transport.txt"
 
 
-#: The functions the whole-function pin holds: the two transports, and the two checks
-#: that decide what they read (the answer's length, and which websocket is opened).
+#: The functions the whole-function pin holds: the two transports, and the three checks
+#: that decide what they read and touch (the answer's length, which websocket is
+#: opened, and, #678, which target is the UI's window).
 IDENTITY_PINNED_FUNCTIONS = frozenset(
-    {"_browser_websocket_url", "_read_process_info", "_ok_content_length", "_is_browser_websocket"}
+    {
+        "_browser_websocket_url",
+        "_read_process_info",
+        "_ok_content_length",
+        "_is_browser_websocket",
+        "ui_window_target",
+    }
 )
 
 
@@ -2892,7 +2948,8 @@ def test_the_identity_transport_functions_are_exactly_the_reviewed_ones() -> Non
     )
 
 
-_WS_SEND = "            await ws.send(json.dumps("
+_WS_SEND = '            await ws.send(json.dumps({"id": 1,'
+_FRONT_SEND = '                    await ws.send(json.dumps({"id": 2,'
 _STREAM_WRITE = "            writer.write(VERSION_REQUEST"
 
 
@@ -2903,6 +2960,14 @@ _STREAM_WRITE = "            writer.write(VERSION_REQUEST"
         (_WS_SEND, "            ws.transport.write(b'{}')\n"),
         (_WS_SEND, "            await ws.send('{}')\n"),
         (_WS_SEND, "            _raw(ws)\n"),
+        # #678: another frame in the front step, or the front's frame sent twice.
+        (
+            _FRONT_SEND,
+            "                    await ws.send(json.dumps({'id': 4, 'method':"
+            " 'Target.closeTarget', 'params': {'targetId': 'x'}}))\n",
+        ),
+        (_FRONT_SEND, "                    await ws.send(json.dumps({'id': 2}))\n"),
+        (_FRONT_SEND, "                    ws.protocol.send_text(b'{}')\n"),
         (_STREAM_WRITE, "            writer.transport.write(b'PUT /json/new HTTP/1.1')\n"),
         (_STREAM_WRITE, "            writer.get_extra_info('socket').sendall(b'x')\n"),
         (_STREAM_WRITE, "            writer.write(b'PUT /json/new?about:blank HTTP/1.1')\n"),
@@ -2934,7 +2999,18 @@ def test_the_identity_transport_pin_catches_another_send(anchor: str, line: str)
         ),
         ("proxy=None, compression=None", "proxy=True, compression=None"),
         ("            return exc  #", "            return super().process_redirect(exc)  #"),
-        ('message.get("id") == 1', 'message.get("id") is not None'),
+        ('message.get("id") == number', 'message.get("id") is not None'),
+        # #678: the front step's frames, and the guards before it.
+        ('"method": "Target.getTargets"}', '"method": "Target.getTargets", "params": {}}'),
+        ('"params": {"targetId": target_id}', '"params": {"targetId": "x"}'),
+        ('"method": "Target.activateTarget",', '"method": "Page.bringToFront",'),
+        (
+            "if pid is None or ui_port is None or dedicated is None:",
+            "if pid is None or ui_port is None:",
+        ),
+        ("                if not dedicated(pid):\n", "                if False:\n"),
+        ("async with asyncio.timeout(FRONT_STEP_TIMEOUT_S):", "if True:"),
+        ('return pid, "error" not in done and', "return pid, True or"),
     ],
 )
 def test_the_whole_function_pin_catches_a_change_the_reach_pin_cant(old: str, new: str) -> None:
@@ -2952,9 +3028,15 @@ def test_the_whole_function_pin_catches_a_change_the_reach_pin_cant(old: str, ne
         ("return length if length <= IDENTITY_READ_MAX_BYTES else None", "return length"),
         ("and parts.netloc == netloc", "and True"),
         ('r"/devtools/browser/[A-Za-z0-9-]+"', 'r"/devtools/.+"'),
+        # #678: which target is the UI's window.
+        ('info.get("type") != "page"', 'info.get("type") is None'),
+        ('parts.scheme == "http"\n            and parts.netloc in origins', "True"),
+        ("and parts.netloc in origins", "and parts.netloc.endswith(str(ui_port))"),
+        ('origins = {f"127.0.0.1:{ui_port}", f"localhost:{ui_port}"}', 'origins = {""}'),
+        ('r"[A-Za-z0-9-]{1,64}", target_id', 'r".*", target_id'),
     ],
 )
-def test_the_whole_function_pin_holds_the_two_checks(old: str, new: str) -> None:
+def test_the_whole_function_pin_holds_the_checks(old: str, new: str) -> None:
     source = read_source(LINKEDIN / "browser.py")
     assert source.count(old) == 1, old
     assert identity_transport_source(source.replace(old, new, 1)) != (
@@ -2969,6 +3051,7 @@ def test_the_whole_function_pin_holds_the_two_checks(old: str, new: str) -> None
         "async def _read_process_info(ws_url: str) -> object:\n    return None\n",
         "def _is_browser_websocket(ws_url: str, netloc: str) -> bool:\n    return True\n",
         "_browser_websocket_url = None\n",
+        "def ui_window_target(answer: object, ui_port: int) -> str | None:\n    return 'x'\n",
         "class _read_process_info:\n    pass\n",
         "from os import path as _is_browser_websocket\n",
     ],
