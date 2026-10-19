@@ -623,6 +623,11 @@ def auto(command: str | None, *, serving: bool = False) -> AutoResult:
     legacy = paths.legacy_default_data_dir()
     new = paths.default_data_dir()
     if legacy is not None and legacy.exists() and (new / MARKER_FILENAME).exists():
+        if holds_database(legacy):
+            raise Refused(
+                f"both {legacy} and {new} hold a database; netkeep won't pick one. Move the"
+                " one you don't want aside, then start again"
+            )
         # Already migrated: the data is safe in the new folder, so the old one coming back
         # is a warning, never a refusal (the login item's serve would crash-loop under
         # KeepAlive). `netkeep migrate` says how to clean it up.
@@ -667,8 +672,18 @@ def _follow_moved_folder(env: MutableMapping[str, str]) -> None:
     new = paths.default_data_dir()
     # Moved (the marker), or gone and the new one there: the old name means the new folder,
     # even if something brought an old folder back.
-    if (new / MARKER_FILENAME).exists() or (not legacy.exists() and new.is_dir()):
+    # Never when the old folder holds a database: that is real data (an undo restored
+    # there), and the automatic run refuses rather than pick one.
+    moved = (new / MARKER_FILENAME).exists() and not holds_database(legacy)
+    if moved or (not legacy.exists() and new.is_dir()):
         _point_env_at(env, new)
+
+
+def holds_database(folder: Path) -> bool:
+    """Whether ``folder`` has a database file, or its ``-wal`` or ``-shm``."""
+    return any(
+        (folder / f"{DATABASE_FILENAME}{suffix}").exists() for suffix in ("", "-wal", "-shm")
+    )
 
 
 def _same(left: Path, right: Path) -> bool:
