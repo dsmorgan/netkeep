@@ -98,10 +98,17 @@ uploads to PyPI by hand, and no PyPI token exists.
    that counts: the workflow's own main-ancestor check lives in the tagged commit's
    copy of `release.yml`, which a tag on another branch could have edited. Then approve.
    The workflow publishes to PyPI, then creates the GitHub release with the wheel, the
-   sdist, `constraints.txt` and `SHA256SUMS`.
+   sdist, `constraints.txt`, the one-line installer `install.sh` (with the release's
+   version stamped in) and `SHA256SUMS`.
 
 The workflow refuses a tag that isn't `vX.Y.Z` for the package's version, a commit that
 isn't on `main`, and a version that already has a release, drafts included.
+
+The installer, `scripts/install.sh`, pins uv's installer by version and SHA-256. To move
+it to a newer uv, download `uv-installer.sh` from that uv version's GitHub release, read
+it, and update `uv_version` and `uv_installer_sha256` in the script and in
+`tests/test_install_script.py`. The repository's copy has a placeholder for the netkeep
+version and refuses to run; the release workflow stamps the version in.
 
 If only the **GitHub release** job fails, the PyPI upload is good and the version is not
 lost: delete any draft release the job left for the tag (**Releases**, or

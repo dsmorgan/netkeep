@@ -1,10 +1,10 @@
 # Setup
 
-This guide takes you from a fresh clone to a database full of your LinkedIn connections, sorted into people you've met and people you haven't. It takes an afternoon, most of it waiting for LinkedIn's data export. When you're done, go on to [your first campaign](first-campaign.md).
+This guide takes you from installing netkeep to a database full of your LinkedIn connections, sorted into people you've met and people you haven't. It takes an afternoon, most of it waiting for LinkedIn's data export. When you're done, go on to [your first campaign](first-campaign.md).
 
 You use one Chrome for netkeep: **netkeep's Chrome**, a Chrome with its own profile and a debug port. It holds LinkedIn and setup steps such as Gmail linkage, and it's where you look for the UI, so you have one place to look ([ADR 0012](../adr/0012-chrome-profiles.md)). netkeep attaches to it to read LinkedIn and to type LinkedIn messages. netkeep starts it only when you ask: with **Start Chrome**, with `netkeep open`, or at startup if you turn that on. A run never starts a browser ([ADR 0002](../adr/0002-attach-only-browser-mode.md)).
 
-The first time, you open the UI at <http://127.0.0.1:8000> yourself, in Chrome. The UI requires Chrome.
+The UI is at <http://127.0.0.1:8000>. `netkeep setup` opens it for you the first time; otherwise, open it yourself in Chrome. The UI requires Chrome.
 
 ## The Steps tab
 
@@ -12,7 +12,21 @@ The dashboard opens on **Steps** until setup is done: a diagram with a box for e
 
 ## 1. Install
 
-Install the prerequisites in the README's [Requirements](../../README.md#requirements), then:
+On macOS 14 or later, paste this into Terminal:
+
+```sh
+curl -fsSL https://github.com/dsmorgan/netkeep/releases/latest/download/install.sh | sh
+```
+
+It installs uv if you don't have it, installs netkeep with the dependency versions its release was tested with, then runs `netkeep setup`. It prints each step before it runs it, and `| sh -s -- --dry-run` prints the steps without running any. To read and verify the installer before you run it, follow [Download, verify, read, then run](../../README.md#download-verify-read-then-run) in the README, which also lists the [requirements](../../README.md#requirements).
+
+`netkeep setup` turns on the login item, so `serve` starts whenever you log in, and opens the first-run page in netkeep's Chrome. If your release has no `netkeep setup` yet, the installer says so: start netkeep yourself with `netkeep serve`, leave it running in its own terminal (press Ctrl+C to stop it), and open <http://127.0.0.1:8000> in Chrome. You see an empty dashboard. `serve` creates and migrates the database itself.
+
+If `netkeep` isn't found in a new terminal, run `uv tool update-shell`, then open another terminal.
+
+### From a checkout
+
+To work on netkeep itself, install the checkout prerequisites in the README's [From a checkout, for development](../../README.md#from-a-checkout-for-development), then:
 
 ```sh
 git clone https://github.com/dsmorgan/netkeep.git
@@ -22,11 +36,7 @@ make build-ui
 .venv/bin/netkeep serve
 ```
 
-Open <http://127.0.0.1:8000> in Chrome. You see an empty dashboard. `serve` creates and migrates the database itself. Leave it running in its own terminal; press Ctrl+C to stop it.
-
-The commands below use `netkeep` for short. Run them as `.venv/bin/netkeep`, or activate the environment first with `source .venv/bin/activate`.
-
-To start `serve` when you log in, see [Run at login](../../README.md#run-at-login-macos).
+From a checkout, run the commands below as `.venv/bin/netkeep`, or activate the environment first with `source .venv/bin/activate`. To start `serve` when you log in, see [Run at login](../../README.md#run-at-login-macos).
 
 ## 2. Gmail
 

@@ -77,6 +77,8 @@ dev = [
   # tests/test_release_workflow.py reads the workflow files (#683).
   "pyyaml>=6",
   "types-pyyaml>=6",
+  # tests/test_install_script.py lints scripts/install.sh (#686).
+  "shellcheck-py>=0.10",
 ]
 
 [project.scripts]
