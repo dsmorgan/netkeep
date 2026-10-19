@@ -21,14 +21,16 @@ from __future__ import annotations
 
 import asyncio
 import enum
+import http.client
 import inspect
+import json
 import logging
 import os
 import random
 import re
 import unicodedata
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping, Sequence
-from contextlib import AbstractAsyncContextManager, asynccontextmanager, contextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, closing, contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -2658,10 +2660,28 @@ class CdpConnector(Protocol):
     async def connect(self, cdp_url: str) -> Connection: ...
 
 
+#: #675: what ``connect_over_cdp`` fails with on a Chrome that has no windows open.
+#: Playwright sets up a browser context as it attaches (``Browser.setDownloadBehavior``),
+#: and Chrome refuses that with no window. On macOS, closing Chrome's last window
+#: leaves it running like this.
+NO_WINDOWS_ERROR: Final = "Browser context management is not supported"
+
+
+def no_windows_message(cdp_url: str) -> str:
+    """Why an attach to a Chrome with no windows open failed, and what to do (#675)."""
+    return (
+        f"cannot attach to Chrome at {cdp_url}: it has no windows open (on macOS, Chrome"
+        " keeps running after you close its last window), and Chrome can't be attached to"
+        " without one. Reopen netkeeper's window with `netkeeper open` (or Start Chrome),"
+        " then try again"
+    )
+
+
 class PlaywrightCdpConnector:
     """The production connector: Playwright's ``connect_over_cdp``, and nothing else.
 
-    This is the only place in netkeeper that opens a browser connection, and the only
+    This is the only place in netkeeper that attaches to a browser (the one other CDP
+    connection, :class:`CdpIdentityReader`'s, sends one read and closes), and the only
     Playwright entry point it names is the attaching one. ``chromium.launch`` and
     ``launch_persistent_context`` are not used here or anywhere else, and a test
     walks the package's syntax tree to keep it that way.
@@ -2677,6 +2697,8 @@ class PlaywrightCdpConnector:
             browser = await playwright.chromium.connect_over_cdp(cdp_url)
         except BaseException as exc:
             await playwright.stop()
+            if NO_WINDOWS_ERROR in str(exc):
+                raise BrowserUnavailable(no_windows_message(cdp_url)) from exc
             raise BrowserUnavailable(
                 f"cannot attach to Chrome at {cdp_url}: {_reason(exc)}; "
                 "start it with the command `netkeeper browser launch` prints"
@@ -2719,6 +2741,107 @@ async def read_browser_pid(browser: object) -> int | None:
         if session is not None:
             await _detach_quietly(session.detach)
     return browser_pid_from_process_info(answer) if isinstance(answer, Mapping) else None
+
+
+#: #675: the most of ``/json/version`` and of the websocket's one answer the identity
+#: read takes in. Chrome's answers are a few hundred bytes.
+IDENTITY_READ_MAX_BYTES: Final = 64 * 1024
+#: #675: how long each step of the identity read (the GET, then the websocket's answer)
+#: may take. The launcher's probe bounds the whole read too.
+PROBE_STEP_TIMEOUT_S: Final = 5.0
+
+
+class PidReader(Protocol):
+    """How the launcher's probe learns which process the Chrome on a port is (#675)."""
+
+    async def read_pid(self, cdp_url: str) -> int | None: ...
+
+
+class CdpIdentityReader:
+    """Which process the Chrome on a port is, without Playwright (#675).
+
+    The Chrome launcher's probe uses this, not :class:`PlaywrightCdpConnector`.
+    ``connect_over_cdp`` sets up a browser context as it attaches, and a Chrome with no
+    windows open refuses that (``Browser.setDownloadBehavior``: "Browser context
+    management is not supported"). On macOS, Chrome keeps running after you close its
+    last window, so ``netkeeper open`` couldn't tell that it was netkeeper's own.
+
+    :meth:`read_pid` reads ``/json/version`` from ``cdp_url`` for the browser target's
+    websocket, opens that websocket, sends one ``SystemInfo.getProcessInfo`` (the
+    message :func:`read_browser_pid` sends), and closes it. It needs no window, opens no
+    tab, and reads no page or cookie. The websocket must be on ``cdp_url``'s own host and
+    port, at ``/devtools/browser/``: an answer that points anywhere else is no pid.
+    Everything that fails is ``None``, which the launcher refuses, as before.
+
+    A run never uses this: it attaches through :class:`PlaywrightCdpConnector`, and reads
+    the pid on that same connection (#624).
+    """
+
+    async def read_pid(self, cdp_url: str) -> int | None:
+        """The browser process's pid that the Chrome on ``cdp_url`` names, or ``None``."""
+        parts = urlsplit(cdp_url)
+        if parts.scheme != "http" or not parts.hostname:
+            log.info("the identity read takes an http:// address, not %s", cdp_url)
+            return None
+        try:
+            port = parts.port or 80
+            ws_url = await asyncio.to_thread(_browser_websocket_url, parts.hostname, port)
+            if ws_url is None or not _is_browser_websocket(ws_url, parts.netloc):
+                log.warning("the Chrome on %s named an unexpected websocket", cdp_url)
+                return None
+            answer = await _read_process_info(ws_url)
+        except Exception as exc:
+            log.info(
+                "could not read which process the Chrome on %s is: %s", cdp_url, personal_exc(exc)
+            )
+            return None
+        return browser_pid_from_process_info(answer) if isinstance(answer, Mapping) else None
+
+
+def _browser_websocket_url(host: str, port: int) -> str | None:
+    """``/json/version``'s ``webSocketDebuggerUrl``: one GET, no proxy, nothing sent."""
+    with closing(
+        http.client.HTTPConnection(host, port, timeout=PROBE_STEP_TIMEOUT_S)
+    ) as connection:
+        connection.request("GET", "/json/version")
+        response = connection.getresponse()
+        if response.status != 200:
+            return None
+        body = json.loads(response.read(IDENTITY_READ_MAX_BYTES))
+    found = body.get("webSocketDebuggerUrl") if isinstance(body, dict) else None
+    return found if isinstance(found, str) else None
+
+
+def _is_browser_websocket(ws_url: str, netloc: str) -> bool:
+    """Whether ``ws_url`` is ``ws://<netloc>/devtools/browser/<id>``, and nothing else."""
+    parts = urlsplit(ws_url)
+    return (
+        parts.scheme == "ws"
+        and parts.netloc == netloc
+        and re.fullmatch(r"/devtools/browser/[A-Za-z0-9-]+", parts.path) is not None
+        and not parts.query
+        and not parts.fragment
+    )
+
+
+async def _read_process_info(ws_url: str) -> object:
+    """``SystemInfo.getProcessInfo``'s result, over the browser target's own websocket.
+
+    One message, then the connection closes. No proxy, no compression, and an answer
+    over :data:`IDENTITY_READ_MAX_BYTES` is refused. Events (none are subscribed to) and
+    any other id are skipped until the answer arrives or the step times out.
+    """
+    from websockets.asyncio.client import connect
+
+    async with asyncio.timeout(PROBE_STEP_TIMEOUT_S):
+        async with connect(
+            ws_url, proxy=None, compression=None, max_size=IDENTITY_READ_MAX_BYTES
+        ) as ws:
+            await ws.send(json.dumps({"id": 1, "method": "SystemInfo.getProcessInfo"}))
+            while True:
+                message = json.loads(await ws.recv())
+                if isinstance(message, dict) and message.get("id") == 1:
+                    return message.get("result")
 
 
 class ActivityLocks:

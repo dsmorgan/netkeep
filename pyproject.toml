@@ -24,6 +24,10 @@ dependencies = [
   # Attach-only browser driver: connect_over_cdp needs no bundled browser, so
   # `playwright install` is never part of the setup (ADR 0002, spec 6).
   "playwright>=1.55",
+  # The launcher probe's one read of which process Chrome is (#675), over the browser
+  # target's websocket: Playwright can't attach to a Chrome with no windows open.
+  # Already installed and locked through uvicorn[standard]; declared because we import it.
+  "websockets>=15",
   "sse-starlette>=3.3",
   "keyring>=25",
   "regex>=2026.9.10",

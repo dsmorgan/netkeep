@@ -1062,6 +1062,7 @@ dependencies = [
     { name = "sse-starlette" },
     { name = "typer" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "websockets" },
 ]
 
 [package.optional-dependencies]
@@ -1110,6 +1111,7 @@ requires-dist = [
     { name = "types-openpyxl", marker = "extra == 'dev'", specifier = ">=3.1" },
     { name = "types-regex", marker = "extra == 'dev'", specifier = ">=2026.9.10.20260911" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+    { name = "websockets", specifier = ">=15" },
 ]
 provides-extras = ["dev"]
 

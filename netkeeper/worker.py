@@ -76,8 +76,8 @@ from netkeeper.linkedin.browser import (
     BrowserUnavailable,
     BubbleCheck,
     BubbleCheckFailed,
-    CdpConnector,
-    PlaywrightCdpConnector,
+    CdpIdentityReader,
+    PidReader,
     ProfileRefused,
     ReadFailure,
     classify_read_failure,
@@ -862,9 +862,9 @@ def serve_app(settings: Settings, *, ui_base: str | None = None) -> FastAPI:
 # --- the Chrome launcher (#636) ---------------------------------------------------
 
 
-#: How long the launcher's probe waits for the Chrome on the port to answer over CDP,
+#: How long the launcher's probe waits for the Chrome on the port to name its process,
 #: while it holds the activity lock: a port that accepts but never speaks CDP would
-#: otherwise hold it for Playwright's 30 s and refuse runs as busy meanwhile.
+#: otherwise hold it and refuse runs as busy meanwhile.
 PROBE_CONNECT_TIMEOUT_S: Final = 5.0
 
 
@@ -873,31 +873,30 @@ async def launcher_probe(
     *,
     locks: ActivityLocks,
     account: str,
-    connector: CdpConnector | None = None,
+    reader: PidReader | None = None,
     timeout_s: float = PROBE_CONNECT_TIMEOUT_S,
 ) -> PortProbe:
     """What the Chrome on ``cdp_url`` is, for the launcher's checks (#636).
 
-    Under ``account``'s activity lock, never waiting: one connection through the attach's
-    own connector, which reads the browser's pid (#624) and nothing else, then detaches.
-    A Chrome that can't be reached within ``timeout_s`` is no pid, which the launcher
-    refuses. A held lock is ``busy``, and nothing connects: a run is attached, and a
-    second CDP client would drop its connection (spec 9.9). Then ``verified_pid`` is the
-    Chrome pid that run's attach verified, from the holder note of ``account``'s own
-    lock, read only while that lock is held.
+    Under ``account``'s activity lock, never waiting: one read of the browser's pid
+    (#624) over the browser target's own websocket (:class:`CdpIdentityReader`, #675),
+    which then closes. It needs no Playwright context, so a Chrome with no windows open
+    still names its process. A Chrome that can't be reached or doesn't answer within
+    ``timeout_s`` is no pid, which the launcher refuses. A held lock is ``busy``, and
+    nothing connects: a run is attached, and a second CDP client would drop its
+    connection (spec 9.9). Then ``verified_pid`` is the Chrome pid that run's attach
+    verified, from the holder note of ``account``'s own lock, read only while that lock
+    is held.
     """
-    chosen = PlaywrightCdpConnector() if connector is None else connector
+    chosen = CdpIdentityReader() if reader is None else reader
     try:
         async with locks.hold(account):
             try:
-                connection = await asyncio.wait_for(chosen.connect(cdp_url), timeout_s)
-            except (BrowserUnavailable, TimeoutError) as exc:
-                log.info("the launcher's probe couldn't attach: %s", personal_exc(exc))
+                pid = await asyncio.wait_for(chosen.read_pid(cdp_url), timeout_s)
+            except TimeoutError:
+                log.info("the launcher's probe got no answer from %s in time", cdp_url)
                 return PortProbe(busy=False)
-            try:
-                return PortProbe(busy=False, browser_pid=connection.browser_pid)
-            finally:
-                await connection.detach()
+            return PortProbe(busy=False, browser_pid=pid)
     except BrowserBusy:
         # Only the account's own lock's note, and only while it's held: a busy legacy
         # lock, or a note a crash left on a free lock, verifies nothing.

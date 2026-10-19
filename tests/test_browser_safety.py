@@ -207,6 +207,10 @@ COOKIE_CDP_METHODS: dict[str, frozenset[str]] = {"Network.getCookies": frozenset
 #:
 #: - ``SystemInfo.getProcessInfo`` with no params: Chrome's processes by type and pid,
 #:   read for the browser process's pid. It opens no tab and reads no page or cookie.
+#:
+#: #675 sends the same message from a second site, ``_read_process_info``: the launcher
+#: probe's read over the browser target's own websocket (``CdpIdentityReader``), which
+#: needs no Playwright context and so works on a Chrome with no windows open.
 IDENTITY_CDP_METHODS: dict[str, frozenset[str]] = {
     "SystemInfo.getProcessInfo": frozenset(),
 }
@@ -230,6 +234,8 @@ CDP_SENDERS = {
     (LINKEDIN / "browser.py", "BrowserRun._target_id"): 1,
     (LINKEDIN / "preflight.py", "_read_session_cookies"): 1,
     (LINKEDIN / "browser.py", "read_browser_pid"): 1,
+    # #675: the launcher probe's pid read, on the browser target's own websocket.
+    (LINKEDIN / "browser.py", "_read_process_info"): 1,
 }
 #: Which of those methods each function may send: neither borrows the other's.
 CDP_SENDER_METHODS = {
@@ -261,6 +267,7 @@ CDP_SENDER_METHODS = {
     (LINKEDIN / "browser.py", "BrowserRun._target_id"): frozenset({"Target.getTargetInfo"}),
     (LINKEDIN / "preflight.py", "_read_session_cookies"): frozenset({"Network.getCookies"}),
     (LINKEDIN / "browser.py", "read_browser_pid"): frozenset({"SystemInfo.getProcessInfo"}),
+    (LINKEDIN / "browser.py", "_read_process_info"): frozenset({"SystemInfo.getProcessInfo"}),
 }
 #: The only observations that open the body tap, each once (ADR 0006's amendment):
 #: the connections sync's (#200) and each enrichment visit's, whose tap streams only
@@ -1146,6 +1153,24 @@ def request_mutations(source: str, path: Path = MEMORY) -> Iterator[Finding]:
             yield Finding(path, line, f"{name}() answers or alters a request (ADR 0006)")
 
 
+#: #675: the detail :func:`api_request_sends` gives the launcher probe's one GET.
+DEVTOOLS_VERSION_GET = "GETs Chrome's /json/version (#675)"
+#: Where that GET may be, and how many times: the identity read's websocket lookup.
+ALLOWED_DEVTOOLS_GETS = {(LINKEDIN / "browser.py", "_browser_websocket_url"): 1}
+
+
+def _is_devtools_version_get(node: ast.Attribute, call: ast.Call | None) -> bool:
+    """Whether ``node`` is ``connection.request("GET", "/json/version")``, exactly."""
+    return (
+        call is not None
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "connection"
+        and not call.keywords
+        and [a.value if isinstance(a, ast.Constant) else None for a in call.args]
+        == ["GET", "/json/version"]
+    )
+
+
 def api_request_sends(source: str, path: Path = MEMORY) -> Iterator[Finding]:
     """A request of netkeeper's own through an API request context.
 
@@ -1158,12 +1183,25 @@ def api_request_sends(source: str, path: Path = MEMORY) -> Iterator[Finding]:
     - ``<anything>.request.<send>``, whatever it is read on.
 
     ``request.new_context`` is refused by the context rule (``new_context``).
+
+    #675: ``connection.request("GET", "/json/version")``, with exactly those two literals
+    and nothing else, is reported apart as :data:`DEVTOOLS_VERSION_GET`: the launcher
+    probe's one read of Chrome's own DevTools endpoint, which the rule below allows at
+    one site.
     """
-    for node in walk(parse(source)):
+    tree = parse(source)
+    calls = {
+        id(node.func): node
+        for node in walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    }
+    for node in walk(tree):
         if not isinstance(node, ast.Attribute):
             continue
         if node.attr == "request" and _is_super_call(node.value):
             yield Finding(path, node.lineno, SUPER_REQUEST)
+        elif node.attr == "request" and _is_devtools_version_get(node, calls.get(id(node))):
+            yield Finding(path, node.lineno, DEVTOOLS_VERSION_GET)
         elif node.attr == "request" and not (
             isinstance(node.value, ast.Name) and node.value.id == "response"
         ):
@@ -2384,6 +2422,11 @@ def cdp_sends(source: str, path: Path = MEMORY) -> Iterator[CdpSend]:
                 yield CdpSend(where, None, None)
                 continue
             first = call.args[0] if call.args else None
+            frame = _raw_frame(first)
+            if frame is not None:
+                # #675: a raw websocket's frame, ``json.dumps({"id": .., "method": ..})``.
+                yield CdpSend(where, *frame)
+                continue
             method = (
                 first.value
                 if isinstance(first, ast.Constant) and isinstance(first.value, str)
@@ -2398,6 +2441,41 @@ def cdp_sends(source: str, path: Path = MEMORY) -> Iterator[CdpSend]:
                     and "send" in arg.value.split(".")
                 ):
                     yield CdpSend(where, None, None)
+
+
+def _raw_frame(node: ast.expr | None) -> tuple[str | None, frozenset[str] | None] | None:
+    """A raw CDP frame's method and params keys, or ``None`` when ``node`` isn't one (#675).
+
+    A frame is ``json.dumps(<dict literal>)``, the one way the identity read writes to
+    its websocket. Its method is the ``"method"`` key's string literal, else ``None``
+    (refused). Its params are the keys of the ``"params"`` dict literal, ``frozenset()``
+    when there is none, and ``None`` when it isn't a dict literal. A frame with a key
+    other than ``id``, ``method`` and ``params``, or a ``**`` spread, reads as ``None``
+    for both."""
+    if not (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "dumps"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "json"
+    ):
+        return None
+    payload = node.args[0] if len(node.args) == 1 and not node.keywords else None
+    if not isinstance(payload, ast.Dict):
+        return (None, None)
+    fields: dict[str, ast.expr] = {}
+    for key, value in zip(payload.keys, payload.values, strict=True):
+        if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+            return (None, None)
+        fields[key.value] = value
+    if not set(fields) <= {"id", "method", "params"}:
+        return (None, None)
+    method = fields.get("method")
+    name = (
+        method.value if isinstance(method, ast.Constant) and isinstance(method.value, str) else None
+    )
+    params = fields.get("params")
+    return (name, frozenset() if params is None else _param_keys([params]))
 
 
 def _param_keys(args: list[ast.expr]) -> frozenset[str] | None:
@@ -2614,6 +2692,113 @@ def test_the_cdp_send_scanner_catches_a_mutating_method_or_a_hidden_one() -> Non
         assert params != READ_ONLY_CDP_METHODS["Network.enable"]
 
 
+def test_the_cdp_send_scanner_reads_a_raw_websocket_frame() -> None:
+    """#675: a frame written with ``json.dumps`` is read for its method and params, so the
+    identity read's websocket answers to the same allow-list as every session."""
+    source = (
+        "import json\n"
+        "async def _read_process_info(ws, name):\n"
+        "    await ws.send(json.dumps({'id': 1, 'method': 'SystemInfo.getProcessInfo'}))\n"
+        "    await ws.send(json.dumps({'id': 2, 'method': 'Target.createTarget',"
+        " 'params': {'url': 'x'}}))\n"
+        "    await ws.send(json.dumps({'id': 3, 'method': name}))\n"
+        "    await ws.send(json.dumps({'id': 4, 'method': 'SystemInfo.getProcessInfo',"
+        " 'sessionId': 's'}))\n"
+        "    await ws.send(json.dumps({**frame}))\n"
+        "    await ws.send(json.dumps(frame))\n"
+        "    await ws.send(json.dumps({'id': 5, 'method': 'Browser.close', 'params': p}))\n"
+    )
+    found = [(i.method, i.params) for i in cdp_sends(source)]
+    assert found == [
+        ("SystemInfo.getProcessInfo", frozenset()),
+        ("Target.createTarget", frozenset({"url"})),
+        (None, frozenset()),
+        (None, None),
+        (None, None),
+        (None, None),
+        ("Browser.close", None),
+    ]
+
+
+#: #675: who may reach the identity read, by (file, function): the websocket library is
+#: imported only where the one frame is written, that function is reached only from the
+#: reader, the websocket lookup only from the reader, and the reader is built only by
+#: the launcher's probe (and named by the worker's import).
+IDENTITY_READ_REACHES = {
+    "websockets": {(LINKEDIN / "browser.py", "_read_process_info"): 1},
+    "_read_process_info": {(LINKEDIN / "browser.py", "CdpIdentityReader.read_pid"): 1},
+    "_browser_websocket_url": {(LINKEDIN / "browser.py", "CdpIdentityReader.read_pid"): 1},
+    "CdpIdentityReader": {
+        (PACKAGE / "worker.py", ""): 1,
+        (PACKAGE / "worker.py", "launcher_probe"): 1,
+    },
+}
+
+
+def identity_read_reaches(sources: dict[Path, str]) -> dict[str, dict[tuple[Path, str], int]]:
+    """Each reach of the names :data:`IDENTITY_READ_REACHES` pins, by file and function:
+    a name, an attribute, an import (``websockets`` by any module path under it) or a
+    ``getattr`` literal, outside the name's own definition."""
+    found: dict[str, dict[tuple[Path, str], int]] = {name: {} for name in IDENTITY_READ_REACHES}
+
+    def add(name: str, path: Path, where: str) -> None:
+        found[name][(path, where)] = found[name].get((path, where), 0) + 1
+
+    for path, source in sources.items():
+        tree = parse(source)
+        scopes = _scoped(tree)
+        for node in walk(tree):
+            where = scopes.get(id(node), "")
+            if isinstance(node, ast.Import | ast.ImportFrom):
+                modules = (
+                    [alias.name for alias in node.names]
+                    if isinstance(node, ast.Import)
+                    else [node.module or ""]
+                )
+                if any(m == "websockets" or m.startswith("websockets.") for m in modules):
+                    add("websockets", path, where)
+                if isinstance(node, ast.ImportFrom):
+                    for alias in node.names:
+                        if alias.name in found and alias.name != "websockets":
+                            add(alias.name, path, where)
+            elif isinstance(node, ast.Name) and node.id in found:
+                add(node.id, path, where)
+            elif isinstance(node, ast.Attribute) and node.attr in found:
+                add(node.attr, path, where)
+            elif isinstance(node, ast.Call):
+                for arg in _attribute_name_arguments(node):
+                    if isinstance(arg, ast.Constant) and arg.value in found:
+                        add(str(arg.value), path, where)
+    return found
+
+
+def test_only_the_launchers_probe_reaches_the_identity_read() -> None:
+    """#675: the websocket that needs no Playwright context sends its one frame from one
+    function, reached only by the reader, which only the launcher's probe builds. So no
+    run, route or helper can use it to talk to Chrome some other way."""
+    assert identity_read_reaches(package_sources()) == IDENTITY_READ_REACHES
+
+
+@pytest.mark.parametrize(
+    ("path", "line"),
+    [
+        (PACKAGE / "cli.py", "import websockets\n"),
+        (PACKAGE / "services" / "chrome_launch.py", "from websockets.sync import client\n"),
+        (LINKEDIN / "preflight.py", "from netkeeper.linkedin.browser import CdpIdentityReader\n"),
+        (LINKEDIN / "browser.py", "_HELD = _read_process_info\n"),
+        (PACKAGE / "worker.py", "_ALSO = getattr(browser_module, 'CdpIdentityReader')\n"),
+        (
+            LINKEDIN / "page_inbox.py",
+            "from netkeeper.linkedin.browser import _browser_websocket_url\n",
+        ),
+    ],
+)
+def test_the_identity_read_pin_catches_a_new_reach(path: Path, line: str) -> None:
+    sources = package_sources()
+    sources[path] = sources[path] + "\n" + line
+    assert identity_read_reaches(sources) != IDENTITY_READ_REACHES
+
+
 def test_no_code_path_alters_or_answers_a_request() -> None:
     """ADR 0006: the page's requests are read, never held, changed, or answered."""
     findings = scan([PACKAGE], request_mutations)
@@ -2629,10 +2814,51 @@ def test_no_code_path_sends_through_an_api_request_context() -> None:
             f"{path.name} no longer makes exactly {count} super().request calls ({len(hits)});"
             " if they moved, update ALLOWED_SUPER_REQUESTS"
         )
+    gets = [f for f in findings if f.detail == DEVTOOLS_VERSION_GET]
+    for (path, function), count in ALLOWED_DEVTOOLS_GETS.items():
+        hits = [f for f in gets if f.path == path and _function_at(path, f.line) == function]
+        assert len(hits) == count, (
+            f"{function} no longer makes exactly {count} /json/version GET ({len(hits)});"
+            " if it moved, update ALLOWED_DEVTOOLS_GETS"
+        )
     others = [
-        f for f in findings if not (f.path in ALLOWED_SUPER_REQUESTS and f.detail == SUPER_REQUEST)
+        f
+        for f in findings
+        if not (f.path in ALLOWED_SUPER_REQUESTS and f.detail == SUPER_REQUEST)
+        and not (
+            f.detail == DEVTOOLS_VERSION_GET
+            and (f.path, _function_at(f.path, f.line)) in ALLOWED_DEVTOOLS_GETS
+        )
     ]
     assert not others, complain(others, "netkeeper sends no requests of its own:")
+
+
+def _function_at(path: Path, line: int) -> str:
+    """The enclosing ``Class.method`` (or function) of the first node on ``line``."""
+    tree = parse(read_source(path))
+    scopes = _scoped(tree)
+    for node in walk(tree):
+        if getattr(node, "lineno", None) == line and id(node) in scopes:
+            return scopes[id(node)]
+    return ""
+
+
+def test_the_devtools_get_pin_catches_another_request() -> None:
+    """#675: only the exact GET is set apart, and only at its one site."""
+    exact = 'def f(connection):\n    connection.request("GET", "/json/version")\n'
+    assert [f.detail for f in api_request_sends(exact)] == [DEVTOOLS_VERSION_GET]
+    for other in (
+        'connection.request("POST", "/json/version")',
+        'connection.request("GET", "/json/new?https://example.com")',
+        'connection.request("GET", "/json/version", body)',
+        'connection.request("GET", path)',
+        'connection.request("GET", "/json/version", headers=h)',
+        'page.request("GET", "/json/version")',
+        "held = connection.request",
+    ):
+        assert [f.detail for f in api_request_sends(other)] == [
+            "reads an API request context (ADR 0006)"
+        ], other
 
 
 def test_the_observing_modules_only_listen_and_scroll() -> None:

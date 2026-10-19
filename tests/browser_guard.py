@@ -50,3 +50,18 @@ def isolated_cdp(url: str) -> str:
             " port or no port. Set NETKEEPER_CDP_URL to an isolated Chrome on another port"
         )
     return url
+
+
+#: #675 review: the ports a live service on this machine may listen on: the maintainer's
+#: netkeeper Chrome (9222) and netkeeper serve (8000). No test connects to either.
+LIVE_LOCAL_PORTS = frozenset({9222, 8000})
+
+
+def refuse_live_port(address: object) -> None:
+    """Raise :class:`RealBrowserBlocked` when ``address`` (a socket address) names one of
+    :data:`LIVE_LOCAL_PORTS`, on any host."""
+    if isinstance(address, tuple) and len(address) >= 2 and address[1] in LIVE_LOCAL_PORTS:
+        raise RealBrowserBlocked(
+            f"a test tried to connect to {address[0]}:{address[1]}, a port a live service"
+            " on this machine may be listening on"
+        )
