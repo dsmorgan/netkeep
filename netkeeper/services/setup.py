@@ -2,9 +2,10 @@
 
 One answer to "where is this person in setup?", for the dashboard's Steps tab. Every
 state is read from what netkeeper already stores or can see without a probe: the
-database, the Keychain's OAuth client, netkeeper's Chrome profile lock file
+database, netkeeper's Chrome profile lock file
 (:func:`netkeeper.services.posture.netkeeper_chrome_pid`, #599) and the login item's
-plist. Nothing here attaches to Chrome, calls Gmail, or starts a run. The first
+plist and ``launchctl print`` (read-only, as ``/login-item`` reads it). The Keychain is
+never read. Nothing here attaches to Chrome, calls Gmail, or starts a run. The first
 LinkedIn inbox poll stays one a person starts (``FIRST_POLL_BY_HAND`` in
 :mod:`netkeeper.services.scheduled_runs`): this reports it as to do, and never starts it.
 
@@ -62,6 +63,7 @@ from netkeeper.scoping import scoped
 from netkeeper.services.gmail_setup import load as load_gmail_setup
 from netkeeper.services.linkedin_accounts import account_id_for, scheduled_runs_armed
 from netkeeper.services.linkedin_session import last_session_evidence, session_flag
+from netkeeper.services.login_item import State as LoginItemState
 from netkeeper.services.login_item import Status as LoginItemStatus
 from netkeeper.services.runs import has_completed_inbox_poll, latest_run
 from netkeeper.services.settings_kv import get_setting, set_setting
@@ -154,12 +156,10 @@ class Readings:
     """What the steps read that is not in the database, read by the caller.
 
     ``chrome_pid`` is the live process holding netkeeper's Chrome profile, or None.
-    ``oauth_client`` is whether a Gmail OAuth client is in the Keychain, None when the
-    Keychain could not be read. ``login_item`` is None when it could not be read.
+    ``login_item`` is None when it could not be read.
     """
 
     chrome_pid: int | None = None
-    oauth_client: bool | None = None
     login_item: LoginItemStatus | None = None
     login_item_error: str | None = None
 
@@ -272,7 +272,7 @@ def _raw_states(session: Session, user: User, readings: Readings) -> dict[StepKe
     return {
         StepKey.ABOUT_YOU: _about_you(session, user),
         StepKey.IMPORT: _import(session, user, stats.total),
-        StepKey.GMAIL: _gmail(session, user, readings.oauth_client),
+        StepKey.GMAIL: _gmail(session, user),
         StepKey.CHROME: _chrome(session, user, readings.chrome_pid),
         StepKey.FIRST_SYNC: _first_sync(session, user),
         StepKey.FIRST_INBOX: _first_inbox(session, user),
@@ -307,33 +307,31 @@ def _import(session: Session, user: User, total: int) -> _Raw:
         )
         or 0
     )
-    if drafts:
-        return _Raw(
-            StepState.IN_PROGRESS, f"{_plural(drafts, 'draft import')} waiting to be finished."
-        )
+    waiting = f"{_plural(drafts, 'draft import')} waiting to be finished."
     if total:
-        return _Raw(StepState.DONE, f"{_plural(total, 'contact')} imported.")
+        # An open draft is a note, not a gate: the contacts are there to work with.
+        imported = f"{_plural(total, 'contact')} imported."
+        return _Raw(StepState.DONE, f"{imported} {waiting}" if drafts else imported)
+    if drafts:
+        return _Raw(StepState.IN_PROGRESS, waiting)
     return _Raw(StepState.TODO, "Nothing imported yet: bring in a CSV or your LinkedIn archive.")
 
 
-def _gmail(session: Session, user: User, oauth_client: bool | None) -> _Raw:
+def _gmail(session: Session, user: User) -> _Raw:
+    """Done once a mailbox is connected (``ok``). Arming it to send is its own decision,
+    made on the mailbox card, so it is not part of this step. The Keychain is never read:
+    the OAuth client is a secret, and the mailbox rows and the wizard's progress say
+    enough."""
     rows = session.scalars(scoped(user, Mailbox)).all()
     if any(row.status is MailboxStatus.OK for row in rows):
         return _Raw(StepState.DONE, "A Gmail mailbox is connected.")
     if any(row.status is MailboxStatus.REAUTH_REQUIRED for row in rows):
         return _Raw(StepState.IN_PROGRESS, "Your mailbox needs signing in again.")
-    if oauth_client:
-        return _Raw(StepState.IN_PROGRESS, "The OAuth client is saved; connect your mailbox next.")
     progress = load_gmail_setup(session, user)
     if progress.done or progress.project_id is not None:
         return _Raw(
             StepState.IN_PROGRESS,
             f"{_plural(len(progress.done), 'Google Cloud step')} marked done in Settings, Gmail.",
-        )
-    if oauth_client is None:
-        return _Raw(
-            StepState.TODO,
-            "The Keychain couldn't be read, so whether an OAuth client is saved is unknown.",
         )
     return _Raw(StepState.TODO, "Set up your Google Cloud project, then connect your mailbox.")
 
@@ -437,6 +435,17 @@ def _login_item(status: LoginItemStatus | None, error: str | None) -> _Raw:
         return _Raw(StepState.TODO, f"The login item couldn't be read: {error or 'unknown'}.")
     if not status.supported:
         return _Raw(StepState.TODO, status.reason or "Run at login needs macOS.")
-    if status.enabled:
+    if status.state in (LoginItemState.REGISTERED, LoginItemState.RUNNING):
         return _Raw(StepState.DONE, f"netkeeper starts at login ({status.state.value}).")
+    if status.state is LoginItemState.DIFFERENT_NETKEEPER:
+        return _Raw(
+            StepState.TODO,
+            f"{status.state.value}: click Repair in Settings, Run at login, so it starts this one.",
+        )
+    if status.state is LoginItemState.NEEDS_REPAIR:
+        return _Raw(
+            StepState.TODO,
+            f"{status.state.value}: an old install script's agent can't start; click Repair in"
+            " Settings, Run at login.",
+        )
     return _Raw(StepState.TODO, "Turn on Run at login in Settings so netkeeper starts with you.")

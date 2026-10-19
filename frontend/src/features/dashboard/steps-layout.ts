@@ -58,7 +58,20 @@ export interface Layout {
   columns: number
   rows: number
   /** `from` must be done first; `any` marks a one-of prerequisite. */
-  edges: { from: string; to: string; any: boolean }[]
+  edges: Edge[]
+}
+
+export interface Edge {
+  from: string
+  to: string
+  any: boolean
+  /**
+   * Where the arrow meets each box, as a fraction of its height. Arrows that share
+   * a box are spread across it in the order of the box at their other end, so a
+   * dashed one-of arrow never lands on the same point as a solid one.
+   */
+  fromAt: number
+  toAt: number
 }
 
 function prerequisites(step: SetupStep): string[] {
@@ -113,7 +126,7 @@ export function layoutSteps(steps: SetupStep[]): Layout {
     })
   })
 
-  const edges = steps.flatMap((step) => [
+  const plain = steps.flatMap((step) => [
     ...step.needs
       .filter((from) => byKey.has(from))
       .map((from) => ({ from, to: step.key, any: false })),
@@ -121,6 +134,22 @@ export function layoutSteps(steps: SetupStep[]): Layout {
       .filter((from) => byKey.has(from))
       .map((from) => ({ from, to: step.key, any: true })),
   ])
+  const row = (key: string) => rowOf.get(key) ?? 0
+  const spread = (siblings: typeof plain, other: (edge: (typeof plain)[number]) => string) => {
+    const ordered = [...siblings].sort((left, right) => row(other(left)) - row(other(right)))
+    return (edge: (typeof plain)[number]) => (ordered.indexOf(edge) + 1) / (ordered.length + 1)
+  }
+  const edges: Edge[] = plain.map((edge) => ({
+    ...edge,
+    fromAt: spread(
+      plain.filter((other) => other.from === edge.from),
+      (other) => other.to,
+    )(edge),
+    toAt: spread(
+      plain.filter((other) => other.to === edge.to),
+      (other) => other.from,
+    )(edge),
+  }))
   return { placed, columns, rows, edges }
 }
 
@@ -167,4 +196,20 @@ export const TARGET_LABELS: Record<string, string> = {
   '/triage': 'Open Triage',
   '/lists': 'Open Lists',
   '/campaigns': 'Open Campaigns',
+}
+
+/**
+ * What a box says it needs, for the narrow layout, which has no arrows: "Needs: A
+ * and B", "Needs one of: A or B", or both. Null when there is nothing to say, or the
+ * reason already says what the step waits for.
+ */
+export function needsText(step: SetupStep, titles: Map<string, string>): string | null {
+  if (step.state === 'done' || step.state === 'blocked') return null
+  const name = (key: string) => titles.get(key) ?? key
+  const all = step.needs.map(name).join(' and ')
+  const any = step.needs_any.map(name).join(' or ')
+  if (all !== '' && any !== '') return `Needs: ${all}, and one of ${any}`
+  if (all !== '') return `Needs: ${all}`
+  if (any !== '') return `Needs one of: ${any}`
+  return null
 }

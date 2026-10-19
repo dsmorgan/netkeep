@@ -12,6 +12,7 @@ from typing import Any
 
 import factories
 import httpx
+import keyring
 import pytest
 from campaign_fakes import make_mailbox
 from fastapi import FastAPI
@@ -19,7 +20,6 @@ from isolation.harness import acting_as
 from sqlalchemy.orm import Session, sessionmaker
 from test_login_item import FakeLaunchctl, make
 
-from netkeeper.campaigns.gmail_oauth import OAuthClient
 from netkeeper.crm.lists import create_list
 from netkeeper.crm.self_contact import update_self_contact
 from netkeeper.db import session_scope
@@ -39,11 +39,13 @@ from netkeeper.models import (
     UserKind,
 )
 from netkeeper.scoping import get_scoped_contact, scoped_contacts
-from netkeeper.services import mailboxes
+from netkeeper.services import keychain
 from netkeeper.services import setup as service
 from netkeeper.services.linkedin_accounts import arm_scheduled_runs, ensure_account
 from netkeeper.services.linkedin_session import flag_session, record_session_evidence
 from netkeeper.services.login_item import LoginItem
+from netkeeper.services.login_item import State as LoginItemState
+from netkeeper.services.login_item import Status as LoginItemStatus
 from netkeeper.services.settings_kv import get_setting, set_setting
 
 URL = "/api/v1/setup"
@@ -68,7 +70,7 @@ class Db:
 
     def states(self, readings: service.Readings | None = None) -> dict[K, service.Step]:
         with self.writer() as (session, user):
-            rows = service.steps(session, user, readings or service.Readings(oauth_client=False))
+            rows = service.steps(session, user, readings or service.Readings())
         return {row.key: row for row in rows}
 
 
@@ -182,7 +184,7 @@ def test_a_finished_install(db: Db, tmp_path: Path) -> None:
     item.enable()
     with db.writer() as (session, user):
         _finish_everything(session, user)
-    steps = db.states(service.Readings(oauth_client=True, login_item=item.status()))
+    steps = db.states(service.Readings(login_item=item.status()))
     assert {row.state for row in steps.values()} == {S.DONE}
     assert service.complete(list(steps.values()))
     assert not any(row.next for row in steps.values())
@@ -210,43 +212,63 @@ def test_about_you_needs_a_first_name(db: Db) -> None:
     assert db.states()[K.ABOUT_YOU].state is S.DONE
 
 
-def test_a_draft_import_is_in_progress(db: Db) -> None:
+def test_an_open_draft_with_contacts_is_a_note_not_a_gate(db: Db) -> None:
+    """Three contacts and a draft left in preview: import is done, and nothing waits on it."""
     with db.writer() as (session, user):
-        factories.make_contact(session, user)
+        for _ in range(3):
+            factories.make_contact(session, user)
+        session.add(ImportRun(user_id=user.id, filename="people.csv", status=ImportStatus.DRAFT))
+    steps = db.states()
+    assert steps[K.IMPORT].state is S.DONE
+    assert steps[K.IMPORT].reason == "3 contacts imported. 1 draft import waiting to be finished."
+    assert steps[K.TRIAGE].state is S.TODO
+    assert steps[K.BUILD_LIST].state is S.TODO
+    with db.writer() as (session, user):
+        make_mailbox(session, user)
+    assert db.states()[K.CAMPAIGN].state is S.TODO
+
+
+def test_a_draft_with_no_contacts_is_in_progress(db: Db) -> None:
+    with db.writer() as (session, user):
         session.add(ImportRun(user_id=user.id, filename="people.csv", status=ImportStatus.DRAFT))
     step = db.states()[K.IMPORT]
-    assert step.state is S.IN_PROGRESS
-    assert step.reason == "1 draft import waiting to be finished."
+    assert (step.state, step.reason) == (S.IN_PROGRESS, "1 draft import waiting to be finished.")
     assert step.next
+    assert db.states()[K.TRIAGE].state is S.BLOCKED
 
 
 @pytest.mark.parametrize(
-    ("arrange", "oauth", "state"),
+    ("arrange", "state"),
     [
-        (lambda s, u: None, False, S.TODO),
-        (lambda s, u: None, None, S.TODO),
-        (lambda s, u: None, True, S.IN_PROGRESS),
+        (lambda s, u: None, S.TODO),
         (
             lambda s, u: set_setting(s, u, "gmail.setup", {"project_id": "quorbelle-1"}),
-            False,
             S.IN_PROGRESS,
         ),
-        (
-            lambda s, u: make_mailbox(s, u, status=MailboxStatus.REAUTH_REQUIRED),
-            True,
-            S.IN_PROGRESS,
-        ),
-        (lambda s, u: make_mailbox(s, u, status=MailboxStatus.DISABLED), False, S.TODO),
-        (lambda s, u: make_mailbox(s, u), False, S.DONE),
+        (lambda s, u: make_mailbox(s, u, status=MailboxStatus.REAUTH_REQUIRED), S.IN_PROGRESS),
+        (lambda s, u: make_mailbox(s, u, status=MailboxStatus.DISABLED), S.TODO),
+        (lambda s, u: make_mailbox(s, u), S.DONE),
     ],
 )
-def test_gmail(db: Db, arrange: Any, oauth: bool | None, state: S) -> None:
+def test_gmail(db: Db, arrange: Any, state: S) -> None:
+    """Done once a mailbox is connected; arming it to send is a decision of its own."""
     with db.writer() as (session, user):
         arrange(session, user)
-    step = db.states(service.Readings(oauth_client=oauth))[K.GMAIL]
-    assert step.state is state
-    if oauth is None:
-        assert "Keychain" in step.reason
+    assert db.states()[K.GMAIL].state is state
+
+
+def test_gmail_never_reads_the_keychain(db: Db, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The OAuth client is a secret: a saved one is not a signal, and nothing fetches it."""
+
+    def refused(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("setup must not read a secret from the Keychain")
+
+    monkeypatch.setattr(keychain, "get_secret", refused)
+    monkeypatch.setattr(keychain, "get_install_secret", refused)
+    monkeypatch.setattr(keychain, "_get", refused)
+    monkeypatch.setattr(keyring, "get_password", refused)
+    monkeypatch.setattr(keyring, "get_credential", refused)
+    assert db.states()[K.GMAIL].state is S.TODO
 
 
 def test_chrome_from_the_lock_file_and_the_session_evidence(
@@ -348,15 +370,68 @@ def test_done_wins_over_its_own_gate(db: Db) -> None:
     assert db.states()[K.BUILD_LIST].state is S.DONE
 
 
-def test_the_login_item(db: Db, tmp_path: Path) -> None:
+def _status(**fields: Any) -> LoginItemStatus:
+    values: dict[str, Any] = {
+        "supported": True,
+        "reason": None,
+        "label": "fun.tnkr.netkeeper",
+        "plist_path": Path("/nowhere/fun.tnkr.netkeeper.plist"),
+        "log_path": Path("/nowhere/netkeeper.log"),
+        "installed": True,
+        "disabled": False,
+        "loaded": False,
+        "this_serve_is_the_agent": False,
+        "plist_executable": "/nowhere/netkeeper",
+        "stale": False,
+        "legacy": False,
+    }
+    values.update(fields)
+    return LoginItemStatus(**values)
+
+
+@pytest.mark.parametrize(
+    ("fields", "shown", "state", "says"),
+    [
+        ({"installed": False}, LoginItemState.OFF, S.TODO, "Turn on Run at login"),
+        ({}, LoginItemState.REGISTERED, S.DONE, "Registered"),
+        ({"loaded": True}, LoginItemState.RUNNING, S.DONE, "Running from login agent"),
+        (
+            {"stale": True, "loaded": True},
+            LoginItemState.DIFFERENT_NETKEEPER,
+            S.TODO,
+            "Points at a different netkeeper",
+        ),
+        ({"legacy": True}, LoginItemState.NEEDS_REPAIR, S.TODO, "Needs repair"),
+    ],
+)
+def test_the_login_item_is_done_only_registered_for_this_netkeeper(
+    db: Db, fields: dict[str, Any], shown: LoginItemState, state: S, says: str
+) -> None:
+    status = _status(**fields)
+    assert status.state is shown
+    step = db.states(service.Readings(login_item=status))[K.LOGIN_ITEM]
+    assert (step.state, step.optional) == (state, True)
+    assert says in step.reason
+
+
+def test_the_login_item_unsupported_or_unreadable(db: Db, tmp_path: Path) -> None:
     item = make(FakeLaunchctl(), tmp_path, tmp_path / "data", lock_held=True)
     off = db.states(service.Readings(login_item=item.status()))[K.LOGIN_ITEM]
-    assert (off.state, off.optional) == (S.TODO, True)
+    assert off.state is S.TODO
     other = make(FakeLaunchctl(), tmp_path, tmp_path / "data", macos=False)
     unsupported = db.states(service.Readings(login_item=other.status()))
     assert "macOS" in unsupported[K.LOGIN_ITEM].reason
     unreadable = db.states(service.Readings(login_item_error="launchctl refused"))
     assert "launchctl refused" in unreadable[K.LOGIN_ITEM].reason
+
+
+def test_next_skips_over_a_skipped_step(db: Db) -> None:
+    """The first step that isn't done is skipped, so the next one to do is next."""
+    with db.writer() as (session, user):
+        service.skip(session, user, "about_you")
+    steps = db.states()
+    assert (steps[K.ABOUT_YOU].state, steps[K.ABOUT_YOU].next) == (S.SKIPPED, False)
+    assert [key for key, row in steps.items() if row.next] == [K.IMPORT]
 
 
 # --- skips ---------------------------------------------------------------------------------
@@ -439,24 +514,6 @@ async def test_get_setup(running_app: FastAPI, client: httpx.AsyncClient, tmp_pa
     assert campaign["state"] == "blocked"
 
 
-async def test_an_oauth_client_in_the_keychain_counts(
-    running_app: FastAPI, client: httpx.AsyncClient, tmp_path: Path
-) -> None:
-    _install_login_item(running_app, tmp_path)
-    with session_scope(running_app.state.session_factory) as session:
-        owner = session.scalars(_owner_query()).one()
-    mailboxes.save_client(owner, OAuthClient(client_id="quorbelle.apps", client_secret="x"))
-    steps = (await client.get(URL)).json()["steps"]
-    gmail = next(step for step in steps if step["key"] == "gmail")
-    assert gmail["state"] == "in_progress"
-
-
-def _owner_query() -> Any:
-    from sqlalchemy import select
-
-    return select(User).where(User.kind == UserKind.LOCAL)
-
-
 async def test_skip_and_unskip_over_http(
     running_app: FastAPI, client: httpx.AsyncClient, tmp_path: Path
 ) -> None:
@@ -472,6 +529,17 @@ async def test_skip_and_unskip_over_http(
     assert (item["state"], item["skipped"]) == ("todo", False)
     missing = await client.post(f"{URL}/steps/nothing_here/skip", headers=CSRF)
     assert missing.status_code == 404
+
+
+async def test_a_skip_without_the_csrf_header_is_refused(
+    running_app: FastAPI, client: httpx.AsyncClient, tmp_path: Path
+) -> None:
+    _install_login_item(running_app, tmp_path)
+    for method in ("POST", "DELETE"):
+        response = await client.request(method, f"{URL}/steps/gmail/skip")
+        assert response.status_code == 403
+    gmail = next(s for s in (await client.get(URL)).json()["steps"] if s["key"] == "gmail")
+    assert gmail["skipped"] is False
 
 
 async def test_a_second_user_gets_403(
@@ -499,7 +567,9 @@ async def test_reading_setup_touches_no_browser_gmail_or_network(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Chrome's lock file and the plist are files; nothing connects or runs a process."""
+    """Chrome's lock file is a file read and the Keychain is never asked for a secret.
+    The login item's status is the only process (here a fake launchctl; in a real serve,
+    ``launchctl print``, read-only): no socket, no browser, no Gmail."""
     _install_login_item(running_app, tmp_path)
 
     def refused(*_args: object, **_kwargs: object) -> object:
@@ -509,4 +579,6 @@ async def test_reading_setup_touches_no_browser_gmail_or_network(
     monkeypatch.setattr(socket.socket, "connect", refused)
     monkeypatch.setattr(subprocess, "Popen", refused)
     monkeypatch.setattr(subprocess, "run", refused)
+    # A user secret (the Gmail OAuth client, a token) is never fetched for setup.
+    monkeypatch.setattr(keychain, "get_secret", refused)
     assert (await client.get(URL)).status_code == 200

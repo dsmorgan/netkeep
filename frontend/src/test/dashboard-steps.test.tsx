@@ -125,6 +125,9 @@ describe('the Steps flow', () => {
       within(box('import')).getByText('1 draft import waiting to be finished.'),
     ).toBeInTheDocument()
 
+    // A box that waits says so once, in its reason, not again as a "Needs" line.
+    expect(within(box('first_sync')).queryByText(/^Needs/)).not.toBeInTheDocument()
+
     const href = (key: string) => within(box(key)).getByRole('link').getAttribute('href')
     expect(href('import')).toBe('/imports')
     expect(href('chrome')).toBe('/linkedin')
