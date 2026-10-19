@@ -331,12 +331,16 @@ class _SilentReader:
 
 async def test_the_probe_gives_up_quickly_and_lets_go_of_the_lock(tmp_path: Path) -> None:
     key = activity_lock.SINGLE_ACCOUNT_KEY
-    probe = await launcher_probe(
-        CDP_URL,
-        locks=ActivityLocks(tmp_path),
-        account=key,
-        reader=_SilentReader(),
-        timeout_s=0.05,
+    # Bounded on its own, so a probe that lost its timeout fails here instead of hanging.
+    probe = await asyncio.wait_for(
+        launcher_probe(
+            CDP_URL,
+            locks=ActivityLocks(tmp_path),
+            account=key,
+            reader=_SilentReader(),
+            timeout_s=0.05,
+        ),
+        2,
     )
     assert probe == PortProbe(busy=False, browser_pid=None)
     assert not activity_lock.inspect(key, tmp_path).held

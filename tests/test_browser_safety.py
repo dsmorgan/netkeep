@@ -1153,24 +1153,6 @@ def request_mutations(source: str, path: Path = MEMORY) -> Iterator[Finding]:
             yield Finding(path, line, f"{name}() answers or alters a request (ADR 0006)")
 
 
-#: #675: the detail :func:`api_request_sends` gives the launcher probe's one GET.
-DEVTOOLS_VERSION_GET = "GETs Chrome's /json/version (#675)"
-#: Where that GET may be, and how many times: the identity read's websocket lookup.
-ALLOWED_DEVTOOLS_GETS = {(LINKEDIN / "browser.py", "_browser_websocket_url"): 1}
-
-
-def _is_devtools_version_get(node: ast.Attribute, call: ast.Call | None) -> bool:
-    """Whether ``node`` is ``connection.request("GET", "/json/version")``, exactly."""
-    return (
-        call is not None
-        and isinstance(node.value, ast.Name)
-        and node.value.id == "connection"
-        and not call.keywords
-        and [a.value if isinstance(a, ast.Constant) else None for a in call.args]
-        == ["GET", "/json/version"]
-    )
-
-
 def api_request_sends(source: str, path: Path = MEMORY) -> Iterator[Finding]:
     """A request of netkeeper's own through an API request context.
 
@@ -1183,25 +1165,12 @@ def api_request_sends(source: str, path: Path = MEMORY) -> Iterator[Finding]:
     - ``<anything>.request.<send>``, whatever it is read on.
 
     ``request.new_context`` is refused by the context rule (``new_context``).
-
-    #675: ``connection.request("GET", "/json/version")``, with exactly those two literals
-    and nothing else, is reported apart as :data:`DEVTOOLS_VERSION_GET`: the launcher
-    probe's one read of Chrome's own DevTools endpoint, which the rule below allows at
-    one site.
     """
-    tree = parse(source)
-    calls = {
-        id(node.func): node
-        for node in walk(tree)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-    }
-    for node in walk(tree):
+    for node in walk(parse(source)):
         if not isinstance(node, ast.Attribute):
             continue
         if node.attr == "request" and _is_super_call(node.value):
             yield Finding(path, node.lineno, SUPER_REQUEST)
-        elif node.attr == "request" and _is_devtools_version_get(node, calls.get(id(node))):
-            yield Finding(path, node.lineno, DEVTOOLS_VERSION_GET)
         elif node.attr == "request" and not (
             isinstance(node.value, ast.Name) and node.value.id == "response"
         ):
@@ -2799,6 +2768,92 @@ def test_the_identity_read_pin_catches_a_new_reach(path: Path, line: str) -> Non
     assert identity_read_reaches(sources) != IDENTITY_READ_REACHES
 
 
+#: #675 review: everything the identity read's two transport functions reach, exactly:
+#: each attribute read (as written) and each function called by name. The websocket
+#: may only ``send`` its one frame and ``recv``; the stream may only ``write`` the one
+#: pinned request, read, and close. Any other attribute, such as ``ws.protocol``,
+#: ``ws.transport``, ``writer.transport`` or a socket's ``sendall``, a second write, or a
+#: helper handed the stream, fails here.
+IDENTITY_TRANSPORT_REACHES = {
+    "_browser_websocket_url": (
+        sorted(
+            [
+                "(await stream.readuntil(b'\\r\\n\\r\\n')).decode",
+                "VERSION_REQUEST.format",
+                "VERSION_REQUEST.format(netloc=netloc).encode",
+                "asyncio.open_connection",
+                "asyncio.timeout",
+                "body.get",
+                "json.loads",
+                "stream.readexactly",
+                "stream.readuntil",
+                "writer.close",
+                "writer.write",
+            ]
+        ),
+        sorted(["_ok_content_length", "isinstance", "isinstance"]),
+    ),
+    "_read_process_info": (
+        sorted(
+            [
+                "asyncio.timeout",
+                "json.dumps",
+                "json.loads",
+                "message.get",
+                "message.get",
+                "ws.recv",
+                "ws.send",
+            ]
+        ),
+        sorted(["NoRedirect", "isinstance"]),
+    ),
+}
+
+
+def identity_transport_reaches(source: str) -> dict[str, tuple[list[str], list[str]]]:
+    """What each function :data:`IDENTITY_TRANSPORT_REACHES` names reaches in ``source``."""
+    found: dict[str, tuple[list[str], list[str]]] = {}
+    for node in parse(source).body:
+        if isinstance(node, ast.AsyncFunctionDef) and node.name in IDENTITY_TRANSPORT_REACHES:
+            attributes = sorted(ast.unparse(n) for n in walk(node) if isinstance(n, ast.Attribute))
+            called = sorted(
+                n.func.id
+                for n in walk(node)
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+            )
+            found[node.name] = (attributes, called)
+    return found
+
+
+def test_the_identity_read_reaches_only_its_pinned_transport_calls() -> None:
+    source = read_source(LINKEDIN / "browser.py")
+    assert identity_transport_reaches(source) == IDENTITY_TRANSPORT_REACHES
+
+
+_WS_SEND = "            await ws.send(json.dumps("
+_STREAM_WRITE = "            writer.write(VERSION_REQUEST"
+
+
+@pytest.mark.parametrize(
+    ("anchor", "line"),
+    [
+        (_WS_SEND, "            ws.protocol.send_text(b'{}')\n            ws.send_data()\n"),
+        (_WS_SEND, "            ws.transport.write(b'{}')\n"),
+        (_WS_SEND, "            await ws.send('{}')\n"),
+        (_WS_SEND, "            _raw(ws)\n"),
+        (_STREAM_WRITE, "            writer.transport.write(b'PUT /json/new HTTP/1.1')\n"),
+        (_STREAM_WRITE, "            writer.get_extra_info('socket').sendall(b'x')\n"),
+        (_STREAM_WRITE, "            writer.write(b'PUT /json/new?about:blank HTTP/1.1')\n"),
+        (_STREAM_WRITE, "            writer.writelines([b'x'])\n"),
+    ],
+)
+def test_the_identity_transport_pin_catches_another_send(anchor: str, line: str) -> None:
+    source = read_source(LINKEDIN / "browser.py")
+    assert source.count(anchor) == 1, anchor
+    mutated = source.replace(anchor, line + anchor, 1)
+    assert identity_transport_reaches(mutated) != IDENTITY_TRANSPORT_REACHES
+
+
 def test_no_code_path_alters_or_answers_a_request() -> None:
     """ADR 0006: the page's requests are read, never held, changed, or answered."""
     findings = scan([PACKAGE], request_mutations)
@@ -2814,51 +2869,10 @@ def test_no_code_path_sends_through_an_api_request_context() -> None:
             f"{path.name} no longer makes exactly {count} super().request calls ({len(hits)});"
             " if they moved, update ALLOWED_SUPER_REQUESTS"
         )
-    gets = [f for f in findings if f.detail == DEVTOOLS_VERSION_GET]
-    for (path, function), count in ALLOWED_DEVTOOLS_GETS.items():
-        hits = [f for f in gets if f.path == path and _function_at(path, f.line) == function]
-        assert len(hits) == count, (
-            f"{function} no longer makes exactly {count} /json/version GET ({len(hits)});"
-            " if it moved, update ALLOWED_DEVTOOLS_GETS"
-        )
     others = [
-        f
-        for f in findings
-        if not (f.path in ALLOWED_SUPER_REQUESTS and f.detail == SUPER_REQUEST)
-        and not (
-            f.detail == DEVTOOLS_VERSION_GET
-            and (f.path, _function_at(f.path, f.line)) in ALLOWED_DEVTOOLS_GETS
-        )
+        f for f in findings if not (f.path in ALLOWED_SUPER_REQUESTS and f.detail == SUPER_REQUEST)
     ]
     assert not others, complain(others, "netkeeper sends no requests of its own:")
-
-
-def _function_at(path: Path, line: int) -> str:
-    """The enclosing ``Class.method`` (or function) of the first node on ``line``."""
-    tree = parse(read_source(path))
-    scopes = _scoped(tree)
-    for node in walk(tree):
-        if getattr(node, "lineno", None) == line and id(node) in scopes:
-            return scopes[id(node)]
-    return ""
-
-
-def test_the_devtools_get_pin_catches_another_request() -> None:
-    """#675: only the exact GET is set apart, and only at its one site."""
-    exact = 'def f(connection):\n    connection.request("GET", "/json/version")\n'
-    assert [f.detail for f in api_request_sends(exact)] == [DEVTOOLS_VERSION_GET]
-    for other in (
-        'connection.request("POST", "/json/version")',
-        'connection.request("GET", "/json/new?https://example.com")',
-        'connection.request("GET", "/json/version", body)',
-        'connection.request("GET", path)',
-        'connection.request("GET", "/json/version", headers=h)',
-        'page.request("GET", "/json/version")',
-        "held = connection.request",
-    ):
-        assert [f.detail for f in api_request_sends(other)] == [
-            "reads an API request context (ADR 0006)"
-        ], other
 
 
 def test_the_observing_modules_only_listen_and_scroll() -> None:
@@ -4193,6 +4207,8 @@ PAGE_ACTION_REACHES = {
         ("linkedin/archive.py", "_open_zip", "close", 3),
         ("linkedin/archive.py", "open_archive", "close", 3),
         ("linkedin/browser.py", "AttachBrowserProvider.run", "close", 1),
+        # #675: the identity read's own loopback stream to /json/version, not a tab.
+        ("linkedin/browser.py", "_browser_websocket_url", "close", 1),
         ("linkedin/browser.py", "BrowserRun._open_body_tap", "close", 1),
         ("linkedin/browser.py", "BrowserRun.close", "close", 2),
         ("linkedin/browser.py", "BrowserRun.close_sent_tab", "close", 2),
@@ -4224,6 +4240,7 @@ PAGE_ACTION_SITES = {
     ("BrowserRun.close", "page.close"): 1,
     ("BrowserRun.bring_tab_forward", "page.bring_to_front"): 1,
     ("AttachBrowserProvider.run", "run.close"): 1,
+    ("_browser_websocket_url", "writer.close"): 1,
 }
 #: Where a function that closes or raises ``page`` may have taken it from: the run's
 #: own tab (``self._page``, or ``ensure_page``), or nothing.

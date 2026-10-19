@@ -21,16 +21,16 @@ from __future__ import annotations
 
 import asyncio
 import enum
-import http.client
 import inspect
 import json
 import logging
 import os
 import random
 import re
+import socket
 import unicodedata
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping, Sequence
-from contextlib import AbstractAsyncContextManager, asynccontextmanager, closing, contextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -2769,8 +2769,10 @@ class CdpIdentityReader:
     :meth:`read_pid` reads ``/json/version`` from ``cdp_url`` for the browser target's
     websocket, opens that websocket, sends one ``SystemInfo.getProcessInfo`` (the
     message :func:`read_browser_pid` sends), and closes it. It needs no window, opens no
-    tab, and reads no page or cookie. The websocket must be on ``cdp_url``'s own host and
-    port, at ``/devtools/browser/``: an answer that points anywhere else is no pid.
+    tab, and reads no page or cookie. ``cdp_url`` must name its port, and its host is
+    resolved once, so the GET and the websocket reach the same address. The websocket
+    must be on that address, at ``/devtools/browser/``, and no redirect is followed: an
+    answer that points anywhere else is no pid.
     Everything that fails is ``None``, which the launcher refuses, as before.
 
     A run never uses this: it attaches through :class:`PlaywrightCdpConnector`, and reads
@@ -2780,13 +2782,29 @@ class CdpIdentityReader:
     async def read_pid(self, cdp_url: str) -> int | None:
         """The browser process's pid that the Chrome on ``cdp_url`` names, or ``None``."""
         parts = urlsplit(cdp_url)
-        if parts.scheme != "http" or not parts.hostname:
-            log.info("the identity read takes an http:// address, not %s", cdp_url)
+        try:
+            port = parts.port
+        except ValueError:
+            port = None
+        if parts.scheme != "http" or not parts.hostname or port is None or not 0 < port < 65536:
+            log.info("the identity read takes http://<host>:<port>, not %s", cdp_url)
             return None
         try:
-            port = parts.port or 80
-            ws_url = await asyncio.to_thread(_browser_websocket_url, parts.hostname, port)
-            if ws_url is None or not _is_browser_websocket(ws_url, parts.netloc):
+            # Resolved once. The GET tries each address in turn (``localhost`` may be
+            # ::1 first, and Chrome listens on 127.0.0.1); the websocket then goes to
+            # the one that answered.
+            loop = asyncio.get_running_loop()
+            found = await loop.getaddrinfo(parts.hostname, port, type=socket.SOCK_STREAM)
+            ws_url, netloc = None, ""
+            for address in dict.fromkeys(str(info[4][0]) for info in found):
+                netloc = f"[{address}]:{port}" if ":" in address else f"{address}:{port}"
+                try:
+                    ws_url = await _browser_websocket_url(address, port, netloc)
+                except OSError as exc:
+                    log.debug("no answer from %s: %s", netloc, personal_exc(exc))
+                    continue
+                break
+            if ws_url is None or not _is_browser_websocket(ws_url, netloc):
                 log.warning("the Chrome on %s named an unexpected websocket", cdp_url)
                 return None
             answer = await _read_process_info(ws_url)
@@ -2798,18 +2816,50 @@ class CdpIdentityReader:
         return browser_pid_from_process_info(answer) if isinstance(answer, Mapping) else None
 
 
-def _browser_websocket_url(host: str, port: int) -> str | None:
-    """``/json/version``'s ``webSocketDebuggerUrl``: one GET, no proxy, nothing sent."""
-    with closing(
-        http.client.HTTPConnection(host, port, timeout=PROBE_STEP_TIMEOUT_S)
-    ) as connection:
-        connection.request("GET", "/json/version")
-        response = connection.getresponse()
-        if response.status != 200:
-            return None
-        body = json.loads(response.read(IDENTITY_READ_MAX_BYTES))
+#: #675: the one request the identity read writes: Chrome's own DevTools version
+#: endpoint, on the address the read resolved. ``tests/test_identity_reader.py`` pins it.
+VERSION_REQUEST: Final = "GET /json/version HTTP/1.1\r\nHost: {netloc}\r\nConnection: close\r\n\r\n"
+
+
+async def _browser_websocket_url(address: str, port: int, netloc: str) -> str | None:
+    """``/json/version``'s ``webSocketDebuggerUrl``: :data:`VERSION_REQUEST`, once.
+
+    No proxy and no redirect (nothing here follows one). The whole read has one deadline,
+    :data:`PROBE_STEP_TIMEOUT_S`, and the headers and the body are each capped at
+    :data:`IDENTITY_READ_MAX_BYTES`, so a slow or endless answer ends the read. Only a
+    ``200`` with one ``Content-Length`` and no ``Transfer-Encoding`` is read.
+    """
+    async with asyncio.timeout(PROBE_STEP_TIMEOUT_S):
+        stream, writer = await asyncio.open_connection(address, port, limit=IDENTITY_READ_MAX_BYTES)
+        try:
+            writer.write(VERSION_REQUEST.format(netloc=netloc).encode("ascii"))
+            head = (await stream.readuntil(b"\r\n\r\n")).decode("latin-1")
+            length = _ok_content_length(head)
+            if length is None:
+                return None
+            body = json.loads(await stream.readexactly(length))
+        finally:
+            writer.close()
     found = body.get("webSocketDebuggerUrl") if isinstance(body, dict) else None
     return found if isinstance(found, str) else None
+
+
+def _ok_content_length(head: str) -> int | None:
+    """The body's length, when ``head`` is a ``200`` the read takes; else ``None``."""
+    status, _, rest = head.partition("\r\n")
+    if re.fullmatch(r"HTTP/1\.[01] 200(?: [^\r\n]*)?", status) is None:
+        return None
+    lengths: list[str] = []
+    for line in rest.split("\r\n"):
+        name, _, value = line.partition(":")
+        if name.strip().lower() == "transfer-encoding":
+            return None
+        if name.strip().lower() == "content-length":
+            lengths.append(value.strip())
+    if len(lengths) != 1 or not lengths[0].isdigit():
+        return None
+    length = int(lengths[0])
+    return length if length <= IDENTITY_READ_MAX_BYTES else None
 
 
 def _is_browser_websocket(ws_url: str, netloc: str) -> bool:
@@ -2827,14 +2877,19 @@ def _is_browser_websocket(ws_url: str, netloc: str) -> bool:
 async def _read_process_info(ws_url: str) -> object:
     """``SystemInfo.getProcessInfo``'s result, over the browser target's own websocket.
 
-    One message, then the connection closes. No proxy, no compression, and an answer
-    over :data:`IDENTITY_READ_MAX_BYTES` is refused. Events (none are subscribed to) and
-    any other id are skipped until the answer arrives or the step times out.
+    One message, then the connection closes. No proxy, no compression, no redirect (a
+    handshake answered with one fails), and an answer over
+    :data:`IDENTITY_READ_MAX_BYTES` is refused. Events (none are subscribed to) and any
+    other id are skipped until the answer arrives or the step times out.
     """
     from websockets.asyncio.client import connect
 
+    class NoRedirect(connect):
+        def process_redirect(self, exc: Exception) -> Exception:
+            return exc  # never followed: the websocket stays where it was checked
+
     async with asyncio.timeout(PROBE_STEP_TIMEOUT_S):
-        async with connect(
+        async with NoRedirect(
             ws_url, proxy=None, compression=None, max_size=IDENTITY_READ_MAX_BYTES
         ) as ws:
             await ws.send(json.dumps({"id": 1, "method": "SystemInfo.getProcessInfo"}))

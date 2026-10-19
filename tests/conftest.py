@@ -90,9 +90,15 @@ def _close_log_file() -> Iterator[None]:
 
 @pytest.fixture(autouse=True)
 def _no_live_port(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No test's socket connects to port 9222 or 8000, on any host, whatever the code
-    under test does (#675 review: a mutant reader reached 9222). Raised before the
-    connect, as a :class:`RealBrowserBlocked`, so nothing catches it as a failed attach."""
+    """No socket this test process opens connects to port 9222 or 8000, on any host
+    (#675 review: a mutant reader reached 9222). Raised before the connect, as a
+    :class:`RealBrowserBlocked`, so nothing catches it as a failed attach.
+
+    What it covers: ``socket.socket.connect`` and ``connect_ex`` in this process, which
+    asyncio, ``websockets``, ``http.client`` and raw sockets all go through. What it
+    doesn't: a subprocess (Playwright's driver, a child test process), which
+    ``_no_real_browser`` and ``UNREACHABLE_CDP_URL`` cover instead, and a session-scoped
+    fixture, which runs before this function-scoped one."""
     import socket
 
     real_connect = socket.socket.connect
