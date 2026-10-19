@@ -1561,7 +1561,7 @@ describe('draft with your AI assistant', () => {
     const { helper } = await openHelper()
     expect(within(helper).getByRole('link', { name: 'Read the guide' })).toHaveAttribute(
       'href',
-      'https://github.com/dsmorgan/netkeeper/blob/main/docs/ai-drafting.md',
+      'https://github.com/dsmorgan/netkeep/blob/main/docs/ai-drafting.md',
     )
   })
 })

@@ -43,7 +43,7 @@ import {
 
 /** The guide, on the project's site, since the app serves no docs of its own. */
 export const AI_DRAFTING_GUIDE_URL =
-  'https://github.com/dsmorgan/netkeeper/blob/main/docs/ai-drafting.md'
+  'https://github.com/dsmorgan/netkeep/blob/main/docs/ai-drafting.md'
 
 /** What a paste put into the editor, so the editor can say so and lint at once. */
 export interface AppliedStep {
