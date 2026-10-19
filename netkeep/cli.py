@@ -275,9 +275,10 @@ class _PathsBlock:
     log_file: str
 
 
-_NO_LOG_FILE: Final = frozenset({"openapi", "version"})
+_NO_LOG_FILE: Final = frozenset({"openapi", "version", "migrate"})
 """Commands that read no data and write no log file (#602): ``make gen-client`` runs
-``openapi export`` wherever the repository is, never against a data directory."""
+``openapi export`` wherever the repository is, never against a data directory. ``migrate``
+(#661) logs to stderr only: a log file would open in the new data folder before the move."""
 
 
 @app.callback()
@@ -308,13 +309,15 @@ def _auto_migrate(command: str | None) -> list[str]:
     if "--help" in sys.argv[1:]:  # asking how to use a command opens no data
         return []
     try:
-        done = migrate_name.auto(command, serving=command == "serve")
+        result = migrate_name.auto(command, serving=command == "serve")
     except migrate_name.Refused as exc:
         typer.echo(f"error: netkeep can't move netkeeper's data yet: {exc}", err=True)
         raise typer.Exit(code=1) from exc
-    for line in done:
+    for line in result.lines:
         typer.echo(f"netkeep: {line}", err=True)
-    return done
+    if result.handed_over:  # the new login item serves now; this old job ends
+        raise typer.Exit(code=0)
+    return result.lines
 
 
 def legacy_main() -> None:

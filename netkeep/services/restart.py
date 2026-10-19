@@ -40,10 +40,6 @@ LAUNCHD_LABEL: Final = "fun.tnkr.netkeep"
 (:data:`netkeep.services.login_item.LABEL_BASE`; another data directory's label adds
 ``.<hash>``). launchd puts it in the job's ``XPC_SERVICE_NAME``."""
 
-LEGACY_LAUNCHD_LABEL: Final = "fun.tnkr.netkeeper"
-"""The label before the rename (#661): an agent from then that runs this version is still
-launchd's job, so a restart is launchd's to do until the migration replaces it."""
-
 OLD_AGENT_MARK: Final = "NETKEEPER_LAUNCHD_LOG_DIR"
 """Set by the removed install script's plist, never by the login item's: a process with
 it was started by an agent whose definition still runs ``serve-launchd.sh``."""
@@ -58,10 +54,9 @@ Mode = Literal["launchd", "exec"]
 def mode(environ: Mapping[str, str] = os.environ) -> Mode:
     """``launchd`` when the login item started this process, else ``exec``."""
     name = environ.get("XPC_SERVICE_NAME", "")
-    if not any(
-        name == label or name.startswith(f"{label}.")
-        for label in (LAUNCHD_LABEL, LEGACY_LAUNCHD_LABEL)
-    ):
+    # An agent from before the rename (``fun.tnkr.netkeeper``, #661) is not one: its
+    # definition points into the folder the migration moved, so launchd can't respawn it.
+    if name != LAUNCHD_LABEL and not name.startswith(f"{LAUNCHD_LABEL}."):
         return "exec"
     return "exec" if OLD_AGENT_MARK in environ else "launchd"
 

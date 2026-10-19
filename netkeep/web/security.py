@@ -51,6 +51,16 @@ from netkeep.services.local_api_key import LocalApiKey, cookie_name, legacy_cook
 
 CLIENT_HEADER = "x-netkeep-client"
 CLIENT_HEADER_VALUE = "1"
+LEGACY_CLIENT_HEADER = "x-netkeeper-client"
+"""The header's name before the rename (#661), accepted for one release: a UI tab opened
+before the upgrade still sends it. Any custom header forces a preflight all the same."""
+
+
+def has_client_header(headers: Mapping[str, str]) -> bool:
+    """Whether lower-cased ``headers`` carry the client header, under either name."""
+    return CLIENT_HEADER_VALUE in (headers.get(CLIENT_HEADER), headers.get(LEGACY_CLIENT_HEADER))
+
+
 GUARDED_PREFIX = "/api/"
 STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -109,7 +119,7 @@ def csrf_violation(
     """
     if method.upper() not in STATE_CHANGING_METHODS or not path.startswith(GUARDED_PREFIX):
         return None
-    if headers.get(CLIENT_HEADER) != CLIENT_HEADER_VALUE:
+    if not has_client_header(headers):
         return RULE_CLIENT_HEADER
     site = headers.get("sec-fetch-site")
     origin = headers.get("origin")

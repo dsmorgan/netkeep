@@ -584,6 +584,24 @@ def test_repair_from_the_old_agent_does_not_boot_out_the_server_answering(
     assert "off and on" not in outcome.message
 
 
+def test_a_failed_write_of_the_new_plist_leaves_the_old_agent_in_place(
+    launchctl: FakeLaunchctl, tmp_path: Path, data: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The old plist goes only once the new one is written (#661 review)."""
+    old = write_old_plist(tmp_path, data)
+    before = old.read_bytes()
+    item = make(launchctl, tmp_path, data)
+
+    def refuse(_content: bytes) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(item, "_write_plist", refuse)
+    with pytest.raises(OSError, match="disk full"):
+        item.enable()
+    assert old.read_bytes() == before
+    assert "bootout" not in launchctl.verbs()
+
+
 def test_a_manual_serve_adopts_an_old_agent_that_is_crash_looping(
     launchctl: FakeLaunchctl, tmp_path: Path, data: Path
 ) -> None:
