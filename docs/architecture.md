@@ -4,7 +4,7 @@
 |---|---|
 | Status | Draft v0.1 |
 | Date | 2026-09-20 |
-| Name | `netkeep`, at [github.com/dsmorgan/netkeeper](https://github.com/dsmorgan/netkeeper) |
+| Name | `netkeep`, at [github.com/dsmorgan/netkeep](https://github.com/dsmorgan/netkeep) |
 | Related | [networking-workflow.md](networking-workflow.md), the method this tool automates; [implementation-guide.md](implementation-guide.md), the backlog and checkpoints; [adr/](adr/), the reasoning behind contested decisions |
 
 ## 1. Summary
@@ -1184,7 +1184,7 @@ Each phase ends with a usable tool. Estimates assume evenings and weekends with 
 2. **Second mailbox later.** The `mailbox` table supports several rows. Is there a case (a Workspace account for a business) worth designing the sender picker for now?
 3. **Interaction logging from your side.** Should netkeep read your own outbound Gmail to contacts outside campaigns, so "last contacted" is true rather than campaign-only? It needs no new scope but widens what the tool reads.
 4. **Calendar.** A "schedule a call" outcome could create a placeholder event through the Google Calendar API. Worth a scope, or leave it to your scheduling link?
-5. **Name.** Resolved: `netkeep`, under `dsmorgan/netkeeper`.
+5. **Name.** Resolved: `netkeep`, under `dsmorgan/netkeep`.
 6. **Shape of multi-user.** Self-hosted single-tenant (a family or a small team on one server), a hosted service, or both? The answer decides whether the extractor agent needs an installer and an authenticated channel, and whether the Google OAuth app must be verified. Deferred until the local form has matured; the readiness constraints in section 5 hold either way.
 
 ## Appendix A: Nine-column export preset

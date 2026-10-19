@@ -1,6 +1,6 @@
 # netkeep
 
-[![CI](https://github.com/dsmorgan/netkeeper/actions/workflows/ci.yml/badge.svg)](https://github.com/dsmorgan/netkeeper/actions/workflows/ci.yml)
+[![CI](https://github.com/dsmorgan/netkeep/actions/workflows/ci.yml/badge.svg)](https://github.com/dsmorgan/netkeep/actions/workflows/ci.yml)
 
 Keep your professional network warm.
 
@@ -35,8 +35,8 @@ The workflow is a five-stage reconnect method: validate your network, enrich it,
 ## Running
 
 ```sh
-git clone https://github.com/dsmorgan/netkeeper.git
-cd netkeeper
+git clone https://github.com/dsmorgan/netkeep.git
+cd netkeep
 make install                # create .venv and install netkeep
 make build-ui               # build the UI into frontend/dist
 .venv/bin/netkeep serve   # http://127.0.0.1:8000

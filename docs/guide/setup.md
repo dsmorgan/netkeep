@@ -15,8 +15,8 @@ The dashboard opens on **Steps** until setup is done: a diagram with a box for e
 Install the prerequisites in the README's [Requirements](../../README.md#requirements), then:
 
 ```sh
-git clone https://github.com/dsmorgan/netkeeper.git
-cd netkeeper
+git clone https://github.com/dsmorgan/netkeep.git
+cd netkeep
 make install
 make build-ui
 .venv/bin/netkeep serve

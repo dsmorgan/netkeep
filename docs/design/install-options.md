@@ -20,7 +20,7 @@ So a new user today needs git, uv, Node 22, pnpm, Chrome, and a terminal, and ru
 
 ```sh
 curl -LsSf https://astral.sh/uv/<uv version>/install.sh | sh    # only if uv is missing
-curl -fsSLo constraints.txt https://github.com/dsmorgan/netkeeper/releases/download/vX.Y.Z/constraints.txt
+curl -fsSLo constraints.txt https://github.com/dsmorgan/netkeep/releases/download/vX.Y.Z/constraints.txt
 uv tool install --python 3.12 --managed-python -c constraints.txt netkeep==X.Y.Z
 netkeep setup
 ```
@@ -37,7 +37,7 @@ The constraints file is `uv export --no-dev --no-hashes` from the release's `uv.
 ### B. One-line installer
 
 ```sh
-curl -fsSL https://github.com/dsmorgan/netkeeper/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/dsmorgan/netkeep/releases/latest/download/install.sh | sh
 ```
 
 A short POSIX script that does option A's three steps, then opens the first-run page. It is a front end to A, not a separate channel: everything it installs, A installs.
@@ -58,7 +58,7 @@ A short POSIX script that does option A's three steps, then opens the first-run 
 ### C. Homebrew tap
 
 ```sh
-brew install dsmorgan/netkeeper/netkeep
+brew install dsmorgan/netkeep/netkeep
 netkeep setup
 ```
 
