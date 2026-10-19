@@ -25,6 +25,15 @@ but ``migrate``, ``openapi`` and ``version``), or when you run ``netkeep migrate
   ``fun.tnkr.netkeep`` through the login item's adoption of an old agent
   (:meth:`netkeep.services.login_item.LoginItem.enable`): on stays on, starting at the
   next login, and off stays off. The old plist is removed either way.
+- **The lock.** :func:`apply` holds the serve lock of the folder it migrates from its
+  last checks through the marker, so no ``serve`` starts on either path meanwhile (the
+  lock file moves with the folder), and a second migration is refused.
+- **The old agent's own job.** Run by ``fun.tnkr.netkeeper`` itself, it hands over at the
+  end: it starts the new agent and stops the old one, whose definition points into the
+  moved folder (:meth:`netkeep.services.login_item.LoginItem.replace_old_job`).
+- **Only the default.** The automatic run migrates the default data directory only; a
+  ``$NETKEEP_DATA`` elsewhere (a scratch folder) waits for ``netkeep migrate``, so it
+  reads no Keychain and writes no marker.
 - **The marker.** ``migrated-from-netkeeper.json`` in the data directory records what
   was done; with it there, a later start does nothing. Every step is also idempotent
   on its own, so a run that stopped part way finishes the next time.
@@ -36,6 +45,7 @@ sets :data:`path_guard` to refuse them and turns off the automatic run.
 
 from __future__ import annotations
 
+import errno
 import json
 import logging
 import os
@@ -46,7 +56,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
+from urllib.parse import unquote
 
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
 
@@ -55,6 +67,7 @@ from netkeep.chrome_profile import profile_lock_pid
 from netkeep.db import DATABASE_FILENAME, DATABASE_URL_ENV, make_engine
 from netkeep.linkedin import activity_lock
 from netkeep.services import keychain, local_api_key, login_item, mailboxes
+from netkeep.services.serve_lock import SERVE_LOCK_FILENAME
 
 log = logging.getLogger(__name__)
 
@@ -75,6 +88,10 @@ LoginItemFactory = Callable[[Path], login_item.LoginItem]
 
 class Refused(RuntimeError):
     """The migration would not be safe now; the message says what to do."""
+
+
+class _DatabaseUnreadable(RuntimeError):
+    """The database exists but could not be read, so its users' secrets are unknown."""
 
 
 @dataclass
@@ -101,6 +118,11 @@ class Plan:
     """A step could not be planned (the Keychain refused): no marker, so it runs again."""
     keychain_skipped: str | None = None
     """Why there is no Keychain step, when there is none."""
+    login_moved: bool = False
+    """:func:`apply` replaced or removed the old login item."""
+    handed_over: bool = False
+    """:func:`apply` started the new login item and stopped the old one, which was this
+    process's own job: the caller ends now."""
 
     @property
     def has_work(self) -> bool:
@@ -177,8 +199,17 @@ def plan(
     return result
 
 
-def _check_move(result: Plan, legacy: Path, env: Mapping[str, str]) -> None:
+def _check_move(
+    result: Plan, legacy: Path, env: Mapping[str, str], *, holding: str | None = None
+) -> None:
     new = result.data
+    if (new / MARKER_FILENAME).exists():
+        result.refusals.append(
+            f"{legacy} is back, but your data was already moved to {new}, which netkeep"
+            f" uses. {legacy} is not used: check what is in it, move it somewhere else"
+            " (don't move the new one), then run netkeep migrate"
+        )
+        return
     if new.exists():
         result.refusals.append(
             f"both {legacy} and {new} exist, so netkeep can't tell which is yours. Keep the"
@@ -186,7 +217,7 @@ def _check_move(result: Plan, legacy: Path, env: Mapping[str, str]) -> None:
             " netkeep migrate"
         )
         return
-    held = _held_locks(legacy / "locks")
+    held = [name for name in _held_locks(legacy / "locks") if name != holding]
     if held:
         result.refusals.append(
             f"netkeeper is still running on {legacy} ({', '.join(held)} held). Stop it:"
@@ -201,11 +232,28 @@ def _check_move(result: Plan, legacy: Path, env: Mapping[str, str]) -> None:
         )
     for name in (DATABASE_URL_ENV, paths.CONFIG_ENV):
         value = paths.getenv(name, env) or ""
-        if value and str(legacy) in value:
+        if value and _names_inside(value, legacy):
             result.refusals.append(
                 f"${name} points inside {legacy}, which is about to move. Point it at"
                 f" {new} instead (the same path with netkeep), then run netkeep migrate"
             )
+
+
+def _names_inside(value: str, folder: Path) -> bool:
+    """Whether a path or a database URL names something in ``folder``: ``~`` expanded,
+    percent-decoded, resolved, and compared by path parts, so ``.../netkeeper-backup``
+    is not inside ``.../netkeeper``."""
+    text_value = value.strip()
+    if "://" in text_value:
+        try:
+            text_value = make_url(text_value).database or ""
+        except Exception:  # not a URL after all
+            return False
+    if not text_value:
+        return False
+    candidate = Path(unquote(text_value)).expanduser().resolve()
+    root = folder.expanduser().resolve()
+    return candidate == root or root in candidate.parents
 
 
 def _held_locks(locks: Path) -> list[str]:
@@ -227,7 +275,16 @@ def _plan_keychain(result: Plan, source: Path, env: Mapping[str, str]) -> None:
     result.service_from = f"{LEGACY_SERVICE}{digest}"
     result.service_to = f"{keychain.DEFAULT_SERVICE}{digest}"
     try:
-        for entry in _entries(source, env):
+        entries = _entries(source, env)
+    except _DatabaseUnreadable as exc:
+        result.incomplete = True
+        result.notes.append(
+            f"could not read the database ({exc}), so the Gmail secrets are not copied yet;"
+            " once it reads again, run netkeep migrate"
+        )
+        entries = _install_entries()
+    try:
+        for entry in entries:
             if not keychain.has_secret_under(result.service_from, entry):
                 continue
             if not keychain.has_secret_under(result.service_to, entry):
@@ -245,16 +302,20 @@ def _plan_keychain(result: Plan, source: Path, env: Mapping[str, str]) -> None:
 
 def _entries(source: Path, env: Mapping[str, str]) -> list[str]:
     """The Keychain entries netkeep writes for this data directory (see the module doc)."""
-    entries = [
-        keychain.install_entry_name(local_api_key.KEY_ENTRY),
-        keychain.install_entry_name(local_api_key.CLAIMED_ENTRY),
-    ]
+    entries = _install_entries()
     users, tokens = _secret_owners(source, env)
     for user_id in users:
         entries.append(keychain.entry_name(user_id, mailboxes.CLIENT_SECRET_NAME))
     for user_id, ref in tokens:
         entries.append(keychain.entry_name(user_id, ref))
     return list(dict.fromkeys(entries))
+
+
+def _install_entries() -> list[str]:
+    return [
+        keychain.install_entry_name(local_api_key.KEY_ENTRY),
+        keychain.install_entry_name(local_api_key.CLAIMED_ENTRY),
+    ]
 
 
 _USERS_SQL: Final = "SELECT id FROM users ORDER BY id"
@@ -265,7 +326,11 @@ _TOKENS_SQL: Final = (
 
 def _secret_owners(source: Path, env: Mapping[str, str]) -> tuple[list[int], list[tuple[int, str]]]:
     """The user ids, and each mailbox's ``(user_id, keychain_ref)``. Read-only: a SQLite
-    database is opened ``mode=ro``, so a dry run writes nothing beside it."""
+    database is opened ``mode=ro``, so a dry run writes nothing beside it.
+
+    No database, or one never migrated (no ``users`` or ``mailboxes`` table), has no
+    secrets to copy. Any other failure raises :class:`_DatabaseUnreadable`.
+    """
     url = paths.getenv(DATABASE_URL_ENV, env)
     try:
         if not url or make_url(url).get_backend_name() == "sqlite":
@@ -274,20 +339,30 @@ def _secret_owners(source: Path, env: Mapping[str, str]) -> tuple[list[int], lis
                 return [], []
             uri = f"{database.resolve().as_uri()}?mode=ro"
             with closing(sqlite3.connect(uri, uri=True)) as connection:
+                tables = {
+                    str(row[0])
+                    for row in connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    )
+                }
+                if not {"users", "mailboxes"} <= tables:
+                    return [], []
                 users = [int(row[0]) for row in connection.execute(_USERS_SQL)]
                 tokens = [(int(u), str(r)) for u, r in connection.execute(_TOKENS_SQL)]
             return users, tokens
         engine = make_engine(url)
         try:
             with engine.connect() as connection:
+                inspector = sa_inspect(connection)
+                if not (inspector.has_table("users") and inspector.has_table("mailboxes")):
+                    return [], []
                 users = [int(row[0]) for row in connection.execute(text(_USERS_SQL))]
                 tokens = [(int(u), str(r)) for u, r in connection.execute(text(_TOKENS_SQL))]
             return users, tokens
         finally:
             engine.dispose()
-    except Exception as exc:  # a database it can't read has no users to copy for
-        log.warning("migrate: could not read the users from the database (%s)", type(exc).__name__)
-        return [], []
+    except Exception as exc:
+        raise _DatabaseUnreadable(type(exc).__name__) from exc
 
 
 def _plan_login_item(
@@ -349,12 +424,56 @@ def apply(
     env = os.environ if environ is None else environ
     if planned.refusals:
         raise Refused("; ".join(planned.refusals))
+    folder = planned.move_from or planned.data
+    claim = None
+    if folder.is_dir():
+        # The serve lock, from the checks through the marker: no serve starts on either
+        # path meanwhile (the lock file moves with the folder), and no second migration.
+        claim = activity_lock.try_claim_at(folder / "locks" / SERVE_LOCK_FILENAME, "serve")
+        if claim is None:
+            raise Refused(
+                f"a serve or another migration holds {folder / 'locks' / SERVE_LOCK_FILENAME};"
+                " stop it, then run netkeep migrate"
+            )
+    try:
+        done = _apply_locked(planned, env, login_factory=login_factory, serving=serving)
+    finally:
+        if claim is not None:
+            claim.release()
+    if planned.login_moved:
+        handed = _hand_over(planned, login_factory=login_factory)
+        if handed is not None:
+            done.append(handed)
+    return done
+
+
+def _apply_locked(
+    planned: Plan,
+    env: MutableMapping[str, str],
+    *,
+    login_factory: LoginItemFactory | None,
+    serving: bool,
+) -> list[str]:
     done: list[str] = []
     if planned.move_from is not None:
-        if planned.data.exists():  # appeared since the plan
-            raise Refused(f"{planned.data} appeared while migrating; run netkeep migrate again")
+        recheck = Plan(data=planned.data)
+        _check_move(recheck, planned.move_from, env, holding=SERVE_LOCK_FILENAME)
+        if recheck.refusals:  # something changed since the plan
+            raise Refused("; ".join(recheck.refusals))
         planned.data.parent.mkdir(parents=True, exist_ok=True)
-        planned.move_from.rename(planned.data)  # one rename(2): same folder, same volume
+        try:
+            planned.move_from.rename(planned.data)  # one rename(2): same folder, same volume
+        except OSError as exc:
+            reason = errno.errorcode.get(exc.errno or 0, "error")
+            hint = (
+                " (they are on different volumes: move it yourself with mv, then start netkeep)"
+                if exc.errno == errno.EXDEV
+                else ""
+            )
+            raise Refused(
+                f"could not rename {planned.move_from} to {planned.data}: {reason}{hint};"
+                " nothing was moved. Fix that, then run netkeep migrate"
+            ) from exc
         done.append(f"moved your data from {planned.move_from} to {planned.data}")
         log.info("migrate: moved the data directory to its netkeep name")
     if planned.data_from_env:
@@ -374,6 +493,7 @@ def apply(
     if planned.login is not None:
         try:
             done.append(_move_login_item(planned, login_factory=login_factory, serving=serving))
+            planned.login_moved = True
         except login_item.LoginItemError as exc:
             incomplete = True
             done.append(f"could not move the login item ({exc}); run netkeep login-item on")
@@ -381,6 +501,18 @@ def apply(
     if not incomplete and planned.data.is_dir():
         _write_marker(planned, copied)
     return done
+
+
+def _hand_over(planned: Plan, *, login_factory: LoginItemFactory | None) -> str | None:
+    """Under the old login item's own job, start the new one and stop the old (whose
+    definition points into the moved folder), now that the lock is released."""
+    item = (login_factory or _default_login_item)(planned.data)
+    try:
+        handed = item.replace_old_job()
+    except login_item.LoginItemError as exc:
+        return f"could not start the new login item ({exc}); run netkeep login-item on"
+    planned.handed_over = handed is not None
+    return handed
 
 
 def _copy_secrets(planned: Plan) -> int:
@@ -431,37 +563,58 @@ def _write_marker(planned: Plan, copied: int) -> None:
 def needed(environ: Mapping[str, str] | None = None) -> bool:
     """Whether a start should run the migration: a cheap check, no Keychain or launchd.
 
-    The old default folder exists and is in use (no ``$NETKEEP_DATA`` elsewhere), or the
-    data directory exists without the marker.
+    Only for the default data directory: the old default folder exists, or the new one
+    exists without the marker. A ``$NETKEEP_DATA`` naming any other folder (a scratch
+    directory, a second install) is left to ``netkeep migrate``: the automatic run reads
+    no Keychain and writes no marker for it.
     """
     env = os.environ if environ is None else environ
     legacy = paths.legacy_default_data_dir()
     named = paths.getenv(paths.DATA_ENV, env)
-    if legacy is not None and (not named or _same(Path(named).expanduser(), legacy)):
+    data = paths.default_data_dir()
+    if named:
+        chosen = Path(named).expanduser()
+        if not (legacy is not None and _same(chosen, legacy)) and not _same(chosen, data):
+            return False
+    if legacy is not None:
         path_guard(legacy)
         if legacy.exists():
             return True
-        data = paths.default_data_dir()
-    else:
-        data = Path(named).expanduser() if named else paths.default_data_dir()
     path_guard(data)
     return data.is_dir() and not (data / MARKER_FILENAME).exists()
 
 
-def auto(command: str | None, *, serving: bool = False) -> list[str]:
-    """The automatic run at a command's start. ``[]`` when there was nothing to do.
+@dataclass(frozen=True, slots=True)
+class AutoResult:
+    lines: list[str] = field(default_factory=list)
+    """What it did, in plain lines; empty when there was nothing to do."""
+    handed_over: bool = False
+    """It stopped this process's own (old) login item job: the command ends now."""
+
+
+def auto(command: str | None, *, serving: bool = False) -> AutoResult:
+    """The automatic run at a command's start.
 
     Raises :class:`Refused` when the migration is needed but not safe now.
     """
     if command in _NO_AUTO:
-        return []
+        return AutoResult()
     _follow_moved_folder(os.environ)
     if not needed():
-        return []
+        return AutoResult()
     planned = plan()
     if planned.refusals:
         raise Refused("; ".join(planned.refusals))
-    return apply(planned, serving=serving) if planned.has_work or planned.data.is_dir() else []
+    if planned.move_from is None and _serve_lock_held(planned.data):
+        return AutoResult()  # a serve runs here: the Keychain retry waits for the next start
+    if not (planned.has_work or planned.data.is_dir()):
+        return AutoResult()
+    lines = apply(planned, serving=serving)
+    return AutoResult(lines, handed_over=planned.handed_over)
+
+
+def _serve_lock_held(folder: Path) -> bool:
+    return activity_lock.inspect_at(folder / "locks" / SERVE_LOCK_FILENAME, "serve").held
 
 
 def _point_env_at(env: MutableMapping[str, str], data: Path) -> None:

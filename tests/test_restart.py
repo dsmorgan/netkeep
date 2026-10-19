@@ -63,9 +63,9 @@ def test_the_launchd_constants_match_the_agent() -> None:
         ({"XPC_SERVICE_NAME": "fun.tnkr.netkeep"}, "launchd"),
         ({"XPC_SERVICE_NAME": "fun.tnkr.netkeep.6f70bec19518"}, "launchd"),
         ({"XPC_SERVICE_NAME": "fun.tnkr.netkeepx"}, "exec"),
-        # an agent from before the rename (#661) running this version
-        ({"XPC_SERVICE_NAME": "fun.tnkr.netkeeper"}, "launchd"),
-        ({"XPC_SERVICE_NAME": "fun.tnkr.netkeeper.6f70bec19518"}, "launchd"),
+        # an agent from before the rename (#661): its definition points into the moved folder
+        ({"XPC_SERVICE_NAME": "fun.tnkr.netkeeper"}, "exec"),
+        ({"XPC_SERVICE_NAME": "fun.tnkr.netkeeper.6f70bec19518"}, "exec"),
         ({"XPC_SERVICE_NAME": "fun.tnkr.netkeeperx"}, "exec"),
         # started by the removed script's agent: launchd would run a script that is gone
         (

@@ -825,8 +825,34 @@ def test_chrome_script_warns_when_no_python_can_parse_a_sh_shim_answer(tmp_path:
             (minimal_bin / tool).symlink_to(found)
     path = f"{bin_dir}:{minimal_bin}"
     result = run_sh(script, "--dry-run", "--port", str(free_port()), env={"PATH": path})
-    assert result.returncode == 0, result.stderr
     assert "netkeep answered but no Python was found to parse it" in result.stderr
+    # With no profile named, it never guesses the default data folder (#661).
+    assert result.returncode == 1
+    assert "pass --profile or --data-dir" in result.stderr
+
+
+def test_chrome_script_stops_with_netkeeps_message_and_creates_no_folder(tmp_path: Path) -> None:
+    """A failing ``browser launch --json`` (a refused migration, #661) stops the script
+    with netkeep's own message; it never falls back to the default data folder."""
+    script = isolated_chrome_script(tmp_path)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "netkeep"
+    fake.write_text(
+        f"#!{sys.executable}\n"
+        "import sys\n"
+        "sys.stderr.write(\"error: netkeep can't move netkeeper's data yet: both exist\\n\")\n"
+        "sys.exit(1)\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    home = tmp_path / "home"
+    home.mkdir()
+    path = f"{bin_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
+    result = run_sh(script, "--port", str(free_port()), env={"PATH": path, "HOME": str(home)})
+    assert result.returncode == 1
+    assert "can't move netkeeper's data yet: both exist" in result.stderr
+    assert list(home.rglob("*")) == []
 
 
 def test_chrome_script_round_trips_a_non_ascii_profile_path(tmp_path: Path) -> None:

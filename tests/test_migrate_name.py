@@ -7,6 +7,7 @@ the automatic run off, and its ``path_guard`` fails a test that reaches the real
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import plistlib
@@ -26,6 +27,7 @@ from netkeep.linkedin import activity_lock
 from netkeep.migrate_name import MARKER_FILENAME, Refused
 from netkeep.services import keychain
 from netkeep.services.login_item import LoginItem
+from netkeep.services.serve_lock import SERVE_LOCK_FILENAME
 
 REAL_AUTO = cli._auto_migrate  # before conftest turns it off for every test
 OLD_LABEL = "fun.tnkr.netkeeper"
@@ -114,18 +116,37 @@ def store_old_secrets(service: str = "netkeeper") -> list[str]:
     return entries
 
 
-def write_old_agent(agents: Path, data: Path, label: str = OLD_LABEL) -> Path:
+def write_old_agent(agents: Path, data: Path, label: str = OLD_LABEL, **extra_env: str) -> Path:
     path = agents / f"{label}.plist"
     path.write_bytes(
         plistlib.dumps(
             {
                 "Label": label,
                 "ProgramArguments": ["/opt/nk/bin/netkeeper", "serve", "--port", "8001"],
-                "EnvironmentVariables": {"NETKEEPER_DATA": str(data)},
+                "EnvironmentVariables": {"NETKEEPER_DATA": str(data), **extra_env},
             }
         )
     )
     return path
+
+
+def login_factory_for(
+    launchctl: FakeLaunchctl, agents: Path, environ: dict[str, str]
+) -> migrate_name.LoginItemFactory:
+    def make(data: Path) -> LoginItem:
+        return LoginItem(
+            data=data,
+            agents_dir=agents,
+            runner=launchctl,
+            uid=UID,
+            executable=Path(EXE),
+            macos=True,
+            environ=environ,
+            lock_held=lambda: False,
+            sleep=lambda _s: None,
+        )
+
+    return make
 
 
 # -- the data directory ----------------------------------------------------------------
@@ -316,7 +337,7 @@ def test_a_restarted_old_job_follows_the_moved_folder(
     new.mkdir()
     (new / MARKER_FILENAME).write_text("{}")
     monkeypatch.setenv("NETKEEPER_DATA", str(old))
-    assert migrate_name.auto("serve") == []
+    assert migrate_name.auto("serve").lines == []
     assert os.environ["NETKEEP_DATA"] == str(new)
     assert "NETKEEPER_DATA" not in os.environ
     assert paths.data_dir() == new
@@ -497,7 +518,7 @@ def test_a_refused_automatic_run_stops_the_command(
 @pytest.mark.parametrize("command", ["migrate", "openapi", "version"])
 def test_some_commands_never_migrate_on_their_own(old: Path, command: str) -> None:
     make_netkeeper_install(old)
-    assert migrate_name.auto(command) == []
+    assert migrate_name.auto(command).lines == []
     assert old.is_dir()
 
 
@@ -550,3 +571,264 @@ def test_asking_for_help_never_migrates(old: Path, monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(sys, "argv", ["netkeep", "serve", "--help"])
     assert REAL_AUTO("serve") == []
     assert old.is_dir()
+
+
+# -- the review's follow-ups ----------------------------------------------------------
+
+
+def test_a_dry_run_with_an_old_variable_set_creates_nothing_new(
+    old: Path,
+    new: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    factory: migrate_name.LoginItemFactory,
+) -> None:
+    """The old-name warning is a log record: it must not open a log file in the new
+    folder, which would leave both folders and block the real run."""
+    make_netkeeper_install(old)
+    monkeypatch.setattr(paths, "_warned", set())
+    monkeypatch.setenv("NETKEEPER_CONFIG", str(tmp_path / "elsewhere.toml"))
+    monkeypatch.setattr(migrate_name, "_default_login_item", factory)
+    result = CliRunner().invoke(cli.app, ["migrate", "--dry-run"])
+    assert result.exit_code == 0, result.output
+    assert not new.exists()
+    real = CliRunner().invoke(cli.app, ["migrate"])
+    assert real.exit_code == 0, real.output
+    assert new.is_dir() and not old.exists()
+
+
+def test_an_unreadable_database_leaves_the_gmail_secrets_for_a_retry(
+    old: Path, new: Path, factory: migrate_name.LoginItemFactory, memory_keyring: MemoryKeyring
+) -> None:
+    make_netkeeper_install(old)
+    entries = store_old_secrets()
+    good = (old / "netkeeper.sqlite3").read_bytes()
+    (old / "netkeeper.sqlite3").write_bytes(b"this is not a database" * 100)
+    planned = migrate_name.plan(macos=True, login_factory=factory)
+    assert planned.incomplete
+    assert sorted(planned.copy) == ["install/local-api-claimed", "install/local-api-key"]
+    done = migrate_name.apply(planned, login_factory=factory)
+    assert any("could not read the database" in line for line in done)
+    assert not (new / MARKER_FILENAME).exists()
+    assert keyring.get_password("netkeep", "1/gmail/oauth_client") is None
+    # Readable again: the next start copies the rest and finishes.
+    (new / "netkeeper.sqlite3").write_bytes(good)
+    assert migrate_name.needed()
+    again = migrate_name.plan(macos=True, login_factory=factory)
+    assert not again.incomplete
+    migrate_name.apply(again, login_factory=factory)
+    for entry in entries:
+        assert keyring.get_password("netkeep", entry) == f"{SECRET}:{entry}"
+    assert (new / MARKER_FILENAME).exists()
+
+
+def test_a_database_never_migrated_has_no_users_and_is_complete(
+    old: Path, factory: migrate_name.LoginItemFactory
+) -> None:
+    old.mkdir()
+    sqlite3.connect(old / "netkeeper.sqlite3").close()  # an empty file: no tables
+    planned = migrate_name.plan(macos=True, login_factory=factory)
+    assert not planned.incomplete
+
+
+def test_the_new_login_item_keeps_the_old_ones_config_and_keychain_settings(
+    tmp_path: Path,
+    old: Path,
+    new: Path,
+    agents: Path,
+    factory: migrate_name.LoginItemFactory,
+) -> None:
+    """The maintainer's case: the old agent named a config in the repo checkout. A
+    terminal without that variable must not drop it from the new agent."""
+    make_netkeeper_install(old)
+    checkout_config = tmp_path / "code" / "netkeeper" / "config.toml"
+    write_old_agent(
+        agents,
+        old,
+        NETKEEPER_CONFIG=str(checkout_config),
+        NETKEEPER_KEYCHAIN_SERVICE="my-service",
+    )
+    migrate_name.apply(migrate_name.plan(macos=True, login_factory=factory), login_factory=factory)
+    env = plistlib.loads((agents / f"{NEW_LABEL}.plist").read_bytes())["EnvironmentVariables"]
+    assert env["NETKEEP_CONFIG"] == str(checkout_config)
+    assert env["NETKEEP_KEYCHAIN_SERVICE"] == "my-service"
+    assert env["NETKEEP_DATA"] == str(new.resolve())
+    assert not any(name.startswith("NETKEEPER_") for name in env)
+
+
+def test_a_config_inside_the_old_folder_is_pointed_at_the_new_one(
+    old: Path, new: Path, agents: Path, factory: migrate_name.LoginItemFactory
+) -> None:
+    make_netkeeper_install(old)
+    write_old_agent(agents, old, NETKEEPER_CONFIG=str(old / "config.toml"))
+    migrate_name.apply(migrate_name.plan(macos=True, login_factory=factory), login_factory=factory)
+    env = plistlib.loads((agents / f"{NEW_LABEL}.plist").read_bytes())["EnvironmentVariables"]
+    assert env["NETKEEP_CONFIG"] == str(new.resolve() / "config.toml")
+
+
+def test_the_serve_lock_is_held_through_the_move(
+    old: Path, new: Path, launchctl: FakeLaunchctl, agents: Path
+) -> None:
+    """A serve starting during the migration, on either path, is refused."""
+    make_netkeeper_install(old)
+    write_old_agent(agents, old)
+    seen: list[object] = []
+    inner = login_factory_for(launchctl, agents, {})
+
+    def during(data: Path) -> LoginItem:  # called while the login item moves
+        seen.append(activity_lock.try_claim_at(new / "locks" / SERVE_LOCK_FILENAME, "serve"))
+        return inner(data)
+
+    planned = migrate_name.plan(macos=True, login_factory=inner)
+    migrate_name.apply(planned, login_factory=during)
+    for claim in seen[1:]:  # the hand-over check runs after the release
+        if isinstance(claim, activity_lock.Claim):
+            claim.release()
+    assert seen[0] is None
+    after = activity_lock.try_claim_at(new / "locks" / SERVE_LOCK_FILENAME, "serve")
+    assert after is not None  # released at the end
+    after.release()
+
+
+def test_a_second_migration_holding_the_lock_is_refused(
+    old: Path, new: Path, factory: migrate_name.LoginItemFactory
+) -> None:
+    make_netkeeper_install(old)
+    planned = migrate_name.plan(macos=True, login_factory=factory)
+    other = activity_lock.try_claim_at(old / "locks" / SERVE_LOCK_FILENAME, "serve")
+    assert other is not None
+    try:
+        with pytest.raises(Refused, match="holds"):
+            migrate_name.apply(planned, login_factory=factory)
+    finally:
+        other.release()
+    assert old.is_dir() and not new.exists()
+
+
+def test_the_folder_appearing_after_the_plan_is_refused(
+    old: Path, new: Path, factory: migrate_name.LoginItemFactory
+) -> None:
+    make_netkeeper_install(old)
+    planned = migrate_name.plan(macos=True, login_factory=factory)
+    new.mkdir()
+    with pytest.raises(Refused, match="both"):
+        migrate_name.apply(planned, login_factory=factory)
+    assert (old / "netkeeper.sqlite3").is_file()
+
+
+@pytest.mark.parametrize("code", [errno.EXDEV, errno.EBUSY, errno.ENOENT])
+def test_a_failed_rename_is_a_refusal_and_moves_nothing(
+    old: Path,
+    new: Path,
+    factory: migrate_name.LoginItemFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    code: int,
+) -> None:
+    make_netkeeper_install(old)
+    planned = migrate_name.plan(macos=True, login_factory=factory)
+
+    def refuse(self: Path, target: Path) -> Path:
+        raise OSError(code, os.strerror(code))
+
+    monkeypatch.setattr(Path, "rename", refuse)
+    with pytest.raises(Refused, match="nothing was moved") as refused:
+        migrate_name.apply(planned, login_factory=factory)
+    if code == errno.EXDEV:
+        assert "different volumes" in str(refused.value)
+    monkeypatch.undo()
+    assert old.is_dir() and not new.exists()
+    claim = activity_lock.try_claim_at(old / "locks" / SERVE_LOCK_FILENAME, "serve")
+    assert claim is not None  # the lock was let go
+    claim.release()
+
+
+def test_the_old_agents_own_job_hands_over_to_the_new_one(
+    old: Path, new: Path, agents: Path, launchctl: FakeLaunchctl
+) -> None:
+    """Under ``fun.tnkr.netkeeper`` (installed without the bootout), the old job's
+    definition points into the moved folder: it starts the new agent and stops itself."""
+    make_netkeeper_install(old)
+    write_old_agent(agents, old)
+    launchctl.loaded.add(OLD_LABEL)
+    as_old_job = login_factory_for(launchctl, agents, {"XPC_SERVICE_NAME": OLD_LABEL})
+    planned = migrate_name.plan(macos=True, login_factory=as_old_job)
+    done = migrate_name.apply(planned, login_factory=as_old_job)
+    assert planned.handed_over
+    assert OLD_LABEL not in launchctl.loaded
+    assert NEW_LABEL in launchctl.loaded
+    verbs = launchctl.verbs()
+    assert verbs.index("bootstrap") < len(verbs) - 1 - verbs[::-1].index("bootout")
+    assert any("handed over" in line for line in done)
+    assert (new / MARKER_FILENAME).exists()  # finished before handing over
+
+
+def test_the_cli_ends_after_a_hand_over(monkeypatch: pytest.MonkeyPatch) -> None:
+    import typer
+
+    monkeypatch.setattr(
+        migrate_name, "auto", lambda *_a, **_k: migrate_name.AutoResult(["x"], handed_over=True)
+    )
+    with pytest.raises(typer.Exit) as exited:
+        REAL_AUTO("serve")
+    assert exited.value.exit_code == 0
+
+
+def test_a_restart_never_relies_on_the_old_agents_definition() -> None:
+    from netkeep.services import restart
+
+    assert restart.mode({"XPC_SERVICE_NAME": OLD_LABEL}) == "exec"
+
+
+def test_a_custom_data_directory_is_never_migrated_automatically(
+    tmp_path: Path,
+    old: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    memory_keyring: MemoryKeyring,
+) -> None:
+    """Other agents run commands with a scratch NETKEEPER_DATA: no Keychain read, no marker."""
+    custom = tmp_path / "scratch"
+    make_netkeeper_install(custom)
+    make_netkeeper_install(old)
+    monkeypatch.setenv("NETKEEPER_DATA", str(custom))
+    memory_keyring.broken = True  # any Keychain access would raise
+    assert not migrate_name.needed()
+    assert migrate_name.auto("serve").lines == []
+    assert not (custom / MARKER_FILENAME).exists()
+    assert old.is_dir()
+
+
+def test_a_folder_that_came_back_after_the_migration_is_named_as_unused(
+    old: Path, new: Path, factory: migrate_name.LoginItemFactory
+) -> None:
+    make_netkeeper_install(old)
+    new.mkdir()
+    (new / MARKER_FILENAME).write_text("{}")
+    refusals = migrate_name.plan(macos=True, login_factory=factory).refusals
+    assert len(refusals) == 1
+    assert "already moved" in refusals[0] and "don't move the new one" in refusals[0]
+
+
+@pytest.mark.parametrize(
+    ("value", "inside"),
+    [
+        ("~/Library/Application Support/netkeeper/config.toml", True),
+        ("sqlite:///~/Library/Application%20Support/netkeeper/netkeeper.sqlite3", True),
+        ("~/Library/Application Support/netkeeper-backup/config.toml", False),
+        ("~/Library/Application Support/netkeep/config.toml", False),
+        ("postgresql://u@localhost/netkeeper", False),
+    ],
+)
+def test_a_setting_inside_the_old_folder_is_matched_by_path(
+    old: Path, value: str, inside: bool
+) -> None:
+    assert migrate_name._names_inside(value, old) is inside
+
+
+def test_copying_a_secret_never_overwrites_the_new_one(memory_keyring: MemoryKeyring) -> None:
+    keyring.set_password("netkeeper", "install/local-api-key", "old")
+    keyring.set_password("netkeep", "install/local-api-key", "newer")
+    assert not keychain.copy_secret("install/local-api-key", source="netkeeper", target="netkeep")
+    assert keyring.get_password("netkeep", "install/local-api-key") == "newer"
+    keyring.set_password("netkeeper", "1/gmail/oauth_client", "c")
+    assert keychain.copy_secret("1/gmail/oauth_client", source="netkeeper", target="netkeep")
+    assert keyring.get_password("netkeep", "1/gmail/oauth_client") == "c"

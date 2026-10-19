@@ -491,6 +491,17 @@ async def test_the_cookie_from_before_the_rename_still_connects_and_is_renamed(
     assert (await anonymous.get("/api/v1/me", headers=other_port)).status_code == 401
 
 
+async def test_a_tab_opened_before_the_rename_can_still_write(
+    running_app: FastAPI, anonymous: httpx.AsyncClient
+) -> None:
+    """Its JavaScript still sends X-Netkeeper-Client: accepted for one release (#661)."""
+    bearer = {"Authorization": f"Bearer {_key(running_app).key}"}
+    old = await anonymous.post("/api/v1/tasks/ping", headers={**bearer, "X-Netkeeper-Client": "1"})
+    assert old.status_code == 202
+    neither = await anonymous.post("/api/v1/tasks/ping", headers=bearer)
+    assert neither.status_code == 403
+
+
 def test_the_session_label_is_pinned_through_the_rename() -> None:
     """A new HMAC label would disconnect every browser at the upgrade (#661)."""
     assert local_api_key._SESSION_LABEL == b"netkeeper-ui-session"

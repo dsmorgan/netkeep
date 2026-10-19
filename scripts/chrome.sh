@@ -156,10 +156,20 @@ fi
 if [ -z "$port" ] || [ -z "$profile" ]; then
   answer=
   if [ -n "$netkeep_bin" ]; then
+    # A failure stops here with netkeep's own message (#661): guessing the defaults
+    # could start Chrome on a new, empty profile, for example while the data folder
+    # still waits for its one-time move to netkeep's name.
+    err_file="${TMPDIR:-/tmp}/netkeep-chrome.$$.err"
+    status=0
     if [ -n "$data_dir" ]; then
-      answer=$(NETKEEP_DATA="$data_dir" "$netkeep_bin" browser launch --json 2>/dev/null) || answer=
+      answer=$(NETKEEP_DATA="$data_dir" "$netkeep_bin" browser launch --json 2>"$err_file") || status=$?
     else
-      answer=$("$netkeep_bin" browser launch --json 2>/dev/null) || answer=
+      answer=$("$netkeep_bin" browser launch --json 2>"$err_file") || status=$?
+    fi
+    message=$(cat "$err_file" 2>/dev/null) || message=
+    rm -f "$err_file"
+    if [ "$status" -ne 0 ]; then
+      die "netkeep browser launch --json failed (exit $status)${message:+: $message}"
     fi
   fi
   # One field per line: port, profile, remote note (empty when none).
@@ -187,7 +197,8 @@ print(d["port"]); print(d["profile"]); print(d["remote"] or "")' 2>/dev/null) ||
     fi
     [ -n "$port" ] || port=$DEFAULT_PORT
     if [ -z "$profile" ]; then
-      [ -n "$data_dir" ] || data_dir=${NETKEEP_DATA:-${NETKEEPER_DATA:-"$HOME/Library/Application Support/netkeep"}}
+      # Never guess the default data folder (#661): only one named on the command line.
+      [ -n "$data_dir" ] || die "could not ask netkeep for its Chrome profile; install netkeep (make install), or pass --profile or --data-dir"
       profile="$data_dir/$PROFILE_DIRNAME"
     fi
   fi

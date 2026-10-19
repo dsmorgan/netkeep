@@ -18,7 +18,11 @@ The GitHub repository keeps its old address for now, and GitHub redirects it aft
 | Log file | `logs/netkeeper.log` | `logs/netkeep.log` | New records go to the new file. Old files stay in `logs/`. |
 | Backups | `backups/netkeeper-<time>.sqlite3` | `backups/netkeep-<time>.sqlite3` | Old backups still list, restore and prune. |
 
-Only the default data directory moves. If you set `NETKEEP_DATA` (or `NETKEEPER_DATA`) to another folder, it stays where it is, and only its Keychain items and login item move to the new names.
+Only the default data directory moves, and only the default one migrates by itself. If you set `NETKEEP_DATA` (or `NETKEEPER_DATA`) to another folder, it stays where it is, and nothing happens until you run `netkeep migrate` with that variable set: then its Keychain items and login item move to the new names.
+
+The new login item keeps the old one's settings: a `NETKEEPER_CONFIG` or `NETKEEPER_KEYCHAIN_SERVICE` in the old plist becomes `NETKEEP_CONFIG` or `NETKEEP_KEYCHAIN_SERVICE` in the new one, with a path inside the old folder pointed at the new folder. A config in your checkout stays the one it reads.
+
+A UI tab you left open keeps working too: it still sends the old request header, which netkeep accepts for one release. Reload it when you can.
 
 When it's done, netkeep writes `migrated-from-netkeeper.json` in the data directory, recording what it did. With that file there, it doesn't run again.
 
@@ -30,12 +34,17 @@ netkeep moves nothing, and says what to do, when:
 - **netkeeper is still running.** A `serve`, or a LinkedIn run, holds a lock in the old folder. Stop it, then try again.
 - **netkeeper's Chrome is open.** It's using the profile inside the old folder. Quit that Chrome, then try again.
 - **`NETKEEP_DATABASE_URL` or `NETKEEP_CONFIG` points inside the old folder.** Point it at the new folder first.
+- **The rename itself fails,** for example because the folder is on another volume. Nothing moves; the message says why.
+
+If the old folder comes back after a migration, netkeep says that your data is already in the new folder and the old one isn't used. Check what's in it and move it aside; don't move the new one.
+
+The migration holds the serve lock from its checks to its last step, so no `serve` starts on either folder halfway through.
 
 Until the move succeeds, every command but `netkeep migrate`, `version` and `openapi` stops with the same message, so nothing starts on a new, empty data directory beside your real one.
 
 ## Upgrade
 
-1. **Stop netkeeper.** Press Ctrl+C in the terminal running `serve`, and quit netkeeper's Chrome. If the login item runs it, stop it without removing it, so the migration keeps it on:
+1. **Stop netkeeper.** Press Ctrl+C in the terminal running `serve`, and quit netkeeper's Chrome. Don't start Chrome again (`make chrome`, **Start Chrome**, `netkeep open`) until the migration is done: its profile is inside the folder that moves. If the login item runs it, stop it without removing it, so the migration keeps it on:
 
    ```sh
    launchctl bootout gui/$(id -u)/fun.tnkr.netkeeper
@@ -57,7 +66,9 @@ Until the move succeeds, every command but `netkeep migrate`, `version` and `ope
    .venv/bin/netkeep migrate --dry-run
    ```
 
-5. **Migrate,** with `.venv/bin/netkeep migrate`, or by starting `.venv/bin/netkeep serve`: the first start migrates the same way and prints what it did.
+5. **Migrate,** with `.venv/bin/netkeep migrate`, or by starting `.venv/bin/netkeep serve`: the first start migrates the same way and prints what it did. The new login item starts at your next login; to start it now instead of running `serve` yourself, run `.venv/bin/netkeep login-item on`.
+
+   If you skipped step 1's `launchctl bootout` and the old login item starts the new version, it migrates, starts the new login item and stops itself.
 
 6. **Open the UI.** Your browser stays connected. If it asks you to connect, run `netkeep open`.
 

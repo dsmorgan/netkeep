@@ -38,7 +38,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Final
@@ -343,6 +343,11 @@ class LoginItem:
             serves=serves,
             serves_here=moved or _same_directory(serves, self._data),
             arguments=arguments,
+            environment={
+                str(key): str(value)
+                for key, value in (env.items() if isinstance(env, dict) else ())
+                if isinstance(value, str)
+            },
         )
 
     def legacy_agent(self) -> LegacyAgent | None:
@@ -389,7 +394,13 @@ class LoginItem:
 
     # -- the plist --------------------------------------------------------------------
 
-    def render_plist(self, *, host: str | None = None, port: int | None = None) -> bytes:
+    def render_plist(
+        self,
+        *,
+        host: str | None = None,
+        port: int | None = None,
+        carried: Mapping[str, str] | None = None,
+    ) -> bytes:
         if self._executable is None:
             raise LoginItemError(
                 "Cannot find the installed netkeep command to run at login. Install"
@@ -406,8 +417,9 @@ class LoginItem:
         }
         # Settings that name where secrets and config live must follow the agent, or it
         # would read another Keychain service or config file than the serve you set up.
+        # ``carried`` (the settings of the agent being replaced) wins over this process's.
         for name in (keychain.SERVICE_ENV, paths.CONFIG_ENV):
-            value = (paths.getenv(name, self._environ) or "").strip()
+            value = (carried or {}).get(name) or (paths.getenv(name, self._environ) or "").strip()
             if value:
                 env[name] = value
         document = {
@@ -472,7 +484,8 @@ class LoginItem:
         adopting = self._adoptable_legacy()
         if keep_arguments and host is None and port is None:
             host, port = self._kept_arguments(adopting)
-        content = self.render_plist(host=host, port=port)
+        carried = self._carried(adopting) if adopting is not None else None
+        content = self.render_plist(host=host, port=port, carried=carried)
         previous = self.plist_path.read_bytes() if self.plist_path.is_file() else None
         self._write_plist(content)
         try:
@@ -582,6 +595,43 @@ class LoginItem:
                 self._stop(service)
         return Outcome(self.status(), started=False, message=message)
 
+    def _carried(self, legacy: LegacyAgent) -> dict[str, str]:
+        """The old agent's Keychain service and config settings, under their new names,
+        with a path inside the moved default folder pointed at the new one (#661)."""
+        carried: dict[str, str] = {}
+        old_default = paths.legacy_default_data_dir()
+        for name in (keychain.SERVICE_ENV, paths.CONFIG_ENV):
+            value = paths.getenv(name, legacy.environment)
+            if not value or not value.strip():
+                continue
+            value = value.strip()
+            if name == paths.CONFIG_ENV and old_default is not None:
+                candidate = Path(value).expanduser()
+                if paths.is_default_data_dir(self._data) and _within(candidate, old_default):
+                    value = str(self._data / candidate.resolve().relative_to(old_default.resolve()))
+            carried[name] = value
+        return carried
+
+    def replace_old_job(self) -> str | None:
+        """When this process is an agent from before the rename (#661), start the new one
+        and stop the old, whose definition points into the moved folder. Returns what it
+        did, or None when this is not such an agent. Stopping the old job ends this process
+        under launchd, so the caller has finished everything else first."""
+        self._require_macos()
+        me = self._environ.get("XPC_SERVICE_NAME", "")
+        if me != LEGACY_LABEL_BASE and not me.startswith(f"{LEGACY_LABEL_BASE}."):
+            return None
+        started = False
+        if self.plist_path.is_file():
+            self._launchctl("enable", self._service)
+            if not self._is_loaded():
+                self._launchctl("bootstrap", self._domain, str(self.plist_path))
+            started = True
+        self._runner(["bootout", f"{self._domain}/{me}"])
+        if started:
+            return f"handed over from the login item {me} to {self.label}, which starts now"
+        return f"stopped the login item {me}, which was off"
+
     def retire_legacy(self) -> None:
         """Remove the old agent for this data directory (:meth:`legacy_agent`) and stop
         it if launchd has it loaded, unless it is this process. The new one is untouched:
@@ -631,6 +681,8 @@ class LegacyAgent:
     serves: Path
     serves_here: bool
     arguments: list[str]
+    environment: dict[str, str] = field(default_factory=dict)
+    """Its ``EnvironmentVariables``, carried over when it is replaced (#661)."""
 
 
 def _read_plist(path: Path) -> dict[str, object] | None:
@@ -647,6 +699,11 @@ def _arguments(document: Mapping[str, object]) -> list[str] | None:
     if isinstance(arguments, list) and arguments and all(isinstance(a, str) for a in arguments):
         return [str(a) for a in arguments]
     return None
+
+
+def _within(path: Path, folder: Path) -> bool:
+    path, folder = path.expanduser().resolve(), folder.expanduser().resolve()
+    return path == folder or folder in path.parents
 
 
 def _same_directory(left: Path, right: Path) -> bool:

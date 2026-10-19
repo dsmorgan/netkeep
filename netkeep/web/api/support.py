@@ -32,7 +32,7 @@ from pydantic import BaseModel
 from netkeep.models import User
 from netkeep.services import log_tail, support_bundle
 from netkeep.web.deps import CurrentUser, SessionDep, effective_settings, require_owner
-from netkeep.web.security import CLIENT_HEADER, CLIENT_HEADER_VALUE
+from netkeep.web.security import has_client_header
 
 router = APIRouter(tags=["support"])
 
@@ -85,7 +85,7 @@ def cross_site(request: Request) -> bool:
     site = request.headers.get("sec-fetch-site")
     if site is not None:
         return site.strip().lower() not in _SAME_SITE
-    return request.headers.get(CLIENT_HEADER) != CLIENT_HEADER_VALUE
+    return not has_client_header({k.lower(): v for k, v in request.headers.items()})
 
 
 @router.get("/support/levels", operation_id="list_support_levels")
