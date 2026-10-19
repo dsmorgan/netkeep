@@ -1,4 +1,4 @@
-"""netkeeper.crm.interactions (spec 8.1, 10.1): CRUD, last_contacted_at, the timeline, notes."""
+"""netkeep.crm.interactions (spec 8.1, 10.1): CRUD, last_contacted_at, the timeline, notes."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ import factories
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.crm import interactions as module
-from netkeeper.crm import provenance
-from netkeeper.crm.interactions import (
+from netkeep.crm import interactions as module
+from netkeep.crm import provenance
+from netkeep.crm.interactions import (
     MISSING,
     OUTBOUND_KINDS,
     NoSuchMessage,
@@ -27,8 +27,8 @@ from netkeeper.crm.interactions import (
     timeline,
     update_interaction,
 )
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.db import session_scope
+from netkeep.models import (
     Contact,
     ContactMet,
     ContactSnapshot,
@@ -37,7 +37,7 @@ from netkeeper.models import (
     InteractionKind,
     User,
 )
-from netkeeper.scoping import scoped
+from netkeep.scoping import scoped
 
 NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
 LATER = NOW + timedelta(days=1)

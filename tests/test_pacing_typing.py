@@ -1,4 +1,4 @@
-"""netkeeper.linkedin.pacing's typing plan: P4-10 (#376).
+"""netkeep.linkedin.pacing's typing plan: P4-10 (#376).
 
 The plan decides how P4-03's prefill types a LinkedIn message, one keystroke at
 a time. These tests are property-style: each one draws many seeds and many
@@ -18,8 +18,8 @@ import statistics
 import pytest
 import regex
 
-from netkeeper.linkedin import pacing
-from netkeeper.linkedin.pacing import (
+from netkeep.linkedin import pacing
+from netkeep.linkedin.pacing import (
     InvalidTypingProfile,
     MultilineRefused,
     TypeStep,
@@ -151,7 +151,7 @@ def test_typing_constants_are_pinned_to_the_decision() -> None:
     assert pacing.MAX_TYPING_SECONDS == 300
     assert pacing.TYPING_WARN_CHARS == 1000
     assert pacing.TYPING_LINT_SECONDS == 240
-    # The same line breaks netkeeper.campaigns.render splits a header on.
+    # The same line breaks netkeep.campaigns.render splits a header on.
     assert frozenset("\r\n\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029") == pacing.LINE_BREAK_CHARS
     # The only line breaks the newline flag governs.
     assert frozenset({"\r", "\n"}) == pacing.NEWLINE_CHARS

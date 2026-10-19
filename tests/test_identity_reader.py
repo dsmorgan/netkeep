@@ -1,9 +1,9 @@
-"""#675: the launcher's probe names netkeeper's Chrome even when it has no windows open.
+"""#675: the launcher's probe names netkeep's Chrome even when it has no windows open.
 
 On macOS, Chrome keeps running after you close its last window. Playwright's
 ``connect_over_cdp`` sets up a browser context as it attaches, and such a Chrome refuses
 that ("Browser context management is not supported"), so the probe, which attached
-through it, named no pid and ``netkeeper open`` refused its own Chrome as
+through it, named no pid and ``netkeep open`` refused its own Chrome as
 ``not_dedicated``. The probe now reads the pid with :class:`CdpIdentityReader`: one
 ``SystemInfo.getProcessInfo`` over the browser target's websocket, no context needed.
 
@@ -29,9 +29,9 @@ from browser_guard import RealBrowserBlocked, is_personal_cdp
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.http11 import Request, Response
 
-from netkeeper.chrome_spawn import ChromeLaunch, ChromeLauncher
-from netkeeper.linkedin import activity_lock, browser
-from netkeeper.linkedin.browser import (
+from netkeep.chrome_spawn import ChromeLaunch, ChromeLauncher
+from netkeep.linkedin import activity_lock, browser
+from netkeep.linkedin.browser import (
     NO_WINDOWS_ERROR,
     ActivityLocks,
     BrowserUnavailable,
@@ -39,8 +39,8 @@ from netkeeper.linkedin.browser import (
     PlaywrightCdpConnector,
     no_windows_message,
 )
-from netkeeper.services.chrome_launch import LaunchStatus, PortProbe, Refusal
-from netkeeper.worker import launcher_probe
+from netkeep.services.chrome_launch import LaunchStatus, PortProbe, Refusal
+from netkeep.worker import launcher_probe
 
 #: The real methods, read before ``tests/conftest.py``'s guard replaces them for a test.
 #: Only this file's tests put them back, each against its own fake on a loopback port.
@@ -457,7 +457,7 @@ def _launcher(tmp_path: Path, reader: _Reader, spawned: _Handed) -> ChromeLaunch
     )
 
 
-async def test_netkeepers_chrome_with_no_windows_gets_the_window(tmp_path: Path) -> None:
+async def test_netkeeps_chrome_with_no_windows_gets_the_window(tmp_path: Path) -> None:
     reader, spawned = _Reader(pid=CHROME_PID), _Handed()
     result = await _launcher(tmp_path, reader, spawned).start()
     assert result.status is LaunchStatus.HANDED_OFF, result
@@ -539,7 +539,7 @@ async def test_a_run_on_a_chrome_with_no_windows_says_to_reopen_the_window(
     with pytest.raises(BrowserUnavailable) as raised:
         await PlaywrightCdpConnector().connect("http://127.0.0.1:9333")
     assert str(raised.value) == no_windows_message("http://127.0.0.1:9333")
-    assert "netkeeper open" in str(raised.value) and "no windows open" in str(raised.value)
+    assert "netkeep open" in str(raised.value) and "no windows open" in str(raised.value)
     assert fake.stopped == 1
 
 

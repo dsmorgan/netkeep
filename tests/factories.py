@@ -14,7 +14,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from netkeeper.models import (
+from netkeep.models import (
     Campaign,
     CampaignStatus,
     CampaignStep,
@@ -37,7 +37,7 @@ from netkeeper.models import (
     UserKind,
     UserPosition,
 )
-from netkeeper.models.base import utcnow
+from netkeep.models.base import utcnow
 
 _users: Iterator[int] = itertools.count(1)
 _contacts: Iterator[int] = itertools.count(1)

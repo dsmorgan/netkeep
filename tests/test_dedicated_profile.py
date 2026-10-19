@@ -1,4 +1,4 @@
-"""Attach only to netkeeper's dedicated Chrome profile (ADR 0012, rule 6; #624).
+"""Attach only to netkeep's dedicated Chrome profile (ADR 0012, rule 6; #624).
 
 Offline, against fakes: no test here reaches a real Chrome or any port. The fake
 Chrome (``browser_fakes.FakeConnector``) holds the profile it runs on the way Chrome
@@ -20,19 +20,19 @@ import pytest
 from browser_fakes import FAKE_CHROME_PID, FakeBrowser, FakeConnector, FakeContext, hold_profile
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper import chrome_profile
-from netkeeper.chrome_profile import (
+from netkeep import chrome_profile
+from netkeep.chrome_profile import (
     ProfileCheck,
     ProfileVerdict,
     browser_pid_from_process_info,
     check_dedicated_profile,
     profile_lock_pid,
 )
-from netkeeper.cli import _preflight_lines
-from netkeeper.config import Settings
-from netkeeper.db import session_scope
-from netkeeper.linkedin import browser
-from netkeeper.linkedin.browser import (
+from netkeep.cli import _preflight_lines
+from netkeep.config import Settings
+from netkeep.db import session_scope
+from netkeep.linkedin import browser
+from netkeep.linkedin.browser import (
     CHROME_PROFILE_DIRNAME,
     ActivityLocks,
     AttachBrowserProvider,
@@ -41,11 +41,11 @@ from netkeeper.linkedin.browser import (
     ProfileRefused,
     read_browser_pid,
 )
-from netkeeper.linkedin.preflight import preflight
-from netkeeper.models import SyncRunKind, SyncRunStatus, SyncRunTrigger, User
-from netkeeper.paths import data_dir
-from netkeeper.services import runs
-from netkeeper.worker import BrowserWorker
+from netkeep.linkedin.preflight import preflight
+from netkeep.models import SyncRunKind, SyncRunStatus, SyncRunTrigger, User
+from netkeep.paths import data_dir
+from netkeep.services import runs
+from netkeep.worker import BrowserWorker
 
 CDP_URL = "http://127.0.0.1:9222"
 OTHER_PID = 5151
@@ -79,7 +79,7 @@ def test_a_browser_process_that_does_not_hold_the_profile_is_another_profile(
 
     assert check.verdict is ProfileVerdict.OTHER_PROFILE
     assert not check.dedicated
-    assert "isn't the one holding netkeeper's profile" in check.reason
+    assert "isn't the one holding netkeep's profile" in check.reason
 
 
 def test_a_browser_that_names_no_process_is_undetermined(tmp_path: Path) -> None:
@@ -92,11 +92,11 @@ def test_a_browser_that_names_no_process_is_undetermined(tmp_path: Path) -> None
 
 
 def test_a_profile_no_chrome_holds_is_undetermined(tmp_path: Path) -> None:
-    """No lock: nothing shows the Chrome on the port is netkeeper's, so it's refused."""
+    """No lock: nothing shows the Chrome on the port is netkeep's, so it's refused."""
     check = check_dedicated_profile(tmp_path / "never-started", FAKE_CHROME_PID)
 
     assert check.verdict is ProfileVerdict.UNDETERMINED
-    assert "no Chrome holds netkeeper's profile" in check.reason
+    assert "no Chrome holds netkeep's profile" in check.reason
 
 
 @pytest.mark.parametrize(
@@ -173,7 +173,7 @@ def test_the_refusal_names_the_profile_and_the_way_out(tmp_path: Path) -> None:
 
     assert message.startswith(f"refusing to attach to the Chrome at {CDP_URL}: ")
     assert str(tmp_path) in message
-    assert "`netkeeper browser launch`" in message
+    assert "`netkeep browser launch`" in message
 
 
 # --- reading the pid -------------------------------------------------------------------
@@ -240,7 +240,7 @@ async def test_the_dedicated_profile_is_attached() -> None:
 
 
 async def test_another_profile_is_refused_before_anything_is_touched(tmp_path: Path) -> None:
-    """The Chrome on the port is another Chrome, while netkeeper's own runs elsewhere."""
+    """The Chrome on the port is another Chrome, while netkeep's own runs elsewhere."""
     dedicated = data_dir() / CHROME_PROFILE_DIRNAME
     hold_profile(dedicated, pid=OTHER_PID)
     context = FakeContext()
@@ -251,7 +251,7 @@ async def test_another_profile_is_refused_before_anything_is_touched(tmp_path: P
 
     with pytest.raises(ProfileRefused) as refused:
         async with provider.run():
-            pytest.fail("a run was handed a Chrome that isn't netkeeper's profile")
+            pytest.fail("a run was handed a Chrome that isn't netkeep's profile")
 
     assert isinstance(refused.value, BrowserUnavailable), "callers treat it as unusable Chrome"
     assert refused.value.profile_check.verdict is ProfileVerdict.OTHER_PROFILE
@@ -357,7 +357,7 @@ async def test_preflights_table_shows_the_profile_line() -> None:
 
     assert "refused, undetermined" in _profile_line(_preflight_lines(refused))
     line = _profile_line(_preflight_lines(passed))
-    assert "netkeeper's (" in line
+    assert "netkeep's (" in line
     assert f"pid {FAKE_CHROME_PID}" in line
 
 
@@ -371,7 +371,7 @@ def test_a_refused_profile_has_its_own_stop_reason(tmp_path: Path) -> None:
     assert runs.browser_stop_reason(BrowserUnavailable("gone")) == "browser_unavailable"
     assert runs.browser_stop_reason(BrowserBusy("held")) == "browser_busy"
     assert runs.STOP_REASON_TEXT["profile_refused"] == (
-        "refused: the Chrome on the port isn't netkeeper's own profile"
+        "refused: the Chrome on the port isn't netkeep's own profile"
     )
 
 

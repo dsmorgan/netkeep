@@ -1,4 +1,4 @@
-"""The attach path against a real Chrome. Opt in with ``NETKEEPER_BROWSER_TESTS=1``.
+"""The attach path against a real Chrome. Opt in with ``NETKEEP_BROWSER_TESTS=1``.
 
 Skipped by default, because it needs a browser the developer started and the rest of
 the suite must stay offline. What it drives is a loopback HTTP server in this
@@ -6,12 +6,12 @@ process: the only site involved is one this file serves, and nothing here knows 
 LinkedIn URL. CONTRIBUTING.md has the two commands to run it.
 
 What it proves that the offline tests cannot: that the narrow protocols in
-``netkeeper.linkedin.browser`` match what Playwright actually does, that the tab
-netkeeper opens sends the user's own headers and client hints because nothing
+``netkeep.linkedin.browser`` match what Playwright actually does, that the tab
+netkeep opens sends the user's own headers and client hints because nothing
 overrides them, that a tab closed by hand comes back where it was, and that the whole
 run adds no browser process and no context.
 
-Start Chrome first with the command ``netkeeper browser launch`` prints.
+Start Chrome first with the command ``netkeep browser launch`` prints.
 """
 
 from __future__ import annotations
@@ -26,19 +26,19 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from netkeeper.linkedin.browser import AttachBrowserProvider, BrowserUnavailable
-from netkeeper.linkedin.preflight import LoginState, preflight
+from netkeep.linkedin.browser import AttachBrowserProvider, BrowserUnavailable
+from netkeep.linkedin.preflight import LoginState, preflight
 
 pytestmark = pytest.mark.skipif(
-    os.environ.get("NETKEEPER_BROWSER_TESTS") != "1",
-    reason="browser smoke suite: start Chrome, then set NETKEEPER_BROWSER_TESTS=1",
+    os.environ.get("NETKEEP_BROWSER_TESTS") != "1",
+    reason="browser smoke suite: start Chrome, then set NETKEEP_BROWSER_TESTS=1",
 )
 
-CDP_URL = os.environ.get("NETKEEPER_CDP_URL", "http://127.0.0.1:9222")
+CDP_URL = os.environ.get("NETKEEP_CDP_URL", "http://127.0.0.1:9222")
 
 PAGE = b"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>netkeeper smoke replica</title></head>
-<body><h1 id="marker">netkeeper smoke replica</h1>
+<html lang="en"><head><meta charset="utf-8"><title>netkeep smoke replica</title></head>
+<body><h1 id="marker">netkeep smoke replica</h1>
 <div style="height:4000px">a page tall enough to scroll</div></body></html>
 """
 
@@ -103,7 +103,7 @@ async def test_attach_reuses_the_running_browser(provider: AttachBrowserProvider
             page = await run.ensure_page()
             assert not page.is_closed()
     except BrowserUnavailable as exc:
-        pytest.fail(f"{exc}\nStart Chrome with the command `netkeeper browser launch` prints.")
+        pytest.fail(f"{exc}\nStart Chrome with the command `netkeep browser launch` prints.")
 
 
 async def test_the_tab_sends_the_browsers_own_headers(
@@ -128,7 +128,7 @@ async def test_a_tab_closed_by_hand_comes_back_where_it_was(
 ) -> None:
     async with provider.run() as run:
         page = await run.goto(f"{site}/")
-        await page.close()  # the user closing netkeeper's tab
+        await page.close()  # the user closing netkeep's tab
         assert page.is_closed()
 
         recovered = await run.ensure_page()
@@ -136,7 +136,7 @@ async def test_a_tab_closed_by_hand_comes_back_where_it_was(
         assert not recovered.is_closed()
         assert recovered is not page
         assert recovered.url.rstrip("/") == site
-        assert await recovered.evaluate("() => document.title") == "netkeeper smoke replica"
+        assert await recovered.evaluate("() => document.title") == "netkeep smoke replica"
 
 
 async def test_a_run_adds_no_browser_and_no_context(

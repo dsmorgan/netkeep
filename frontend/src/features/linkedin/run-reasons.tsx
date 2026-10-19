@@ -68,7 +68,7 @@ function VisitTable({ visits }: { visits: RunVisitReason[] }) {
  * counted toward the unreadable limits, with its contact and reason, each visit that
  * saved the profile without its lost Contact info (listed apart since #424: it is not
  * unreadable), and each answer a connections sync lost. The reasons are fixed codes the server also gives in plain
- * words; the names are the contacts' own in netkeeper, never anything from the page.
+ * words; the names are the contacts' own in netkeep, never anything from the page.
  *
  * While the run is going, `marker` (its unreadable, mismatched and deferred counts) moves with
  * each live progress event, and a change refetches the list, so a new reason shows

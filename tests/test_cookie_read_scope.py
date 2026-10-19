@@ -1,7 +1,7 @@
 """The cookie read asks only for LinkedIn's cookies (#633, ADR 0012).
 
 Once Gmail is linked, the same Chrome profile holds Google's cookies. An unscoped
-``context.cookies()`` would copy them into netkeeper's memory, so every ``cookies(``
+``context.cookies()`` would copy them into netkeep's memory, so every ``cookies(``
 call in the package passes ``urls``, and the preflight read passes LinkedIn's only.
 """
 
@@ -16,9 +16,9 @@ import pytest
 from browser_fakes import FakeContext
 from test_preflight import FAKE_CSRF_VALUE, FAKE_SESSION_VALUE, cookie, make_provider
 
-from netkeeper.linkedin.preflight import COOKIE_URLS, LoginState, preflight
+from netkeep.linkedin.preflight import COOKIE_URLS, LoginState, preflight
 
-PACKAGE = Path(__file__).resolve().parents[1] / "netkeeper"
+PACKAGE = Path(__file__).resolve().parents[1] / "netkeep"
 
 GOOGLE_VALUE = "fake-google-sid-0000-not-a-session"
 

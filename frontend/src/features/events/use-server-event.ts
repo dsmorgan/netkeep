@@ -3,9 +3,9 @@ import { useEffect, useRef } from 'react'
 import { useEventStreamSource } from './event-stream-context'
 
 /**
- * The wire shape of every SSE message (`Event.to_dict()`, `netkeeper/services/events.py`):
+ * The wire shape of every SSE message (`Event.to_dict()`, `netkeep/services/events.py`):
  * the whole envelope, not just the payload a publisher passed as `data=`.
- * `netkeeper/web/api/events.py` sends this JSON-encoded as the SSE `data:` field,
+ * `netkeep/web/api/events.py` sends this JSON-encoded as the SSE `data:` field,
  * named by `event.type` as the SSE `event:` field — so `event.data` in a
  * `MessageEvent` is this envelope, and `.data` (lower case, the envelope's own
  * field) is the inner payload a caller actually wants. `tests/test_web_events.py`
@@ -26,7 +26,7 @@ interface ServerEventEnvelope<T> {
  * `event.data` a second time.
  *
  * The backend names each message by its event type (`ServerSentEvent(data=...,
- * event=event.type)` in `netkeeper/web/api/events.py`), so `EventSource`'s plain
+ * event=event.type)` in `netkeep/web/api/events.py`), so `EventSource`'s plain
  * `onmessage` never fires for it — only `addEventListener(type, ...)` does. This
  * re-attaches automatically after a reconnect: `useEventStream` opens a fresh
  * `EventSource` each time, `useEventStreamSource()` returns the new instance, and

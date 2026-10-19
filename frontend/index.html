@@ -7,7 +7,9 @@
     <script>
       // The theme switch's saved choice, before the first paint (#666; src/lib/theme.ts).
       try {
-        const theme = localStorage.getItem('netkeeper.theme')
+        // The name before the rename (#661) too, until main.tsx moves it.
+        const theme =
+          localStorage.getItem('netkeep.theme') ?? localStorage.getItem('netkeeper.theme')
         if (theme === 'light' || theme === 'dark') {
           document.documentElement.dataset.theme = theme
           document.querySelector('meta[name="color-scheme"]').content = theme
@@ -17,7 +19,7 @@
       }
     </script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>netkeeper</title>
+    <title>netkeep</title>
   </head>
   <body>
     <div id="root"></div>

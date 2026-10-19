@@ -1,0 +1,3061 @@
+"""Every protection the LinkedIn extractor has, in one report (P2-11, CP3).
+
+Spec section 9 spreads the extractor's safety across five modules: attach-only
+browsing (9.1, ADR 0002), human-like pacing and active hours and the warm-up
+ramp (9.5), per-day and per-week budgets with hard maxima (9.6), heat with its
+skip threshold (9.7), and the session flag a checkpoint or a login wall raises
+(9.7). Each is tested on its own. None of them answers the question somebody
+actually asks before pointing this at their own LinkedIn account, which is
+"what is protecting me, and is any of it off right now?"
+
+This module answers exactly that, and it is built around one property:
+
+    **A protection that is off, bypassed, or configured past spec 9.6's hard
+    maximum always produces a warning.**
+
+A report that can say "all clear" while something is disabled is worse than no
+report, because it converts an unchecked assumption into a reassurance. That
+property is structural here, not a convention: :class:`Protection` refuses to
+exist with a status other than :attr:`Status.ON` and no warning to go with it,
+and ``tests/test_posture.py`` turns each protection off in turn and asserts
+that that one warns.
+
+**Why this lives under ``services/`` and not under ``linkedin/``.** Budget
+counters and heat are rows in ``settings_kv``, so reading them needs a session
+and a ``User``; the extractor boundary (ADR 0005, spec 9.10) forbids both on
+the ``linkedin/`` side of the line. The same seam already puts
+``services.budgets`` and ``services.heat`` here. This module reads through
+those two and through ``services.linkedin_session``, and calls the pure math in
+``linkedin.pacing`` and ``linkedin.heat`` directly rather than restating any of
+it -- a posture report that recomputed the warm-up ramp its own way could agree
+with itself while disagreeing with what a run will actually do.
+
+**What it does not import, on purpose.** Nothing here reaches
+``netkeep.linkedin.browser`` or ``netkeep.linkedin.preflight``: a module
+under ``services/`` that imports the provider is how browser work ends up
+inside a request handler, and ``tests/test_browser_safety.py`` fails the build
+for it. What a browser probe found therefore arrives as a
+:class:`SessionProbe`, a plain value the caller builds (``netkeep posture``
+builds one from ``netkeep.linkedin.preflight.preflight``). The probe carries
+cookie *names* and never a cookie value, the same rule preflight itself keeps
+(spec 9.1, CLAUDE.md): a posture report must not print what preflight was
+careful not to read.
+
+**Read-only.** Every call this makes -- :func:`netkeep.services.budgets.status`,
+:func:`netkeep.services.heat.read`, :func:`netkeep.services.linkedin_session.session_flag`
+-- is a read, so :func:`posture` needs no writer session and takes no write
+lock. Nothing about summarizing the protections should be able to change one.
+``now`` is a parameter rather than a clock read, so the whole report is
+testable at any instant: the weekend multiplier on a Saturday, a warm-up ramp
+on day 0, an active window from outside it.
+"""
+
+from __future__ import annotations
+
+import enum
+import math
+import textwrap
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime, time, timedelta
+from pathlib import Path
+from typing import Final
+from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from sqlalchemy.orm import Session
+
+from netkeep.campaigns.schedule import (
+    SERVE_REMINDER,
+    ScheduleError,
+    SendingHours,
+    hold,
+    suggested,
+)
+from netkeep.campaigns.templates import (
+    describe_removed_field_campaigns,
+    removed_field_campaigns,
+)
+from netkeep.chrome_profile import ProfileCheck, profile_lock_pid
+from netkeep.config import HeatSettings, LinkedInSettings, PacingSettings, Settings
+from netkeep.crm import inbox_apply
+from netkeep.crm.inbox_apply import short_first_poll
+from netkeep.linkedin import activity_lock
+from netkeep.linkedin import heat as heat_math
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.pacing import (
+    apply_weekend_multiplier,
+    is_active_at,
+    local_time_of,
+    next_window_start,
+    warmup_budget,
+)
+from netkeep.models import Mailbox, SyncRunKind, SyncRunStatus, User
+from netkeep.paths import data_dir
+from netkeep.scoping import scoped
+from netkeep.services import heat as heat_rows
+from netkeep.services import inbox_hold, route_breaker
+from netkeep.services.browser_launch import CHROME_PROFILE_DIRNAME
+from netkeep.services.budgets import (
+    HARD_MAX_PER_DAY,
+    HARD_MAX_PER_WEEK,
+    ActionClass,
+    BudgetSnapshot,
+    configured_default,
+    li_message_risk_warning,
+    profile_visit_risk_warning,
+    profile_visit_week_note,
+)
+from netkeep.services.budgets import status as budget_status
+from netkeep.services.campaign_engine import (
+    RECORD_PENDING_AFTER,
+    UpcomingFire,
+    hours_for,
+    unrecorded_sends,
+    upcoming,
+)
+from netkeep.services.linkedin_accounts import (
+    find_account,
+    schedule_pause_state,
+    scheduled_runs_armed,
+)
+from netkeep.services.linkedin_session import (
+    SessionEvidence,
+    SessionFlag,
+    last_session_evidence,
+    session_flag,
+)
+from netkeep.services.linkedin_steps import (
+    AUTO_SEND_HOLD_CLEAR,
+    AutoSendHold,
+    auto_send_budget_warning,
+    auto_send_hold,
+    unrecorded_prefills,
+)
+from netkeep.services.runs import latest_run
+from netkeep.services.runs import view as run_view
+from netkeep.services.scheduler import (
+    CATCHUP_MAX_MINUTES,
+    CATCHUP_MIN_MINUTES,
+    DEFAULT_SCHEDULES,
+    HEAT_SKIP_DISABLED,
+    MIN_JOB_KIND_GAP,
+    SERVED_SCHEDULES,
+    HeatGate,
+    HeatSkip,
+    JobKind,
+    served_schedules,
+    stored_due,
+)
+from netkeep.services.setting_checks import (
+    active_window_check,
+    auto_send_warnings,
+    weekend_multiplier_warnings,
+)
+
+# --- the thresholds this module judges by -----------------------------------
+# Spec 9.6's hard maxima and Appendix C's defaults live in the modules that
+# enforce them; these are the extra lines *this* module draws, for "configured
+# so far out that the protection stops protecting". Each is deliberately
+# conservative, each is justified below, and each is pinned to its literal
+# value by a test -- a ceiling that only ever gets compared against itself
+# would let a bad merge move it and stay green (CLAUDE.md).
+
+#: The only browser mode there is (ADR 0002). Spelled out here rather than
+#: imported from ``linkedin.browser``, which ``services/`` may not import; the
+#: caller passes its provider's ``mode`` and this compares the two, so a
+#: provider that grew a second mode is caught by the comparison failing.
+ATTACH_ONLY: Final = "attach"
+
+#: The account id every caller used before ``linkedin_accounts`` existed (P2-06),
+#: and the id the first user's account row gets. ``netkeep posture`` now reads
+#: the user's row (``services.linkedin_accounts.account_id_for``) and falls back
+#: to this only for a user with no row yet; ``netkeep simulate`` keeps it for
+#: its scratch database. The browser lock is keyed by the row too
+#: (``linkedin.activity_lock.account_key``, #169 F).
+SINGLE_ACCOUNT_ID: Final = 1
+
+#: Hosts a CDP url may point at. Chrome's debug port is only ever on the
+#: machine's own loopback (spec 9.1); a url naming anything else is either a
+#: typo or a browser on another machine, and neither is the device LinkedIn is
+#: meant to see.
+LOOPBACK_HOSTS: Final = frozenset({"127.0.0.1", "localhost", "::1"})
+
+#: How many consecutive blocks may be needed to trip the skip threshold before
+#: the threshold stops being a brake. Spec 9.7 aborts a *run* after two
+#: consecutive throttled units; a threshold that needs more than five blocks at
+#: the configured ``per_block`` would let a bad day keep going all day. The
+#: Appendix C defaults (``per_block`` 1.0, ``skip_threshold`` 2.5) need three.
+MAX_BLOCKS_BEFORE_SKIP: Final = 5
+
+#: Below this, heat decays away faster than the cooldown it is meant to impose.
+#: Appendix C's default half-life is 6 hours, chosen so "one throttle stretches
+#: the rest of the day"; under an hour, a throttle is forgotten before the next
+#: burst starts.
+MIN_HALF_LIFE_HOURS: Final = 1.0
+
+#: The shortest median gap between profile views this report will call
+#: human-like. Appendix C picks 25 seconds because that is how long a person
+#: takes to read a profile; five is already a skim nobody performs sixty times
+#: in a row, and below it the lognormal's own spread puts a large share of
+#: waits under a second.
+MIN_DELAY_MEDIAN_S: Final = 5.0
+
+#: The longest a netkeep run can plausibly hold the browser. Spec 9.6's hard
+#: maximum of profile visits at Appendix C's pacing -- 25-second medians, bursts
+#: of 8-15 with 5-20 minute breaks -- is about two hours of wall clock; four
+#: leaves room for a slow day. A lock held longer is a stuck run, and a stuck run
+#: silently answers ``busy`` to every job and every preflight.
+MAX_PLAUSIBLE_HOLD_HOURS: Final = 4.0
+
+#: The shortest between-burst break that is still a break. Appendix C's range
+#: is 5 to 20 minutes ("sessions, not streams"); a break measured in seconds
+#: leaves one unbroken stream of requests, which is the shape bursts exist to
+#: avoid.
+MIN_BURST_BREAK_S: Final = 60.0
+
+
+#: How long a recorded "logged in" (a preflight, a probe, or a run that read
+#: LinkedIn) counts as current on a report that ran no probe of its own (#282).
+#: Past it the session row still reads on, with a warning: LinkedIn sessions
+#: last weeks, but a day is long enough that "it worked yesterday" is worth
+#: checking again before trusting an unattended run with it.
+SESSION_EVIDENCE_FRESH_FOR: Final = timedelta(hours=24)
+
+#: Why a job kind that ``netkeep serve`` does not schedule is not applicable (#327).
+#: A kind outside :data:`~netkeep.services.scheduler.SERVED_SCHEDULES` that is not
+#: named here reads as having no runner.
+NOT_SERVED_BECAUSE: Final[dict[JobKind, str]] = {}
+
+#: What a served job kind with no due time means: it never runs on its own (#327).
+MISSING_MEANS: Final[dict[JobKind, str]] = {
+    JobKind.CONNECTIONS_FULL: "the weekly full sync never runs, so nobody is aged out",
+    JobKind.CONNECTIONS_INCREMENTAL: "the daily sync never runs, so new connections wait",
+    JobKind.ENRICH: "enrichment never runs on its own",
+    JobKind.INBOX: "the LinkedIn inbox poll never runs on its own, so LinkedIn replies wait",
+    JobKind.AUTO_SEND: (
+        "auto-send never runs; `netkeep serve` schedules it when it starts, so start"
+        " `netkeep serve`"
+    ),
+}
+
+#: The Gmail reply poll is late once a mailbox's last complete poll is older than this
+#: many ``[campaigns] reply_poll_minutes`` (#327). One missed poll is noise (a slow tick,
+#: a transient Gmail error the next tick retries); three in a row is a poll that is not
+#: running. The sender already holds follow-ups that start a new conversation past two
+#: (``campaign_replies.STALE_AFTER_POLLS``), so a late poll is a note, not a warning.
+REPLY_POLL_LATE_AFTER_POLLS: Final = 3
+
+
+class Status(enum.StrEnum):
+    """Whether one protection is in force.
+
+    ``ON`` may still carry warnings -- a budget clamped down from a configured
+    value above spec 9.6's hard max is working exactly as designed and is still
+    worth saying out loud, and a heat score over its skip threshold is the
+    protection *firing*, not failing. ``OFF`` and ``UNKNOWN`` may never be
+    silent; :class:`Protection` enforces that.
+    """
+
+    ON = "on"
+    OFF = "off"
+    UNKNOWN = "unknown"
+
+
+class Severity(enum.StrEnum):
+    """How much a row needs you, for a page that groups rows (#654).
+
+    Derived from the row, never stored: ``PROBLEM`` is a protection that is not in force
+    (:attr:`Status.OFF` or :attr:`Status.UNKNOWN`), ``WARNING`` is one in force that still
+    warns, and ``ON`` is one in force with nothing to say.
+    """
+
+    PROBLEM = "problem"
+    WARNING = "warning"
+    ON = "on"
+
+
+KEY_DEDICATED_PROFILE: Final = "dedicated_profile"
+"""The key of the dedicated Chrome profile row (#624)."""
+KEY_MANUAL_LINKEDIN_SENDS: Final = "manual_linkedin_sends"
+"""The key of ADR 0004's row: off means auto-send is on."""
+KEY_GMAIL_REPLY_POLL: Final = "gmail_reply_poll"
+KEY_SENDING_HOURS: Final = "sending_hours"
+KEY_NEXT_CAMPAIGN_SEND: Final = "next_campaign_send"
+KEY_CAMPAIGN_TEMPLATES: Final = "campaign_templates"
+KEY_SEND_RECORDS: Final = "send_records"
+"""The keys of the rows that concern Gmail and campaign sending; the Gmail page picks
+its posture rows by them (#449)."""
+KEY_LINKEDIN_REPLY_POLL: Final = "linkedin_reply_poll"
+"""The key of the LinkedIn inbox poll's row (it is always there). A short first poll adds
+a warning to it, which Settings acknowledges."""
+KEY_ROUTE_CHANGED_BREAKER: Final = "route_changed_breaker"
+KEY_ANSWER_LOST_LIMIT: Final = "answer_lost_limit"
+KEY_CONTACT_INFO_BREAKER: Final = "contact_info_breaker"
+KEY_INBOX_BREAKER: Final = "inbox_breaker"
+KEY_INBOX_OWNER_BREAKER: Final = "inbox_owner_breaker"
+"""The keys of the five breaker rows (#583). ``POST /linkedin/schedule/reset-breaker``
+takes the keys of the tripped ones the person saw (:func:`tripped_breakers`)."""
+
+ACTION_RESET_BREAKER: Final = "reset_breaker"
+"""A row's action (#583): **Reset breaker**, ``netkeep linkedin schedule reset-breaker``.
+Set on a breaker row only while it is tripped (an unreadable one included)."""
+ACTION_FORGET_INBOX_OWNER: Final = "forget_inbox_owner"
+"""A row's action (#583): **Forget inbox owner**, ``netkeep linkedin inbox-forget-owner``.
+Set only where a row shows an owner mismatch that forgetting can fix
+(:func:`_forget_owner_applies`)."""
+
+RESET_BREAKER_HOW: Final = (
+    "click **Reset breaker** under Posture on the Settings page, or run"
+    " `netkeep linkedin schedule reset-breaker`"
+)
+"""How to clear a tripped breaker directly, in every breaker row's warning (#583)."""
+
+
+@dataclass(frozen=True, slots=True)
+class Protection:
+    """One protection: what it is, whether it is in force, and anything wrong with it.
+
+    ``notes`` are things the reader should know that are not wrong: a choice
+    the user is entitled to make, such as profile visits above 100 a day
+    (#318). They are listed with the protection and in the report, and they
+    never affect :attr:`PostureReport.ok`, the verdict, or the exit code.
+
+    ``brief`` is the one-line form of ``value`` that the summary shows (#340),
+    for the few rows whose ``value`` runs long. Most rows leave it unset and
+    their ``value`` is already short enough; :attr:`summary` picks whichever
+    applies. It is presentation only: it never affects ``ok`` or the verdict.
+    """
+
+    name: str
+    status: Status
+    value: str
+    warnings: tuple[str, ...] = ()
+    notes: tuple[str, ...] = ()
+    brief: str | None = None
+    key: str | None = None
+    """A stable id for a row the UI acts on (#383): :data:`KEY_MANUAL_LINKEDIN_SENDS`,
+    :data:`KEY_LINKEDIN_REPLY_POLL`. None for the rest; ``name`` is for reading."""
+    actions: tuple[str, ...] = ()
+    """The buttons this row offers right now (#583): :data:`ACTION_RESET_BREAKER`,
+    :data:`ACTION_FORGET_INBOX_OWNER`. Empty when none applies."""
+    opted_in: bool = False
+    """The row is not in force because you chose it (#654): LinkedIn auto-send turned on on
+    purpose. It stays ``off`` for ``ok`` and the verdict, but its severity is a warning, not a
+    permanent problem."""
+    fix: str | None = None
+    """What to do about this row, in one plain sentence (#654), or None. Light Markdown:
+    ``**Button**`` names and backticked commands. The CLI strips the ``**``. A row that is not
+    in force must have one; a row with nothing to say must not; a row that is in force
+    with a warning may have one. It explains and ``actions`` are the buttons. Only commands
+    and pages that exist are named: a fix that names a button the person cannot find is
+    worse than none. It describes; it never changes what the row checks."""
+
+    @property
+    def severity(self) -> Severity:
+        """:class:`Severity` of this row: problem, warning, or on."""
+        if self.status is not Status.ON and not self.opted_in:
+            return Severity.PROBLEM
+        return Severity.WARNING if self.warnings else Severity.ON
+
+    @property
+    def summary(self) -> str:
+        """This row in a few words: ``brief`` when the row sets one, else ``value``."""
+        return self.brief if self.brief is not None else self.value
+
+    def __post_init__(self) -> None:
+        if self.status is not Status.ON and not self.warnings:
+            raise ValueError(
+                f"protection {self.name!r} is {self.status.value} with no warning; a"
+                " report that can read as all-clear while a protection is off is worse"
+                " than no report"
+            )
+        if self.severity is Severity.PROBLEM and not self.fix:
+            raise ValueError(
+                f"protection {self.name!r} is {self.status.value} with no fix; a row that"
+                " is not in force has to say what to do about it"
+            )
+        if self.severity is Severity.ON and self.fix is not None:
+            raise ValueError(f"protection {self.name!r} has nothing to say, so it has no fix")
+
+
+@dataclass(frozen=True, slots=True)
+class SessionProbe:
+    """What a browser probe found, reduced to what a report may say about it.
+
+    The caller builds this from
+    :func:`netkeep.linkedin.preflight.preflight` -- this module may not
+    import that one (see the module docstring), and the narrow shape is the
+    point rather than a workaround: there is no field here a cookie value, a
+    token, or a message body could be put in, so no future edit to the renderer
+    can leak one. ``logged_in`` is ``None`` when the cookie jar could not be
+    read at all, which is different from reading it and finding no session.
+    ``profile`` is the attach's dedicated-profile check (#624), or ``None`` when the
+    attach failed before it was made.
+    """
+
+    attached: bool
+    logged_in: bool | None
+    browser_version: str = ""
+    cookie_names: tuple[str, ...] = ()
+    problems: tuple[str, ...] = ()
+    profile: ProfileCheck | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class HeatPosture:
+    """Heat as spec 9.7 says the Settings page shows it: level, last raised, when runs resume.
+
+    ``readable`` is false when the configured half-life is not a positive
+    number, which is the one case where the decay math has no answer at all
+    (:func:`netkeep.linkedin.heat.decayed_score` raises rather than divide by
+    it). The score, the multiplier, and the skip verdict are then all placeholders
+    -- a posture report is the last thing that should crash on a bad config,
+    since a bad config is exactly what it exists to tell you about.
+    """
+
+    score: float
+    threshold: float
+    multiplier: float
+    tripped: bool
+    last_raised_at: datetime | None
+    resumes_at: datetime | None
+    readable: bool = True
+    #: When the score was last manually cleared (spec 9.7's "a manual clear
+    #: exists for the case where the block was something else"). A clear writes
+    #: a state like a raise does, so reading the stored timestamp without
+    #: looking at the score reports a clear as the last raise -- which reads as
+    #: "0.00, last raised five minutes ago" and sends someone hunting a
+    #: throttle that did not happen.
+    cleared_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SchedulerPosture:
+    """What the scheduler (spec 9.4, 9.5, 9.7) is set to do, and when it next will.
+
+    The cadences, the catch-up window, and the interleave gap are facts about
+    the scheduler rather than knobs a config file can turn off, so they are
+    reported here rather than as :class:`Protection` rows -- a "protection"
+    nothing can disable is a row that can never warn, and rows that can never
+    warn are how a report drifts into decoration. The two things that *can* go
+    wrong -- the heat skip gate being disabled, and a schedule that is not
+    established -- are protections, above.
+    """
+
+    heat_skip: bool
+    catchup_minutes: tuple[float, float]
+    job_kind_gap_minutes: float
+    #: ``(kind, interval hours, next due or None)``, in :data:`DEFAULT_SCHEDULES` order.
+    jobs: tuple[tuple[str, float, datetime | None], ...]
+    #: ``(kind, why)`` for each kind ``netkeep serve`` does not schedule (#327). Such a
+    #: kind has no due time on purpose, so it is neither scheduled nor missing.
+    not_applicable: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def scheduled(self) -> tuple[str, ...]:
+        return tuple(kind for kind, _, due in self.jobs if due is not None)
+
+    @property
+    def unscheduled(self) -> tuple[str, ...]:
+        """The kinds ``serve`` schedules that have no due time: they never run."""
+        skip = {kind for kind, _ in self.not_applicable}
+        return tuple(kind for kind, _, due in self.jobs if due is None and kind not in skip)
+
+    @property
+    def applicable(self) -> tuple[str, ...]:
+        skip = {kind for kind, _ in self.not_applicable}
+        return tuple(kind for kind, _, _ in self.jobs if kind not in skip)
+
+
+@dataclass(frozen=True, slots=True)
+class TodaysBudget:
+    """Today's profile-visit budget, and each protection's bite out of it, in order.
+
+    ``ramp`` is the warm-up ramp's number for today (spec 9.5), ``after_weekend``
+    is that damped on a Saturday or Sunday, and ``after_heat`` is that shrunk by
+    the current cooldown multiplier (spec 9.7). ``spent`` is what the counter
+    already records for today. Showing the chain rather than only the final
+    number is what makes "60 is now 25" explicable instead of alarming.
+    """
+
+    ramp: int
+    after_weekend: int
+    after_heat: int
+    spent: int
+
+    @property
+    def remaining(self) -> int:
+        return max(self.after_heat - self.spent, 0)
+
+
+@dataclass(frozen=True, slots=True)
+class PostureReport:
+    """Every protection, the numbers behind the ones that carry numbers, and the gaps.
+
+    ``gaps`` are the things this report cannot see rather than things that are
+    wrong -- a known limit of the tool, stated so nobody reads a clean report as
+    covering more than it does. They deliberately do not make :attr:`ok` false:
+    a warning is something to act on, a gap is something to know.
+    """
+
+    checked_at: datetime
+    timezone: str
+    local_time: datetime
+    protections: tuple[Protection, ...]
+    heat: HeatPosture
+    scheduler: SchedulerPosture
+    today: TodaysBudget
+    gaps: tuple[str, ...] = ()
+
+    @property
+    def warnings(self) -> tuple[str, ...]:
+        """Every protection's warnings, each prefixed with the protection it came from."""
+        return tuple(
+            f"{protection.name}: {warning}"
+            for protection in self.protections
+            for warning in protection.warnings
+        )
+
+    @property
+    def notes(self) -> tuple[str, ...]:
+        """Every protection's notes, prefixed like :attr:`warnings`. They never affect ``ok``."""
+        return tuple(
+            f"{protection.name}: {note}"
+            for protection in self.protections
+            for note in protection.notes
+        )
+
+    @property
+    def disabled(self) -> tuple[Protection, ...]:
+        """The protections that are not in force, whether off or unknown."""
+        return tuple(
+            protection for protection in self.protections if protection.status is not Status.ON
+        )
+
+    @property
+    def ok(self) -> bool:
+        """True only when nothing warned. Any protection that is off makes this false.
+
+        Notes (:attr:`notes`) do not count: they describe a choice, not a fault.
+        """
+        return not self.warnings
+
+
+#: Which posture row each settings read of ``serve`` (:mod:`netkeep.services.read_failures`)
+#: shows on: the row's name, or its ``key`` for the Gmail reply poll row.
+_READ_FAILURE_ROWS: Final = {
+    "active hours": ("name", "active hours"),
+    "Gmail reply interval": ("key", KEY_GMAIL_REPLY_POLL),
+    "mailbox check interval": ("key", KEY_GMAIL_REPLY_POLL),
+}
+
+
+READ_FAILURE_FIX: Final = (
+    "Restart `netkeep serve`, and if the warning comes back, look in netkeep's log for the error."
+)
+"""The fix for a settings read ``serve`` cannot make (#464, #654)."""
+
+
+def with_read_failures(report: PostureReport, failures: Mapping[str, str]) -> PostureReport:
+    """``report`` with each settings read ``serve`` cannot make (#464) shown on the row it
+    governs: that row is not in force and carries the plain reason, so ``ok``, the warnings
+    and the verdict all count it. ``failures`` maps a read's name to its sentence."""
+    if not failures:
+        return report
+    extra: dict[int, list[str]] = {}
+    unplaced: list[tuple[str, str]] = []
+    for what, sentence in failures.items():
+        field, wanted = _READ_FAILURE_ROWS.get(what, ("name", what))
+        index = next(
+            (i for i, row in enumerate(report.protections) if getattr(row, field) == wanted),
+            None,
+        )
+        if index is None:
+            unplaced.append((what, sentence))
+        else:
+            extra.setdefault(index, []).append(sentence)
+    rows = [
+        replace(row, status=Status.OFF, warnings=(*row.warnings, *extra[i]), fix=READ_FAILURE_FIX)
+        if i in extra
+        else row
+        for i, row in enumerate(report.protections)
+    ]
+    rows.extend(
+        Protection(
+            name=what,
+            status=Status.OFF,
+            value="unreadable",
+            warnings=(sentence,),
+            fix=READ_FAILURE_FIX,
+        )
+        for what, sentence in unplaced
+    )
+    return replace(report, protections=tuple(rows))
+
+
+def posture(
+    session: Session,
+    user: User,
+    account_id: int,
+    *,
+    now: datetime,
+    settings: Settings,
+    browser_mode: str = ATTACH_ONLY,
+    probe: SessionProbe | None = None,
+    heat_gate: HeatGate | None = None,
+    lock: activity_lock.LockState | None = None,
+    chrome_pid: Callable[[], int | None] | None = None,
+) -> PostureReport:
+    """Summarize every protection the extractor has, as of ``now``.
+
+    ``browser_mode`` is the provider's own ``mode`` attribute, passed in rather
+    than imported (see the module docstring). ``probe`` is what a browser probe
+    found, or ``None`` when none was run -- which is reported as an unknown
+    rather than quietly assumed to be fine.
+
+    ``heat_gate`` is the gate the scheduler is actually being run with
+    (:mod:`netkeep.services.scheduler`'s ``heat_settings`` argument). Spec
+    9.7's skip is unconditional, so the scheduler makes turning it off take the
+    named :data:`~netkeep.services.scheduler.HEAT_SKIP_DISABLED`; a caller
+    that has done so gets a warning here, which is the whole reason this
+    parameter exists rather than the report reading the config and assuming.
+    ``None`` means "whatever ``settings`` says", which is what a scheduler
+    started from this config would use.
+
+    ``lock`` is the account's activity lock as the caller inspected it; ``None``
+    inspects ``account_id``'s own lock (``activity_lock.account_key``) here. The
+    inspection peeks with a shared file lock it drops at once, and creates nothing.
+
+    ``chrome_pid`` reads whether netkeep's Chrome is running (#599); ``None`` is
+    :func:`netkeep_chrome_pid`, a read of the profile's lock file that never connects
+    to the port, so the dedicated-profile row says it with or without a probe.
+
+    Read-only: a plain ``session_scope(factory)`` is enough and a writer is not
+    needed.
+    """
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+    linkedin = settings.linkedin
+    zone, zone_warning = _zone_of(linkedin.timezone)
+    local_now = local_time_of(now, zone)
+
+    gate = settings.linkedin.heat if heat_gate is None else heat_gate
+    effective_heat = settings.linkedin.heat if isinstance(gate, HeatSkip) else gate
+    heat_posture = _heat_posture(session, user, account_id, now=now, heat_settings=effective_heat)
+    scheduler = _scheduler_posture(
+        session, user, account_id, gate=gate, auto_send=settings.campaigns.linkedin_auto_send
+    )
+    budgets = {
+        action: budget_status(session, user, account_id, action, now=now, settings=linkedin.budget)
+        for action in ActionClass
+    }
+    today = _todays_budget(
+        user,
+        settings=settings,
+        local_now=local_now,
+        multiplier=heat_posture.multiplier,
+        spent=budgets[ActionClass.PROFILE_VISITS].day.count,
+    )
+
+    protections: list[Protection] = [
+        _browser_mode(browser_mode, linkedin.cdp_url),
+        _dedicated_profile(probe, (netkeep_chrome_pid if chrome_pid is None else chrome_pid)()),
+        _activity_lock(lock, now=now, account=activity_lock.account_key(account_id)),
+        _linkedin_session(
+            probe,
+            evidence=last_session_evidence(session, user, account_id),
+            flag=session_flag(session, user),
+            now=now,
+            zone=zone,
+        ),
+        _session_flag(session, user),
+        _active_hours(
+            linkedin,
+            zone,
+            zone_warning,
+            now=now,
+            local_now=local_now,
+            source=active_hours_source(settings),
+        ),
+        _account_timezone(user, linkedin.timezone),
+        _weekend_damping(linkedin.weekend_multiplier, local_now),
+        _pacing(linkedin.pacing, _profile_visit_cap(settings)),
+        _warmup_ramp(settings, today),
+        _auto_send(settings, auto_send_hold(session, user, account_id)),
+        *(_budget(action, budgets[action], settings) for action in ActionClass),
+        _heat(heat_posture, effective_heat),
+        _heat_skip_gate(gate),
+        _scheduled_jobs(scheduler),
+        _scheduled_runs_armed(session, user, account_id),
+        _reply_poll(session, user, now=now, settings=settings),
+        _sending_hours(session, user),
+        _next_campaign_send(session, user, zone=zone, now=now, settings=settings),
+        _campaign_templates(session, user),
+        _send_records(session, user, now=now),
+        *_breaker_rows(session, user, account_id, now=now),
+        _network_aging(session, user),
+    ]
+    protections.append(_linkedin_reply_poll(session, user, now=now))
+    return PostureReport(
+        checked_at=now,
+        timezone=linkedin.timezone,
+        local_time=local_now,
+        protections=tuple(protections),
+        heat=heat_posture,
+        scheduler=scheduler,
+        today=today,
+        gaps=GAPS,
+    )
+
+
+_CONSUME: Final = "netkeep.services.budgets.consume"
+_ACTION_CLASS: Final = "netkeep.services.budgets.ActionClass"
+
+#: What this report cannot see yet. Each is a real limit of the tool as it
+#: stands, not a warning about the configuration, and each names what would
+#: close it. They are listed rather than silently omitted because a reader who
+#: is deciding whether to trust this tool is entitled to know where the report
+#: stops.
+#: Which function has to be *called* for each protection to actually bite, and
+#: which protections depend on it. A posture report reads configuration and
+#: counters; it cannot see whether anything calls the enforcement. So the fact
+#: that, say, nothing yet calls ``budgets.consume`` is recorded here rather
+#: than left for a reader to discover after their first live run.
+#:
+#: The keys are fully qualified function names, which is what
+#: ``tests/test_posture.py`` resolves every reference in the package to,
+#: through its imports: ``budgets.consume(...)``, ``consume(...)``,
+#: ``spend(...)`` after ``import consume as spend``, and ``consume`` handed
+#: over as a callback all count, and an unrelated ``queue.consume()`` does
+#: not (#162). That test is what keeps
+#: :data:`UNENFORCED_TODAY` honest: when a job that calls ``consume`` becomes
+#: reachable from something netkeep runs (the CLI, the app ``serve`` starts,
+#: an API module), the scan sees it and the test fails until this list is
+#: shortened. A caller nothing starts does not count. The list is therefore
+#: derived from the code, on a schedule of "every test run", rather than being
+#: prose that quietly rots.
+#:
+#: Heat's key is the persisting ``services.heat.raise_heat``, not the pure
+#: ``linkedin.heat.raise_heat`` it delegates to: the pure one returns a new
+#: state and stores nothing, so a run that called only it would forget the
+#: throttle the moment it returned.
+#:
+#: The budget's four keys are one function and four action classes: a key
+#: written ``function[reference]`` is enforced by a file that uses both, so
+#: ``budgets.consume`` called with ``ActionClass.CONNECTION_PAGES`` (the
+#: connections sync, P2-06) wires the ``connection_pages`` budget and none of the
+#: other three. Keyed on ``consume`` alone, that one caller read as all four
+#: budgets enforced while nothing spent a profile visit.
+#:
+#: Human-like pacing's key is ``pacing.plan_enrichment``, the entry point that
+#: produces the inter-visit plan (delays, bursts, breaks), not the helpers it
+#: calls. ``human_delay`` is also reached by ``scroll_like_a_person`` for the
+#: reading dwell alone, so a job that only scrolls pages would have read as
+#: paced while nothing spaced its visits apart.
+ENFORCED_BY: Final[dict[str, tuple[str, ...]]] = {
+    f"{_CONSUME}[{_ACTION_CLASS}.CONNECTION_PAGES]": ("budget connection_pages",),
+    f"{_CONSUME}[{_ACTION_CLASS}.PROFILE_VISITS]": ("budget profile_visits",),
+    f"{_CONSUME}[{_ACTION_CLASS}.INBOX_POLLS]": ("budget inbox_polls",),
+    f"{_CONSUME}[{_ACTION_CLASS}.LI_MESSAGES_AUTO]": ("budget li_messages_auto",),
+    f"{_CONSUME}[{_ACTION_CLASS}.LI_PREFILLS]": ("budget li_prefills",),
+    "netkeep.linkedin.pacing.warmup_budget": ("warm-up ramp",),
+    "netkeep.linkedin.pacing.apply_weekend_multiplier": ("weekend damping",),
+    "netkeep.linkedin.pacing.plan_enrichment": ("human-like pacing",),
+    "netkeep.services.heat.raise_heat": ("heat",),
+    "netkeep.services.linkedin_session.flag_session": ("session flag",),
+    "netkeep.linkedin.pacing.is_active_at": ("active hours",),
+    "netkeep.services.heat.should_skip": ("heat skip gate",),
+}
+
+#: The subset of :data:`ENFORCED_BY` that nothing netkeep runs calls yet. A
+#: caller counts only when it is *live*: reached through imports from the CLI,
+#: the app ``netkeep serve`` starts, or an API module, and not only through
+#: this report or a rehearsal. Code that exists but nothing starts enforces
+#: nothing. Since P2-10 the connections sync and enrichment runners are live --
+#: ``netkeep linkedin sync``/``enrich``, the runs API, and ``serve``'s
+#: scheduler all reach them through ``netkeep.worker`` -- since P4-08 the
+#: inbox poll's runner is too, since P4-03 the prefill's, and since P4-04 (#384,
+#: ADR 0008) the same runner spends ``li_messages_auto`` before an auto-send opens
+#: the profile. Nothing is left. Kept in sync by
+#: ``test_the_unenforced_list_is_what_the_package_actually_shows``, which is the
+#: whole point: a hand-maintained list of "not wired up yet" is wrong the week
+#: after it is written.
+UNENFORCED_TODAY: Final[tuple[str, ...]] = ()
+
+
+def _unenforced_protections() -> tuple[str, ...]:
+    """The protection names that no caller enforces yet, deduplicated, in report order."""
+    names: list[str] = []
+    for function in UNENFORCED_TODAY:
+        for name in ENFORCED_BY[function]:
+            if name not in names:
+                names.append(name)
+    return tuple(names)
+
+
+_UNENFORCED_TEXT: Final = ", ".join(_unenforced_protections())
+
+
+_UNWIRED_SENTENCE: Final = (
+    " The protections listed next have no enforcing caller that netkeep runs yet:"
+    f" {_UNENFORCED_TEXT}; each is a setting rather than a brake until one does."
+    if _UNENFORCED_TEXT
+    else " Every budget it lists has an enforcing caller that netkeep runs."
+)
+
+
+GAPS: Final[tuple[str, ...]] = (
+    "**this report reads configuration and counters, never callers.** It can"
+    " tell you a limit is set and how much of it is spent; it cannot tell you"
+    " that the code which will do the work remembers to ask."
+    f"{_UNWIRED_SENTENCE}"
+    " The LinkedIn prefill's runner spends `li_prefills` and `profile_visits` before"
+    " it opens the profile, and for an auto-send `li_messages_auto` in place"
+    " of `li_prefills`. Heat pauses both outright at its skip threshold. The connections"
+    " sync and enrichment runners are wired: `netkeep linkedin sync` and `enrich`,"
+    " the runs API, and `netkeep serve`'s scheduler reach them. The inbox poll's"
+    " runner spends `inbox_polls` before every read; `netkeep linkedin inbox`, the"
+    " runs API, and `netkeep serve`'s scheduler reach it. Its page source reads the"
+    " shapes of the 2026-10-05 capture, and the first supervised polls confirm the ones"
+    " the capture could not show.",
+    "the activity lock binds netkeep processes that share this data directory on"
+    " this machine: it is a file lock under the data directory. A netkeep started"
+    " with a different NETKEEP_DATA, a netkeep on another machine, or any other"
+    " tool attached to the same Chrome over CDP does not take it and is not seen.",
+    "the activity lock is a file, `locks/browser-<account>.lock` under the data"
+    " directory, and a file lock guards only the file that is still there. Deleting"
+    " `locks/` or the file while netkeep holds the browser leaves the holder"
+    " locking a file nobody else can open, so the next process claims a fresh one"
+    " and attaches as a second CDP client. Nothing in netkeep deletes it; only a"
+    " manual `rm` can cause this, so leave `locks/` alone while `netkeep serve` runs.",
+    "`netkeep serve` runs the scheduler for the connections syncs,"
+    " enrichment, the LinkedIn inbox poll, and LinkedIn auto-send, which sends only"
+    " while `campaigns.linkedin_auto_send` is on. A"
+    " scheduled run fires only while the scheduled-runs row above says armed;"
+    " this report reads that flag from the database and cannot see a scheduler"
+    " some process was started with differently.",
+    "this reports the *stored* due time for each job kind, not whether the"
+    " process that would fire it is running. A schedule established by a"
+    " `netkeep serve` that has since exited still reads as scheduled.",
+    "the heat skip gate reported is the one this report was handed, not one it"
+    " goes and inspects. Run from the command line, or read from the Settings"
+    " page's `GET /api/v1/posture` -- which now runs inside the same"
+    " process `netkeep serve` starts the scheduler in -- that is still only"
+    " the gate this config would build a scheduler with; neither rereads the"
+    " live scheduler's own gate object, so a gate passed some other way than"
+    " `[linkedin.heat]` is not seen either way. `netkeep serve` passes the"
+    " configured `[linkedin.heat]`.",
+    "whether a LinkedIn session is not merely present but still accepted is"
+    " something only a real job learns, from how LinkedIn answers it. This reports"
+    " the cookie jar and the last flag raised, which is everything that can be known"
+    " without sending a request.",
+    "the connections sync reads what LinkedIn's own connections page loads as it is"
+    " scrolled; it sends no request of its own and alters none. Whether the"
+    " page still loads the list the way the 2026-09-24 capture showed is something"
+    " only a run learns: a page it cannot read stops the run as `route_changed`, and"
+    " a run that could not prove the end of the list ages nobody.",
+    "enrichment reads each profile from what the page loads, and clicks Contact info"
+    " once per visit, only on a profile whose id is the contact's. Which"
+    " answers carry the profile's id, the education and phone sections, and how a"
+    " missing profile answers were not in the 2026-09-24 capture: an unreadable"
+    " profile counts toward the run's cap and stops it as `route_changed` after two"
+    " in a row, which only a run learns.",
+)
+
+
+# --- the individual protections ---------------------------------------------
+
+
+def _browser_mode(mode: str, cdp_url: str) -> Protection:
+    """Attach-only, and the debug port it attaches to (spec 9.1, ADR 0002)."""
+    warnings: list[str] = []
+    status = Status.ON
+    if mode != ATTACH_ONLY:
+        status = Status.OFF
+        warnings.append(
+            f"the browser provider reports mode {mode!r}, not {ATTACH_ONLY!r}. A browser"
+            " netkeep starts is a second device on your LinkedIn account, which can get the"
+            " account restricted. netkeep attaches to your own Chrome to avoid that"
+        )
+    host = _host_of(cdp_url)
+    if host not in LOOPBACK_HOSTS:
+        warnings.append(
+            f"linkedin.cdp_url points at {host or 'no host'}, not this machine's loopback."
+            " Chrome's debug port is only ever reachable on its own loopback address"
+        )
+    fix = None
+    if status is Status.OFF:
+        fix = (
+            "Remove any local change to the browser provider, so that netkeep attaches to"
+            " the Chrome you started instead of launching its own."
+        )
+    elif warnings:
+        fix = (
+            "Set `cdp_url` under `[linkedin]` in config.toml to an address on this machine,"
+            " such as `http://127.0.0.1:9222`, then restart `netkeep serve`."
+        )
+    return Protection(
+        name="attach-only browser",
+        status=status,
+        value=f"{mode} over CDP to {cdp_url}",
+        warnings=tuple(warnings),
+        fix=fix,
+    )
+
+
+def netkeep_chrome_pid(profile: Path | None = None) -> int | None:
+    """The live process holding netkeep's Chrome profile, from its ``SingletonLock`` (#599).
+
+    ``profile`` defaults to ``<data dir>/chrome-profile``. A file read and a signal-0
+    check: it never connects to the port or attaches, so a request handler and
+    ``posture --no-probe`` may call it. A stale lock whose pid was reused reads as
+    running, which fails safe: ``serve``'s start at startup then starts nothing.
+    """
+    folder = data_dir() / CHROME_PROFILE_DIRNAME if profile is None else profile
+    pid = profile_lock_pid(folder)
+    return pid if pid is not None and activity_lock.pid_alive(pid) else None
+
+
+def _running(pid: int | None) -> str:
+    return (
+        "netkeep's Chrome isn't running"
+        if pid is None
+        else f"netkeep's Chrome is running (pid {pid})"
+    )
+
+
+def _dedicated_profile(probe: SessionProbe | None, running_pid: int | None) -> Protection:
+    """Whether the Chrome on the port is netkeep's dedicated profile (ADR 0012, #624).
+
+    Every attach checks, and refuses anything else, so the row is on without a probe.
+    A probe that was refused for it says why, as a warning: until that Chrome is quit
+    and netkeep's is started, no run can attach. Without a probe, the row also says
+    whether netkeep's Chrome is running, from its profile's lock file (#599): that's
+    information, not a protection, so a Chrome that isn't running is no warning.
+    """
+    check = None if probe is None else probe.profile
+    if check is None:
+        return Protection(
+            name="dedicated chrome profile",
+            status=Status.ON,
+            value=f"checked at every attach; {_running(running_pid)}",
+            brief="checked at every attach",
+            key=KEY_DEDICATED_PROFILE,
+        )
+    if check.dedicated:
+        return Protection(
+            name="dedicated chrome profile",
+            status=Status.ON,
+            value=f"netkeep's profile, pid {check.browser_pid}",
+            key=KEY_DEDICATED_PROFILE,
+        )
+    return Protection(
+        name="dedicated chrome profile",
+        status=Status.ON,
+        value=f"refusing: {check.verdict.value.replace('_', ' ')}",
+        warnings=(
+            f"{check.reason}, so netkeep refuses to attach and no run can start. It"
+            f" attaches only to its own Chrome profile ({check.profile}). Quit that Chrome,"
+            " then start netkeep's with the command `netkeep browser launch` prints",
+        ),
+        key=KEY_DEDICATED_PROFILE,
+        fix=(
+            "The Chrome on the debug port is not netkeep's and is probably your everyday"
+            " Chrome: quit it, then click **Start Chrome** on the LinkedIn page, or change the"
+            " debug address (`cdp_url` under `[linkedin]` in config.toml, or **Chrome debug"
+            " address** on the Settings page)."
+        ),
+    )
+
+
+def _activity_lock(
+    state: activity_lock.LockState | None,
+    *,
+    now: datetime,
+    account: str = activity_lock.SINGLE_ACCOUNT_KEY,
+) -> Protection:
+    """One browser client per account, across processes (spec 9.9): free, or held by whom.
+
+    Held is normally the lock doing its job -- a run is in progress and anything
+    else that tries to attach answers ``busy`` -- so it stays ``on``. It warns when
+    the holder looks wrong, because a stuck or unknown holder blocks every job and
+    every preflight without saying so: no readable note, a pid that is not running,
+    a holder that is not a netkeep command, or a hold longer than
+    :data:`MAX_PLAUSIBLE_HOLD_HOURS`. It is ``unknown`` when the lock cannot be
+    inspected at all.
+    """
+    name = "one browser client"
+    if state is None:
+        try:
+            state = activity_lock.inspect(account)
+        except OSError as exc:
+            return Protection(
+                name=name,
+                status=Status.UNKNOWN,
+                value="lock unreadable",
+                warnings=(
+                    f"could not inspect the activity lock ({exc}), so whether another"
+                    " netkeep process holds the browser is unknown",
+                ),
+                fix=(
+                    "Make sure your user account can read and write netkeep's data folder,"
+                    " then check again."
+                ),
+            )
+    if not state.held:
+        return Protection(
+            name=name,
+            status=Status.ON,
+            value=f"free: no netkeep process holds the browser for {state.account!r}",
+        )
+    holder = state.holder
+    who = holder.describe() if holder is not None else "a holder that left no note"
+    suspicious = _suspicious_holder(holder, state.path, now=now)
+    return Protection(
+        name=name,
+        status=Status.ON,
+        value=f"held by {who}; anything else that tries to attach answers busy",
+        warnings=suspicious,
+        fix=(
+            "Quit the process that holds the activity lock, then check again."
+            if suspicious
+            else None
+        ),
+    )
+
+
+def _suspicious_holder(
+    holder: activity_lock.Holder | None, path: Path, *, now: datetime
+) -> tuple[str, ...]:
+    """Why a held lock looks stuck or foreign, if it does. Empty for an ordinary run."""
+    until_released = (
+        " Until it is released, every job and every preflight answers busy; stop the"
+        " holding process to release it"
+    )
+    if holder is None:
+        return (
+            f"the activity lock ({path}) is held, but its holder left no readable note,"
+            f" so nothing can say what holds it.{until_released}",
+        )
+    warnings: list[str] = []
+    if not activity_lock.pid_alive(holder.pid):
+        warnings.append(
+            f"the activity lock is held, but pid {holder.pid} from its note is not"
+            " running: something netkeep cannot name holds it (a child process that"
+            f" inherited it, or a process in another pid namespace).{until_released}"
+        )
+    if not holder.command.startswith("netkeep"):
+        warnings.append(
+            f"the activity lock is held by {holder.command or 'an unnamed command'!r},"
+            f" which is not a netkeep command.{until_released}"
+        )
+    if holder.since is not None:
+        since = holder.since
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=UTC)
+        held_for = now - since
+        if held_for > timedelta(hours=MAX_PLAUSIBLE_HOLD_HOURS):
+            hours = held_for.total_seconds() / 3600
+            warnings.append(
+                f"the activity lock has been held for {hours:.1f} hours, longer than the"
+                f" {MAX_PLAUSIBLE_HOLD_HOURS:g} any run should take: the run holding it"
+                f" is probably stuck.{until_released}"
+            )
+    return tuple(warnings)
+
+
+SIGN_IN_FIX: Final = (
+    "Sign in to LinkedIn in the netkeep Chrome window, then run `netkeep preflight`."
+)
+"""The fix for a Chrome profile with no LinkedIn session (#654)."""
+
+
+def _flag_fix(outcome: Outcome) -> str:
+    """What to do about a raised session flag (#654): a logged-out flag clears itself on a
+    preflight that finds a session; a checkpoint is cleared by hand."""
+    if outcome is Outcome.LOGGED_OUT:
+        return (
+            "Sign in to LinkedIn in the netkeep Chrome window, then run `netkeep"
+            " preflight`, which clears this flag when it finds your session."
+        )
+    return (
+        "Open LinkedIn in the netkeep Chrome window and confirm the account is healthy,"
+        " then click **Clear flag** on the LinkedIn page."
+    )
+
+
+def _linkedin_session(
+    probe: SessionProbe | None,
+    *,
+    evidence: SessionEvidence | None = None,
+    flag: SessionFlag | None = None,
+    now: datetime,
+    zone: ZoneInfo,
+) -> Protection:
+    """Whether a LinkedIn session is actually present, from a probe of the cookie jar.
+
+    Cookie names only; a value cannot reach here because :class:`SessionProbe`
+    has nowhere to put one.
+
+    With no live probe (the web page, which may not touch the browser, or
+    ``posture --no-probe``), the row answers from the last evidence instead
+    (#282): what ``netkeep preflight`` or ``posture --probe`` last found, or
+    the newest run that read LinkedIn without flagging the session, whichever is
+    newer. See :func:`_session_from_evidence`.
+    """
+    if probe is None:
+        return _session_from_evidence(evidence, flag, now=now, zone=zone)
+    if not probe.attached:
+        return Protection(
+            name="linkedin session",
+            status=Status.UNKNOWN,
+            value="not attached",
+            warnings=probe.problems
+            or ("could not attach to Chrome, so the LinkedIn session could not be read",),
+            fix=(
+                "Click **Start Chrome** on the LinkedIn page, then run `netkeep preflight` again."
+            ),
+        )
+    if probe.logged_in is None:
+        return Protection(
+            name="linkedin session",
+            status=Status.UNKNOWN,
+            value="cookie jar unreadable",
+            warnings=("the browser's cookie jar could not be read, so the login state is unknown",),
+            fix=(
+                "Quit netkeep's Chrome, click **Start Chrome** on the LinkedIn page, then run"
+                " `netkeep preflight` again."
+            ),
+        )
+    if not probe.logged_in:
+        return Protection(
+            name="linkedin session",
+            status=Status.OFF,
+            value="no session in this profile",
+            warnings=(
+                "this Chrome profile holds no live LinkedIn session, so no job can run."
+                " Log in once in the window `netkeep browser launch` describes",
+            ),
+            fix=SIGN_IN_FIX,
+        )
+    names = ", ".join(probe.cookie_names) or "no named cookies"
+    return Protection(
+        name="linkedin session",
+        status=Status.ON,
+        value=f"logged in ({names})",
+    )
+
+
+def _session_from_evidence(
+    evidence: SessionEvidence | None,
+    flag: SessionFlag | None,
+    *,
+    now: datetime,
+    zone: ZoneInfo,
+) -> Protection:
+    """The session row from recorded evidence, for a report that ran no probe (#282).
+
+    * Nothing ever recorded: unknown, and it says how to get an answer.
+    * A session flag is up: off, whatever the evidence says. A flag is what
+      LinkedIn itself answered, and a live cookie is not proof a checkpoint is
+      resolved (spec 9.7).
+    * The last evidence found no session: off.
+    * Logged in within :data:`SESSION_EVIDENCE_FRESH_FOR`: on.
+    * Logged in, but longer ago: on, with a warning that it may have expired.
+    """
+    if evidence is None and flag is None:
+        return Protection(
+            name="linkedin session",
+            status=Status.UNKNOWN,
+            value="not checked yet",
+            warnings=(
+                "nothing has checked the LinkedIn session yet: no `netkeep preflight`"
+                " and no run that read LinkedIn. Run `netkeep preflight` in a terminal;"
+                " this report shows what it finds",
+            ),
+            fix=(
+                "Click **Start Chrome** on the LinkedIn page and sign in to LinkedIn, then run"
+                " `netkeep preflight` in a terminal."
+            ),
+        )
+    if flag is not None:
+        when = f"{local_time_of(flag.flagged_at, zone):%Y-%m-%d %H:%M}"
+        return Protection(
+            name="linkedin session",
+            status=Status.OFF,
+            value=f"flagged {flag.outcome.value} {when}",
+            warnings=(
+                f"LinkedIn answered with a {flag.outcome.value.replace('_', ' ')} on {when},"
+                " so no run can use this session until the session flag is cleared (see"
+                " the session flag row of the posture report: Settings, Posture, or"
+                " `netkeep posture`)",
+            ),
+            fix=_flag_fix(flag.outcome),
+        )
+    assert evidence is not None
+    when = f"{local_time_of(evidence.observed_at, zone):%Y-%m-%d %H:%M}"
+    age = now - evidence.observed_at
+    ago = _ago(age)
+    if not evidence.logged_in:
+        return Protection(
+            name="linkedin session",
+            status=Status.OFF,
+            value=f"no session at {when} by {evidence.source} ({ago})",
+            warnings=(
+                f"the last check ({evidence.source}, {when}) found no LinkedIn session in"
+                " this Chrome profile, so no job can run. Log in once in the netkeep"
+                " Chrome profile, then run `netkeep preflight`",
+            ),
+            fix=SIGN_IN_FIX,
+        )
+    value = f"last confirmed logged in {when} by {evidence.source} ({ago})"
+    if age <= SESSION_EVIDENCE_FRESH_FOR:
+        return Protection(name="linkedin session", status=Status.ON, value=value)
+    hours = SESSION_EVIDENCE_FRESH_FOR.total_seconds() / 3600
+    return Protection(
+        name="linkedin session",
+        status=Status.ON,
+        value=value,
+        warnings=(
+            f"the session was last confirmed {ago}, more than {hours:.0f} h ago, so it"
+            " may have expired since. `netkeep preflight` checks it again, and this"
+            " report shows the result",
+        ),
+        fix="Run `netkeep preflight` in a terminal to check the LinkedIn session again.",
+    )
+
+
+def _ago(age: timedelta) -> str:
+    """``age`` as a person says it: "just now", "25 min ago", "3 h ago", "2 days ago"."""
+    minutes = max(int(age.total_seconds() // 60), 0)
+    if minutes < 1:
+        return "just now"
+    if minutes < 60:
+        return f"{minutes} min ago"
+    if minutes < 48 * 60:
+        return f"{minutes // 60} h ago"
+    return f"{minutes // (24 * 60)} days ago"
+
+
+def _session_flag(session: Session, user: User) -> Protection:
+    """The flag a ``Checkpoint`` or ``LoggedOut`` classification raises (spec 9.7).
+
+    The advice differs by outcome (#168 review, F1): ``netkeep preflight`` clears a
+    ``LoggedOut`` flag itself the moment it finds a live session again, so that one
+    just needs a login and another preflight. A ``Checkpoint`` flag is never
+    auto-cleared -- a live ``li_at`` cookie is not proof the checkpoint is solved --
+    so its advice names the two ways to clear it by hand, once the account is
+    confirmed healthy: the LinkedIn page's **Clear flag** button, or `netkeep
+    linkedin clear-flag` (#181).
+    """
+    flag = session_flag(session, user)
+    if flag is None:
+        return Protection(
+            name="session flag",
+            status=Status.ON,
+            value="clear (checkpoint and logged-out raise it)",
+        )
+    if flag.outcome is Outcome.LOGGED_OUT:
+        advice = (
+            "log in to LinkedIn in the netkeep Chrome profile, then run `netkeep"
+            " preflight`: a preflight that finds a live session clears a logged-out"
+            " flag on its own"
+        )
+    else:
+        advice = (
+            "a checkpoint is never retried, and a live session cookie is not proof it"
+            " is resolved, so `netkeep preflight` leaves this one alone. Once you"
+            " have opened LinkedIn in the netkeep profile and confirmed the account"
+            " is healthy, clear it by hand: the Clear flag button on the LinkedIn page, or"
+            " `netkeep linkedin clear-flag`"
+        )
+    return Protection(
+        name="session flag",
+        status=Status.ON,
+        value=f"{flag.outcome.value} at {flag.url or '/'}",
+        warnings=(
+            f"the session was flagged {flag.outcome.value} on"
+            f" {flag.flagged_at:%Y-%m-%d %H:%M UTC}. Runs stop while a flag is up; {advice}",
+        ),
+        fix=_flag_fix(flag.outcome),
+    )
+
+
+def _active_hours(
+    linkedin: LinkedInSettings,
+    zone: ZoneInfo,
+    zone_warning: str | None,
+    *,
+    now: datetime,
+    local_now: datetime,
+    source: str = "defaults",
+) -> Protection:
+    """The active window, where ``now`` falls in it (spec 9.5), and where it was set (#213)."""
+    active_hours = linkedin.active_hours
+    timezone_name = linkedin.timezone
+    warnings: list[str] = []
+    if zone_warning is not None:
+        warnings.append(zone_warning)
+    window = _parse_window(active_hours)
+    if window is None:
+        return Protection(
+            name="active hours",
+            status=Status.UNKNOWN,
+            value=f"unreadable: {active_hours[0]!r} to {active_hours[1]!r}",
+            warnings=(
+                *warnings,
+                "linkedin.active_hours is not two HH:MM times, so no window can be"
+                " enforced from it",
+            ),
+            fix=(
+                "Set `active_hours` under `[linkedin]` in config.toml to a start and an end"
+                " time in HH:MM form, then restart `netkeep serve`."
+            ),
+        )
+    start, end = window
+    on_or_off, window_warnings = active_window_check(start, end)
+    status = Status.ON if on_or_off == "on" else Status.OFF
+    warnings.extend(window_warnings)
+    inside = is_active_at(now, zone, start=start, end=end)
+    where = "inside" if inside else "outside"
+    opens = next_window_start(now, zone, start=start).astimezone(zone)
+    value = (
+        f"{start:%H:%M}-{end:%H:%M} {timezone_name}; now {local_now:%H:%M} ({where})"
+        if inside
+        else f"{start:%H:%M}-{end:%H:%M} {timezone_name}; outside, opens {opens:%a %H:%M}"
+    )
+    value += f"; set in {source}"
+    fix = None
+    if status is Status.OFF:
+        fix = (
+            "Set `active_hours` under `[linkedin]` in config.toml to the hours you are"
+            " usually online, then restart `netkeep serve`."
+        )
+    elif zone_warning is not None:
+        fix = (
+            "Set `timezone` under `[linkedin]` in config.toml to a zone name such as"
+            " America/New_York, then restart `netkeep serve`."
+        )
+    return Protection(
+        name="active hours", status=status, value=value, warnings=tuple(warnings), fix=fix
+    )
+
+
+def active_hours_source(settings: Settings) -> str:
+    """Where ``[linkedin] active_hours`` came from: the config file's path, or the defaults.
+
+    Shown beside the window (#213) so a person who wants a different one knows
+    where to change it: the Settings page, the file that pins it, or nowhere yet
+    because the default is in force (#343: the file wins over the Settings page).
+    """
+    key = "linkedin.active_hours"
+    if key in settings.ui_keys:
+        return "Settings (the web UI)"
+    if settings.source_path is None:
+        return "the defaults (no config.toml)"
+    if settings.file_keys is not None and key not in settings.file_keys:
+        return f"the defaults ({settings.source_path} does not set it)"
+    return str(settings.source_path)
+
+
+def describe_active_hours(settings: Settings) -> str:
+    """``[linkedin] active_hours`` in one line: the window, its zone, and its source (#213)."""
+    start, end = settings.linkedin.active_hours
+    return (
+        f"active hours: {start}-{end} {settings.linkedin.timezone}, set in"
+        f" {active_hours_source(settings)} (`[linkedin] active_hours`)"
+    )
+
+
+def _account_timezone(user: User, configured: str) -> Protection:
+    """Budget days and active hours have to roll over at the same midnight.
+
+    ``services.budgets`` keys its counters by ``user.timezone``; active hours
+    read ``linkedin.timezone``. They are two fields, so they can disagree, and
+    when they do the daily budget resets at a different midnight than the one
+    the window opens against -- a hole big enough to run a second day's visits
+    through and invisible in either module's own tests.
+    """
+    if user.timezone == configured:
+        return Protection(
+            name="one local midnight", status=Status.ON, value=f"budgets and hours in {configured}"
+        )
+    return Protection(
+        name="one local midnight",
+        status=Status.OFF,
+        value=f"budgets in {user.timezone}, hours in {configured}",
+        warnings=(
+            f"budget counters roll over at midnight in {user.timezone} while active hours"
+            f" are read in {configured}. Set linkedin.timezone and the user's timezone to"
+            " the same zone, or a day's budget resets at an hour the window is open",
+        ),
+        fix=(
+            "Restart `netkeep serve`, which sets your account's zone to the **Time zone**"
+            " setting, so budgets and hours use one zone."
+        ),
+    )
+
+
+def _weekend_damping(multiplier: float, local_now: datetime) -> Protection:
+    """Spec 9.5: "multiply budgets by 0.5 on Saturday and Sunday by default"."""
+    weekday = local_now.strftime("%A")
+    applied = local_now.date().weekday() in (5, 6)
+    value = f"x{multiplier:g} on Sat/Sun; today is {weekday}"
+    if applied:
+        value += " (applied)"
+    warnings = weekend_multiplier_warnings(multiplier)
+    if warnings:
+        return Protection(
+            name="weekend damping",
+            status=Status.OFF,
+            value=value,
+            warnings=warnings,
+            fix="Set **Weekend multiplier** on the Settings page to a value below 1, such as 0.5.",
+        )
+    return Protection(name="weekend damping", status=Status.ON, value=value)
+
+
+def _warmup_ramp(settings: Settings, today: TodaysBudget) -> Protection:
+    """Spec 9.5: a fresh install starts at 20 profile visits a day and grows by 10."""
+    budget = settings.linkedin.budget
+    cap = _profile_visit_cap(settings)
+    value = f"start {budget.warmup_start}, +{budget.warmup_step}/day, cap {cap}"
+    if budget.warmup_start >= cap:
+        return Protection(
+            name="warm-up ramp",
+            status=Status.OFF,
+            value=value,
+            warnings=(
+                f"the ramp starts at {budget.warmup_start}, at or above the {cap}-visit"
+                " cap, so a fresh install gets its full daily budget on day one. Spec 9.5"
+                " ramps from 20 by 10 a day precisely because a new device does not",
+            ),
+            fix=(
+                "Lower **Warm-up: profile visits on day one** on the Settings page below your"
+                " daily profile-visit limit."
+            ),
+        )
+    return Protection(
+        name="warm-up ramp",
+        status=Status.ON,
+        value=f"{value}; today {today.ramp}",
+    )
+
+
+def _pacing(pacing: PacingSettings, cap: int) -> Protection:
+    """Spec 9.5's human-like behavior: the wait between profiles, and the bursts.
+
+    Four of Appendix C's six rows live in ``[linkedin.pacing]`` -- the delay
+    between profiles, the distraction pause, the burst size, and the break
+    between bursts -- and every one of them is a real, loadable config key.
+    Reporting the weekend multiplier while saying nothing about the gap between
+    two profile views has the coverage backwards: the gap *is* what spec 9.5 is
+    about, and a config that zeroes it turns the sidecar into exactly the
+    request pattern the whole design exists to avoid.
+
+    ``cap`` is the per-day profile-visit limit in force, which is what makes
+    the burst-size check a derived fact rather than an invented ceiling: a
+    burst larger than a day's whole budget can never reach its own end, so the
+    break between bursts never happens.
+    """
+    warnings: list[str] = []
+    status = Status.ON
+    if pacing.profile_delay_median_s <= 0:
+        status = Status.OFF
+        warnings.append(
+            f"linkedin.pacing.profile_delay_median_s is {pacing.profile_delay_median_s:g}:"
+            " there is no wait between profile views at all. Worse than the pacing being"
+            " off, pacing.human_delay refuses a median of zero or less, so this does not"
+            " run fast -- it raises part-way through a run, after this report has been"
+            " read. Appendix C's default is 25"
+        )
+    elif pacing.profile_delay_median_s < MIN_DELAY_MEDIAN_S:
+        status = Status.OFF
+        warnings.append(
+            f"linkedin.pacing.profile_delay_median_s is {pacing.profile_delay_median_s:g}s,"
+            f" under the {MIN_DELAY_MEDIAN_S:g}s this report treats as human. Appendix C"
+            " picks 25 because that is how long a person takes to read a profile"
+        )
+    if pacing.profile_delay_sigma <= 0:
+        status = Status.OFF
+        warnings.append(
+            f"linkedin.pacing.profile_delay_sigma is {pacing.profile_delay_sigma:g}, so"
+            " every wait is exactly the median. A constant interval between requests is"
+            " the most machine-like signature there is; the spread is what makes the"
+            " timing look human at all"
+        )
+    if pacing.distraction_p <= 0:
+        status = Status.OFF
+        warnings.append(
+            f"linkedin.pacing.distraction_p is {pacing.distraction_p:g}, so the run never"
+            " pauses for a distraction. Appendix C gives it an 8% chance because people"
+            " get interrupted, and a session that never is looks unattended"
+        )
+    elif pacing.distraction_range_s[1] <= 0:
+        status = Status.OFF
+        warnings.append(
+            f"linkedin.pacing.distraction_range_s is {list(pacing.distraction_range_s)}, so"
+            " a distraction pause adds nothing however often it is drawn"
+        )
+    low, high = pacing.burst_size
+    if low < 1 or high < low:
+        status = Status.OFF
+        warnings.append(
+            f"linkedin.pacing.burst_size is {list(pacing.burst_size)}, which is not a"
+            " range pacing.plan_burst_sizes accepts: it raises rather than planning a"
+            " run, so this fails part-way through rather than pacing badly"
+        )
+    elif low > cap:
+        status = Status.OFF
+        warnings.append(
+            f"linkedin.pacing.burst_size starts at {low}, more than the {cap} profile"
+            " visits a day allows, so a burst never reaches its own end and the break"
+            " between bursts never happens. Spec 9.5's bursts are 8 to 15"
+        )
+    break_low, break_high = pacing.burst_break_s
+    if break_high < break_low or break_low < 0:
+        status = Status.OFF
+        warnings.append(
+            f"linkedin.pacing.burst_break_s is {list(pacing.burst_break_s)}, which is not a range"
+        )
+    elif break_high < MIN_BURST_BREAK_S:
+        status = Status.OFF
+        warnings.append(
+            f"linkedin.pacing.burst_break_s tops out at {break_high:g}s, under the"
+            f" {MIN_BURST_BREAK_S:g}s this report treats as a break. Appendix C's range is"
+            " 5 to 20 minutes -- sessions, not streams"
+        )
+    return Protection(
+        name="human-like pacing",
+        status=status,
+        value=(
+            f"{pacing.profile_delay_median_s:g}s median (sigma {pacing.profile_delay_sigma:g}),"
+            f" {pacing.distraction_p:.0%} distraction, bursts of {low}-{high}"
+            f" then {break_low:g}-{break_high:g}s"
+        ),
+        warnings=tuple(warnings),
+        fix=(
+            "Set the values under `[linkedin.pacing]` in config.toml back to the ones in"
+            " `config.example.toml`, or remove that section."
+            if warnings
+            else None
+        ),
+    )
+
+
+def _auto_send(settings: Settings, hold: AutoSendHold | None = None) -> Protection:
+    """ADR 0004: LinkedIn messages are prefilled for a person to send, not sent. With
+    auto-send on (ADR 0008), a hold says why auto-send stopped and how to clear it."""
+    if not settings.campaigns.linkedin_auto_send:
+        return Protection(
+            name="manual linkedin sends",
+            status=Status.ON,
+            value="auto-send off",
+            key=KEY_MANUAL_LINKEDIN_SENDS,
+        )
+    return Protection(
+        name="manual linkedin sends",
+        key=KEY_MANUAL_LINKEDIN_SENDS,
+        status=Status.OFF,
+        value="auto-send ON",
+        warnings=(
+            *auto_send_warnings(settings.campaigns),
+            # #447: a daily auto-send budget above 20 is warned about with it (ADR 0008).
+            *filter(None, (auto_send_budget_warning(settings),)),
+            *(
+                ()
+                if hold is None
+                else (f"auto-send is held: {hold.reason}. {AUTO_SEND_HOLD_CLEAR}",)
+            ),
+        ),
+        opted_in=True,
+        fix=(
+            "Auto-send is on by your choice; turn off **LinkedIn auto-send** on the Settings"
+            " page (or remove `linkedin_auto_send` from config.toml if it sets it) to send"
+            " each LinkedIn message yourself."
+        ),
+    )
+
+
+def _budget(action: ActionClass, snapshot: BudgetSnapshot, settings: Settings) -> Protection:
+    """One action class's day and week counters against their limits (spec 9.6)."""
+    budget = settings.linkedin.budget
+    warnings: list[str] = []
+    notes: list[str] = []
+    parts = [f"{snapshot.day.count}/{snapshot.day.limit} today"]
+    if snapshot.week is not None:
+        parts.append(f"{snapshot.week.count}/{snapshot.week.limit} this week")
+    hard_day = HARD_MAX_PER_DAY[action]
+    asked_day = configured_default(action, budget, "day")
+    if asked_day is not None and asked_day > hard_day:
+        warnings.append(
+            f"config asks for {asked_day} a day, above netkeep's hard max of {hard_day}."
+            f" The clamp holds and {hard_day} is what is enforced, but the config file"
+            " says something the tool will not do"
+        )
+    if action is ActionClass.PROFILE_VISITS:
+        # Both are the user's call (#318), so they are notes: listed, never gating.
+        risk = profile_visit_risk_warning(budget)
+        if risk is not None:
+            notes.append(risk)
+        short_week = profile_visit_week_note(budget)
+        if short_week is not None:
+            notes.append(short_week)
+    message_risk = li_message_risk_warning(action, budget)
+    if message_risk is not None:
+        notes.append(message_risk)  # the user's call (#447), so a note, never gating
+    hard_week = HARD_MAX_PER_WEEK.get(action)
+    asked_week = configured_default(action, budget, "week")
+    if hard_week is not None and asked_week is not None and asked_week > hard_week:
+        warnings.append(
+            f"config asks for {asked_week} a week, above netkeep's hard max of"
+            f" {hard_week}. The clamp holds and {hard_week} is what is enforced"
+        )
+    if snapshot.day.over:
+        warnings.append(
+            f"today's count is already past its limit ({snapshot.day.count} of"
+            f" {snapshot.day.limit}); the next unit of work is refused"
+        )
+    if snapshot.week is not None and snapshot.week.over:
+        warnings.append(
+            f"this week's count is already past its limit ({snapshot.week.count} of"
+            f" {snapshot.week.limit}); the next unit of work is refused"
+        )
+    ceiling = f"hard max {hard_day}/day"
+    if hard_week is not None:
+        ceiling += f", {hard_week}/week"
+    above_max = (asked_day is not None and asked_day > hard_day) or (
+        hard_week is not None and asked_week is not None and asked_week > hard_week
+    )
+    return Protection(
+        name=f"budget {action.value}",
+        status=Status.ON,
+        value=f"{', '.join(parts)} ({ceiling})",
+        warnings=tuple(warnings),
+        notes=tuple(notes),
+        brief=", ".join(parts),
+        # A count past its limit is the limit working: it clears when the day or week rolls over.
+        fix=(
+            "Set this limit under `[linkedin.budget]` in config.toml to a value at or below the"
+            " one in `config.example.toml`, then restart `netkeep serve`."
+            if above_max
+            else None
+        ),
+    )
+
+
+def _heat_skip_gate(gate: HeatGate) -> Protection:
+    """Spec 9.7's "above heat_skip_threshold the scheduler skips browser jobs entirely".
+
+    The scheduler makes disabling this take a named argument rather than a
+    falsy default, so a caller cannot turn it off by forgetting something. That
+    also means the only way it is ever off is that somebody meant it -- and
+    somebody meaning it is exactly what a posture report is for.
+    """
+    if gate is HEAT_SKIP_DISABLED:
+        return Protection(
+            name="heat skip gate",
+            status=Status.OFF,
+            value="DISABLED",
+            warnings=(
+                "the scheduler is running with HEAT_SKIP_DISABLED, so browser jobs run"
+                " however warm the account is. Spec 9.7 makes the skip unconditional:"
+                " above the threshold the scheduler skips browser jobs entirely, and"
+                " with this off a throttled account keeps being asked for more",
+            ),
+            fix=(
+                "Remove the code that passes `HEAT_SKIP_DISABLED` to the scheduler, then restart"
+                " `netkeep serve`."
+            ),
+        )
+    return Protection(
+        name="heat skip gate",
+        status=Status.ON,
+        value="on: browser jobs skipped above the threshold",
+    )
+
+
+def _scheduled_jobs(scheduler: SchedulerPosture) -> Protection:
+    """Each job kind, by name: scheduled, missing, or not applicable, and why (#327).
+
+    Active hours deferral, the catch-up rule, and the heat skip gate are all
+    things the *scheduler* does. A report that called them in force while no
+    job kind has a due time would be claiming protection from a mechanism that
+    is not running, so a schedule that is missing or half-established warns. A
+    kind ``netkeep serve`` does not schedule (the LinkedIn inbox poll, which has
+    no page source yet) is named as not applicable, never as missing.
+    """
+    states = [
+        f"{kind} {'scheduled' if due is not None else 'missing'}"
+        for kind, _, due in scheduler.jobs
+        if kind in scheduler.applicable
+    ]
+    states += [f"{kind} not applicable ({why})" for kind, why in scheduler.not_applicable]
+    detail = "; ".join(states)
+    applicable = len(scheduler.applicable)
+    if not scheduler.unscheduled:
+        dues = [
+            due
+            for kind, _, due in scheduler.jobs
+            if due is not None and kind in scheduler.applicable
+        ]
+        soonest = f"; next {min(dues):%Y-%m-%d %H:%M UTC}" if dues else ""
+        return Protection(
+            name="scheduled jobs",
+            status=Status.ON,
+            value=f"{detail}{soonest}",
+            brief=f"{applicable} of {applicable} scheduled{soonest}",
+        )
+    if not any(kind in scheduler.applicable for kind in scheduler.scheduled):
+        return Protection(
+            name="scheduled jobs",
+            status=Status.UNKNOWN,
+            value=f"nothing scheduled: {detail}",
+            brief=f"nothing scheduled (0 of {applicable})",
+            warnings=(
+                "no job kind has a due time for this account, so nothing fires on its"
+                " own and the active-hours, catch-up, and heat-skip protections have"
+                " nothing to act on. That is the expected state until `netkeep serve`"
+                " establishes a schedule",
+            ),
+            fix="Start `netkeep serve`, which gives each job its first due time when it starts.",
+        )
+    meaning = "; ".join(
+        f"{kind}: {MISSING_MEANS.get(JobKind(kind), 'it never runs on its own')}"
+        for kind in scheduler.unscheduled
+    )
+    return Protection(
+        name="scheduled jobs",
+        status=Status.OFF,
+        value=detail,
+        brief=f"missing: {', '.join(scheduler.unscheduled)}",
+        warnings=(
+            f"these job kinds have no due time, so they never run ({meaning})."
+            " `netkeep serve` gives a missing kind its first due time when it starts,"
+            " and `netkeep linkedin schedule arm` does it at once",
+        ),
+        fix=(
+            "Restart `netkeep serve`, which gives each missing job its first due time when it"
+            " starts."
+        ),
+    )
+
+
+NEXT_SEND_LOOKAHEAD: Final = 50
+"""How many upcoming rows the "next campaign send" row weighs: an overdue row can move
+later than one due after it."""
+
+
+def _effective_send(
+    fire: UpcomingFire,
+    *,
+    now: datetime,
+    settings: Settings,
+    user: User,
+    hours: SendingHours | None,
+) -> datetime:
+    """When a row would really go: its due time or now, whichever is later, then where
+    the tick's own rule (:func:`netkeep.campaigns.schedule.hold`: the unbounded start,
+    the spill, the sending hours) puts it."""
+    at = max(fire.due, now)
+    if hours is None:
+        return at
+    try:
+        slots = suggested(settings.campaigns, user.timezone)
+    except ScheduleError:
+        return at
+    held = hold(
+        fire.due,
+        at,
+        slots=slots,
+        hours=hours,
+        starts_at=fire.campaign.starts_at if fire.campaign.start_chosen else None,
+        first_step=fire.enrollment.current_step is None,
+    )
+    return held or at
+
+
+def _sending_hours(session: Session, user: User) -> Protection:
+    """The sending hours (#338): when campaign email may go out after each start."""
+    hours = hours_for(session, user)
+    if hours is None:
+        return Protection(
+            name="sending hours",
+            key=KEY_SENDING_HOURS,
+            status=Status.UNKNOWN,
+            value="the stored sending hours cannot be read",
+            warnings=(
+                "The stored sending hours cannot be read, so no campaign sends. Set them"
+                " again on the Settings page or with `netkeep campaigns sending-hours`",
+            ),
+            fix=(
+                "Set the sending hours again on the Settings page, or run `netkeep campaigns"
+                " sending-hours`."
+            ),
+        )
+    if not hours.enabled:
+        return Protection(
+            name="sending hours",
+            key=KEY_SENDING_HOURS,
+            status=Status.ON,
+            value="any time: every campaign send goes as soon as it is due",
+        )
+    return Protection(
+        name="sending hours",
+        key=KEY_SENDING_HOURS,
+        status=Status.ON,
+        value=f"{hours.describe()} ({user.timezone}); only a campaign's start ignores them",
+    )
+
+
+def _campaign_templates(session: Session, user: User) -> Protection:
+    """Active and paused campaigns whose step templates name a removed ``me.*`` field
+    (#342). The engine sends nothing for those steps, so the report says so."""
+    blocked = removed_field_campaigns(session, user)
+    if not blocked:
+        return Protection(
+            name="campaign templates",
+            key=KEY_CAMPAIGN_TEMPLATES,
+            status=Status.ON,
+            value="no active or paused campaign uses a removed merge field",
+        )
+    return Protection(
+        name="campaign templates",
+        key=KEY_CAMPAIGN_TEMPLATES,
+        status=Status.ON,
+        value=f"{len(blocked)} active or paused campaign(s) blocked by a removed merge field",
+        warnings=(describe_removed_field_campaigns(blocked),),
+        fix=(
+            "Fix the template, then click **Use newest version** on the campaign page, or run"
+            " `netkeep campaigns adopt-template`."
+        ),
+    )
+
+
+def _send_records(session: Session, user: User, *, now: datetime) -> Protection:
+    """Sends whose outcome was never recorded (#627): an email message still claimed
+    :data:`~netkeep.services.campaign_engine.RECORD_PENDING_AFTER` after its claim, and a
+    LinkedIn message claimed by a run that ended, or was left behind, with no outcome.
+    The protection holds either way, since a claimed step is never sent again, but the
+    record is behind what may have gone out, so each gets a warning."""
+    emails = unrecorded_sends(session, user, now=now)
+    linkedin = unrecorded_prefills(session, user, now=now)
+    if not emails and not linkedin:
+        return Protection(
+            name="send records",
+            key=KEY_SEND_RECORDS,
+            status=Status.ON,
+            value="every claimed send has its outcome recorded",
+        )
+    warnings: list[str] = []
+    if emails:
+        minutes = int(RECORD_PENDING_AFTER.total_seconds() // 60)
+        warnings.append(
+            f"{emails} email send(s) claimed over {minutes} min ago have no recorded"
+            " outcome (a record that failed, a stop mid-send, or no answer from Gmail)."
+            " None is sent again; reconcile settles each by its Message-ID while"
+            " `netkeep serve` runs"
+        )
+    if linkedin:
+        warnings.append(
+            f"{linkedin} LinkedIn message(s) were claimed by a run that stopped, or was"
+            " left behind, with no recorded outcome, and an auto-sent one may have gone"
+            " out. None is typed again: check the conversation in LinkedIn. Each is listed"
+            " in the messages waiting for you once its run has ended (a run left behind"
+            " is ended at the next start), and you can discard it there"
+        )
+    return Protection(
+        name="send records",
+        key=KEY_SEND_RECORDS,
+        status=Status.ON,
+        value=f"{emails} email and {linkedin} LinkedIn send(s) with no recorded outcome",
+        warnings=tuple(warnings),
+        fix=(
+            "Check each conversation in LinkedIn, then, under **Waiting for you** on the"
+            " dashboard, click **I sent it, check now** if the message went out or"
+            " **Discard** if it did not."
+            if linkedin
+            else "Keep `netkeep serve` running, which settles each email send by its Message-ID."
+        ),
+    )
+
+
+def _next_campaign_send(
+    session: Session, user: User, *, zone: ZoneInfo, now: datetime, settings: Settings
+) -> Protection:
+    """When the campaign engine next has a send to consider, and what it needs (#338).
+
+    There is no send window: each campaign sends from its scheduled start, and only
+    while ``netkeep serve`` runs on an awake Mac. The row is the soonest due time
+    the tick would act on (:func:`netkeep.services.campaign_engine.upcoming`, the
+    dashboard's own list), so it never disagrees with the campaign pages. In force
+    either way: a send with nothing running to make it is a choice, not a fault.
+    """
+    fires, _ = upcoming(session, user, limit=NEXT_SEND_LOOKAHEAD)
+    if not fires:
+        return Protection(
+            name="next campaign send",
+            key=KEY_NEXT_CAMPAIGN_SEND,
+            status=Status.ON,
+            value="no campaign send is scheduled",
+        )
+    # Where each row will really go (#338 review, N4): a row already due waits for the
+    # spill, or goes at the next tick. Rows are read soonest first,
+    # and the earliest effective time among them is the one shown.
+    hours = hours_for(session, user)
+    effective = [
+        (_effective_send(fire, now=now, settings=settings, user=user, hours=hours), fire)
+        for fire in fires
+    ]
+    when, fire = min(effective, key=lambda pair: pair[0])
+    step = "" if fire.step is None else f" step {fire.step.position}"
+    local = when.astimezone(zone)
+    return Protection(
+        name="next campaign send",
+        key=KEY_NEXT_CAMPAIGN_SEND,
+        status=Status.ON,
+        value=(
+            f"{fire.campaign.name!r}{step} at {local:%a %b} {local.day}, {local:%H:%M}"
+            f" ({when:%Y-%m-%d %H:%M UTC}). {SERVE_REMINDER}"
+        ),
+    )
+
+
+def _reply_poll(session: Session, user: User, *, now: datetime, settings: Settings) -> Protection:
+    """When each armed mailbox was last polled for replies (#327).
+
+    The reply poll (spec 11.7) runs in ``netkeep serve``'s campaign tick for every
+    armed mailbox, armed for drafts or to send, every ``[campaigns]
+    reply_poll_minutes``. ``mailboxes.replies_polled_at`` is when it last read
+    everything up to then. A poll that never ran, or is over
+    :data:`REPLY_POLL_LATE_AFTER_POLLS` intervals old, gets a note, not a warning:
+    the protection still holds, because the sender holds every follow-up that starts
+    a new conversation until replies are checked again, and a ``same_thread``
+    follow-up reads its thread before it goes. The usual cause is that ``serve`` is
+    not running, which is a choice, not a fault.
+    """
+    minutes = max(settings.campaigns.reply_poll_minutes, 1)
+    late_after = timedelta(minutes=minutes * REPLY_POLL_LATE_AFTER_POLLS)
+    armed = [
+        mailbox
+        for mailbox in session.scalars(scoped(user, Mailbox).order_by(Mailbox.id))
+        if mailbox.arm is not None
+    ]
+    if not armed:
+        return Protection(
+            name="reply poll",
+            key=KEY_GMAIL_REPLY_POLL,
+            status=Status.ON,
+            value="no armed mailbox: no campaign email goes out, so there is no reply to poll for",
+            brief="no armed mailbox",
+        )
+    held = (
+        "Follow-ups that start a new conversation are held until replies are checked"
+        " again; a follow-up in the same thread reads the thread before it goes."
+        " The poll runs in `netkeep serve`"
+    )
+    details: list[str] = []
+    notes: list[str] = []
+    never_polled = 0
+    oldest: timedelta | None = None
+    for mailbox in armed:
+        arm = mailbox.arm
+        assert arm is not None  # filtered above
+        polled = mailbox.replies_polled_at
+        if polled is None:
+            never_polled += 1
+            details.append(f"{mailbox.email} ({arm.value}-armed): never polled")
+            notes.append(
+                f"{mailbox.email} is armed but has not been polled for replies yet. {held},"
+                f" every {minutes} min"
+            )
+            continue
+        age = now - polled
+        oldest = age if oldest is None else max(oldest, age)
+        details.append(
+            f"{mailbox.email} ({arm.value}-armed): last polled {polled:%Y-%m-%d %H:%M UTC}"
+            f" ({_ago(age)})"
+        )
+        if age > late_after:
+            notes.append(
+                f"{mailbox.email} was last polled for replies {_ago(age)}, more than"
+                f" {REPLY_POLL_LATE_AFTER_POLLS} times the {minutes} min interval. {held}:"
+                " check that it is running"
+            )
+    value = f"every {minutes} min; " + "; ".join(details)
+    mailboxes = f"{len(armed)} armed mailbox{'es' if len(armed) != 1 else ''}"
+    poll_parts: list[str] = []
+    if never_polled:
+        poll_parts.append(f"{never_polled} never polled")
+    if oldest is not None:
+        poll_parts.append(
+            f"oldest poll {_ago(oldest)}" if len(armed) > 1 else f"polled {_ago(oldest)}"
+        )
+    polled_brief = "; ".join(poll_parts)
+    return Protection(
+        name="reply poll",
+        key=KEY_GMAIL_REPLY_POLL,
+        status=Status.ON,
+        value=value,
+        notes=tuple(notes),
+        brief=f"every {minutes} min; {mailboxes}, {polled_brief}",
+    )
+
+
+def _linkedin_reply_poll(session: Session, user: User, *, now: datetime) -> Protection:
+    """The LinkedIn inbox poll's row: when it last completed, and whether LinkedIn steps wait.
+
+    Always there, and ``on``: a poll reads the inbox on each fire of its schedule (P4-01).
+    The hold text below shows while LinkedIn is in use
+    (:func:`~netkeep.services.inbox_hold.linkedin_in_use`: a live campaign has a
+    LinkedIn step or a watched contact).
+
+    **One threshold** (#417). The inbox is stale past
+    :func:`~netkeep.services.inbox_hold.stale_after` (two intervals plus the
+    scheduler's longest retry), or with no complete poll yet, and while it is, LinkedIn
+    prefills and every step for a watched contact are held. The row says so as a note,
+    not a warning: the hold is the protection working, as the Gmail row's is. The note
+    names how the newest poll ended when it did not complete (an ``aborted`` one never
+    refreshes the inbox).
+
+    **A first poll by hand.** A scheduled poll starts nothing until one has completed, so
+    with no complete poll the value says to run ``netkeep linkedin inbox``; the hold
+    note says the same steps wait for it.
+
+    **A poll by hand after a forgotten owner** (#592). After **Forget inbox owner** a
+    scheduled poll starts nothing until one a person starts passes the owner check; a
+    note says so, and how to run it.
+
+    A first poll that could not read back to the earliest outreach it watches counted
+    as complete anyway, so replies older than what it read were never seen. That stays
+    a warning until a person checks them by hand and acknowledges it
+    (Settings, Posture, **Acknowledge**, or ``netkeep linkedin inbox-acknowledge``); no
+    poll clears it.
+    """
+    in_use = inbox_hold.linkedin_in_use(session, user)
+    short_of = short_first_poll(session, user)
+    last = inbox_hold.last_complete_poll(session, user, now=now)
+    notes: list[str] = []
+    actions: tuple[str, ...] = ()
+    if last is None:
+        value = (
+            "no complete poll yet; scheduled polls wait for a first one you run by hand:"
+            " `netkeep linkedin inbox`"
+        )
+    else:
+        value = f"last complete poll {last:%Y-%m-%d %H:%M UTC} ({_ago(now - last)})"
+        if in_use:
+            hours = inbox_hold.stale_after().total_seconds() / 3600
+            value += f"; holds past {hours:.1f} h"
+    if inbox_hold.is_stale(last, now=now, linkedin_live=in_use):
+        newest = latest_run(session, user, SyncRunKind.INBOX)
+        why = ""
+        if newest is not None and newest.status is not SyncRunStatus.COMPLETED:
+            why = f"; the newest poll ended {newest.stop_reason or newest.status.value}"
+            if newest.stop_reason == "owner_mismatch":
+                why += f" ({inbox_apply.owner_mismatch_fix(session, user)})"
+                if _forget_owner_applies(session, user):
+                    actions = (ACTION_FORGET_INBOX_OWNER,)
+        reason = inbox_hold.why_stale(session, user, now=now)
+        effect = (
+            "LinkedIn prefills, and every step, email included, for a contact you are"
+            " watching on LinkedIn (a conversation the poll has seen, or a prefill you"
+            " claimed), wait until a poll completes; nothing is skipped or failed"
+            if in_use
+            else "no LinkedIn step or watched contact waits on it now, but LinkedIn replies"
+            " are noticed only when a poll completes"
+        )
+        notes.append(f"{reason}{why}. {effect}")
+    if inbox_apply.owner_hold(session, user):
+        notes.append(
+            "the inbox owner was forgotten, so scheduled polls wait until a poll you run by"
+            " hand records it again: click Check inbox now on the LinkedIn page, or run"
+            " `netkeep linkedin inbox`, while Chrome is signed in to your LinkedIn account."
+            " A poll that sees no conversation records no owner, and the hold stays: poll"
+            " again once a conversation shows in your LinkedIn inbox"
+        )
+    warnings: tuple[str, ...] = ()
+    if short_of is not None:
+        warnings = (
+            f"the first LinkedIn inbox poll couldn't read back to {short_of:%Y-%m-%d};"
+            " check older LinkedIn replies by hand, then click Acknowledge in Settings,"
+            " Posture, or run `netkeep linkedin inbox-acknowledge`",
+        )
+    return Protection(
+        name="linkedin reply poll",
+        key=KEY_LINKEDIN_REPLY_POLL,
+        status=Status.ON,
+        value=value,
+        notes=tuple(notes),
+        warnings=warnings,
+        actions=actions,
+        fix=(
+            "Check your older LinkedIn replies by hand, then click **Acknowledge** under"
+            " Posture on the Settings page."
+            if warnings
+            else None
+        ),
+    )
+
+
+def _scheduled_runs_armed(session: Session, user: User, account_id: int) -> Protection:
+    """Whether ``netkeep serve`` may run LinkedIn jobs on its own (P2-10).
+
+    Disarmed is the default on every install, and it is the protection doing
+    its job: the scheduler keeps due times and fires nothing, and every run is
+    one a person started. Armed is a person's decision, made after a supervised
+    run (CP4), so it is in force either way and says which. A paused schedule
+    (#324) says so, and since when: armed or not, no new scheduled run starts.
+    """
+    account = find_account(session, user)
+    armed = scheduled_runs_armed(session, user, account_id)
+    pause = schedule_pause_state(session, user, account_id)
+    since = (
+        "paused (unreadable value)"
+        if pause.paused_at is None
+        else f"paused since {pause.paused_at:%Y-%m-%d %H:%M UTC}"
+    )
+    paused = (
+        f"; {since}: no new scheduled run starts until `netkeep linkedin schedule unpause`"
+        if pause.paused
+        else ""
+    )
+    if not armed or account is None or account.scheduled_runs_armed_at is None:
+        return Protection(
+            name="scheduled runs",
+            status=Status.ON,
+            value="disarmed: no LinkedIn job fires on its own; runs are the ones you start"
+            + paused,
+        )
+    if paused:
+        return Protection(
+            name="scheduled runs",
+            status=Status.ON,
+            value=f"armed since {account.scheduled_runs_armed_at:%Y-%m-%d %H:%M UTC}" + paused,
+        )
+    return Protection(
+        name="scheduled runs",
+        status=Status.ON,
+        value=(
+            f"armed since {account.scheduled_runs_armed_at:%Y-%m-%d %H:%M UTC}: due jobs fire"
+            " within the budgets and active hours (`netkeep linkedin schedule disarm`)"
+        ),
+    )
+
+
+def tripped_breakers(session: Session, user: User, account_id: int) -> frozenset[str]:
+    """The keys of the breaker rows tripped now, an unreadable one included (fail closed):
+    the rows that offer **Reset breaker** (#583), and what its endpoint compares with the
+    keys the person saw. Read-only."""
+    lost = route_breaker.answer_lost_states(session, user, account_id)
+    tripped = {
+        KEY_ROUTE_CHANGED_BREAKER: route_breaker.tripped(session, user, account_id),
+        KEY_ANSWER_LOST_LIMIT: any(state.tripped for state in lost.values()),
+        KEY_CONTACT_INFO_BREAKER: route_breaker.contact_info_tripped(session, user, account_id),
+        KEY_INBOX_BREAKER: route_breaker.inbox_tripped(session, user, account_id),
+        KEY_INBOX_OWNER_BREAKER: route_breaker.inbox_owner_tripped(session, user, account_id),
+    }
+    return frozenset(key for key, on in tripped.items() if on)
+
+
+def _forget_owner_applies(session: Session, user: User) -> bool:
+    """Whether **Forget inbox owner** can fix an owner mismatch (#583): a mailbox is
+    recorded, and the self contact has no LinkedIn ID, which
+    :func:`inbox_apply.owner_matches` would compare first. Read-only."""
+    return inbox_apply.owner_recorded(session, user) and not inbox_apply.self_contact_has_urn(
+        session, user
+    )
+
+
+def _breaker_rows(
+    session: Session, user: User, account_id: int, *, now: datetime
+) -> tuple[Protection, ...]:
+    """The five breaker rows, each with its key, and **Reset breaker** on the tripped ones
+    (#583). The inbox owner breaker's row also offers **Forget inbox owner** while it shows
+    a mismatch that forgetting can fix."""
+    tripped = tripped_breakers(session, user, account_id)
+    owner = route_breaker.inbox_owner_state(session, user, account_id)
+    rows = (
+        (KEY_ROUTE_CHANGED_BREAKER, _route_changed_breaker(session, user, account_id)),
+        (KEY_ANSWER_LOST_LIMIT, _answer_lost_limit(session, user, account_id)),
+        (KEY_CONTACT_INFO_BREAKER, _contact_info_breaker(session, user, account_id)),
+        (KEY_INBOX_BREAKER, _inbox_breaker(session, user, account_id, now=now)),
+        (KEY_INBOX_OWNER_BREAKER, _inbox_owner_breaker(session, user, account_id, now=now)),
+    )
+    forget = owner.readable and owner.count > 0 and _forget_owner_applies(session, user)
+    return tuple(
+        replace(
+            row,
+            key=key,
+            actions=(
+                *((ACTION_RESET_BREAKER,) if key in tripped else ()),
+                *(
+                    (ACTION_FORGET_INBOX_OWNER,)
+                    if key == KEY_INBOX_OWNER_BREAKER and forget
+                    else ()
+                ),
+            ),
+        )
+        for key, row in rows
+    )
+
+
+def _route_changed_breaker(session: Session, user: User, account_id: int) -> Protection:
+    """The route-changed breaker's count (#189 item 1): consecutive connections runs
+    (full or incremental, by hand or by schedule) that ended ``route_changed``.
+
+    A wall served in place at the connections url raises no heat and sets no
+    session flag (ADR 0006), so this breaker is the only thing that stops a
+    scheduled sync from loading it again at every interval once it reaches
+    :data:`~netkeep.services.route_breaker.THRESHOLD`. Tripped is the
+    protection *firing*, the same as heat over its skip threshold: still ``ON``,
+    still worth saying out loud.
+
+    A stored row that could not be read (#191 review, F7) is ``UNKNOWN``, the
+    same status a cookie jar or a browser probe that could not be read gets
+    above -- the honest answer is "unknown", even though
+    :meth:`~netkeep.services.route_breaker.BreakerState.tripped` treats it
+    as tripped for the scheduler's own sake (fail closed).
+    """
+    current = route_breaker.state(session, user, account_id)
+    since = f" (since {current.since:%Y-%m-%d %H:%M UTC})" if current.since is not None else ""
+    if not current.readable:
+        return Protection(
+            name="route-changed breaker",
+            status=Status.UNKNOWN,
+            value="stored state unreadable; treated as tripped",
+            warnings=(
+                "the route-changed breaker's stored state is corrupt and could not be"
+                " read. Scheduled connections runs are skipped until it is next written"
+                " (fail closed) -- run one by hand (`netkeep linkedin sync`) to check"
+                " and repair it, or clear it directly:"
+                f" {RESET_BREAKER_HOW}",
+            ),
+            fix=(
+                "Run `netkeep linkedin sync` by hand to check whether the page still changes,"
+                " or click **Reset breaker** under Posture on the Settings page."
+            ),
+        )
+    if current.count == 0:
+        return Protection(
+            name="route-changed breaker",
+            status=Status.ON,
+            value="clear: no consecutive connections runs have ended route_changed",
+        )
+    if not current.tripped:
+        return Protection(
+            name="route-changed breaker",
+            status=Status.ON,
+            value=(
+                f"{current.count} of {route_breaker.THRESHOLD} route_changed connections"
+                f" runs in a row{since}"
+            ),
+        )
+    return Protection(
+        name="route-changed breaker",
+        status=Status.ON,
+        value=f"tripped: {current.count} route_changed connections runs in a row{since}",
+        warnings=(
+            f"{current.count} connections runs in a row ended route_changed{since}:"
+            " scheduled connections runs are skipped until this clears. Run one by hand"
+            " (`netkeep linkedin sync`) to check whether the wall is still there, or"
+            f" clear it directly: {RESET_BREAKER_HOW}",
+        ),
+        fix=(
+            "Run `netkeep linkedin sync` by hand to check whether the page still changes,"
+            " or click **Reset breaker** under Posture on the Settings page."
+        ),
+    )
+
+
+def _answer_lost_limit(session: Session, user: User, account_id: int) -> Protection:
+    """The answer-lost limit's counts (#199): consecutive connections runs recorded
+    ``answer_lost`` -- the page's answers arrived with no body the browser could
+    hand over -- counted per run kind (full, incremental; #199 review M2). That
+    moves neither heat nor the route-changed breaker, so this is what stops
+    scheduled runs spending page views on it once either kind reaches
+    :data:`~netkeep.services.route_breaker.ANSWER_LOST_THRESHOLD`. Reported the
+    way :func:`_route_changed_breaker` reports its own streak, unreadable rows
+    included.
+    """
+    states = route_breaker.answer_lost_states(session, user, account_id)
+    unreadable = [kind.value for kind, state in states.items() if not state.readable]
+    if unreadable:
+        return Protection(
+            name="answer-lost limit",
+            status=Status.UNKNOWN,
+            value="stored state unreadable; treated as tripped",
+            warnings=(
+                f"the answer-lost limit's stored state ({', '.join(unreadable)}) is corrupt"
+                " and could not be read. Scheduled connections runs are skipped until it"
+                " is next written (fail closed) -- run one by hand (`netkeep linkedin"
+                " sync`) to check and repair it, or clear it directly:"
+                f" {RESET_BREAKER_HOW}",
+            ),
+            fix=(
+                "Run `netkeep linkedin sync` by hand to check whether the page still changes,"
+                " or click **Reset breaker** under Posture on the Settings page."
+            ),
+        )
+    if all(state.count == 0 for state in states.values()):
+        return Protection(
+            name="answer-lost limit",
+            status=Status.ON,
+            value="clear: no consecutive connections runs have ended answer_lost",
+        )
+
+    def since(state: route_breaker.BreakerState) -> str:
+        return "" if state.since is None else f" since {state.since:%Y-%m-%d %H:%M UTC}"
+
+    counts = "; ".join(
+        f"{kind.value} {state.count} of {route_breaker.ANSWER_LOST_THRESHOLD}{since(state)}"
+        for kind, state in states.items()
+    )
+    tripped = [kind.value for kind, state in states.items() if state.tripped]
+    if not tripped:
+        return Protection(
+            name="answer-lost limit",
+            status=Status.ON,
+            value=f"answer_lost runs in a row: {counts}",
+        )
+    return Protection(
+        name="answer-lost limit",
+        status=Status.ON,
+        value=f"tripped ({', '.join(tripped)}): answer_lost runs in a row: {counts}",
+        warnings=(
+            f"{route_breaker.ANSWER_LOST_THRESHOLD} or more {' and '.join(tripped)} runs in a"
+            f" row ended answer_lost ({counts}): the page's answers keep arriving"
+            " unreadable, and scheduled connections runs are skipped until this clears."
+            " Run one of that kind by hand (`netkeep linkedin sync`, with `--full` for a"
+            " full sync) to check whether they still do, or clear it directly:"
+            f" {RESET_BREAKER_HOW}",
+        ),
+        fix=(
+            "Run `netkeep linkedin sync` by hand to check whether the page still changes,"
+            " or click **Reset breaker** under Posture on the Settings page."
+        ),
+    )
+
+
+def _contact_info_breaker(session: Session, user: User, account_id: int) -> Protection:
+    """The Contact info breaker's count (#424): consecutive enrichment runs (by hand or
+    by schedule) that lost their Contact info answers: stopped ``answer_lost`` by the
+    #405 caps, or reached their end with every one of two or more clicks lost.
+    Reported the way :func:`_route_changed_breaker` reports its own streak, an
+    unreadable row included.
+    """
+    current = route_breaker.contact_info_state(session, user, account_id)
+    since = f" (since {current.since:%Y-%m-%d %H:%M UTC})" if current.since is not None else ""
+    if not current.readable:
+        return Protection(
+            name="Contact info breaker",
+            status=Status.UNKNOWN,
+            value="stored state unreadable; treated as tripped",
+            warnings=(
+                "the Contact info breaker's stored state is corrupt and could not be read."
+                " Scheduled enrichment runs are skipped until it is next written (fail"
+                " closed) -- run one by hand (`netkeep linkedin enrich`) to check and"
+                " repair it, or clear it directly:"
+                f" {RESET_BREAKER_HOW}",
+            ),
+            fix=(
+                "Run `netkeep linkedin enrich` by hand to check whether Contact info reads"
+                " again, or click **Reset breaker** under Posture on the Settings page."
+            ),
+        )
+    if current.count == 0:
+        return Protection(
+            name="Contact info breaker",
+            status=Status.ON,
+            value="clear: no consecutive enrichment runs have lost their Contact info answers",
+        )
+    if not current.tripped:
+        return Protection(
+            name="Contact info breaker",
+            status=Status.ON,
+            value=(
+                f"{current.count} of {route_breaker.CONTACT_INFO_THRESHOLD} enrichment runs"
+                f" in a row lost their Contact info answers{since}"
+            ),
+        )
+    return Protection(
+        name="Contact info breaker",
+        status=Status.ON,
+        value=(
+            f"tripped: {current.count} enrichment runs in a row lost their Contact info"
+            f" answers{since}"
+        ),
+        warnings=(
+            f"{current.count} enrichment runs in a row lost their Contact info answers, which"
+            f" arrived with no readable body{since}: scheduled enrichment runs are"
+            " skipped until this clears. Run one by hand (`netkeep linkedin enrich`) to"
+            " check whether Contact info reads again, or clear it directly:"
+            f" {RESET_BREAKER_HOW}",
+        ),
+        fix=(
+            "Run `netkeep linkedin enrich` by hand to check whether Contact info reads"
+            " again, or click **Reset breaker** under Posture on the Settings page."
+        ),
+    )
+
+
+def _inbox_breaker(session: Session, user: User, account_id: int, *, now: datetime) -> Protection:
+    """The inbox breaker's count (#437): consecutive LinkedIn inbox polls (by hand or by
+    schedule) that ended because the messaging page changed or could not be read. Its own
+    streak: connections syncs are never blocked by it. Reported the way
+    :func:`_contact_info_breaker` reports its own, an unreadable row included.
+
+    While it is tripped no scheduled poll refreshes the inbox, so #417's hold
+    (:func:`_linkedin_reply_poll`) keeps LinkedIn steps waiting once the inbox is stale.
+    The warning says so only while LinkedIn is in use and the inbox is stale now (the
+    hold actually applies), and that a manual poll that completes releases both.
+    """
+    current = route_breaker.inbox_state(session, user, account_id)
+    since = f" (since {current.since:%Y-%m-%d %H:%M UTC})" if current.since is not None else ""
+    release = (
+        "run `netkeep linkedin inbox` by hand: a poll that completes releases the breaker,"
+        f" or clear it directly: {RESET_BREAKER_HOW}"
+    )
+    held = inbox_hold.linkedin_in_use(session, user) and inbox_hold.stale(session, user, now=now)
+    waits = (
+        " LinkedIn prefills and steps for contacts you are watching are held until a poll"
+        " completes (the inbox hold, shown on the linkedin reply poll row)."
+        if held
+        else ""
+    )
+    if not current.readable:
+        return Protection(
+            name="Inbox breaker",
+            status=Status.UNKNOWN,
+            value="stored state unreadable; treated as tripped",
+            warnings=(
+                "the inbox breaker's stored state is corrupt and could not be read."
+                " Scheduled inbox polls are skipped until it is next written (fail closed)."
+                f"{waits} To check and repair it, {release}",
+            ),
+            fix=(
+                "Run `netkeep linkedin inbox` by hand to check whether the messaging page"
+                " reads again, or click **Reset breaker** under Posture on the Settings page."
+            ),
+        )
+    if current.count == 0:
+        return Protection(
+            name="Inbox breaker",
+            status=Status.ON,
+            value=(
+                "clear: no consecutive inbox polls ended because the messaging page changed"
+                " or could not be read"
+            ),
+        )
+    if not current.tripped:
+        return Protection(
+            name="Inbox breaker",
+            status=Status.ON,
+            value=(
+                f"{current.count} of {route_breaker.INBOX_THRESHOLD} unreadable inbox"
+                f" polls in a row{since}"
+            ),
+        )
+    return Protection(
+        name="Inbox breaker",
+        status=Status.ON,
+        value=f"tripped: {current.count} unreadable inbox polls in a row{since}",
+        warnings=(
+            f"{current.count} LinkedIn inbox polls in a row ended because the messaging page"
+            f" changed or could not be read{since}. Scheduled inbox polls are skipped,"
+            f" and connections syncs are unaffected.{waits} To check whether the page"
+            f" reads again, {release}",
+        ),
+        fix=(
+            "Run `netkeep linkedin inbox` by hand to check whether the messaging page"
+            " reads again, or click **Reset breaker** under Posture on the Settings page."
+        ),
+    )
+
+
+def _inbox_owner_breaker(
+    session: Session, user: User, account_id: int, *, now: datetime
+) -> Protection:
+    """The inbox owner breaker's count (#443): consecutive LinkedIn inbox polls that ended
+    ``owner_mismatch``. Its own streak, kept apart from :func:`_inbox_breaker` because the
+    fix differs: a poll that completes releases it, by hand, and the warning names the
+    right correction (:func:`inbox_apply.owner_mismatch_fix`)."""
+    current = route_breaker.inbox_owner_state(session, user, account_id)
+    name = "Inbox owner breaker"
+    since = f" (since {current.since:%Y-%m-%d %H:%M UTC})" if current.since is not None else ""
+    fix = inbox_apply.owner_mismatch_fix(session, user)
+    held = inbox_hold.linkedin_in_use(session, user) and inbox_hold.stale(session, user, now=now)
+    waits = (
+        " LinkedIn prefills and steps for contacts you are watching are held until a poll"
+        " completes (the inbox hold, shown on the linkedin reply poll row)."
+        if held
+        else ""
+    )
+    release = (
+        f"a poll that completes releases the breaker, or clear it directly: {RESET_BREAKER_HOW}"
+    )
+    if not current.readable:
+        return Protection(
+            name=name,
+            status=Status.UNKNOWN,
+            value="stored state unreadable; treated as tripped",
+            warnings=(
+                "the inbox owner breaker's stored state is corrupt and could not be read."
+                " Scheduled inbox polls are skipped until it is next written (fail closed)."
+                f"{waits} To check and repair it, run `netkeep linkedin inbox` by hand:"
+                f" {release}",
+            ),
+            fix=(
+                "Run `netkeep linkedin inbox` by hand, or click **Reset breaker** under"
+                " Posture on the Settings page."
+            ),
+        )
+    if current.count == 0:
+        return Protection(
+            name=name,
+            status=Status.ON,
+            value="clear: no consecutive inbox polls showed another mailbox than this account's",
+        )
+    if not current.tripped:
+        return Protection(
+            name=name,
+            status=Status.ON,
+            value=(
+                f"{current.count} of {route_breaker.INBOX_OWNER_THRESHOLD} inbox polls in a"
+                f" row showed another mailbox{since}"
+            ),
+        )
+    # With a LinkedIn ID on the self contact, resetting would only trip again on the next
+    # poll: only a poll that completes (after you sign back in) releases it.
+    then = (
+        "Then run `netkeep linkedin inbox` by hand: a poll that completes after you sign"
+        " back in releases the breaker."
+        if inbox_apply.self_contact_has_urn(session, user)
+        else f"Then {release}"
+    )
+    return Protection(
+        name=name,
+        status=Status.ON,
+        value=f"tripped: {current.count} inbox polls in a row showed another mailbox{since}",
+        warnings=(
+            f"{current.count} LinkedIn inbox polls in a row showed another mailbox than this"
+            f" account's{since}. Scheduled inbox polls are skipped; a poll you run by hand"
+            f" is not, and connections syncs are unaffected.{waits} To fix it: {fix}."
+            f" {then}",
+        ),
+        fix=(
+            "If Chrome is signed in to another LinkedIn account, sign back in to yours, then"
+            " run `netkeep linkedin inbox` by hand, which releases the breaker when it"
+            " completes; if it is already your account, no fix exists yet because netkeep"
+            " cannot edit your own contact's LinkedIn ID, so click **Reset breaker** under"
+            " Posture on the Settings page and expect the mismatch to return on the next poll."
+            if inbox_apply.self_contact_has_urn(session, user)
+            else "If Chrome is signed in to another LinkedIn account, sign back in to yours,"
+            " then run `netkeep linkedin inbox` by hand, which releases the breaker when it"
+            " completes; if you use another account on purpose, click **Forget inbox owner**"
+            " under Posture on the Settings page, then run `netkeep linkedin inbox` by hand."
+        ),
+    )
+
+
+def _network_aging(session: Session, user: User) -> Protection:
+    """Whether the last complete full sync aged the network, or refused to (spec 9.8, #169 E).
+
+    A refusal is the protection firing: a complete sync that would have aged too
+    much of the network ages nobody. But a refusal every week means removals are
+    never recorded at all, so the latest one is said out loud.
+    """
+    latest = latest_run(session, user, SyncRunKind.CONNECTIONS_FULL, status=SyncRunStatus.COMPLETED)
+    if latest is None:
+        return Protection(name="network aging", status=Status.ON, value="no complete full sync yet")
+    refused = run_view(latest).aging_refused
+    when = f"{latest.started_at:%Y-%m-%d}"
+    if refused is None:
+        return Protection(
+            name="network aging",
+            status=Status.ON,
+            value=f"the last complete full sync (run {latest.id}, {when}) aged as usual",
+        )
+    return Protection(
+        name="network aging",
+        status=Status.ON,
+        value=f"the last complete full sync (run {latest.id}, {when}) aged nobody",
+        warnings=(
+            f"the last complete full sync (run {latest.id}, {when}) refused to age anyone:"
+            f" {refused}. Removed connections are not being recorded while this holds;"
+            " check the run (`netkeep linkedin run " + str(latest.id) + "`)",
+        ),
+        fix=f"Run `netkeep linkedin run {latest.id}` to see why the sync refused to age anyone.",
+    )
+
+
+def _heat(posture_of_heat: HeatPosture, heat_settings: HeatSettings) -> Protection:
+    """Heat's level, its skip threshold, and whether it is holding runs back (spec 9.7)."""
+    warnings: list[str] = []
+    status = Status.ON
+    if heat_settings.per_block <= heat_math.COLD_EPSILON:
+        # At or under the cold cutoff, one block reads back as cold as soon as
+        # any time passes, and the residue is zeroed before the next block is
+        # added, so blocks never accumulate: as off as zero. `raise_heat` still
+        # stores the raise, so the row may say "last raised"; the score as read
+        # is what this warning is about.
+        status = Status.OFF
+        warnings.append(
+            f"linkedin.heat.per_block is {heat_settings.per_block:g}, at or under the"
+            f" {heat_math.COLD_EPSILON:g} below which the score reads as cold, so a"
+            " throttle or a checkpoint never raises the score as read: it is back to"
+            " 0.00 as soon as any time passes, even when a raise is recorded. Delays"
+            " never stretch, and the skip threshold can never be reached"
+        )
+    if heat_settings.half_life_hours < MIN_HALF_LIFE_HOURS:
+        status = Status.OFF
+        warnings.append(
+            f"linkedin.heat.half_life_hours is {heat_settings.half_life_hours:g}, under the"
+            f" {MIN_HALF_LIFE_HOURS:g} this report treats as a real cooldown: a throttle is"
+            " forgotten before the next burst starts. Appendix C's default is 6"
+        )
+    if heat_settings.skip_threshold <= 0:
+        warnings.append(
+            f"linkedin.heat.skip_threshold is {heat_settings.skip_threshold:g}, so every"
+            " browser job is skipped whatever the score. Nothing will ever run"
+        )
+    elif heat_settings.per_block > 0:
+        blocks = math.ceil(heat_settings.skip_threshold / heat_settings.per_block)
+        if blocks > MAX_BLOCKS_BEFORE_SKIP:
+            status = Status.OFF
+            warnings.append(
+                f"it takes {blocks} blocks at {heat_settings.per_block:g} each to reach a"
+                f" skip threshold of {heat_settings.skip_threshold:g}, past the"
+                f" {MAX_BLOCKS_BEFORE_SKIP} this report treats as a brake. Appendix C's"
+                " defaults need 3"
+            )
+    config_unsafe = bool(warnings)
+    if posture_of_heat.tripped:
+        resumes = (
+            f" until {posture_of_heat.resumes_at:%Y-%m-%d %H:%M UTC}"
+            if posture_of_heat.resumes_at is not None
+            else ""
+        )
+        warnings.append(
+            f"the score is {posture_of_heat.score:.2f}, at or above the skip threshold of"
+            f" {posture_of_heat.threshold:g}: browser jobs are skipped{resumes}"
+        )
+    if posture_of_heat.last_raised_at is not None:
+        raised = f"last raised {posture_of_heat.last_raised_at:%Y-%m-%d %H:%M UTC}"
+    elif posture_of_heat.cleared_at is not None:
+        raised = f"cleared {posture_of_heat.cleared_at:%Y-%m-%d %H:%M UTC}"
+    else:
+        raised = "never raised"
+    level = (
+        "score unreadable"
+        if not posture_of_heat.readable
+        else (
+            f"{posture_of_heat.score:.2f} of {posture_of_heat.threshold:g}"
+            f" (x{posture_of_heat.multiplier:.2f})"
+        )
+    )
+    fix = None
+    if config_unsafe:
+        fix = (
+            "Set the values under `[linkedin.heat]` in config.toml back to the ones in"
+            " `config.example.toml`."
+        )
+    elif posture_of_heat.tripped:
+        fix = (
+            "Wait for the score to cool, or click **Clear heat** on the LinkedIn page if you"
+            " are sure LinkedIn did not throttle you or show a checkpoint."
+        )
+    return Protection(
+        name="heat", status=status, value=f"{level}, {raised}", warnings=tuple(warnings), fix=fix
+    )
+
+
+# --- the numbers behind them -------------------------------------------------
+
+
+def heat_status(
+    session: Session, user: User, account_id: int, *, now: datetime, settings: LinkedInSettings
+) -> HeatPosture:
+    """Heat as the LinkedIn page shows it (spec 9.7), read the way this report reads it."""
+    return _heat_posture(session, user, account_id, now=now, heat_settings=settings.heat)
+
+
+def _heat_posture(
+    session: Session,
+    user: User,
+    account_id: int,
+    *,
+    now: datetime,
+    heat_settings: HeatSettings,
+) -> HeatPosture:
+    stored_state = heat_rows.state(session, user, account_id)
+    if heat_settings.half_life_hours <= 0:
+        # Nothing decays over a non-positive half-life, so there is no score to
+        # report. :func:`_heat` warns about the setting itself; this only keeps
+        # the report from raising on the way there.
+        return HeatPosture(
+            score=0.0,
+            threshold=heat_settings.skip_threshold,
+            multiplier=heat_math.COOLDOWN_FLOOR,
+            tripped=False,
+            last_raised_at=None if stored_state is None else stored_state.updated_at,
+            resumes_at=None,
+            readable=False,
+        )
+    score = heat_rows.read(session, user, account_id, now=now, settings=heat_settings)
+    tripped = heat_rows.should_skip(session, user, account_id, now=now, settings=heat_settings)
+    multiplier = heat_rows.cooldown_multiplier(
+        session, user, account_id, now=now, settings=heat_settings
+    )
+    # A stored score of exactly 0.0 is what `heat.clear()` writes and nothing
+    # else does: `raise_heat` adds a positive `per_block` to a non-negative
+    # score, so a raised row is never exactly zero even when the score it was
+    # raised from had decayed to a cold 0.0 (`COLD_EPSILON`). So the timestamp
+    # means "cleared", not "raised".
+    raised = stored_state is not None and stored_state.score > 0
+    return HeatPosture(
+        score=score,
+        threshold=heat_settings.skip_threshold,
+        multiplier=multiplier,
+        tripped=tripped,
+        last_raised_at=stored_state.updated_at if raised and stored_state else None,
+        resumes_at=_resumes_at(score, now, settings=heat_settings) if tripped else None,
+        cleared_at=None if stored_state is None or raised else stored_state.updated_at,
+    )
+
+
+def _scheduler_posture(
+    session: Session, user: User, account_id: int, *, gate: HeatGate, auto_send: bool = False
+) -> SchedulerPosture:
+    """What the scheduler is set to do, read through its own public functions.
+
+    ``stored_due`` is the scheduler's read-only accessor for the persisted due
+    time; nothing here reaches into its ``settings_kv`` keys or recomputes a
+    cadence, so a scheduler change cannot leave this report quietly describing
+    a schedule nobody runs.
+    """
+    jobs = tuple(
+        (
+            kind.value,
+            schedule.interval.total_seconds() / 3600,
+            stored_due(session, user, account_id, kind),
+        )
+        # Auto-send (ADR 0008) only while its flag is on: `serve` always schedules it,
+        # and each fire claims nothing while it is off (#598).
+        for kind, schedule in served_schedules(auto_send).items()
+    )
+    not_applicable = tuple(
+        (kind.value, NOT_SERVED_BECAUSE.get(kind, "no runner, so `netkeep serve` skips it"))
+        for kind in DEFAULT_SCHEDULES
+        if kind not in SERVED_SCHEDULES
+    )
+    return SchedulerPosture(
+        heat_skip=gate is not HEAT_SKIP_DISABLED,
+        catchup_minutes=(CATCHUP_MIN_MINUTES, CATCHUP_MAX_MINUTES),
+        job_kind_gap_minutes=MIN_JOB_KIND_GAP.total_seconds() / 60,
+        jobs=jobs,
+        not_applicable=not_applicable,
+    )
+
+
+def _resumes_at(score: float, now: datetime, *, settings: HeatSettings) -> datetime | None:
+    """When an exponentially decaying ``score`` falls back below the skip threshold.
+
+    Spec 9.7: the Settings page shows "when runs resume". Derived from the
+    decayed score rather than from the stored one, so it stays right however
+    long ago the last block was: halving every ``half_life_hours`` means the
+    score reaches ``threshold`` after ``half_life * log2(score / threshold)``
+    hours. ``None`` when the threshold is not a positive number, where the
+    question has no answer.
+    """
+    threshold = settings.skip_threshold
+    half_life = settings.half_life_hours
+    if threshold <= 0 or half_life <= 0 or score <= 0 or score < threshold:
+        return None
+    hours = half_life * math.log2(score / threshold)
+    return now + timedelta(hours=hours)
+
+
+def _todays_budget(
+    user: User,
+    *,
+    settings: Settings,
+    local_now: datetime,
+    multiplier: float,
+    spent: int,
+) -> TodaysBudget:
+    """The warm-up ramp, damped for the weekend, shrunk by heat -- in that order.
+
+    The order is spec 9.5's then spec 9.7's, and it is the order a run applies
+    them in: the ramp says what the day is worth, the weekend halves it, and
+    heat divides what is left. Computed by calling those modules rather than by
+    restating the arithmetic, so this cannot drift from what a run does.
+    """
+    budget = settings.linkedin.budget
+    cap = _profile_visit_cap(settings)
+    days = _days_since_install(user, local_now)
+    ramp = warmup_budget(days, cap, start=budget.warmup_start, step=budget.warmup_step)
+    after_weekend = apply_weekend_multiplier(
+        ramp, local_now.date(), multiplier=settings.linkedin.weekend_multiplier
+    )
+    after_heat = (
+        heat_math.shrink(after_weekend, max(multiplier, heat_math.COOLDOWN_FLOOR))
+        if after_weekend >= 1
+        else after_weekend
+    )
+    return TodaysBudget(ramp=ramp, after_weekend=after_weekend, after_heat=after_heat, spent=spent)
+
+
+def _profile_visit_cap(settings: Settings) -> int:
+    """The per-day profile-visit ceiling actually in force: config, clamped by spec 9.6."""
+    return min(
+        settings.linkedin.budget.profile_visits_per_day,
+        HARD_MAX_PER_DAY[ActionClass.PROFILE_VISITS],
+    )
+
+
+def _days_since_install(user: User, local_now: datetime) -> int:
+    """Local calendar days between the user row being created and today.
+
+    The user row is created at first start, so its ``created_at`` is the
+    install date. Counted in the account's own local days, not in 24-hour
+    blocks: the ramp steps at local midnight along with the budget counters it
+    feeds, and a run at 01:00 local on day 2 is on day 2's budget even though
+    fewer than 48 hours have passed.
+    """
+    created = user.created_at
+    if created.tzinfo is None or created.utcoffset() is None:
+        created = created.replace(tzinfo=UTC)
+    installed_local = created.astimezone(local_now.tzinfo)
+    return max((local_now.date() - installed_local.date()).days, 0)
+
+
+def session_row(
+    session: Session, user: User, account_id: int, *, now: datetime, settings: LinkedInSettings
+) -> Protection:
+    """The ``linkedin session`` row as the web page shows it, without the rest (#181).
+
+    Exactly the row :func:`posture` gives a report that ran no probe: what
+    the last ``netkeep preflight``, ``posture --probe`` or Check connection run
+    (#652) recorded, or the newest run that read LinkedIn, and the session flag
+    over both. Read-only; nothing here attaches to the browser.
+    """
+    zone, _ = _zone_of(settings.timezone)
+    return _linkedin_session(
+        None,
+        evidence=last_session_evidence(session, user, account_id),
+        flag=session_flag(session, user),
+        now=now,
+        zone=zone,
+    )
+
+
+def probe_row(probe: SessionProbe) -> Protection:
+    """The ``linkedin session`` row from a live probe alone, as ``posture --probe`` gives
+    it: what a Check connection run (#652) records on its run. Pure; it reads nothing."""
+    return _linkedin_session(probe, now=datetime.now(UTC), zone=ZoneInfo("UTC"))
+
+
+def _zone_of(name: str) -> tuple[ZoneInfo, str | None]:
+    """``name`` as a zone, or UTC with the warning that says so."""
+    try:
+        return ZoneInfo(name), None
+    except (ZoneInfoNotFoundError, ValueError):
+        return ZoneInfo("UTC"), (
+            f"linkedin.timezone is {name!r}, which is not a zone this machine knows."
+            " Everything below is read in UTC instead, so the active window and the"
+            " budget day are both in the wrong place"
+        )
+
+
+def _parse_window(active_hours: tuple[str, str]) -> tuple[time, time] | None:
+    try:
+        return time.fromisoformat(active_hours[0]), time.fromisoformat(active_hours[1])
+    except (ValueError, IndexError):
+        return None
+
+
+def _host_of(url: str) -> str | None:
+    try:
+        return urlsplit(url).hostname
+    except ValueError:
+        return None
+
+
+# --- rendering ----------------------------------------------------------------
+# Separate from the report on purpose: `netkeep posture` prints this table,
+# and an API can serve the dataclasses above as JSON (`GET /linkedin/heat`
+# serves `HeatPosture`'s fields; a posture endpoint is P2-12's). Neither shape is
+# derived from the other, and adding a field to the report never silently
+# changes what the CLI prints.
+
+
+def render(report: PostureReport) -> str:
+    """The report as a person reads it: a table, the day's arithmetic, warnings, gaps, verdict."""
+    lines = [
+        f"netkeep posture at {report.checked_at:%Y-%m-%d %H:%M UTC}"
+        f" ({report.local_time:%H:%M} {report.timezone})",
+        "",
+    ]
+    rows = [(p.name, p.status.value, p.value) for p in report.protections]
+    lines.extend(_table(("PROTECTION", "STATE", "DETAIL"), rows).splitlines())
+    lines.append("")
+    today = report.today
+    lines.append(
+        f"today's profile-visit budget: {today.after_heat}"
+        f" (warm-up {today.ramp} -> weekend {today.after_weekend} -> heat {today.after_heat}),"
+        f" {today.spent} spent, {today.remaining} left"
+    )
+    lines.append("")
+    lines.extend(_scheduler_lines(report.scheduler))
+    if report.warnings:
+        lines.append("")
+        for warning in report.warnings:
+            lines.extend(_wrapped(warning, first="warning: ", rest="         "))
+    lines.extend(_fix_lines(report))
+    if report.notes:
+        lines.append("")
+        for note in report.notes:
+            lines.extend(_wrapped(note, first="note: ", rest="      "))
+    if report.gaps:
+        lines.append("")
+        lines.append("not covered by this report:")
+        for gap in report.gaps:
+            lines.extend(_wrapped(gap, first="  - ", rest="    "))
+    lines.append("")
+    lines.append(verdict(report))
+    return "".join(f"{line}\n" for line in lines)
+
+
+def render_summary(report: PostureReport) -> str:
+    """The report in short (#340): one line per protection, every warning, the verdict.
+
+    Each row shows its state and :attr:`Protection.summary`, plus a count of its
+    notes when it has any. Warnings always print in full, because they are what
+    makes the verdict "NOT clear" and a summary that hid them would read as
+    clean. Everything else -- each row's full detail, the notes themselves,
+    today's budget arithmetic, the schedule, and the gaps -- is in
+    :func:`render`, which ``netkeep posture --details`` prints.
+    """
+    lines = [
+        f"netkeep posture at {report.checked_at:%Y-%m-%d %H:%M UTC}"
+        f" ({report.local_time:%H:%M} {report.timezone})",
+        "",
+    ]
+    rows = [(p.name, p.status.value, _summary_cell(p)) for p in report.protections]
+    lines.extend(_table(("PROTECTION", "STATE", "SUMMARY"), rows).splitlines())
+    if report.warnings:
+        lines.append("")
+        for warning in report.warnings:
+            lines.extend(_wrapped(warning, first="warning: ", rest="         "))
+    lines.extend(_fix_lines(report))
+    lines.append("")
+    hidden = []
+    if report.notes:
+        hidden.append(_plural(len(report.notes), "note"))
+    hidden.append("each row's detail, the schedule, and what this report cannot see")
+    # The command leads, so wrapping never splits it across two lines.
+    lines.extend(
+        _wrapped(f"run `netkeep posture --details` for {', '.join(hidden)}", first="", rest="")
+    )
+    lines.append("")
+    lines.append(verdict(report))
+    return "".join(f"{line}\n" for line in lines)
+
+
+def _fix_lines(report: PostureReport) -> list[str]:
+    """What to do about each row that has a fix (#654), under the warnings, one line each."""
+    rows = [p for p in report.protections if p.fix is not None]
+    if not rows:
+        return []
+    lines = [""]
+    for row in rows:
+        text = (row.fix or "").replace("**", "")
+        lines.extend(_wrapped(f"{row.name}: {text}", first="fix: ", rest="     "))
+    return lines
+
+
+def _summary_cell(protection: Protection) -> str:
+    """A row's summary, with a count of the notes the summary leaves out."""
+    if not protection.notes:
+        return protection.summary
+    return f"{protection.summary} ({_plural(len(protection.notes), 'note')})"
+
+
+def _scheduler_lines(scheduler: SchedulerPosture) -> list[str]:
+    """The scheduler's own settings, and when each job kind next fires."""
+    low, high = scheduler.catchup_minutes
+    skip = {kind for kind, _ in scheduler.not_applicable}
+    rows = [
+        (
+            kind,
+            f"every {_hours(interval)}",
+            "not applicable"
+            if kind in skip
+            else "not scheduled"
+            if due is None
+            else f"{due:%Y-%m-%d %H:%M UTC}",
+        )
+        for kind, interval, due in scheduler.jobs
+    ]
+    lines = _table(("JOB", "CADENCE", "NEXT DUE"), rows).splitlines()
+    lines.append(
+        f"a run missed while the process was down happens once, {low:g} to {high:g} minutes"
+        f" after it notices; job kinds are kept {scheduler.job_kind_gap_minutes:g} minutes apart"
+    )
+    return lines
+
+
+def _hours(interval: float) -> str:
+    return f"{interval / 24:g} d" if interval >= 24 else f"{interval:g} h"
+
+
+def verdict(report: PostureReport) -> str:
+    """What this report is entitled to claim, which is narrower than "you are safe".
+
+    The report reads configuration and counters. It cannot see whether the code
+    that will do the work calls the enforcement every time it should; it checks only
+    that a live caller exists (:data:`UNENFORCED_TODAY`, stated in :data:`GAPS`).
+    So a clean report says *nothing is misconfigured*, which is
+    true and worth a great deal, rather than *every protection is in force*,
+    which would be the same sentence on the day a protection works and the day
+    it was never wired.
+    """
+    total = len(report.protections)
+    if report.ok:
+        return f"nothing is misconfigured: {total} protections, none of them disabled"
+    off = len(report.disabled)
+    warned = _plural(len(report.warnings), "warning")
+    if off:
+        verb = "is" if off == 1 else "are"
+        return f"NOT clear: {off} of {total} protections {verb} not in force, {warned} in all"
+    verb = "needs" if len(report.warnings) == 1 else "need"
+    return f"NOT clear: no protection is disabled, but {warned} {verb} reading"
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
+def _wrapped(text: str, *, first: str, rest: str, width: int = 88) -> list[str]:
+    """``text`` wrapped to ``width``, with a label on the first line and a hanging indent.
+
+    A report whose warnings run off the side of a terminal is a report nobody
+    reads to the end, and the end is where the instruction usually is.
+    """
+    return textwrap.wrap(text, width=width, initial_indent=first, subsequent_indent=rest) or [
+        first.rstrip()
+    ]
+
+
+def _table(headers: tuple[str, ...], rows: Sequence[tuple[str, ...]]) -> str:
+    """Left-aligned columns, two spaces between, one line per row."""
+    if not rows:
+        return ""
+    widths = [max(len(cell) for cell in column) for column in zip(headers, *rows, strict=True)]
+    lines = []
+    for row in (headers, *rows):
+        cells = (cell.ljust(width) for cell, width in zip(row, widths, strict=True))
+        lines.append("  ".join(cells).rstrip())
+    return "".join(f"{line}\n" for line in lines)

@@ -1,6 +1,6 @@
-"""netkeeper.services.runs, the arm gate, retry parking, and the pinned constants (P2-10).
+"""netkeep.services.runs, the arm gate, retry parking, and the pinned constants (P2-10).
 
-The end-to-end property -- ``netkeeper serve`` never reaches the browser while
+The end-to-end property -- ``netkeep serve`` never reaches the browser while
 disarmed -- is ``tests/test_runs_serve.py``. This module pins each of the three
 checks behind it on its own, so a mutation of any one layer fails a test even
 while the other two still hold: the scheduler's arm gate, ``create_run``'s
@@ -18,20 +18,20 @@ import factories
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.config import Settings
-from netkeeper.db import session_scope
-from netkeeper.linkedin import enrich
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.models import SyncRun, SyncRunKind, SyncRunStatus, SyncRunTrigger, User
-from netkeeper.services import connections_sync, runs, scheduler
-from netkeeper.services.linkedin_accounts import (
+from netkeep.config import Settings
+from netkeep.db import session_scope
+from netkeep.linkedin import enrich
+from netkeep.linkedin.classify import Outcome
+from netkeep.models import SyncRun, SyncRunKind, SyncRunStatus, SyncRunTrigger, User
+from netkeep.services import connections_sync, runs, scheduler
+from netkeep.services.linkedin_accounts import (
     arm_scheduled_runs,
     disarm_scheduled_runs,
     ensure_account,
     scheduled_runs_armed,
 )
-from netkeeper.services.linkedin_session import flag_session
-from netkeeper.services.scheduled_runs import INBOX_RUN_KIND, RUN_KIND
+from netkeep.services.linkedin_session import flag_session
+from netkeep.services.scheduled_runs import INBOX_RUN_KIND, RUN_KIND
 
 NOW = datetime(2026, 9, 23, 15, 0, tzinfo=UTC)
 ALL_DAY = (time(0, 0), time(23, 59))
@@ -928,9 +928,9 @@ async def test_a_scheduled_full_sync_that_lost_answers_is_not_done(
 ) -> None:
     """#200: the weekly full sync is not done while its run lost any answers; an
     incremental sync, which never ages anyone, keeps its cadence."""
-    from netkeeper.services.events import EventBus
-    from netkeeper.services.scheduled_runs import serve_registry
-    from netkeeper.services.tasks import TaskRunner
+    from netkeep.services.events import EventBus
+    from netkeep.services.scheduled_runs import serve_registry
+    from netkeep.services.tasks import TaskRunner
 
     class Finishes:
         async def execute(self, run_id: int, user_id: int) -> runs.RunOutcome:
@@ -976,7 +976,7 @@ def test_only_the_busy_heartbeat_warning_is_dropped() -> None:
     about it is noise. Any other warning still goes through."""
     import logging
 
-    from netkeeper.services.scheduled_runs import _BusyHeartbeat
+    from netkeep.services.scheduled_runs import _BusyHeartbeat
 
     def record(message: str) -> logging.LogRecord:
         return logging.LogRecord(
@@ -1076,7 +1076,7 @@ def test_cancelling_a_live_run_only_flags_it(writer: Session, user: User) -> Non
 
 def test_a_lock_that_cannot_be_read_counts_as_held(monkeypatch: pytest.MonkeyPatch) -> None:
     """X8: a run nobody can prove is over is left alone, never failed under its process."""
-    from netkeeper.linkedin import activity_lock
+    from netkeep.linkedin import activity_lock
 
     def unreadable(*args: object, **kwargs: object) -> None:
         raise PermissionError("locks/ is not readable")
@@ -1089,8 +1089,8 @@ def test_a_lock_that_cannot_be_read_counts_as_held(monkeypatch: pytest.MonkeyPat
 def test_the_legacy_lock_counts_for_the_local_account_only(writer: Session) -> None:
     """X7, F10: an older process holding ``browser-local.lock`` is running the local
     user's account, whatever its id; another account is not held by it."""
-    from netkeeper.linkedin import activity_lock
-    from netkeeper.models import UserKind
+    from netkeep.linkedin import activity_lock
+    from netkeep.models import UserKind
 
     hosted = factories.make_user(writer, kind=UserKind.HOSTED)
     other_account = ensure_account(writer, hosted).id  # id 1
@@ -1117,9 +1117,9 @@ async def test_a_scheduled_fire_behind_a_manual_run_parks_a_retry(
 ) -> None:
     """X12: the account's manual run is still going, so the scheduled one is retried
     later rather than dropped until its next interval."""
-    from netkeeper.services.events import EventBus
-    from netkeeper.services.scheduled_runs import serve_registry
-    from netkeeper.services.tasks import TaskRunner
+    from netkeep.services.events import EventBus
+    from netkeep.services.scheduled_runs import serve_registry
+    from netkeep.services.tasks import TaskRunner
 
     class NeverCalled:
         async def execute(self, run_id: int, user_id: int) -> runs.RunOutcome:
@@ -1145,7 +1145,7 @@ async def test_a_scheduled_fire_behind_a_manual_run_parks_a_retry(
 
 def test_posture_reports_armed_and_disarmed(writer: Session, user: User) -> None:
     """X17: the scheduled-runs row says which, and says it the whole way."""
-    from netkeeper.services.posture import posture
+    from netkeep.services.posture import posture
 
     account = ensure_account(writer, user).id
 

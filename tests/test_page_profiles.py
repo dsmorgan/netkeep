@@ -1,8 +1,8 @@
 """PageProfiles: profiles and contact info from the page's own answers, with one click (#190).
 
-Driven through the real :class:`~netkeeper.linkedin.browser.BrowserRun` (and its one
-click, :meth:`~netkeeper.linkedin.browser.BrowserRun.click_contact_info`) and the real
-:func:`~netkeeper.linkedin.enrich.run_enrichment` over :mod:`profile_site`'s fake pages,
+Driven through the real :class:`~netkeep.linkedin.browser.BrowserRun` (and its one
+click, :meth:`~netkeep.linkedin.browser.BrowserRun.click_contact_info`) and the real
+:func:`~netkeep.linkedin.enrich.run_enrichment` over :mod:`profile_site`'s fake pages,
 which "receive" a profile on navigation, "send" lazy cards on a scroll, and "send" the
 overlay's request when the one Contact info control is clicked.
 
@@ -49,10 +49,10 @@ from profile_site import (
 from run_fakes import fake_provider
 from voyager_pages import PEOPLE, Person
 
-from netkeeper.linkedin import browser as browser_module
-from netkeeper.linkedin.browser import SCROLL_CANCEL_SLICE_S, BrowserUnavailable
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.enrich import (
+from netkeep.linkedin import browser as browser_module
+from netkeep.linkedin.browser import SCROLL_CANCEL_SLICE_S, BrowserUnavailable
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.enrich import (
     MAX_UNREADABLE_IN_A_ROW,
     EnrichJobSpec,
     EnrichResult,
@@ -63,18 +63,18 @@ from netkeeper.linkedin.enrich import (
     UnreadableVisit,
     run_enrichment,
 )
-from netkeeper.linkedin.flagship import CONTACT_DETAILS_SCREEN_ID, NAVIGATION_PATH
-from netkeeper.linkedin.flagship_profile import COMPONENT_PATH
-from netkeeper.linkedin.flight import is_whole, parse_flight
-from netkeeper.linkedin.observe import (
+from netkeep.linkedin.flagship import CONTACT_DETAILS_SCREEN_ID, NAVIGATION_PATH
+from netkeep.linkedin.flagship_profile import COMPONENT_PATH
+from netkeep.linkedin.flight import is_whole, parse_flight
+from netkeep.linkedin.observe import (
     ObservationFailed,
     ObservationLimits,
     ResponseMatch,
     ResponseRule,
 )
-from netkeeper.linkedin.pacing import ScrollPlan, ScrollStep, human_delay, plan_enrichment
-from netkeeper.linkedin.page_profiles import CLICK_REFUSAL_CAUSES, PageProfiles, _refusal_cause
-from netkeeper.linkedin.voyager import RouteChanged
+from netkeep.linkedin.pacing import ScrollPlan, ScrollStep, human_delay, plan_enrichment
+from netkeep.linkedin.page_profiles import CLICK_REFUSAL_CAUSES, PageProfiles, _refusal_cause
+from netkeep.linkedin.voyager import RouteChanged
 
 NOW = datetime(2026, 9, 24, 15, 0, tzinfo=UTC)
 PRIYA, MATEO, HANA, TOMASZ = PEOPLE[0], PEOPLE[1], PEOPLE[2], PEOPLE[3]
@@ -197,7 +197,7 @@ async def test_the_one_click_is_the_only_input_besides_navigation_and_the_wheel(
     assert out.result.clicks == 1
     assert tab.evaluate_calls == []
     assert tab.goto_calls == [f"{ORIGIN}/in/{PRIYA.slug}/"]
-    # The page's own requests, and nothing netkeeper wrote: the document, then the
+    # The page's own requests, and nothing netkeep wrote: the document, then the
     # overlay the click made the page ask for.
     assert [(m, p) for m, p, _ in site.requests] == [
         ("GET", f"/in/{PRIYA.slug}/"),
@@ -557,7 +557,7 @@ def _wheels_seen(site: ProfileSite, *, up: bool = False) -> bool:
 async def test_a_cancel_during_the_dwell_stops_the_run_before_any_read_or_click(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     site = ProfileSite([ProfilePage(PRIYA), ProfilePage(MATEO)])
     slices: list[float] = []
 
@@ -642,7 +642,7 @@ async def test_a_profile_screen_that_cannot_be_read_is_an_unreadable_visit(
     landing: str, caplog: pytest.LogCaptureFixture
 ) -> None:
     """The next person is still visited: one lost answer is one unreadable profile."""
-    caplog.set_level(logging.DEBUG, logger="netkeeper")
+    caplog.set_level(logging.DEBUG, logger="netkeep")
     site = ProfileSite([ProfilePage(PRIYA, landing=landing, screen_error=LOST), ProfilePage(MATEO)])
     out = await visit(site, [target(PRIYA), target(MATEO)])
     assert out.result.reason is StopReason.END_OF_PLAN
@@ -719,7 +719,7 @@ async def test_a_lost_contact_info_answer_saves_the_profile_without_it_and_no_se
     """#405: a lost overlay body is not a changed route. The profile read whole is
     handed over without contact info, recorded as deferred, and counts toward no
     unreadable limit."""
-    caplog.set_level(logging.DEBUG, logger="netkeeper")
+    caplog.set_level(logging.DEBUG, logger="netkeep")
     site = ProfileSite([ProfilePage(PRIYA, overlay_error=LOST), ProfilePage(MATEO)])
     out = await visit(site, [target(PRIYA), target(MATEO)])
     assert out.result.reason is StopReason.END_OF_PLAN
@@ -785,7 +785,7 @@ async def test_a_profile_navigation_that_times_out_is_an_unreadable_visit(
 ) -> None:
     """The document broke off and the page never loaded: one unreadable visit, not
     tried again, and the next person is visited and clicked."""
-    caplog.set_level(logging.DEBUG, logger="netkeeper")
+    caplog.set_level(logging.DEBUG, logger="netkeep")
     site = ProfileSite([ProfilePage(PRIYA, goto_error=navigation_timeout()), ProfilePage(MATEO)])
     out = await visit(site, [target(PRIYA), target(MATEO)])
     assert out.result.reason is StopReason.END_OF_PLAN
@@ -972,7 +972,7 @@ async def test_a_later_visit_never_inherits_an_earlier_lost_screen() -> None:
 
 
 def test_the_navigation_timeout_cause_is_pinned() -> None:
-    from netkeeper.linkedin import page_profiles
+    from netkeep.linkedin import page_profiles
 
     assert page_profiles.NAVIGATION_TIMED_OUT == "navigation timed out"
 
@@ -1362,7 +1362,7 @@ async def test_a_click_on_a_tab_that_is_not_the_observed_one_ends_the_run(
 
 async def test_the_top_card_logs_once_per_visit(caplog: pytest.LogCaptureFixture) -> None:
     """The id is read before the lazy cards are sorted; the top card is read once."""
-    caplog.set_level(logging.DEBUG, logger="netkeeper")
+    caplog.set_level(logging.DEBUG, logger="netkeep")
     screen = profile_payload(PRIYA, location=LOCATION, extra_top_runs=["Some Short Run"])
     site = ProfileSite([ProfilePage(PRIYA, screen=screen)])
     out = await visit(site, [target(PRIYA)])
@@ -1412,7 +1412,7 @@ def _lazy_page(how: str, **extra: Any) -> ProfilePage:
 async def test_a_lost_lazy_card_reads_from_its_whole_streamed_copy(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    caplog.set_level(logging.DEBUG, logger="netkeeper")
+    caplog.set_level(logging.DEBUG, logger="netkeep")
     site = ProfileSite([_lazy_page("whole")], tap=True)
     out = await visit(site, [target(PRIYA)])
     (harvest,) = out.harvests
@@ -1429,7 +1429,7 @@ async def test_a_lost_lazy_card_reads_from_its_whole_streamed_copy(
 async def test_a_lost_lazy_card_without_a_whole_copy_is_still_skipped(
     how: str, caplog: pytest.LogCaptureFixture
 ) -> None:
-    caplog.set_level(logging.DEBUG, logger="netkeeper")
+    caplog.set_level(logging.DEBUG, logger="netkeep")
     site = ProfileSite([_lazy_page(how)], tap=True)
     out = await visit(site, [target(PRIYA)])
     (harvest,) = out.harvests
@@ -1676,7 +1676,7 @@ async def test_each_unreadable_path_records_its_own_cause(
 ) -> None:
     """#405: the run's record says which path made the visit unreadable, by a fixed code
     and the contact's reference, and the log line says the same; nothing from the page."""
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     site = ProfileSite([page, ProfilePage(MATEO)])
     out = await visit(
         site, [target(PRIYA, urn=MATEO.urn if page.silently_to else None), target(MATEO)]

@@ -75,7 +75,7 @@ describe('useServerEvent', () => {
   })
 
   it('unwraps the real envelope the backend sends, not just the fake helper', () => {
-    // Built by hand from Event.to_dict() (netkeeper/services/events.py), pinned by
+    // Built by hand from Event.to_dict() (netkeep/services/events.py), pinned by
     // tests/test_web_events.py::test_published_events_arrive_on_the_stream — not
     // routed through FakeEventSource.emit's own wrapping, so a bug shared by both
     // that wrapping and the hook's unwrap could not hide here. This is the case

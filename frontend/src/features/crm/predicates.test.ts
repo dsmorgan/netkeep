@@ -7,7 +7,7 @@
  * defines onto that op's schema, so it is the authority for "what predicates
  * exist" and for "what each one may carry".
  *
- * These tests read it directly. A predicate added to `netkeeper/crm/filters.py`
+ * These tests read it directly. A predicate added to `netkeep/crm/filters.py`
  * fails the first test until the catalog carries it; a predicate whose shape
  * changed fails the last one until the builder's node matches again.
  */
@@ -37,7 +37,7 @@ interface JsonSchema {
   minItems?: number
   minimum?: number
   discriminator?: { mapping: Record<string, string> }
-  'x-netkeeper-fields'?: Record<
+  'x-netkeep-fields'?: Record<
     string,
     { kind: string; label: string; ops: string[]; values?: string[] }
   >
@@ -191,7 +191,7 @@ describe('the predicate catalog and the filter language', () => {
 })
 
 describe('the field catalog', () => {
-  const published = schema('FilterTree-Input')['x-netkeeper-fields']
+  const published = schema('FilterTree-Input')['x-netkeep-fields']
 
   it('matches the fields the backend publishes for the builder', () => {
     expect(published).toBeDefined()

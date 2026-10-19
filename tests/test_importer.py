@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from netkeeper.crm.importer import (
+from netkeep.crm.importer import (
     FIELD_SIZE_LIMIT,
     EmptyFile,
     ImportField,
@@ -24,7 +24,7 @@ from netkeeper.crm.importer import (
     parse_date,
     resolve_mapping,
 )
-from netkeeper.models import ContactSource
+from netkeep.models import ContactSource
 
 FIXTURES = Path(__file__).parent / "fixtures" / "csv"
 LINKEDHELPER = (FIXTURES / "linkedhelper-sample.csv").read_text()

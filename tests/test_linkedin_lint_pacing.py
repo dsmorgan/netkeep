@@ -1,15 +1,15 @@
 """LinkedIn lint (P4-11, #377) agrees with the typing plan (P4-10, #376).
 
 The prefill types a rendered LinkedIn message with
-:func:`netkeeper.linkedin.pacing.typing_plan`. Whatever the plan refuses, lint must
+:func:`netkeep.linkedin.pacing.typing_plan`. Whatever the plan refuses, lint must
 already have flagged as an error, so no step whose messages lint passes can fail at
 send time, and lint must not flag a character the plan types.
 
 The character rules agree exactly, for every seed: a newline or an untypable cluster
 is a lint error if and only if the plan refuses the text for it. The length rule
 can't agree exactly, because the plan's duration is random: lint compares the
-*expected* duration with :data:`~netkeeper.linkedin.pacing.TYPING_LINT_SECONDS`, a
-margin under the plan's :data:`~netkeeper.linkedin.pacing.MAX_TYPING_SECONDS`. So a
+*expected* duration with :data:`~netkeep.linkedin.pacing.TYPING_LINT_SECONDS`, a
+margin under the plan's :data:`~netkeep.linkedin.pacing.MAX_TYPING_SECONDS`. So a
 text lint passes never draws a plan over the ceiling, and a text far over always
 does; between the two, lint is the stricter.
 """
@@ -21,8 +21,8 @@ from datetime import date
 
 import pytest
 
-from netkeeper.campaigns import render as render_module
-from netkeeper.campaigns.render import (
+from netkeep.campaigns import render as render_module
+from netkeep.campaigns.render import (
     LintIssue,
     LintRule,
     MergeValues,
@@ -30,7 +30,7 @@ from netkeeper.campaigns.render import (
     lint,
     render,
 )
-from netkeeper.linkedin.pacing import (
+from netkeep.linkedin.pacing import (
     LINE_BREAK_CHARS,
     MAX_TYPING_SECONDS,
     NEWLINE_CHARS,
@@ -46,7 +46,7 @@ from netkeeper.linkedin.pacing import (
     typing_length_warning,
     typing_plan,
 )
-from netkeeper.models import TemplateChannel
+from netkeep.models import TemplateChannel
 
 LINKEDIN = TemplateChannel.LINKEDIN
 TODAY = date(2026, 10, 4)

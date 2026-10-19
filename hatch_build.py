@@ -1,6 +1,6 @@
 """Build hook: ship the built frontend inside the wheel and sdist (#596).
 
-A wheel or sdist without ``frontend/dist`` would install a netkeeper whose page says
+A wheel or sdist without ``frontend/dist`` would install a netkeep whose page says
 "The frontend is not built", so a missing build fails here instead. An editable install
 (``make install``) is exempt: it serves ``frontend/dist`` from the checkout.
 """
@@ -13,7 +13,7 @@ from typing import Any
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
 UI_SOURCE = "frontend/dist"
-UI_TARGET = "netkeeper/web/ui"
+UI_TARGET = "netkeep/web/ui"
 
 
 class UiBuildHook(BuildHookInterface):

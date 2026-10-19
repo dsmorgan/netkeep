@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { detectBrowser } from '@/lib/browser'
 
-export const BROWSER_BANNER_KEY = 'netkeeper.chromeBannerDismissed'
+export const BROWSER_BANNER_KEY = 'netkeep.chromeBannerDismissed'
 
 function wasDismissed(): boolean {
   try {
@@ -26,7 +26,7 @@ function remember(): void {
  * Tells you the UI is built and tested for Google Chrome (#549) when this tab is
  * another browser. It never blocks anything, and **Dismiss** is remembered per
  * browser. Detection only reads the browser's own identity; it never touches the
- * Chrome profile netkeeper uses for LinkedIn.
+ * Chrome profile netkeep uses for LinkedIn.
  */
 export function BrowserBanner() {
   const [dismissed, setDismissed] = useState(wasDismissed)
@@ -36,7 +36,7 @@ export function BrowserBanner() {
     <div role="status" className="nk-glass mb-4 flex flex-wrap items-start gap-3 px-4 py-3 text-sm">
       <Info className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
       <p className="min-w-0 flex-1">
-        netkeeper is built and tested for Google Chrome. Other browsers may work, but they are not
+        netkeep is built and tested for Google Chrome. Other browsers may work, but they are not
         supported.
       </p>
       <Button

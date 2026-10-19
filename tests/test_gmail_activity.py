@@ -14,9 +14,9 @@ from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from netkeeper.config import Settings
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.config import Settings
+from netkeep.db import session_scope
+from netkeep.models import (
     Mailbox,
     MessageDirection,
     MessageStatus,
@@ -24,10 +24,10 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.models.base import utcnow
-from netkeeper.services import gmail_activity as service
-from netkeeper.services import mailboxes as mailbox_service
-from netkeeper.services.mailboxes import MAILBOX_HARD_MAX_PER_DAY
+from netkeep.models.base import utcnow
+from netkeep.services import gmail_activity as service
+from netkeep.services import mailboxes as mailbox_service
+from netkeep.services.mailboxes import MAILBOX_HARD_MAX_PER_DAY
 
 
 async def test_a_user_who_never_connected_sees_nothing(client: httpx.AsyncClient) -> None:
@@ -167,9 +167,9 @@ def test_a_campaigns_lower_cap_is_named(session: Session) -> None:
 
 
 def test_the_backend_report_keys_the_four_gmail_posture_rows(session: Session) -> None:
-    from netkeeper.models.base import utcnow as now_fn
-    from netkeeper.services import posture
-    from netkeeper.services.linkedin_accounts import account_id_for
+    from netkeep.models.base import utcnow as now_fn
+    from netkeep.services import posture
+    from netkeep.services.linkedin_accounts import account_id_for
 
     user = factories.make_user(session)
     report = posture.posture(

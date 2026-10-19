@@ -20,7 +20,7 @@
  *   `config.toml` turns it on; nothing here does. A stale message auto-send clicked Send for says so.
  *
  * A part-typed prefill is never retried: a person clears the composer in Chrome and
- * discards it. No message text is shown anywhere here; netkeeper never closes the tab.
+ * discards it. No message text is shown anywhere here; netkeep never closes the tab.
  */
 import { Link } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -149,7 +149,7 @@ function AutoSendBadge() {
       <p className="flex flex-wrap items-center gap-2">
         <Badge variant="outline">Auto-send: unknown</Badge>
         <span className="text-muted-foreground">
-          netkeeper could not read the setting; Settings, Posture shows it.
+          netkeep could not read the setting; Settings, Posture shows it.
         </span>
       </p>
     )
@@ -567,7 +567,7 @@ function FinishedPrefill({ runId, onDismiss }: { runId: number; onDismiss: () =>
     <Callout tone="warning" title="The prefill stopped.">
       <p>{reason}.</p>
       <p>
-        If anything was typed, clear the composer in Chrome yourself. netkeeper never retries a
+        If anything was typed, clear the composer in Chrome yourself. netkeep never retries a
         prefill.
       </p>
       <Button size="sm" variant="outline" className="mt-2" onClick={onDismiss}>
@@ -730,7 +730,7 @@ function WaitingRow({
         error={drop.isError ? drop.error.message : null}
       >
         <p>
-          The step counts as fired and the enrollment moves to its next step. netkeeper changes
+          The step counts as fired and the enrollment moves to its next step. netkeep changes
           nothing in LinkedIn: if the message is still in the composer, clear it in Chrome yourself.
         </p>
       </ConfirmDialog>

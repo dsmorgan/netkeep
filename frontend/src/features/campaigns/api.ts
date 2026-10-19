@@ -288,7 +288,7 @@ export function contactEnrollmentsQuery(contactId: number) {
 }
 
 /**
- * Record a response that came outside netkeeper (#512): it ends the enrollments it
+ * Record a response that came outside netkeep (#512): it ends the enrollments it
  * answers as a detected reply does, so no later step sends.
  */
 export async function recordOutsideResponse(
@@ -450,7 +450,7 @@ export async function unarchiveCampaign(id: number): Promise<Campaign> {
 
 /**
  * Delete a campaign never activated and with no messages (#345). 409 for any other.
- * The answer lists the Gmail drafts left behind: netkeeper never deletes one.
+ * The answer lists the Gmail drafts left behind: netkeep never deletes one.
  */
 export async function deleteCampaign(id: number): Promise<DeletePlan> {
   const { data, error, response } = await api.DELETE('/api/v1/campaigns/{campaign_id}', {

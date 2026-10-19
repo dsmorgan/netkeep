@@ -1,6 +1,6 @@
 """One definition of the extractor boundary, for every test that checks it.
 
-Spec 9.10 and ADR 0005: nothing under ``netkeeper/linkedin/`` imports the ORM, the
+Spec 9.10 and ADR 0005: nothing under ``netkeep/linkedin/`` imports the ORM, the
 session factory, or the CRM. Two mechanisms check that, and they see different
 things, so the project keeps both and they read the same list from here:
 
@@ -25,17 +25,17 @@ import subprocess
 import sys
 from pathlib import Path
 
-PACKAGE = Path(__file__).resolve().parents[1] / "netkeeper"
+PACKAGE = Path(__file__).resolve().parents[1] / "netkeep"
 EXTRACTOR = PACKAGE / "linkedin"
 
 #: What ADR 0005 keeps out of the extractor. "sqlalchemy" is not in the ADR's words
 #: but follows from them: importing the ORM is how the models arrive. A module under
 #: ``linkedin/`` may not import these, or import anything that does.
 FORBIDDEN_IMPORTS = (
-    "netkeeper.models",
-    "netkeeper.crm",
-    "netkeeper.db",
-    "netkeeper.scoping",
+    "netkeep.models",
+    "netkeep.crm",
+    "netkeep.db",
+    "netkeep.scoping",
     "sqlalchemy",
 )
 
@@ -43,8 +43,8 @@ FORBIDDEN_IMPORTS = (
 def is_forbidden(name: str) -> bool:
     """Whether a dotted name is one of the forbidden modules, or lives inside one.
 
-    Matched on dotted segments rather than characters, so a future ``netkeeper.dbg``
-    is not read as ``netkeeper.db``.
+    Matched on dotted segments rather than characters, so a future ``netkeep.dbg``
+    is not read as ``netkeep.db``.
     """
     return any(
         name == forbidden or name.startswith(f"{forbidden}.") for forbidden in FORBIDDEN_IMPORTS
@@ -52,7 +52,7 @@ def is_forbidden(name: str) -> bool:
 
 
 def extractor_modules() -> list[str]:
-    """Every importable module under ``netkeeper/linkedin/``, dotted."""
+    """Every importable module under ``netkeep/linkedin/``, dotted."""
     modules = []
     for path in sorted(EXTRACTOR.rglob("*.py")):
         parts = path.relative_to(PACKAGE.parent).with_suffix("").parts
@@ -91,31 +91,31 @@ def imports_pulled_in_by(module: str) -> list[str]:
 
 #: Spec 9.10's "Out" column as it exists so far: what the extractor hands the core.
 #: A module that imports one of these modules, or one of these names, handles
-#: extractor results. ``netkeeper.linkedin.inbox`` joined with the inbox poll's
+#: extractor results. ``netkeep.linkedin.inbox`` joined with the inbox poll's
 #: contract (P4-08); ``MessageOutcome`` joins with the job that returns it (P4). The
 #: ``voyager`` types are named alone because the rest of ``voyager`` is request
 #: plumbing, not results; the three profile types are what a ``ProfileHarvest``
 #: carries (P2-07).
 RESULT_MODULES = (
-    "netkeeper.linkedin.connections",
-    "netkeeper.linkedin.enrich",
-    "netkeeper.linkedin.inbox",
+    "netkeep.linkedin.connections",
+    "netkeep.linkedin.enrich",
+    "netkeep.linkedin.inbox",
 )
 RESULT_TYPES = (
-    "netkeeper.linkedin.voyager.ConnectionSummary",
-    "netkeeper.linkedin.voyager.ProfileDetails",
-    "netkeeper.linkedin.voyager.ContactInfo",
-    "netkeeper.linkedin.voyager.PositionEntry",
-    "netkeeper.linkedin.voyager.EducationEntry",
+    "netkeep.linkedin.voyager.ConnectionSummary",
+    "netkeep.linkedin.voyager.ProfileDetails",
+    "netkeep.linkedin.voyager.ContactInfo",
+    "netkeep.linkedin.voyager.PositionEntry",
+    "netkeep.linkedin.voyager.EducationEntry",
 )
 
 #: The modules allowed to turn an extractor result into rows: spec 9.10's
 #: ``crm/apply.py``, and the inbox poll's ``crm/inbox_apply.py`` (P4-08, #378).
-MAPPING_MODULES = ("netkeeper/crm/apply.py", "netkeeper/crm/inbox_apply.py")
+MAPPING_MODULES = ("netkeep/crm/apply.py", "netkeep/crm/inbox_apply.py")
 
 #: Models a module may name alongside a result without mapping it onto a table.
 #: ``User`` is the owner handle every core function takes, not a place results land.
-NOT_A_DESTINATION = ("netkeeper.models.User", "netkeeper.models.user.User")
+NOT_A_DESTINATION = ("netkeep.models.User", "netkeep.models.user.User")
 
 
 def maps_results(names: set[str], model_names: set[str]) -> bool:

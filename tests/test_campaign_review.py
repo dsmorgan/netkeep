@@ -19,12 +19,12 @@ from fastapi import FastAPI
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.campaigns.gmail import GmailRateLimited
-from netkeeper.campaigns.gmail_fake import FakeGmail
-from netkeeper.crm import lists as list_service
-from netkeeper.crm.self_contact import get_self_contact
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.campaigns.gmail import GmailRateLimited
+from netkeep.campaigns.gmail_fake import FakeGmail
+from netkeep.crm import lists as list_service
+from netkeep.crm.self_contact import get_self_contact
+from netkeep.db import session_scope
+from netkeep.models import (
     Campaign,
     CampaignStatus,
     CampaignStep,
@@ -46,15 +46,15 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.models.base import utcnow
-from netkeeper.scoping import get_scoped, scoped_delete, unscoped
-from netkeeper.services import campaign_engine, campaign_review
-from netkeeper.services import campaigns as campaign_service
-from netkeeper.services import mailboxes as mailbox_service
-from netkeeper.services.campaign_guards import Reason, check_enrollment
-from netkeeper.services.campaign_sender import GmailSender
+from netkeep.models.base import utcnow
+from netkeep.scoping import get_scoped, scoped_delete, unscoped
+from netkeep.services import campaign_engine, campaign_review
+from netkeep.services import campaigns as campaign_service
+from netkeep.services import mailboxes as mailbox_service
+from netkeep.services.campaign_guards import Reason, check_enrollment
+from netkeep.services.campaign_sender import GmailSender
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 ARMED_FOR_DRAFTS: dict[str, Any] = {"armed_at": utcnow() - timedelta(days=1), "armed_by": "test"}
 REQUIREMENTS = ("step_approvals", "test_sends", "lint")
 
@@ -1075,7 +1075,7 @@ async def test_a_test_draft_for_a_campaign_deleted_meanwhile_is_named_for_the_pe
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """#345 review: the campaign is deleted while Gmail makes the test draft. netkeeper
+    """#345 review: the campaign is deleted while Gmail makes the test draft. netkeep
     never deletes a Gmail draft (ADR 0003), so the answer and the log name the draft for
     the person to delete by hand."""
     s = _build(running_app, people=1, arm=ARMED_FOR_DRAFTS)
@@ -1458,7 +1458,7 @@ async def test_a_fresh_mailbox_goes_from_disarmed_to_armed_to_send_with_no_manua
     assert body["arm"] == "send"
     methods = {m for m, _ in s.gmail.calls}
     assert "messages.send" not in methods
-    assert len(s.gmail.drafts()) == 2  # netkeeper deleted neither test draft
+    assert len(s.gmail.drafts()) == 2  # netkeep deleted neither test draft
     with session_scope(s.factory) as session:
         for table in (Message, Interaction):
             assert session.scalar(unscoped(select(func.count()).select_from(table))) == 0
@@ -1614,7 +1614,7 @@ async def test_a_test_draft_not_found_is_named_when_arming_to_send_is_refused(
     _drafts_check(s, running_app, at=utcnow())
     refused = await _arm_to_send(client, s)
     assert refused.status_code == 409
-    assert "no netkeeper test draft was found in the Drafts of" in refused.json()["detail"]
+    assert "no netkeep test draft was found in the Drafts of" in refused.json()["detail"]
     assert "make a new test draft" in refused.json()["detail"]
     await _test_send_all(client, s)  # a new test draft: not searched for yet
     assert "test draft was found" not in (await _arm_to_send(client, s)).json()["detail"]

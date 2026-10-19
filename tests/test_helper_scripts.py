@@ -29,7 +29,7 @@ from urllib.parse import urlparse
 import pytest
 from time_limit import Stopwatch
 
-from netkeeper.services import browser_launch
+from netkeep.services import browser_launch
 
 ROOT = Path(__file__).resolve().parent.parent
 CHROME = ROOT / "scripts" / "chrome.sh"
@@ -40,10 +40,10 @@ pytestmark = pytest.mark.skipif(SH is None or sys.platform == "win32", reason="n
 
 
 def _config_cdp_port(config_path: str) -> str | None:
-    """The port in a NETKEEPER_CONFIG file's ``[linkedin] cdp_url`` -- the
-    real key path in netkeeper's own config loader (netkeeper/config.py's
+    """The port in a NETKEEP_CONFIG file's ``[linkedin] cdp_url`` -- the
+    real key path in netkeep's own config loader (netkeep/config.py's
     ``Settings.linkedin: LinkedInSettings``, ``LinkedInSettings.cdp_url``),
-    read with the same ``tomllib`` netkeeper itself parses config with,
+    read with the same ``tomllib`` netkeep itself parses config with,
     not a regex that could be fooled by a commented-out line or a wrong
     section (#183 re-review gap 3c). ``None`` if the file cannot be read, is
     not valid TOML, has no ``cdp_url``, or that URL names no explicit port
@@ -71,13 +71,13 @@ def _require_pinned_port(
     from 9222 -- the real default, and David's real Chrome's port.
 
     Falling through to chrome.sh's own DEFAULT_PORT, on a machine where a real
-    `netkeeper` and a real Chrome both happen to be reachable, reaches that
+    `netkeep` and a real Chrome both happen to be reachable, reaches that
     real Chrome: a #183 re-review probe did exactly this. ``--port`` is the
-    direct way to pin it; ``NETKEEPER_CONFIG`` (a test's own ``cdp_url``) is
+    direct way to pin it; ``NETKEEP_CONFIG`` (a test's own ``cdp_url``) is
     another -- read for real, not trusted on sight: a config with no
     ``cdp_url``, or one that still says 9222, must not pass (#183 re-review
     gap). ``pinned_port`` is for a test that controls the port through a fake
-    netkeeper's own JSON answer instead of either -- it must state the value
+    netkeep's own JSON answer instead of either -- it must state the value
     it configured that fake with, so this guard can check it rather than
     trusting the test to have gotten it right silently.
 
@@ -103,11 +103,11 @@ def _require_pinned_port(
     if literal is not None:
         assert not names_9222(literal), "a chrome.sh test must pin a port other than 9222"
         return
-    if "NETKEEPER_CONFIG" in env:
-        config_port = _config_cdp_port(env["NETKEEPER_CONFIG"])
+    if "NETKEEP_CONFIG" in env:
+        config_port = _config_cdp_port(env["NETKEEP_CONFIG"])
         if config_port is None:
             raise AssertionError(
-                "a chrome.sh test's NETKEEPER_CONFIG must set a [linkedin] cdp_url "
+                "a chrome.sh test's NETKEEP_CONFIG must set a [linkedin] cdp_url "
                 "with an explicit port -- this one had none, or could not be read"
             )
         assert not names_9222(config_port), "a chrome.sh test must pin a port other than 9222"
@@ -117,8 +117,8 @@ def _require_pinned_port(
         return
     raise AssertionError(
         "a chrome.sh invocation in tests must pin a port other than 9222 -- pass "
-        "--port, set NETKEEPER_CONFIG to a cdp_url with an explicit non-9222 port, "
-        "or pass run_sh(..., pinned_port=N) for a fake netkeeper's own JSON answer. "
+        "--port, set NETKEEP_CONFIG to a cdp_url with an explicit non-9222 port, "
+        "or pass run_sh(..., pinned_port=N) for a fake netkeep's own JSON answer. "
         "Never let a test fall through to the real default: that can reach a real "
         "Chrome on a machine where one is actually running on it."
     )
@@ -186,7 +186,7 @@ def run_sh(
     assert SH is not None
     if script.name == "chrome.sh":
         _require_pinned_port(args, env, pinned_port)
-    # The interpreter's own bin first: chrome.sh finds netkeeper as <repo>/.venv/bin or on
+    # The interpreter's own bin first: chrome.sh finds netkeep as <repo>/.venv/bin or on
     # PATH, and a sibling worktree has no .venv of its own (#210).
     path = os.pathsep.join(
         (str(Path(sys.executable).parent), os.environ.get("PATH", "/usr/bin:/bin"))
@@ -241,9 +241,9 @@ def chrome_flags(line: str) -> list[str]:
 def isolated_chrome_script(tmp_path: Path) -> Path:
     """A copy of chrome.sh under a fake repo root with no ``.venv`` of its own.
 
-    chrome.sh always prefers ``<repo>/.venv/bin/netkeeper`` over anything on
+    chrome.sh always prefers ``<repo>/.venv/bin/netkeep`` over anything on
     PATH, and this repo's own ``.venv`` exists once ``make install`` has run
-    -- so a test of the PATH/``command -v netkeeper`` branch (a `uv tool`/pipx
+    -- so a test of the PATH/``command -v netkeep`` branch (a `uv tool`/pipx
     install, #183 review should-fix 2) has to run the script from somewhere
     that branch actually gets a chance to run, not the real checkout.
     """
@@ -256,7 +256,7 @@ def isolated_chrome_script(tmp_path: Path) -> Path:
     return copy
 
 
-def fake_netkeeper_cli(
+def fake_netkeep_cli(
     path: Path,
     *,
     port: int | str,
@@ -264,7 +264,7 @@ def fake_netkeeper_cli(
     remote: str | None = None,
     shebang: str | None = None,
 ) -> None:
-    """A stand-in `netkeeper` whose `browser launch --json` answers like the real
+    """A stand-in `netkeep` whose `browser launch --json` answers like the real
     CLI's, with a real python shebang -- enough for chrome.sh to ask it for the
     port and profile the way it would ask the genuine one. ``port`` may be a
     non-numeric string, to simulate a malformed answer. ``shebang`` defaults to
@@ -288,8 +288,8 @@ def fake_netkeeper_cli(
     path.chmod(0o755)
 
 
-def fake_netkeeper_cli_sh_shim(path: Path, *, port: int, profile: Path) -> None:
-    """A stand-in `netkeeper` whose entry point is itself a ``#!/bin/sh``
+def fake_netkeep_cli_sh_shim(path: Path, *, port: int, profile: Path) -> None:
+    """A stand-in `netkeep` whose entry point is itself a ``#!/bin/sh``
     relaunch shim (what `uv tool`'s distlib-style launcher uses) rather than
     python directly. The JSON it prints must still get parsed by a *real*
     python found separately -- never by handing the json.load snippet to this
@@ -432,44 +432,44 @@ def test_run_sh_refuses_pinned_port_9222() -> None:
         run_sh(CHROME, "--status", env={}, pinned_port=9222)
 
 
-def test_run_sh_accepts_netkeeper_config_with_no_explicit_port(tmp_path: Path) -> None:
-    """NETKEEPER_CONFIG alone satisfies the guard: the test's own cdp_url pins
+def test_run_sh_accepts_netkeep_config_with_no_explicit_port(tmp_path: Path) -> None:
+    """NETKEEP_CONFIG alone satisfies the guard: the test's own cdp_url pins
     the port, even with no --port flag on the command line."""
     config = tmp_path / "config.toml"
     config.write_text(f'[linkedin]\ncdp_url = "http://127.0.0.1:{free_port()}"\n')
-    run_sh(CHROME, "--dry-run", env={"NETKEEPER_CONFIG": str(config)})
+    run_sh(CHROME, "--dry-run", env={"NETKEEP_CONFIG": str(config)})
 
 
-def test_run_sh_refuses_netkeeper_config_with_no_cdp_url(tmp_path: Path) -> None:
-    """#183 re-review gap: a NETKEEPER_CONFIG with no cdp_url at all must not
+def test_run_sh_refuses_netkeep_config_with_no_cdp_url(tmp_path: Path) -> None:
+    """#183 re-review gap: a NETKEEP_CONFIG with no cdp_url at all must not
     be read as pinning anything -- it falls through to chrome.sh's own 9222
-    default exactly as surely as having no NETKEEPER_CONFIG would."""
+    default exactly as surely as having no NETKEEP_CONFIG would."""
     config = tmp_path / "config.toml"
     config.write_text("[linkedin]\n")
     with pytest.raises(AssertionError):
-        run_sh(CHROME, "--status", env={"NETKEEPER_CONFIG": str(config)})
+        run_sh(CHROME, "--status", env={"NETKEEP_CONFIG": str(config)})
 
 
-def test_run_sh_refuses_netkeeper_config_with_an_unreadable_path(tmp_path: Path) -> None:
+def test_run_sh_refuses_netkeep_config_with_an_unreadable_path(tmp_path: Path) -> None:
     with pytest.raises(AssertionError):
-        run_sh(CHROME, "--status", env={"NETKEEPER_CONFIG": str(tmp_path / "missing.toml")})
+        run_sh(CHROME, "--status", env={"NETKEEP_CONFIG": str(tmp_path / "missing.toml")})
 
 
-def test_run_sh_refuses_netkeeper_config_with_port_9222(tmp_path: Path) -> None:
+def test_run_sh_refuses_netkeep_config_with_port_9222(tmp_path: Path) -> None:
     """#183 re-review gap: a cdp_url that still says 9222 must not pass either."""
     config = tmp_path / "config.toml"
     config.write_text('[linkedin]\ncdp_url = "http://127.0.0.1:9222"\n')
     with pytest.raises(AssertionError):
-        run_sh(CHROME, "--status", env={"NETKEEPER_CONFIG": str(config)})
+        run_sh(CHROME, "--status", env={"NETKEEP_CONFIG": str(config)})
 
 
-def test_run_sh_refuses_netkeeper_config_with_no_port_in_the_url(tmp_path: Path) -> None:
+def test_run_sh_refuses_netkeep_config_with_no_port_in_the_url(tmp_path: Path) -> None:
     """#183 re-review gap: a cdp_url naming no explicit port at all must not
     pass either -- there is nothing here to confirm isn't 9222."""
     config = tmp_path / "config.toml"
     config.write_text('[linkedin]\ncdp_url = "http://127.0.0.1"\n')
     with pytest.raises(AssertionError):
-        run_sh(CHROME, "--status", env={"NETKEEPER_CONFIG": str(config)})
+        run_sh(CHROME, "--status", env={"NETKEEP_CONFIG": str(config)})
 
 
 def test_run_sh_refuses_a_leading_zero_port_9222() -> None:
@@ -479,11 +479,11 @@ def test_run_sh_refuses_a_leading_zero_port_9222() -> None:
         run_sh(CHROME, "--status", "--port", "09222", env={})
 
 
-def test_run_sh_refuses_netkeeper_config_with_a_leading_zero_port(tmp_path: Path) -> None:
+def test_run_sh_refuses_netkeep_config_with_a_leading_zero_port(tmp_path: Path) -> None:
     config = tmp_path / "config.toml"
     config.write_text('[linkedin]\ncdp_url = "http://127.0.0.1:09222"\n')
     with pytest.raises(AssertionError):
-        run_sh(CHROME, "--status", env={"NETKEEPER_CONFIG": str(config)})
+        run_sh(CHROME, "--status", env={"NETKEEP_CONFIG": str(config)})
 
 
 def test_run_sh_accepts_pinned_port_with_a_leading_zero_that_is_not_9222(tmp_path: Path) -> None:
@@ -569,7 +569,7 @@ def test_curl_shim_does_not_falsely_flag_a_different_port_sharing_the_digits(
 
 
 def test_run_sh_raises_if_chrome_sh_still_reaches_9222_via_curl(tmp_path: Path) -> None:
-    """#183 re-review gap 3b: even when a test's own --port/NETKEEPER_CONFIG/
+    """#183 re-review gap 3b: even when a test's own --port/NETKEEP_CONFIG/
     pinned_port satisfies the guard, run_sh must still notice and fail loudly
     if chrome.sh's own curl call reached 9222 anyway. chrome.sh's
     cdp_version() swallows a failed curl silently (`|| true`), treating it as
@@ -626,14 +626,14 @@ def test_chrome_script_launches_with_exactly_the_flags_the_cli_prints(tmp_path: 
     assert not profile.exists(), "a dry run created the profile"
 
 
-def test_chrome_script_takes_port_and_profile_from_netkeepers_config(tmp_path: Path) -> None:
+def test_chrome_script_takes_port_and_profile_from_netkeeps_config(tmp_path: Path) -> None:
     port = free_port()
     config = tmp_path / "config.toml"
     config.write_text(f'[linkedin]\ncdp_url = "http://127.0.0.1:{port}"\n')
     result = run_sh(
         CHROME,
         "--status",
-        env={"NETKEEPER_DATA": str(tmp_path), "NETKEEPER_CONFIG": str(config)},
+        env={"NETKEEP_DATA": str(tmp_path), "NETKEEP_CONFIG": str(config)},
     )
     assert result.returncode == 0, result.stderr
     assert "warning" not in result.stderr
@@ -646,18 +646,18 @@ def test_chrome_script_refuses_a_cdp_url_on_another_host(tmp_path: Path) -> None
     config = tmp_path / "config.toml"
     # 192.0.2.0/24 (RFC 5737) is non-routable: this test is about the host
     # mismatch, not the port, so the port is deliberately not 9222 anyway (the
-    # run_sh guard below requires that of every NETKEEPER_CONFIG it is handed).
+    # run_sh guard below requires that of every NETKEEP_CONFIG it is handed).
     config.write_text('[linkedin]\ncdp_url = "http://192.0.2.10:9333"\n')
     result = run_sh(
         CHROME,
         "--dry-run",
-        env={"NETKEEPER_DATA": str(tmp_path), "NETKEEPER_CONFIG": str(config)},
+        env={"NETKEEP_DATA": str(tmp_path), "NETKEEP_CONFIG": str(config)},
     )
     assert result.returncode == 1
     assert "192.0.2.10" in result.stderr
 
 
-def test_chrome_script_finds_port_and_profile_through_a_symlinked_netkeeper(
+def test_chrome_script_finds_port_and_profile_through_a_symlinked_netkeep(
     tmp_path: Path,
 ) -> None:
     """#183 review should-fix 2: a `uv tool`/pipx install puts a symlink on
@@ -669,10 +669,10 @@ def test_chrome_script_finds_port_and_profile_through_a_symlinked_netkeeper(
     profile = tmp_path.resolve() / "profile"
     real_dir = tmp_path / "real"
     real_dir.mkdir()
-    fake_netkeeper_cli(real_dir / "netkeeper", port=port, profile=profile)
+    fake_netkeep_cli(real_dir / "netkeep", port=port, profile=profile)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    (bin_dir / "netkeeper").symlink_to(real_dir / "netkeeper")  # no python beside the symlink
+    (bin_dir / "netkeep").symlink_to(real_dir / "netkeep")  # no python beside the symlink
     path = f"{bin_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
     result = run_sh(script, "--status", env={"PATH": path}, pinned_port=port)
     assert result.returncode == 0, result.stderr
@@ -691,12 +691,12 @@ def test_chrome_script_resolves_an_env_shebang_entry_point(tmp_path: Path) -> No
     profile = tmp_path.resolve() / "a custom profile"
     real_dir = tmp_path / "real"
     real_dir.mkdir()
-    fake_netkeeper_cli(
-        real_dir / "netkeeper", port=port, profile=profile, shebang="/usr/bin/env python3"
+    fake_netkeep_cli(
+        real_dir / "netkeep", port=port, profile=profile, shebang="/usr/bin/env python3"
     )
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    (bin_dir / "netkeeper").symlink_to(real_dir / "netkeeper")
+    (bin_dir / "netkeep").symlink_to(real_dir / "netkeep")
     # python3 must resolve through PATH for /usr/bin/env to find it; the venv
     # this suite runs under always has one beside `python` (uv/pip's doing).
     python_dir = Path(sys.executable).parent
@@ -721,8 +721,8 @@ def test_chrome_script_resolves_an_env_dash_s_shebang_entry_point(tmp_path: Path
     profile = tmp_path.resolve() / "profile"
     real_dir = tmp_path / "real"
     real_dir.mkdir()
-    fake_netkeeper_cli(
-        real_dir / "netkeeper",
+    fake_netkeep_cli(
+        real_dir / "netkeep",
         port=port,
         profile=profile,
         shebang="/usr/bin/env -S python3-custom -I",
@@ -750,7 +750,7 @@ def test_chrome_script_resolves_an_env_dash_s_shebang_entry_point(tmp_path: Path
         found = shutil.which(tool)
         if found:
             (bin_dir / tool).symlink_to(found)
-    (bin_dir / "netkeeper").symlink_to(real_dir / "netkeeper")
+    (bin_dir / "netkeep").symlink_to(real_dir / "netkeep")
     (bin_dir / "python3-custom").symlink_to(sys.executable)
     # Nothing generically python-shaped is on this PATH -- only chrome.sh's
     # other prerequisites and the shebang's own unusual interpreter name.
@@ -771,10 +771,10 @@ def test_chrome_script_falls_back_to_python3_for_a_sh_shim_entry_point(tmp_path:
     profile = tmp_path.resolve() / "profile"
     real_dir = tmp_path / "real"
     real_dir.mkdir()
-    fake_netkeeper_cli_sh_shim(real_dir / "netkeeper", port=port, profile=profile)
+    fake_netkeep_cli_sh_shim(real_dir / "netkeep", port=port, profile=profile)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    (bin_dir / "netkeeper").symlink_to(real_dir / "netkeeper")
+    (bin_dir / "netkeep").symlink_to(real_dir / "netkeep")
     python_dir = Path(sys.executable).parent
     path = f"{bin_dir}:{python_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
     result = run_sh(script, "--status", env={"PATH": path}, pinned_port=port)
@@ -784,20 +784,20 @@ def test_chrome_script_falls_back_to_python3_for_a_sh_shim_entry_point(tmp_path:
 
 
 def test_chrome_script_warns_when_no_python_can_parse_a_sh_shim_answer(tmp_path: Path) -> None:
-    """#183 re-review should-fix 2: when netkeeper answered but no python could
+    """#183 re-review should-fix 2: when netkeep answered but no python could
     be found to parse it, the warning must say so specifically, not the
-    generic "could not ask netkeeper" (which means something else: it was
+    generic "could not ask netkeep" (which means something else: it was
     never asked at all, or never answered)."""
     script = isolated_chrome_script(tmp_path)
     port = free_port()
     real_dir = tmp_path / "real"
     real_dir.mkdir()
-    fake_netkeeper_cli_sh_shim(
-        real_dir / "netkeeper", port=port, profile=tmp_path.resolve() / "profile"
+    fake_netkeep_cli_sh_shim(
+        real_dir / "netkeep", port=port, profile=tmp_path.resolve() / "profile"
     )
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    (bin_dir / "netkeeper").symlink_to(real_dir / "netkeeper")
+    (bin_dir / "netkeep").symlink_to(real_dir / "netkeep")
     # Everything chrome.sh needs except any python: no python3 for it to fall
     # back to.
     minimal_bin = tmp_path / "minimal-bin"
@@ -826,7 +826,7 @@ def test_chrome_script_warns_when_no_python_can_parse_a_sh_shim_answer(tmp_path:
     path = f"{bin_dir}:{minimal_bin}"
     result = run_sh(script, "--dry-run", "--port", str(free_port()), env={"PATH": path})
     assert result.returncode == 0, result.stderr
-    assert "netkeeper answered but no Python was found to parse it" in result.stderr
+    assert "netkeep answered but no Python was found to parse it" in result.stderr
 
 
 def test_chrome_script_round_trips_a_non_ascii_profile_path(tmp_path: Path) -> None:
@@ -840,7 +840,7 @@ def test_chrome_script_round_trips_a_non_ascii_profile_path(tmp_path: Path) -> N
     result = run_sh(
         CHROME,
         "--status",
-        env={"NETKEEPER_DATA": str(data_dir), "NETKEEPER_CONFIG": str(config)},
+        env={"NETKEEP_DATA": str(data_dir), "NETKEEP_CONFIG": str(config)},
     )
     assert result.returncode == 0, result.stderr
     assert "warning" not in result.stderr
@@ -854,12 +854,12 @@ def test_chrome_script_refuses_a_non_numeric_port_from_json(tmp_path: Path) -> N
     script = isolated_chrome_script(tmp_path)
     real_dir = tmp_path / "real"
     real_dir.mkdir()
-    fake_netkeeper_cli(
-        real_dir / "netkeeper", port="not-a-port", profile=tmp_path.resolve() / "profile"
+    fake_netkeep_cli(
+        real_dir / "netkeep", port="not-a-port", profile=tmp_path.resolve() / "profile"
     )
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    (bin_dir / "netkeeper").symlink_to(real_dir / "netkeeper")
+    (bin_dir / "netkeep").symlink_to(real_dir / "netkeep")
     path = f"{bin_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
     result = run_sh(script, "--dry-run", env={"PATH": path}, pinned_port="not-a-port")
     assert result.returncode == 1
@@ -917,9 +917,7 @@ def test_chrome_script_trusts_the_locks_pid_over_the_command_line(tmp_path: Path
     assert f"pid {pid}" in result.stderr
     assert f"(per {profile}/SingletonLock)" in result.stderr
     # #183 re-review nit 4: an escape hatch for when the heuristics are wrong.
-    assert (
-        f"If pid {pid} isn't netkeeper's Chrome, remove {profile}/SingletonLock." in result.stderr
-    )
+    assert f"If pid {pid} isn't netkeep's Chrome, remove {profile}/SingletonLock." in result.stderr
     assert (profile / "SingletonLock").is_symlink()
 
 
@@ -1154,9 +1152,7 @@ def test_chrome_script_reports_a_holder_on_a_different_port(tmp_path: Path) -> N
     assert "on port 9333" in result.stderr
     assert "without the debugging port" not in result.stderr
     # #183 re-review nit 4: an escape hatch for when the heuristics are wrong.
-    assert (
-        f"If pid {pid} isn't netkeeper's Chrome, remove {profile}/SingletonLock." in result.stderr
-    )
+    assert f"If pid {pid} isn't netkeep's Chrome, remove {profile}/SingletonLock." in result.stderr
 
 
 def _bin_dir_without(tmp_path: Path, missing: str) -> Path:
@@ -1463,17 +1459,17 @@ def test_reset_refuses_when_the_server_uses_another_database(data: Path) -> None
         "--data-dir",
         str(data),
         "--yes",
-        env={"NETKEEPER_DATABASE_URL": "postgresql://localhost/netkeeper"},
+        env={"NETKEEP_DATABASE_URL": "postgresql://localhost/netkeep"},
     )
     assert result.returncode == 1
-    assert "NETKEEPER_DATABASE_URL" in result.stderr
+    assert "NETKEEP_DATABASE_URL" in result.stderr
     assert db.exists()
 
 
 @needs_sqlite3_cli
-def test_reset_defaults_to_netkeeper_data(data: Path) -> None:
+def test_reset_defaults_to_netkeep_data(data: Path) -> None:
     db = make_db(data)
-    result = run_sh(RESET, "--dry-run", env={"NETKEEPER_DATA": str(data)})
+    result = run_sh(RESET, "--dry-run", env={"NETKEEP_DATA": str(data)})
     assert result.returncode == 0, result.stderr
     assert str(db) in result.stdout
 
@@ -1708,7 +1704,7 @@ def test_reset_does_not_clobber_a_concurrent_runs_archive(data: Path, tmp_path: 
         f'    "{real}" "$@"\n'
         "    rc=$?\n"
         '    archives=$(dirname "$(dirname "$target")")\n'
-        f'    competitor="$archives/netkeeper-{stamp}.sqlite3"\n'
+        f'    competitor="$archives/netkeep-{stamp}.sqlite3"\n'
         '    [ -e "$competitor" ] || printf \'a concurrent run published first\' > "$competitor"\n'
         "    exit $rc\n"
         "    ;;\n"
@@ -1721,8 +1717,8 @@ def test_reset_does_not_clobber_a_concurrent_runs_archive(data: Path, tmp_path: 
     assert result.returncode == 0, result.stderr
 
     archives = data / "archives"
-    competitor = archives / f"netkeeper-{stamp}.sqlite3"
-    ours = archives / f"netkeeper-{stamp}-1.sqlite3"
+    competitor = archives / f"netkeep-{stamp}.sqlite3"
+    ours = archives / f"netkeep-{stamp}-1.sqlite3"
     assert sorted(archives.iterdir()) == sorted([competitor, ours])
     assert competitor.read_bytes() == b"a concurrent run published first"
     with closing(sqlite3.connect(ours)) as check:
@@ -1744,7 +1740,7 @@ def test_reset_refuses_when_the_candidate_name_is_a_directory_symlink(
     archives = data / "archives"
     archives.mkdir()
     stamp = "20260101T000000Z"
-    candidate = archives / f"netkeeper-{stamp}.sqlite3"
+    candidate = archives / f"netkeep-{stamp}.sqlite3"
     trap_dir = tmp_path / "trap-dir"
     trap_dir.mkdir()
     candidate.symlink_to(trap_dir)
@@ -1761,7 +1757,7 @@ def test_reset_refuses_when_the_candidate_name_is_a_directory_symlink(
     # ln's own directory-redirect placed the real copy inside trap_dir, under
     # the work file's basename ("db"); candidate itself is untouched.
     assert candidate.is_symlink()
-    assert not (archives / f"netkeeper-{stamp}-1.sqlite3").exists()
+    assert not (archives / f"netkeep-{stamp}-1.sqlite3").exists()
 
 
 @needs_sqlite3_cli
@@ -1778,7 +1774,7 @@ def test_reset_treats_a_dangling_symlink_at_the_candidate_name_as_taken(
     archives = data / "archives"
     archives.mkdir()
     stamp = "20260101T000000Z"
-    candidate = archives / f"netkeeper-{stamp}.sqlite3"
+    candidate = archives / f"netkeep-{stamp}.sqlite3"
     candidate.symlink_to(archives / "does-not-exist")
     assert not candidate.exists()  # -e is false: the target is missing
     assert candidate.is_symlink()  # but -L is true: the name is still taken
@@ -1791,7 +1787,7 @@ def test_reset_treats_a_dangling_symlink_at_the_candidate_name_as_taken(
     result = run_sh(RESET, "--data-dir", str(data), "--yes", env={"PATH": path})
     assert result.returncode == 0, result.stderr
     assert not db.exists()
-    published = archives / f"netkeeper-{stamp}-1.sqlite3"
+    published = archives / f"netkeep-{stamp}-1.sqlite3"
     assert published.exists()
     with closing(sqlite3.connect(published)) as check:
         assert check.execute("select x from marker").fetchone() == (42,)
@@ -2063,14 +2059,14 @@ def test_list_orders_a_same_second_collision_newest_first(data: Path) -> None:
     first, not second."""
     archives = data / "archives"
     archives.mkdir()
-    (archives / "netkeeper-20260101T000000Z.sqlite3").write_bytes(b"first")
-    (archives / "netkeeper-20260101T000000Z-1.sqlite3").write_bytes(b"second, same second")
+    (archives / "netkeep-20260101T000000Z.sqlite3").write_bytes(b"first")
+    (archives / "netkeep-20260101T000000Z-1.sqlite3").write_bytes(b"second, same second")
     result = run_sh(RESET, "--data-dir", str(data), "--list", env={})
     assert result.returncode == 0, result.stderr
     names = [line.split("  ")[0] for line in result.stdout.splitlines()]
     assert names == [
-        "netkeeper-20260101T000000Z-1.sqlite3",
-        "netkeeper-20260101T000000Z.sqlite3",
+        "netkeep-20260101T000000Z-1.sqlite3",
+        "netkeep-20260101T000000Z.sqlite3",
     ]
 
 

@@ -11,8 +11,8 @@ from isolation.harness import acting_as
 from test_login_item import FakeLaunchctl, make
 from test_runs_serve import HEADERS
 
-from netkeeper.db import session_scope
-from netkeeper.models import UserKind
+from netkeep.db import session_scope
+from netkeep.models import UserKind
 
 URL = "/api/v1/login-item"
 
@@ -39,7 +39,7 @@ async def test_off_then_on_then_off(
     assert on.status_code == 200
     assert on.json()["enabled"] is True
     assert on.json()["state"] == "Registered: starts at next login"
-    assert on.json()["message"].startswith("Registered. netkeeper will start by itself")
+    assert on.json()["message"].startswith("Registered. netkeep will start by itself")
     assert "bootstrap" not in launchctl.verbs()  # this server is already running
     assert (await client.get(URL)).json()["enabled"] is True
 

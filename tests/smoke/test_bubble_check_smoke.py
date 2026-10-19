@@ -1,7 +1,7 @@
 """The bubble check over a real Chrome, against a loopback replica (#497, #495).
 
-Opt in with ``NETKEEPER_BROWSER_TESTS=1``, same as every other file under
-``tests/smoke/``, and point ``NETKEEPER_CDP_URL`` at an isolated Chrome on an explicit,
+Opt in with ``NETKEEP_BROWSER_TESTS=1``, same as every other file under
+``tests/smoke/``, and point ``NETKEEP_CDP_URL`` at an isolated Chrome on an explicit,
 unused port (never 9222). The only site is the replica this file serves for itself: a
 page holding an existing-conversation bubble shaped like the 2026-10-05 capture
 (``docs/linkedin-messaging-shapes.md``): a ``Messaging`` dialog whose header ``h2`` links
@@ -14,7 +14,7 @@ LinkedIn's do. Before #497 that icon stopped the check: Playwright's ``inner_tex
 raises on an ``svg``. It also pins how a real browser's role-and-name matcher answers
 the exact-name lookup used before #499 and the close rule that replaced it
 (``_close_by_rule``), for a few button shapes, and the words
-:func:`~netkeeper.linkedin.browser.classify_read_failure` gives Playwright's own errors.
+:func:`~netkeep.linkedin.browser.classify_read_failure` gives Playwright's own errors.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ import pytest
 from browser_guard import isolated_cdp
 from messaging_pages import OWNER, Member, existing_bubble_html, header_pair
 
-from netkeeper.linkedin.browser import (
+from netkeep.linkedin.browser import (
     BUBBLE_NAME,
     BUBBLE_ROLE,
     COMPOSER_NAME,
@@ -45,14 +45,14 @@ from netkeeper.linkedin.browser import (
     classify_read_failure,
     read_close_shape,
 )
-from netkeeper.linkedin.page_messaging import PageBubbleCheck
+from netkeep.linkedin.page_messaging import PageBubbleCheck
 
 pytestmark = pytest.mark.skipif(
-    os.environ.get("NETKEEPER_BROWSER_TESTS") != "1",
-    reason="browser smoke suite: start Chrome, then set NETKEEPER_BROWSER_TESTS=1",
+    os.environ.get("NETKEEP_BROWSER_TESTS") != "1",
+    reason="browser smoke suite: start Chrome, then set NETKEEP_BROWSER_TESTS=1",
 )
 
-CDP_URL = os.environ.get("NETKEEPER_CDP_URL", "http://127.0.0.1:9222")
+CDP_URL = os.environ.get("NETKEEP_CDP_URL", "http://127.0.0.1:9222")
 CLOSE = "Close your conversation with "
 #: An icon as LinkedIn draws one inside a header button: an ``aria-hidden`` svg, no text.
 ICON = '<svg aria-hidden="true" width="16" height="16"><use href="#close-small"></use></svg>'

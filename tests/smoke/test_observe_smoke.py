@@ -1,6 +1,6 @@
-"""``PageConnections`` over a real Chrome: the page loads its own answers, netkeeper reads them.
+"""``PageConnections`` over a real Chrome: the page loads its own answers, netkeep reads them.
 
-Opt in with ``NETKEEPER_BROWSER_TESTS=1``, same as every other file under
+Opt in with ``NETKEEP_BROWSER_TESTS=1``, same as every other file under
 ``tests/smoke/``. The only site involved is a loopback replica this file serves for
 itself; the people are :mod:`voyager_pages`' invented cast and the payloads
 :mod:`flagship_pages`' hand-built ones.
@@ -34,11 +34,11 @@ those fixes, ``test_a_real_page_loads_its_own_pages_and_the_run_reads_them_all``
 below stalls and ends ``RouteChanged`` instead of ``END_OF_LIST`` -- checked by hand
 against the code from before each fix, and recorded in the PR's description rather
 than as a test of code that no longer exists to run. Run at several window sizes
-(560, 740, 1280, 2200px wide) to cover a phone-width netkeeper Chrome window, the
+(560, 740, 1280, 2200px wide) to cover a phone-width netkeep Chrome window, the
 maintainer's MacBook Air split-screen width, an ordinary laptop, and an ultrawide.
 
-Start Chrome first with the command ``netkeeper browser launch`` prints, and point
-``NETKEEPER_CDP_URL`` at it.
+Start Chrome first with the command ``netkeep browser launch`` prints, and point
+``NETKEEP_CDP_URL`` at it.
 """
 
 from __future__ import annotations
@@ -60,11 +60,11 @@ from flagship_pages import document_html, pagination_payload, pagination_request
 from sqlalchemy.orm import Session, sessionmaker
 from voyager_pages import PEOPLE, Person
 
-from netkeeper.config import LinkedInSettings
-from netkeeper.db import session_scope
-from netkeeper.linkedin.browser import AttachBrowserProvider, BrowserUnavailable
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.connections import (
+from netkeep.config import LinkedInSettings
+from netkeep.db import session_scope
+from netkeep.linkedin.browser import AttachBrowserProvider, BrowserUnavailable
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.connections import (
     ConnectionsPage,
     LostAnswer,
     StopReason,
@@ -72,19 +72,19 @@ from netkeeper.linkedin.connections import (
     SyncMode,
     run_connections_sync,
 )
-from netkeeper.linkedin.flagship import CONNECTIONS_PAGE_PATH, PAGINATION_PATH
-from netkeeper.linkedin.pacing import ScrollProfile
-from netkeeper.linkedin.page_connections import PageConnections
-from netkeeper.models import SyncRunStatus, User
-from netkeeper.services import route_breaker, runs
-from netkeeper.services.connections_sync import sync_connections
+from netkeep.linkedin.flagship import CONNECTIONS_PAGE_PATH, PAGINATION_PATH
+from netkeep.linkedin.pacing import ScrollProfile
+from netkeep.linkedin.page_connections import PageConnections
+from netkeep.models import SyncRunStatus, User
+from netkeep.services import route_breaker, runs
+from netkeep.services.connections_sync import sync_connections
 
 pytestmark = pytest.mark.skipif(
-    os.environ.get("NETKEEPER_BROWSER_TESTS") != "1",
-    reason="browser smoke suite: start Chrome, then set NETKEEPER_BROWSER_TESTS=1",
+    os.environ.get("NETKEEP_BROWSER_TESTS") != "1",
+    reason="browser smoke suite: start Chrome, then set NETKEEP_BROWSER_TESTS=1",
 )
 
-CDP_URL = os.environ.get("NETKEEPER_CDP_URL", "http://127.0.0.1:9222")
+CDP_URL = os.environ.get("NETKEEP_CDP_URL", "http://127.0.0.1:9222")
 
 #: Large, fast wheel deltas: real scroll events without a real dwell per scroll.
 _FAST_SCROLL = ScrollProfile(
@@ -458,7 +458,7 @@ async def test_a_real_page_loads_its_own_pages_and_the_run_reads_them_all(
             )
             sent = await (await run.ensure_page()).evaluate("window.__sent")
     except BrowserUnavailable as exc:
-        pytest.fail(f"{exc}\nStart Chrome with the command `netkeeper browser launch` prints.")
+        pytest.fail(f"{exc}\nStart Chrome with the command `netkeep browser launch` prints.")
 
     people = _Replica.people
     assert [c.urn for page in pages for c in page.connections] == [p.urn for p in people]
@@ -472,7 +472,7 @@ async def test_a_real_page_loads_its_own_pages_and_the_run_reads_them_all(
 
     # The observation altered nothing: every request the replica received is one the
     # page sent, byte for byte, with the page's own marker header, and there are no
-    # others -- netkeeper sent none of its own.
+    # others -- netkeep sent none of its own.
     received = [(r["body"], r["marker"]) for r in _Replica.received]
     assert received == [(s["body"], s["marker"]) for s in sent]
     assert [
@@ -496,7 +496,7 @@ async def test_a_page_that_stops_asking_is_route_changed_not_the_end(
             )
             answer = await source.fetch_page(start=0, count=40)
     except BrowserUnavailable as exc:
-        pytest.fail(f"{exc}\nStart Chrome with the command `netkeeper browser launch` prints.")
+        pytest.fail(f"{exc}\nStart Chrome with the command `netkeep browser launch` prints.")
     assert answer.outcome is Outcome.ROUTE_CHANGED and answer.page is None
 
 
@@ -509,7 +509,7 @@ async def test_a_landing_on_a_checkpoint_is_read_as_one_and_nothing_scrolls(
             source = PageConnections(run, origin=site, scroll_profile=_FAST_SCROLL)
             answer = await source.fetch_page(start=0, count=40)
     except BrowserUnavailable as exc:
-        pytest.fail(f"{exc}\nStart Chrome with the command `netkeeper browser launch` prints.")
+        pytest.fail(f"{exc}\nStart Chrome with the command `netkeep browser launch` prints.")
     assert answer.outcome is Outcome.CHECKPOINT
     assert _Replica.received == []
 
@@ -550,7 +550,7 @@ async def test_an_answer_that_breaks_off_is_asked_for_again_and_the_run_complete
                 on_page=on_page,
             )
     except BrowserUnavailable as exc:
-        pytest.fail(f"{exc}\nStart Chrome with the command `netkeeper browser launch` prints.")
+        pytest.fail(f"{exc}\nStart Chrome with the command `netkeep browser launch` prints.")
 
     assert _starts() == [10, 20, 20, 30, 35]
     assert result.reason is StopReason.END_OF_LIST and result.complete
@@ -583,7 +583,7 @@ async def test_an_answer_that_breaks_off_and_is_moved_past_is_read_past_uncounte
                 sleep=no_wait,
             )
     except BrowserUnavailable as exc:
-        pytest.fail(f"{exc}\nStart Chrome with the command `netkeeper browser launch` prints.")
+        pytest.fail(f"{exc}\nStart Chrome with the command `netkeep browser launch` prints.")
 
     assert _starts() == [10, 20, 30, 35]
     result = report.result
@@ -614,7 +614,7 @@ async def test_an_answer_the_page_aborts_after_reading_is_read_from_its_streamed
     request failed as aborted). The body tap's session received the answer as it
     streamed, the copy agrees with what the page asked next, and the run reads the
     whole list, complete. The tap changed nothing the replica received."""
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     _Replica.abort_at = frozenset({20})
     pages: list[ConnectionsPage] = []
 
@@ -634,7 +634,7 @@ async def test_an_answer_the_page_aborts_after_reading_is_read_from_its_streamed
             aborted = await tab.evaluate("window.__aborted")
             sent = await tab.evaluate("window.__sent")
     except BrowserUnavailable as exc:
-        pytest.fail(f"{exc}\nStart Chrome with the command `netkeeper browser launch` prints.")
+        pytest.fail(f"{exc}\nStart Chrome with the command `netkeep browser launch` prints.")
 
     assert aborted == 1 and _starts() == [10, 20, 30, 35]
     assert result.reason is StopReason.END_OF_LIST and result.complete and result.losses == ()

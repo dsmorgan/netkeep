@@ -103,7 +103,7 @@ describe('the theme switch', () => {
     render(<ThemeSwitch />)
     window.localStorage.setItem(THEME_KEY, 'dark')
     act(() => {
-      window.dispatchEvent(new StorageEvent('storage', { key: 'netkeeper.other' }))
+      window.dispatchEvent(new StorageEvent('storage', { key: 'netkeep.other' }))
     })
     expect(radio('Auto')).toBeChecked()
   })
@@ -145,6 +145,12 @@ describe("index.html's before-paint script", () => {
     run()
     expect(root).not.toHaveAttribute('data-theme')
     expect(colorSchemeMeta().content).toBe('light dark')
+  })
+
+  it("applies a choice saved under the rename's old key (#661)", () => {
+    window.localStorage.setItem('netkeeper.theme', 'dark')
+    run()
+    expect(root).toHaveAttribute('data-theme', 'dark')
   })
 
   it('leaves no global behind', () => {

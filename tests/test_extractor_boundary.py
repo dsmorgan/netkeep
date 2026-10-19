@@ -2,13 +2,13 @@
 
 Three rules, three mechanisms:
 
-* nothing under ``netkeeper/linkedin/`` imports the models, the session, the
+* nothing under ``netkeep/linkedin/`` imports the models, the session, the
   scoping helper, the CRM, or SQLAlchemy -- written down or dragged in. That is
   ``tests/test_browser_safety.py``'s syntax-tree scan and per-module subprocess
   sweep, both reading ``tests/boundary.py``'s one list; it is not repeated here;
 * the job speaks only in plain dataclasses: a spec in, pages and a result out,
   none of them able to carry a row, a session, or anything but data (below);
-* one module turns extractor results into rows, ``netkeeper/crm/apply.py``
+* one module turns extractor results into rows, ``netkeep/crm/apply.py``
   (below). A second module that took a ``ConnectionsPage`` and wrote contacts
   would be a second place the edge lifecycle could drift.
 """
@@ -27,8 +27,8 @@ import boundary
 import call_targets
 import test_browser_safety as browser_safety
 
-from netkeeper.linkedin import connections, enrich, inbox
-from netkeeper.models import Base
+from netkeep.linkedin import connections, enrich, inbox
+from netkeep.models import Base
 
 #: test_browser_safety.py's syntax-tree caches, emptied when this module ends (#478).
 ast_caches = browser_safety.ast_caches
@@ -146,7 +146,7 @@ def _model_names() -> set[str]:
     for mapper in Base.registry.mappers:
         cls = mapper.class_
         names.add(f"{cls.__module__}.{cls.__name__}")
-        names.add(f"netkeeper.models.{cls.__name__}")
+        names.add(f"netkeep.models.{cls.__name__}")
     return names
 
 
@@ -188,16 +188,16 @@ def test_the_mapping_scan_would_see_a_second_mapper() -> None:
     """A snippet that takes a page and writes a contact maps; one that passes it on does not."""
     models = _model_names()
     mapper = (
-        "from netkeeper.linkedin.connections import ConnectionsPage\n"
-        "from netkeeper.models import Contact\n"
+        "from netkeep.linkedin.connections import ConnectionsPage\n"
+        "from netkeep.models import Contact\n"
         "def write(session, page: ConnectionsPage):\n"
         "    for c in page.connections:\n"
         "        session.add(Contact(li_urn=c.urn))\n"
     )
     relay = (
-        "from netkeeper.crm import apply as mapping\n"
-        "from netkeeper.linkedin.connections import ConnectionsPage\n"
-        "from netkeeper.models import User\n"
+        "from netkeep.crm import apply as mapping\n"
+        "from netkeep.linkedin.connections import ConnectionsPage\n"
+        "from netkeep.models import User\n"
         "def on_page(session, user: User, page: ConnectionsPage):\n"
         "    mapping.apply_page(session, user, page)\n"
     )

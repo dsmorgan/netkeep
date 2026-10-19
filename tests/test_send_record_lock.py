@@ -23,14 +23,14 @@ from test_auto_send import lane as lane  # the fixture
 from test_campaign_engine import World, make_world
 from test_linkedin_steps import Lane
 
-from netkeeper import db
-from netkeeper.linkedin.messaging import PrefillResult
-from netkeeper.models import Message, MessageStatus, SyncRunStatus
-from netkeeper.scoping import get_scoped
-from netkeeper.services import campaign_engine as engine_module
-from netkeeper.services import message_send
-from netkeeper.services import posture as posture_module
-from netkeeper.services.campaign_engine import (
+from netkeep import db
+from netkeep.linkedin.messaging import PrefillResult
+from netkeep.models import Message, MessageStatus, SyncRunStatus
+from netkeep.scoping import get_scoped
+from netkeep.services import campaign_engine as engine_module
+from netkeep.services import message_send
+from netkeep.services import posture as posture_module
+from netkeep.services.campaign_engine import (
     RECORD_PENDING_AFTER,
     SCHEDULED_IN_GMAIL,
     STOP_WAIT_S,
@@ -39,8 +39,8 @@ from netkeeper.services.campaign_engine import (
     run_tick,
     unrecorded_sends,
 )
-from netkeeper.services.linkedin_accounts import ensure_account
-from netkeeper.services.linkedin_steps import (
+from netkeep.services.linkedin_accounts import ensure_account
+from netkeep.services.linkedin_steps import (
     AUTO_SEND_HOLD_INTERRUPTED,
     auto_send_hold,
     claim_auto_send,

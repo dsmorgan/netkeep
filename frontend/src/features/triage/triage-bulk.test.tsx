@@ -18,7 +18,7 @@ import type { Tag } from './api'
  *
  * The only `not_met` batch there is, now that nothing decides `not_met` from an
  * absence (#142): a tag's meaning is the user's own declared rule rather than
- * something netkeeper worked out from a quiet message history.
+ * something netkeep worked out from a quiet message history.
  */
 const RECRUITER: Tag = {
   id: 9,
@@ -143,7 +143,7 @@ describe('the bulk suggestion', () => {
   })
 })
 
-describe('what netkeeper decided (P1-28)', () => {
+describe('what netkeep decided (P1-28)', () => {
   /** Accepts the offered batch, which is what leaves decisions to review. */
   async function acceptTheBatch() {
     fireEvent.click(await screen.findByRole('button', { name: /^Mark \d+ as met$/ }))
@@ -156,7 +156,7 @@ describe('what netkeeper decided (P1-28)', () => {
     await acceptTheBatch()
 
     const prompt = await screen.findByTestId('automatic-pass')
-    expect(prompt).toHaveTextContent('netkeeper decided 3 contacts from a batch you accepted')
+    expect(prompt).toHaveTextContent('netkeep decided 3 contacts from a batch you accepted')
 
     // An answer of the person's own, in a state the review queue also serves:
     // it must stay out of it, which is the whole point of `decided_by`.
@@ -177,7 +177,7 @@ describe('what netkeeper decided (P1-28)', () => {
       'true',
     )
     expect(screen.getByTestId('automatic-pass')).toHaveTextContent(
-      'are the 3 contacts netkeeper decided for you, waiting to be checked',
+      'are the 3 contacts netkeep decided for you, waiting to be checked',
     )
   })
 
@@ -212,7 +212,7 @@ describe('what netkeeper decided (P1-28)', () => {
     expect(backend.byId(1).met).toBe('met')
     await waitFor(() =>
       expect(screen.getByTestId('automatic-pass')).toHaveTextContent(
-        'are the 2 contacts netkeeper decided for you',
+        'are the 2 contacts netkeep decided for you',
       ),
     )
     // And the queue moved on to the next one still waiting to be checked.
@@ -324,7 +324,7 @@ describe('what netkeeper decided (P1-28)', () => {
   it('reviews what a not-met batch decided, not only a met one', async () => {
     // The review pass serves both states a batch can leave behind. Every other
     // test here reviews a `met` batch, so dropping `not_met` from the queue's
-    // states would have left the suite green and the people netkeeper decided
+    // states would have left the suite green and the people netkeep decided
     // *not met* unreviewable — the half of the pass most worth checking.
     const backend = withARecruiterTag()
     renderTriage({ backend })
@@ -342,7 +342,7 @@ describe('what netkeeper decided (P1-28)', () => {
 
     await waitFor(async () => expect(await currentName()).toContain('Dev'))
     expect(screen.getByTestId('automatic-pass')).toHaveTextContent(
-      'are the 3 contacts netkeeper decided for you',
+      'are the 3 contacts netkeep decided for you',
     )
     const ahead = screen.getByTestId('triage-queue-list')
     expect(ahead).toHaveTextContent('Esme Fictional-5')

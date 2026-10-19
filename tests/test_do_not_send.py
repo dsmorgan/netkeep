@@ -14,9 +14,9 @@ import factories
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.crm import contacts as contact_service
-from netkeeper.crm import do_not_send
-from netkeeper.crm.identity import (
+from netkeep.crm import contacts as contact_service
+from netkeep.crm import do_not_send
+from netkeep.crm.identity import (
     EMAIL_STATUS_SEVERITY,
     IncomingContact,
     IncomingEmail,
@@ -24,8 +24,8 @@ from netkeeper.crm.identity import (
     New,
     resolve,
 )
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.db import session_scope
+from netkeep.models import (
     DO_NOT_SEND_RANK,
     Campaign,
     ContactSource,
@@ -34,7 +34,7 @@ from netkeeper.models import (
     TemplateChannel,
     User,
 )
-from netkeeper.services.campaign_guards import Reason, check_enrollment, check_step
+from netkeep.services.campaign_guards import Reason, check_enrollment, check_step
 
 NOW = datetime(2026, 9, 30, 12, 0, tzinfo=UTC)
 EMAIL = TemplateChannel.EMAIL

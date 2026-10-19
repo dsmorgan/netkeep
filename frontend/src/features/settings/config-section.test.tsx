@@ -13,7 +13,7 @@ function field(overrides: Partial<ConfigField>): ConfigField {
     key: 'linkedin.budget.li_prefills_per_day',
     group: 'linkedin_budgets',
     label: 'LinkedIn prefills a day',
-    help: 'How many campaign messages netkeeper may type.',
+    help: 'How many campaign messages netkeep may type.',
     kind: 'int',
     applies: 'now',
     applies_note: 'Applies from the next LinkedIn run.',
@@ -59,7 +59,7 @@ const AUTO_SEND = field({
   warn_above: null,
   value: false,
   default: false,
-  confirm_text: 'With auto-send on, netkeeper clicks Send on LinkedIn by itself.',
+  confirm_text: 'With auto-send on, netkeep clicks Send on LinkedIn by itself.',
 })
 const POLL = field({
   key: 'campaigns.reply_poll_minutes',
@@ -78,7 +78,7 @@ const POLL = field({
 function settings(fields: ConfigField[], overrides: Partial<ConfigSettings> = {}): ConfigSettings {
   return {
     config_path: '/etc/nk.toml',
-    log_file: '/data/nk/logs/netkeeper.log',
+    log_file: '/data/nk/logs/netkeep.log',
     config_changed: false,
     config_error: null,
     restart_pending: fields.some((f) => f.restart_pending),
@@ -111,7 +111,7 @@ function renderSections(
     }
     if (pathname === '/api/v1/settings/restart') {
       expect(request.method).toBe('POST')
-      expect(request.headers.get('X-Netkeeper-Client')).not.toBeNull()
+      expect(request.headers.get('X-Netkeep-Client')).not.toBeNull()
       restarts.push(boot)
       const stopping = boot
       boot = 'boot-2'
@@ -128,7 +128,7 @@ function renderSections(
     }
     if (pathname !== '/api/v1/settings/config') return jsonResponse({}, 500)
     if (request.method === 'GET') return jsonResponse(current)
-    expect(request.headers.get('X-Netkeeper-Client')).not.toBeNull()
+    expect(request.headers.get('X-Netkeep-Client')).not.toBeNull()
     const { values, confirm } = (await request.json()) as {
       values: Record<string, unknown>
       confirm?: boolean
@@ -187,8 +187,8 @@ describe('ConfigSections', () => {
     })
     const { puts } = renderSections([PREFILLS, size])
     const logs = within(await screen.findByRole('form', { name: 'Logs' }))
-    expect(screen.getByText('/data/nk/logs/netkeeper.log')).toBeVisible()
-    expect(screen.getAllByText('/data/nk/logs/netkeeper.log')).toHaveLength(1)
+    expect(screen.getByText('/data/nk/logs/netkeep.log')).toBeVisible()
+    expect(screen.getAllByText('/data/nk/logs/netkeep.log')).toHaveLength(1)
     fireEvent.change(logs.getByRole('spinbutton'), { target: { value: '25' } })
     fireEvent.click(logs.getByRole('button', { name: 'Save logs' }))
     await waitFor(() => expect(puts).toEqual([{ 'logs.max_mb': 25 }]))
@@ -217,7 +217,7 @@ describe('ConfigSections', () => {
     await waitFor(() =>
       expect(campaigns.getByRole('checkbox', { name: 'LinkedIn auto-send' })).toBeChecked(),
     )
-    expect(campaigns.getByText('On: netkeeper clicks Send')).toBeVisible()
+    expect(campaigns.getByText('On: netkeep clicks Send')).toBeVisible()
   })
 
   it('turns auto-send off at once, with no question and no Save', async () => {
@@ -312,32 +312,32 @@ describe('ConfigSections', () => {
     const poll = within(
       campaigns.getByRole('group', { name: 'Check Gmail for replies every (minutes)' }),
     )
-    expect(poll.getByText(/Restart netkeeper to apply this value/)).toBeVisible()
+    expect(poll.getByText(/Restart netkeep to apply this value/)).toBeVisible()
     fireEvent.click(poll.getByRole('button', { name: 'Use the default (10)' }))
     await waitFor(() => expect(puts).toEqual([{ [POLL.key]: null }]))
   })
 
-  it('marks a restart-only field, and offers Restart netkeeper until serve is back', async () => {
+  it('marks a restart-only field, and offers Restart netkeep until serve is back', async () => {
     const { restarts, restartBodies } = renderSections()
     const campaigns = within(await screen.findByRole('form', { name: 'Campaign defaults' }))
     const poll = within(
       campaigns.getByRole('group', { name: 'Check Gmail for replies every (minutes)' }),
     )
     expect(poll.getByText('Needs a restart')).toBeVisible()
-    const banner = within(screen.getByRole('region', { name: 'Restart netkeeper' }))
-    expect(banner.getByText(/A setting you changed takes effect when netkeeper restarts/))
-    fireEvent.click(banner.getByRole('button', { name: 'Restart netkeeper' }))
+    const banner = within(screen.getByRole('region', { name: 'Restart netkeep' }))
+    expect(banner.getByText(/A setting you changed takes effect when netkeep restarts/))
+    fireEvent.click(banner.getByRole('button', { name: 'Restart netkeep' }))
     expect(await screen.findByText(/Restarting… this page reconnects/)).toBeVisible()
     expect(
       await screen.findByText(
-        'netkeeper restarted, and the settings above are in force.',
+        'netkeep restarted, and the settings above are in force.',
         {},
         { timeout: 3_000 },
       ),
     ).toBeVisible()
     expect(restarts).toEqual(['boot-1'])
     expect(restartBodies).toEqual([{ when_idle: false }])
-    expect(screen.queryByRole('region', { name: 'Restart netkeeper' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Restart netkeep' })).toBeNull()
   })
 
   it('names what is running, and offers Restart when idle instead', async () => {
@@ -345,10 +345,10 @@ describe('ConfigSections', () => {
       restart_pending: true,
       busy: ['a LinkedIn enrich run (#7) is going; cancel it or wait for it to finish'],
     })
-    const banner = within(await screen.findByRole('region', { name: 'Restart netkeeper' }))
-    expect(banner.getByText('netkeeper is busy:')).toBeVisible()
+    const banner = within(await screen.findByRole('region', { name: 'Restart netkeep' }))
+    expect(banner.getByText('netkeep is busy:')).toBeVisible()
     expect(banner.getByText(/a LinkedIn enrich run \(#7\) is going/)).toBeVisible()
-    expect(banner.queryByRole('button', { name: 'Restart netkeeper' })).toBeNull()
+    expect(banner.queryByRole('button', { name: 'Restart netkeep' })).toBeNull()
     fireEvent.click(banner.getByRole('button', { name: 'Restart when idle' }))
     await waitFor(() => expect(restartBodies).toEqual([{ when_idle: true }]))
   })
@@ -359,8 +359,8 @@ describe('ConfigSections', () => {
       restart_waiting: true,
       busy: ['a campaign send is in progress'],
     })
-    const banner = within(await screen.findByRole('region', { name: 'Restart netkeeper' }))
-    expect(banner.getByText('netkeeper restarts once this is done:')).toBeVisible()
+    const banner = within(await screen.findByRole('region', { name: 'Restart netkeep' }))
+    expect(banner.getByText('netkeep restarts once this is done:')).toBeVisible()
     expect(banner.getByText(/nothing running is cut off/)).toBeVisible()
     expect(banner.getByText(/A run you start by hand after that keeps them paused/)).toBeVisible()
     expect(banner.queryByRole('button', { name: /Restart/ })).toBeNull()
@@ -371,7 +371,7 @@ describe('ConfigSections', () => {
   it('shows no restart banner when nothing waits for one', async () => {
     renderSections([PREFILLS])
     await screen.findByRole('form', { name: 'LinkedIn budgets' })
-    expect(screen.queryByRole('region', { name: 'Restart netkeeper' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Restart netkeep' })).toBeNull()
   })
 
   it('says config.toml changed, and will not restart onto a file that does not load', async () => {
@@ -380,15 +380,15 @@ describe('ConfigSections', () => {
       restart_pending: true,
       config_error: '/etc/nk.toml: invalid TOML',
     })
-    const banner = within(await screen.findByRole('region', { name: 'Restart netkeeper' }))
-    expect(banner.getByText(/config.toml changed since netkeeper started/)).toBeVisible()
+    const banner = within(await screen.findByRole('region', { name: 'Restart netkeep' }))
+    expect(banner.getByText(/config.toml changed since netkeep started/)).toBeVisible()
     expect(banner.getByRole('alert')).toHaveTextContent('/etc/nk.toml: invalid TOML')
-    expect(banner.getByRole('button', { name: 'Restart netkeeper' })).toBeDisabled()
+    expect(banner.getByRole('button', { name: 'Restart netkeep' })).toBeDisabled()
   })
 
   it('says how to restart when serve cannot restart itself', async () => {
     renderSections([PREFILLS], { restart_pending: true, can_restart: false })
-    const banner = within(await screen.findByRole('region', { name: 'Restart netkeeper' }))
+    const banner = within(await screen.findByRole('region', { name: 'Restart netkeep' }))
     expect(banner.queryByRole('button')).toBeNull()
     expect(banner.getByText(/Stop it and start it again/)).toBeVisible()
   })

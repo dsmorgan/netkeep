@@ -12,15 +12,15 @@ import factories
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.config import Settings
-from netkeeper.db import session_scope
-from netkeeper.models import User
-from netkeeper.services import campaign_replies, mailboxes, scheduler
-from netkeeper.services import ui_settings as ui
-from netkeeper.services.campaign_sender import GmailSender
-from netkeeper.services.events import EventBus
-from netkeeper.services.scheduled_runs import user_active_hours
-from netkeeper.services.settings_kv import set_setting
+from netkeep.config import Settings
+from netkeep.db import session_scope
+from netkeep.models import User
+from netkeep.services import campaign_replies, mailboxes, scheduler
+from netkeep.services import ui_settings as ui
+from netkeep.services.campaign_sender import GmailSender
+from netkeep.services.events import EventBus
+from netkeep.services.scheduled_runs import user_active_hours
+from netkeep.services.settings_kv import set_setting
 
 NOW = datetime(2026, 9, 23, 18, 0, tzinfo=UTC)
 HOURS = "config.linkedin.active_hours"
@@ -143,7 +143,7 @@ def test_an_unreadable_window_leaves_the_schedule_unestablished(
             raise RuntimeError("boom")
         return real(user)
 
-    from netkeeper.services.linkedin_accounts import ensure_account
+    from netkeep.services.linkedin_accounts import ensure_account
 
     accounts: list[tuple[User, int]] = []
     for uid in (first, second):
@@ -335,7 +335,7 @@ def test_an_unreadable_reply_interval_polls_nothing_for_that_user(
 def _mailbox_polled(
     factory: sessionmaker[Session], user_id: int, ago: timedelta, clock_now: datetime
 ) -> int:
-    from netkeeper.models import Mailbox
+    from netkeep.models import Mailbox
 
     with session_scope(factory, write=True) as session:
         mailbox = Mailbox(
@@ -428,7 +428,7 @@ async def test_an_unreadable_window_at_startup_fires_nothing_until_the_schedule_
     schedule is established with its catch-up jitter, and still nothing fires."""
     from random import Random
 
-    from netkeeper.services.linkedin_accounts import ensure_account
+    from netkeep.services.linkedin_accounts import ensure_account
 
     with session_scope(session_factory, write=True) as session:
         user = factories.make_user(session)
@@ -490,7 +490,7 @@ class _Restart:
     def __init__(self, factory: sessionmaker[Session], count: int) -> None:
         from random import Random
 
-        from netkeeper.services.linkedin_accounts import ensure_account
+        from netkeep.services.linkedin_accounts import ensure_account
 
         self.factory = factory
         self.accounts: list[tuple[User, int]] = []

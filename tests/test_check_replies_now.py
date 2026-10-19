@@ -20,16 +20,16 @@ from isolation.harness import acting_as
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.config import Settings
-from netkeeper.db import session_scope
-from netkeeper.models import Mailbox, MailboxStatus, User
-from netkeeper.scoping import scoped
-from netkeeper.services import campaign_replies
-from netkeeper.services import poll_status as service
-from netkeeper.services.campaign_sender import GmailSender
+from netkeep.config import Settings
+from netkeep.db import session_scope
+from netkeep.models import Mailbox, MailboxStatus, User
+from netkeep.scoping import scoped
+from netkeep.services import campaign_replies
+from netkeep.services import poll_status as service
+from netkeep.services.campaign_sender import GmailSender
 
 URL = "/api/v1/poll-status/gmail-replies/check-now"
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 EVERY = timedelta(minutes=10)
 
 
@@ -164,7 +164,7 @@ async def test_check_now_refuses_a_campaign_engine_without_gmail(
     [
         ({"none": True}, "Gmail isn't connected"),
         ({"status": MailboxStatus.DISABLED, "armed": False}, "Gmail isn't connected"),
-        ({"armed": False}, "No mailbox is armed, so netkeeper doesn't read Gmail"),
+        ({"armed": False}, "No mailbox is armed, so netkeep doesn't read Gmail"),
         (
             {"status": MailboxStatus.REAUTH_REQUIRED},
             "me@example.test needs you to sign in to Gmail again (Settings, Gmail)",
@@ -602,7 +602,7 @@ def test_a_waiting_request_is_due_but_a_not_ready_mailbox_stays_blocked(
     session_factory: sessionmaker[Session],
 ) -> None:
     """The order in ``_mailbox_poll``: sign-in, then not ready, then due, then the
-    request. A press never hides a mailbox netkeeper can't open."""
+    request. A press never hides a mailbox netkeep can't open."""
     now = datetime.now(UTC)
     with session_scope(session_factory, write=True) as session:
         user = factories.make_user(session)

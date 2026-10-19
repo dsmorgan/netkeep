@@ -13,7 +13,7 @@ import pytest
 from history_fixtures import Tab, grid, workbook_bytes
 from openpyxl import Workbook, load_workbook
 
-from netkeeper.crm.history_workbook import (
+from netkeep.crm.history_workbook import (
     BLANK_ROWS_END_A_LIST,
     MAX_SHEET_COLUMNS,
     Person,

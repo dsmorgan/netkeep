@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Attach screenshots of what you saw, and make the **standard support bundle** (Settings, Support, or `netkeeper support bundle`); see [Reporting a problem](https://github.com/dsmorgan/netkeeper/blob/main/docs/guide/reporting-a-problem.md). The bundle replaces personal values with placeholders and holds no secrets, but skim its `logs/netkeeper.log` before you attach it here, or send it privately and say so below.
+        Attach screenshots of what you saw, and make the **standard support bundle** (Settings, Support, or `netkeep support bundle`); see [Reporting a problem](https://github.com/dsmorgan/netkeeper/blob/main/docs/guide/reporting-a-problem.md). The bundle replaces personal values with placeholders and holds no secrets, but skim its `logs/netkeep.log` before you attach it here, or send it privately and say so below.
 
         Never attach a **full** bundle here: it holds real names. Never paste cookies, OAuth tokens, or other people's names, emails, or phone numbers.
   - type: textarea
@@ -33,7 +33,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: netkeeper version or commit
+      label: netkeep version or commit
       placeholder: "0.1.0 or git SHA"
   - type: input
     id: platform
@@ -44,7 +44,7 @@ body:
     id: bundle
     attributes:
       label: Support bundle and screenshots
-      description: Drag your screenshots and the standard bundle (netkeeper-support-standard-....zip) here, or say that you sent the bundle privately, or why you can't make one (for example, the install fails).
+      description: Drag your screenshots and the standard bundle (netkeep-support-standard-....zip) here, or say that you sent the bundle privately, or why you can't make one (for example, the install fails).
       placeholder: Attach the .zip and screenshots by dragging them into this box.
     validations:
       required: false

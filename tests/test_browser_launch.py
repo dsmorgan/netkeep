@@ -1,11 +1,11 @@
-"""``netkeeper/services/browser_launch.py``: the launch command as data (P2-12).
+"""``netkeep/services/browser_launch.py``: the launch command as data (P2-12).
 
 This is the module ``GET /linkedin/browser`` uses instead of importing
-``netkeeper.linkedin.browser`` (forbidden for anything under ``netkeeper/web/`` --
+``netkeep.linkedin.browser`` (forbidden for anything under ``netkeep/web/`` --
 see ``BROWSER_MODULES`` in ``tests/test_browser_safety.py``). It duplicates one
 constant from that module rather than importing it; one test here pins the two
-copies together so they cannot silently drift apart. ``netkeeper browser launch``
-(``netkeeper/cli.py``) imports this module's functions directly rather than
+copies together so they cannot silently drift apart. ``netkeep browser launch``
+(``netkeep/cli.py``) imports this module's functions directly rather than
 keeping its own copy of the command-building logic (M3, #179 review); the last
 test asserts its printed command is exactly what those functions return, so an
 import forgetting to happen fails loudly rather than passing by coincidence.
@@ -20,11 +20,11 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from netkeeper.cli import app as cli
-from netkeeper.config import Settings
-from netkeeper.linkedin.browser import CHROME_PROFILE_DIRNAME as EXTRACTOR_PROFILE_DIRNAME
-from netkeeper.paths import data_dir
-from netkeeper.services.browser_launch import (
+from netkeep.cli import app as cli
+from netkeep.config import Settings
+from netkeep.linkedin.browser import CHROME_PROFILE_DIRNAME as EXTRACTOR_PROFILE_DIRNAME
+from netkeep.paths import data_dir
+from netkeep.services.browser_launch import (
     CHROME_PROFILE_DIRNAME,
     DEFAULT_CDP_PORT,
     cdp_port,
@@ -86,7 +86,7 @@ def test_the_duplicated_profile_dirname_matches_the_extractors() -> None:
 
 
 def test_cli_browser_launch_prints_exactly_this_modules_command() -> None:
-    """`netkeeper browser launch` calls `chrome_launch_command`/`cdp_port` (M3);
+    """`netkeep browser launch` calls `chrome_launch_command`/`cdp_port` (M3);
     its printed lines must be exactly what those functions return, not a
     hand-kept copy that could say something different."""
     settings = Settings()
@@ -132,10 +132,10 @@ def test_cli_browser_launch_uses_the_chrome_address_the_settings_page_set() -> N
     the file's, then the Settings page's, as serve and preflight do."""
     from sqlalchemy import select
 
-    from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-    from netkeeper.models import User
-    from netkeeper.scoping import install_scope_guard
-    from netkeeper.services import ui_settings
+    from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+    from netkeep.models import User
+    from netkeep.scoping import install_scope_guard
+    from netkeep.services import ui_settings
 
     assert CliRunner().invoke(cli, ["db", "upgrade"]).exit_code == 0
     engine = make_engine(database_url())

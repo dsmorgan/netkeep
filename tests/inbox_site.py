@@ -19,7 +19,7 @@ import messaging_pages as mp
 from browser_fakes import FakeContext, FakeMouse, FakePage
 from flagship_site import FakeRequest, FakeResponse, ListeningTab
 
-from netkeeper.linkedin.browser import PageLike
+from netkeep.linkedin.browser import PageLike
 
 ORIGIN = mp.HOST
 PAGE_URL = f"{ORIGIN}/messaging/"

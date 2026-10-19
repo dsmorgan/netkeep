@@ -18,9 +18,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from test_campaign_engine import World, make_world
 from test_linkedin_steps import EMAIL, LANE_SETTINGS, LINKEDIN, Lane, make_lane
 
-from netkeeper.config import LinkedInSettings, Settings
-from netkeeper.crm import inbox_apply
-from netkeeper.models import (
+from netkeep.config import LinkedInSettings, Settings
+from netkeep.crm import inbox_apply
+from netkeep.models import (
     Campaign,
     Enrollment,
     EnrollmentStatus,
@@ -31,22 +31,22 @@ from netkeeper.models import (
     SyncRunStatus,
     User,
 )
-from netkeeper.scoping import get_scoped, scoped
-from netkeeper.services import inbox_hold, runs
-from netkeeper.services import poll_status as poll_status_service
-from netkeeper.services.campaign_engine import Skip
-from netkeeper.services.inbox_hold import (
+from netkeep.scoping import get_scoped, scoped
+from netkeep.services import inbox_hold, runs
+from netkeep.services import poll_status as poll_status_service
+from netkeep.services.campaign_engine import Skip
+from netkeep.services.inbox_hold import (
     INTERVAL,
     SLACK,
     STALE_AFTER_POLLS,
     is_stale,
     stale_after,
 )
-from netkeeper.services.inbox_poll import INCOMPLETE, poll_inbox
-from netkeeper.services.linkedin_steps import USER_REFUSALS, Refusal
-from netkeeper.services.posture import ACTION_FORGET_INBOX_OWNER, Protection, Status, posture
-from netkeeper.services.scheduler import DEFAULT_SCHEDULES, RETRY_MAX_MINUTES, JobKind
-from netkeeper.services.settings_kv import set_setting
+from netkeep.services.inbox_poll import INCOMPLETE, poll_inbox
+from netkeep.services.linkedin_steps import USER_REFUSALS, Refusal
+from netkeep.services.posture import ACTION_FORGET_INBOX_OWNER, Protection, Status, posture
+from netkeep.services.scheduler import DEFAULT_SCHEDULES, RETRY_MAX_MINUTES, JobKind
+from netkeep.services.settings_kv import set_setting
 
 LIMIT = stale_after()
 
@@ -320,11 +320,11 @@ def test_a_claim_is_held_with_its_reason_while_no_poll_has_completed(
     assert claim.reasons == (Refusal.INBOX_STALE.value,) == ("linkedin_inbox_stale",)
     assert claim.detail is not None
     assert "no poll has completed yet" in claim.detail
-    assert "run `netkeeper linkedin inbox` by hand; scheduled polls wait for a first one" in (
+    assert "run `netkeep linkedin inbox` by hand; scheduled polls wait for a first one" in (
         claim.detail
     )
     assert "or wait for the next scheduled poll" not in claim.detail
-    assert "netkeeper linkedin inbox" in claim.detail
+    assert "netkeep linkedin inbox" in claim.detail
     # Wait, never skip or fail: nothing was written, and the enrollment is still due.
     assert lane.messages(enrollment_id) == []
     assert lane.runs() == []
@@ -699,10 +699,10 @@ def test_posture_explains_the_hold_when_no_poll_has_completed(
     assert row.status is Status.ON
     # #433's first poll by hand, and #417's hold, both on the one row.
     assert "no complete poll yet" in row.value
-    assert "run by hand: `netkeeper linkedin inbox`" in row.value
+    assert "run by hand: `netkeep linkedin inbox`" in row.value
     (note,) = row.notes
     assert "no poll has completed yet" in note
-    assert "netkeeper linkedin inbox" in note
+    assert "netkeep linkedin inbox" in note
     assert "wait until a poll completes" in note
     assert "nothing is skipped or failed" in note
     assert row.warnings == ()
@@ -785,7 +785,7 @@ def test_posture_names_how_the_newest_poll_ended_with_the_hold_text(
     assert "sign back in to yours" in note
     assert (
         "otherwise click **Forget inbox owner** under Posture on the Settings page, or run"
-        " `netkeeper linkedin inbox-forget-owner`"
+        " `netkeep linkedin inbox-forget-owner`"
     ) in note
     assert "wait until a poll completes" in note  # the hold, in the same note
     # Nothing is recorded yet, so there is nothing to forget: no button (#583).
@@ -803,12 +803,12 @@ def test_posture_names_how_the_newest_poll_ended_with_the_hold_text(
 def test_posture_hold_note_names_the_contact_id_case_when_the_self_contact_has_one(
     session_factory: sessionmaker[Session],
 ) -> None:
-    from netkeeper.crm.self_contact import ensure_self_contact
+    from netkeep.crm.self_contact import ensure_self_contact
 
     world = _linkedin_world(session_factory)
     _poll(world, NOW - timedelta(hours=9))
     _poll(world, NOW - timedelta(hours=1), status=SyncRunStatus.ABORTED, reason="owner_mismatch")
-    from netkeeper.db import session_scope
+    from netkeep.db import session_scope
 
     with session_scope(session_factory, write=True) as session:
         user = session.get(User, world.user.id)

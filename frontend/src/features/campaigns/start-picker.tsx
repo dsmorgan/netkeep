@@ -1,7 +1,7 @@
 /**
  * Choosing a campaign's scheduled start (#338): a date and time, "Now" in one click,
  * the suggestion, a warning (never a refusal) outside the suggested slots, and the
- * reminder that netkeeper sends only while `serve` runs on an awake Mac.
+ * reminder that netkeep sends only while `serve` runs on an awake Mac.
  */
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useId } from 'react'

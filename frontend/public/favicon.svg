@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <!-- netkeeper: a lowercase "n" whose two feet are nodes, joined by the link that keeps them warm. -->
+  <!-- netkeep: a lowercase "n" whose two feet are nodes, joined by the link that keeps them warm. -->
   <!-- Electric blue is the theme's primary, oklch(55% 0.2 255), as sRGB (#606). -->
   <rect width="32" height="32" rx="7" fill="#006de2"/>
   <path d="M10 9.5V23M10 15.5a6 6 0 0 1 12 0V23" fill="none" stroke="#f9fcff" stroke-width="3.2" stroke-linecap="round"/>

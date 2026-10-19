@@ -21,7 +21,7 @@ export type SelfContactIn = components['schemas']['SelfContactIn']
  *
  * Built with no browser probe (`GET /posture` never attaches, CLAUDE.md), so
  * the `linkedin session` row always reads "unknown" here — a live check stays
- * `netkeeper preflight`, a terminal command.
+ * `netkeep preflight`, a terminal command.
  */
 export const postureQuery = queryOptions({
   queryKey: ['posture'] as const,
@@ -61,7 +61,7 @@ export const MANUAL_SENDS_KEY = 'manual_linkedin_sends'
 
 /**
  * You checked older LinkedIn replies by hand: clear the warning that the first inbox
- * poll could not read back far enough (`netkeeper linkedin inbox-acknowledge`). False
+ * poll could not read back far enough (`netkeep linkedin inbox-acknowledge`). False
  * when there was nothing to clear.
  */
 export async function acknowledgeInboxFirstPoll(): Promise<boolean> {
@@ -78,7 +78,7 @@ export const RESET_BREAKER_ACTION = 'reset_breaker'
 export const FORGET_INBOX_OWNER_ACTION = 'forget_inbox_owner'
 
 /**
- * Reset the tripped LinkedIn breakers (`netkeeper linkedin schedule reset-breaker`),
+ * Reset the tripped LinkedIn breakers (`netkeep linkedin schedule reset-breaker`),
  * which clears all five. `tripped` is the keys of the rows offering the reset that the
  * person was shown: the backend refuses (409) when a different set is tripped now, or none.
  */
@@ -92,7 +92,7 @@ export async function resetBreaker(tripped: readonly string[]): Promise<void> {
 }
 
 /**
- * Forget the LinkedIn mailbox the inbox poll recorded (`netkeeper linkedin
+ * Forget the LinkedIn mailbox the inbox poll recorded (`netkeep linkedin
  * inbox-forget-owner`). The backend refuses (409) when none is recorded.
  */
 export async function forgetInboxOwner(): Promise<void> {
@@ -198,7 +198,7 @@ export async function saveConfigSettings(
 export type Restart = components['schemas']['RestartOut']
 
 /**
- * Restart netkeeper serve (#597) so the settings it reads at startup apply. 409 when it
+ * Restart netkeep serve (#597) so the settings it reads at startup apply. 409 when it
  * cannot restart itself, config.toml no longer loads, or something is running (a
  * LinkedIn run, the browser, a task, a campaign send) and `whenIdle` is not set; with
  * it, serve restarts once that work is done.
@@ -250,7 +250,7 @@ export async function createBackup(): Promise<Backups> {
 
 export type LoginItem = components['schemas']['LoginItemOut']
 
-/** Whether netkeeper starts at login (#600), read from the launchd plist and launchctl. */
+/** Whether netkeep starts at login (#600), read from the launchd plist and launchctl. */
 export const loginItemQuery = queryOptions({
   queryKey: ['login-item'] as const,
   queryFn: async ({ signal }): Promise<LoginItem> => {
@@ -267,7 +267,7 @@ export async function setLoginItem(enabled: boolean): Promise<LoginItem> {
   return data
 }
 
-/** Rewrite the plist for this netkeeper and adopt an old script's agent; works when this
+/** Rewrite the plist for this netkeep and adopt an old script's agent; works when this
  * server is that agent. */
 export async function repairLoginItem(): Promise<LoginItem> {
   const { data, error, response } = await api.POST('/api/v1/login-item/repair')

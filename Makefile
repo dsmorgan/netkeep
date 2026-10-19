@@ -30,29 +30,29 @@ test-fast:          ## For local iteration: skips the few `slow` week simulation
 check: install lint typecheck test   ## Everything CI runs on the Python side, after resyncing .venv
 
 serve:              ## Run the backend (serves the built frontend if present)
-	$(PY) -m netkeeper.cli serve
+	$(PY) -m netkeep.cli serve
 
 dev:                ## Backend with reload; run `pnpm dev` in frontend/ alongside
-	$(PY) -m netkeeper.cli serve --reload
+	$(PY) -m netkeep.cli serve --reload
 
 build-ui:           ## Production frontend build into frontend/dist
 	cd frontend && pnpm install --frozen-lockfile && pnpm build
 
 gen-client:         ## Export the OpenAPI schema and regenerate the TypeScript client
 	@# A scratch data directory: exporting the schema never touches yours (#602).
-	scratch=$$(mktemp -d) && NETKEEPER_DATA="$$scratch" $(PY) -m netkeeper.cli openapi export --out frontend/openapi.json; status=$$?; rm -rf "$$scratch"; exit $$status
+	scratch=$$(mktemp -d) && NETKEEP_DATA="$$scratch" $(PY) -m netkeep.cli openapi export --out frontend/openapi.json; status=$$?; rm -rf "$$scratch"; exit $$status
 	cd frontend && pnpm gen
 
 changelog-draft:    ## Preview the unreleased changelog assembled from changelog.d/
 	$(PY) -m towncrier build --draft --version unreleased
 
 backup:             ## Snapshot the database into the data directory's backups/
-	$(PY) -m netkeeper.cli backup
+	$(PY) -m netkeep.cli backup
 
 reset:              ## Archive the database, then delete it so `make serve` starts clean
 	scripts/reset-data.sh
 
-chrome:             ## Start the netkeeper Chrome profile with its debugging port (by hand)
+chrome:             ## Start the netkeep Chrome profile with its debugging port (by hand)
 	scripts/chrome.sh
 
 clean:

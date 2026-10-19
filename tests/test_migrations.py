@@ -1,17 +1,17 @@
 """Migrations against a fresh database: SQLite always, PostgreSQL when
-NETKEEPER_TEST_DATABASE_URL points at one.
+NETKEEP_TEST_DATABASE_URL points at one.
 
 CI (.github/workflows/ci.yml) sets that variable against a postgres:16 service, so
 a construct that only SQLite accepts fails there, not on a hosted install. To run
 the PostgreSQL params locally, start a throwaway server and point the variable at it:
 
-    docker run --rm -e POSTGRES_PASSWORD=netkeeper -e POSTGRES_USER=netkeeper \
-        -e POSTGRES_DB=netkeeper_test -p 5432:5432 postgres:16
-    NETKEEPER_TEST_DATABASE_URL=postgresql+psycopg://netkeeper:netkeeper@localhost/netkeeper_test \
+    docker run --rm -e POSTGRES_PASSWORD=netkeep -e POSTGRES_USER=netkeep \
+        -e POSTGRES_DB=netkeep_test -p 5432:5432 postgres:16
+    NETKEEP_TEST_DATABASE_URL=postgresql+psycopg://netkeep:netkeep@localhost/netkeep_test \
         make test
 
 With ``pytest -n``, each xdist worker gets its own database, named after the one in
-the URL plus the worker id (``netkeeper_test_gw0``), so workers do not collide. The
+the URL plus the worker id (``netkeep_test_gw0``), so workers do not collide. The
 login in the URL needs the CREATEDB privilege then; the databases are dropped at the
 end of the session.
 """
@@ -34,14 +34,14 @@ from sqlalchemy import Connection, Engine, MetaData, ScalarResult, create_engine
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 
-from netkeeper import migrations
-from netkeeper.crm.identity import _fold as identity_fold
-from netkeeper.db import database_url, make_engine
-from netkeeper.models import Base
+from netkeep import migrations
+from netkeep.crm.identity import _fold as identity_fold
+from netkeep.db import database_url, make_engine
+from netkeep.models import Base
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VERSIONS_DIR = migrations.alembic_root() / "alembic" / "versions"
-PG_ENV = "NETKEEPER_TEST_DATABASE_URL"
+PG_ENV = "NETKEEP_TEST_DATABASE_URL"
 
 # Text only SQLite understands. Alembic's batch mode (render_as_batch,
 # batch_alter_table) is deliberately absent: it is how Alembic edits tables on
@@ -761,7 +761,7 @@ def test_deleting_a_user_cascades_to_both_import_tables(migration_engine: Engine
 
 def test_alembic_root_is_the_package_directory() -> None:
     root = migrations.alembic_root()
-    assert root == REPO_ROOT / "netkeeper"
+    assert root == REPO_ROOT / "netkeep"
     assert (root / "alembic.ini").is_file()
     assert (root / "alembic" / "env.py").is_file()
     assert (root / "alembic" / "script.py.mako").is_file()
@@ -773,10 +773,10 @@ def test_revision_ids_are_sequential() -> None:
     assert migrations.next_revision_id() == f"{int(head) + 1:04d}"
 
 
-def test_migration_files_do_not_import_netkeeper() -> None:
+def test_migration_files_do_not_import_netkeep() -> None:
     """Migrations are frozen history; they must not track the models module."""
     for path in sorted(VERSIONS_DIR.glob("*.py")):
-        assert "netkeeper" not in path.read_text(), path
+        assert "netkeep" not in path.read_text(), path
 
 
 # --- portability ------------------------------------------------------------
@@ -1403,7 +1403,7 @@ def test_a_run_goes_with_its_user_and_its_resume_link_is_cleared(
 def test_existing_contacts_need_no_review_and_the_mark_downgrades_away(
     migration_engine: Engine,
 ) -> None:
-    """Every contact before 0014 came from a source netkeeper trusts, so none is marked."""
+    """Every contact before 0014 came from a source netkeep trusts, so none is marked."""
     migrations.upgrade(migration_engine, "0013")
     with migration_engine.begin() as connection:
         _seed_users(connection, 1)
@@ -1889,7 +1889,7 @@ def _insert_mailbox(
         text(
             "INSERT INTO mailboxes (id, user_id, email, provider, keychain_ref, daily_cap,"
             " status, label_prefix, created_at, updated_at)"
-            " VALUES (:id, :user_id, :email, 'gmail', :ref, :cap, :status, 'netkeeper', :t, :t)"
+            " VALUES (:id, :user_id, :email, 'gmail', :ref, :cap, :status, 'netkeep', :t, :t)"
         ),
         {
             "id": id,

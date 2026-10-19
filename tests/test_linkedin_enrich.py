@@ -1,4 +1,4 @@
-"""netkeeper.linkedin.enrich: the enrichment job, against a fake source and a fake gate.
+"""netkeep.linkedin.enrich: the enrichment job, against a fake source and a fake gate.
 
 No database and no browser: :class:`profile_fakes.FakeBrowser` answers from invented
 profiles and records every navigation, scroll, read, and click in order, and the gate
@@ -30,9 +30,9 @@ from profile_fakes import (
     details_of,
 )
 
-from netkeeper.linkedin import enrich
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.enrich import (
+from netkeep.linkedin import enrich
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.enrich import (
     EnrichJobSpec,
     EnrichResult,
     EnrichTarget,
@@ -45,8 +45,8 @@ from netkeeper.linkedin.enrich import (
     run_enrichment,
     stretched,
 )
-from netkeeper.linkedin.observe import ObservationFailed
-from netkeeper.linkedin.pacing import (
+from netkeep.linkedin.observe import ObservationFailed
+from netkeep.linkedin.pacing import (
     DelayProfile,
     ScrollPlan,
     depth_after,
@@ -54,7 +54,7 @@ from netkeeper.linkedin.pacing import (
     plan_enrichment,
     scroll_back_to_top,
 )
-from netkeeper.linkedin.voyager import ContactInfo, ProfileDetails
+from netkeep.linkedin.voyager import ContactInfo, ProfileDetails
 
 NOW = datetime(2026, 9, 23, 15, 0, tzinfo=UTC)
 SEED = 7

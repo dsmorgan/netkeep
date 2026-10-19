@@ -25,7 +25,7 @@ function renderSection(
 describe('GmailSection', () => {
   it('asks for the OAuth client in the guide, and cannot connect without one', async () => {
     renderSection(() => status({ client_configured: false, client_id: null }))
-    fireEvent.click(await screen.findByRole('button', { name: /Save the client in netkeeper/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Save the client in netkeep/ }))
     expect(screen.getByLabelText('Client ID')).toBeInTheDocument()
     expect(screen.getByLabelText('Client secret')).toHaveAttribute('type', 'password')
     expect(screen.queryByRole('region', { name: 'OAuth client' })).not.toBeInTheDocument()
@@ -42,7 +42,7 @@ describe('GmailSection', () => {
         return jsonResponse(current)
       },
     })
-    fireEvent.click(await screen.findByRole('button', { name: /Save the client in netkeeper/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Save the client in netkeep/ }))
     fireEvent.change(screen.getByLabelText('Client ID'), {
       target: { value: 'abc.apps.googleusercontent.com' },
     })
@@ -71,7 +71,7 @@ describe('GmailSection', () => {
           422,
         ),
     })
-    fireEvent.click(await screen.findByRole('button', { name: /Save the client in netkeeper/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Save the client in netkeep/ }))
     fireEvent.change(screen.getByLabelText('Client ID'), { target: { value: 'my-project' } })
     fireEvent.change(screen.getByLabelText('Client secret'), { target: { value: 's' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save client' }))
@@ -207,7 +207,7 @@ describe('GmailSection', () => {
     const arm = await screen.findByRole('button', { name: 'Arm to send' })
     expect(arm).toBeDisabled()
     expect(arm).toHaveAccessibleDescription(
-      'Arm to send is off until netkeeper finds one of its own drafts in this mailbox.',
+      'Arm to send is off until netkeep finds one of its own drafts in this mailbox.',
     )
     const path = screen.getByRole('region', { name: 'Arm to send' })
     expect(within(path).getByText(/Waiting: no draft yet/)).toBeInTheDocument()
@@ -287,7 +287,7 @@ describe('GmailSection', () => {
       }),
     )
     const path = await screen.findByRole('region', { name: 'Arm to send' })
-    expect(within(path).getByText(/netkeeper serve isn’t running/)).toBeInTheDocument()
+    expect(within(path).getByText(/netkeep serve isn’t running/)).toBeInTheDocument()
   })
 
   it('arms to send, a separate step, only after confirming', async () => {

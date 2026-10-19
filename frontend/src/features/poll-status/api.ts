@@ -38,7 +38,7 @@ export const pollStatusQuery = queryOptions({
 })
 
 /**
- * "Check now" for Gmail replies (#409): asks `netkeeper serve` to poll at its next
+ * "Check now" for Gmail replies (#409): asks `netkeep serve` to poll at its next
  * campaign tick, within a minute. It never reads Gmail itself, and a second press
  * before that tick joins the first. A refusal (not running, disarmed, not
  * connected, every mailbox needing sign-in) throws its reason.

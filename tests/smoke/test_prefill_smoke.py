@@ -1,7 +1,7 @@
 """The prefill over a real Chrome, against a loopback replica (P4-03, #382, ADR 0007).
 
-Opt in with ``NETKEEPER_BROWSER_TESTS=1``, same as every other file under
-``tests/smoke/``, and point ``NETKEEPER_CDP_URL`` at an isolated Chrome on an explicit,
+Opt in with ``NETKEEP_BROWSER_TESTS=1``, same as every other file under
+``tests/smoke/``, and point ``NETKEEP_CDP_URL`` at an isolated Chrome on an explicit,
 unused port (never 9222), in a window of about 1440 by 1000 (start it with
 ``--window-size=1440,1000``, or resize it): the click-geometry scenarios assume a
 desktop-sized viewport. The only site is the replica this file serves for itself: a
@@ -52,27 +52,27 @@ from messaging_pages import (
     never_messaged_bubble_html,
 )
 
-from netkeeper.linkedin.browser import (
+from netkeep.linkedin.browser import (
     MESSAGE_NOT_ON_SCREEN,
     AttachBrowserProvider,
     ClickFailure,
     classify_click_failure,
 )
-from netkeeper.linkedin.messaging import (
+from netkeep.linkedin.messaging import (
     COMPOSE_OPTIONS_PATH,
     MessageJobSpec,
     MessageOutcomeKind,
     SendPermit,
     plan_typing,
 )
-from netkeeper.linkedin.page_messaging import PagePrefill
+from netkeep.linkedin.page_messaging import PagePrefill
 
 pytestmark = pytest.mark.skipif(
-    os.environ.get("NETKEEPER_BROWSER_TESTS") != "1",
-    reason="browser smoke suite: start Chrome, then set NETKEEPER_BROWSER_TESTS=1",
+    os.environ.get("NETKEEP_BROWSER_TESTS") != "1",
+    reason="browser smoke suite: start Chrome, then set NETKEEP_BROWSER_TESTS=1",
 )
 
-CDP_URL = os.environ.get("NETKEEPER_CDP_URL", "http://127.0.0.1:9222")
+CDP_URL = os.environ.get("NETKEEP_CDP_URL", "http://127.0.0.1:9222")
 BODY = "Hi there, good to see you!\nShall we catch up?\n\nBest, Odalys"
 
 
@@ -618,11 +618,11 @@ REFUSALS = {
     # #444: minimized bubbles keep their composers, hidden; decision 3, read before the
     # click, refuses them and a leftover open bubble with no click.
     "minimized": (
-        "a message bubble is already open in this or another LinkedIn tab in the netkeeper"
+        "a message bubble is already open in this or another LinkedIn tab in the netkeep"
         " Chrome window, minimized ones included"
     ),
     "leftover": (
-        "a message bubble is already open in this or another LinkedIn tab in the netkeeper"
+        "a message bubble is already open in this or another LinkedIn tab in the netkeep"
         " Chrome window, minimized ones included"
     ),
     # #475: another element's ::after over every control covers them; no click.
@@ -825,8 +825,8 @@ async def test_an_auto_send_whose_gate_refuses_types_but_never_clicks_send(origi
 def covering_scroll(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin the prefill's brief scroll to one step that leaves the scrolling page's top
     card under its sticky header (#470)."""
-    from netkeeper.linkedin import page_messaging
-    from netkeeper.linkedin.pacing import scroll_like_a_person
+    from netkeep.linkedin import page_messaging
+    from netkeep.linkedin.pacing import scroll_like_a_person
 
     monkeypatch.setattr(page_messaging, "BRIEF_SCROLL_STEPS", (1, 1))
     monkeypatch.setattr(
@@ -845,7 +845,7 @@ async def test_without_the_scroll_back_the_sticky_header_makes_the_click_refuse(
 ) -> None:
     """#470's failure, in a real Chrome: with the probe answering nothing, the brief
     scroll leaves the top card's control under the sticky header and the click refuses."""
-    from netkeeper.linkedin.browser import MESSAGE_NOT_ON_SCREEN, BrowserRun
+    from netkeep.linkedin.browser import MESSAGE_NOT_ON_SCREEN, BrowserRun
 
     async def nothing(self: BrowserRun, profile_path: str, profile_id: str) -> None:
         return None
@@ -882,8 +882,8 @@ async def test_a_scrolled_page_is_hit_tested_where_the_control_is(
     """#470, in a real Chrome: ``DOM.getNodeForLocation`` takes document coordinates, so
     on a page scrolled 120 pixels (the sticky header not yet shown) the top card's
     control reads clear, and the click needs no scroll back."""
-    from netkeeper.linkedin import page_messaging
-    from netkeeper.linkedin.pacing import scroll_like_a_person
+    from netkeep.linkedin import page_messaging
+    from netkeep.linkedin.pacing import scroll_like_a_person
 
     monkeypatch.setattr(page_messaging, "BRIEF_SCROLL_STEPS", (1, 1))
     monkeypatch.setattr(page_messaging, "BRIEF_SCROLL_DELTA_PX", (120, 120))

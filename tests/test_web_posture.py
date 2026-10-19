@@ -1,4 +1,4 @@
-"""``GET /posture``: the same report `netkeeper posture` prints, as data (P2-12).
+"""``GET /posture``: the same report `netkeep posture` prints, as data (P2-12).
 
 Read-only, no browser probe (CLAUDE.md: never await browser work in a request
 handler) -- the session protection here comes from recorded evidence (#282), never
@@ -15,14 +15,14 @@ from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from netkeeper.config import Settings
-from netkeeper.db import session_scope
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.models import User, UserKind
-from netkeeper.models.base import utcnow
-from netkeeper.services import posture as posture_service
-from netkeeper.services.linkedin_accounts import account_id_for
-from netkeeper.services.linkedin_session import flag_session
+from netkeep.config import Settings
+from netkeep.db import session_scope
+from netkeep.linkedin.classify import Outcome
+from netkeep.models import User, UserKind
+from netkeep.models.base import utcnow
+from netkeep.services import posture as posture_service
+from netkeep.services.linkedin_accounts import account_id_for
+from netkeep.services.linkedin_session import flag_session
 
 NOW = datetime.now(UTC)
 
@@ -59,7 +59,7 @@ async def test_every_row_has_a_severity_and_the_fix_the_service_builds(
     assert session_row["severity"] == "problem"
     assert session_row["fix"] == (
         "Click **Start Chrome** on the LinkedIn page and sign in to LinkedIn, then run"
-        " `netkeeper preflight` in a terminal."
+        " `netkeep preflight` in a terminal."
     )
     for row in rows.values():
         assert (row["status"] != "on") == (row["severity"] == "problem")
@@ -86,7 +86,7 @@ async def test_with_no_evidence_the_browser_session_is_unknown_never_assumed_hea
     assert session_row["status"] == "unknown"
     assert session_row["value"] == "not checked yet"
     assert session_row["warnings"] != []
-    assert "netkeeper preflight" in session_row["warnings"][0]
+    assert "netkeep preflight" in session_row["warnings"][0]
     assert report["ok"] is False
     assert report["verdict"].startswith("NOT clear")
 

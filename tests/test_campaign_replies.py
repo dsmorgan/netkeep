@@ -1,4 +1,4 @@
-"""netkeeper.services.campaign_replies (spec 11.5 "Bounces", 11.7; item P3-08): replies in
+"""netkeep.services.campaign_replies (spec 11.5 "Bounces", 11.7; item P3-08): replies in
 and out of the thread, bounces, unsubscribe phrases, history expiry, idempotency, and the
 claim-time race.
 
@@ -18,12 +18,12 @@ from campaign_fakes import ARMED_FOR_SEND, NOW, SETTINGS, make_mailbox
 from sqlalchemy.orm import Session, sessionmaker
 from test_campaign_sender import LATER, WEEK, Crash, CrashAfterSend, Mail, make_mail
 
-from netkeeper.campaigns.gmail import GmailTransient, Message, MessageRef
-from netkeeper.campaigns.gmail_fake import FakeGmail
-from netkeeper.config import Settings
-from netkeeper.crm import do_not_send
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.campaigns.gmail import GmailTransient, Message, MessageRef
+from netkeep.campaigns.gmail_fake import FakeGmail
+from netkeep.config import Settings
+from netkeep.crm import do_not_send
+from netkeep.db import session_scope
+from netkeep.models import (
     Campaign,
     CampaignStatus,
     Contact,
@@ -43,11 +43,11 @@ from netkeeper.models import (
     TemplateChannel,
     User,
 )
-from netkeeper.scoping import get_scoped, scoped
-from netkeeper.services import campaign_replies as replies
-from netkeeper.services import campaigns as campaign_service
-from netkeeper.services import mailboxes as mailbox_service
-from netkeeper.services.campaign_engine import (
+from netkeep.scoping import get_scoped, scoped
+from netkeep.services import campaign_replies as replies
+from netkeep.services import campaigns as campaign_service
+from netkeep.services import mailboxes as mailbox_service
+from netkeep.services.campaign_engine import (
     RECONCILE_SEARCH_EVERY,
     REVIEW_GATE,
     Firing,
@@ -55,9 +55,9 @@ from netkeeper.services.campaign_engine import (
     SendResult,
     activate,
 )
-from netkeeper.services.campaign_sender import GmailSender
-from netkeeper.services.mailboxes import MailboxNotReady
-from netkeeper.services.simulate_campaign import simulate_campaign
+from netkeep.services.campaign_sender import GmailSender
+from netkeep.services.mailboxes import MailboxNotReady
+from netkeep.services.simulate_campaign import simulate_campaign
 
 ADA = "ada@example.test"
 
@@ -1171,7 +1171,7 @@ def two(session_factory: sessionmaker[Session]) -> TwoBoxes:
     locked: set[int] = set()
 
     def open_gmail(user_id: int, mailbox_id: int) -> FakeGmail:
-        # What netkeeper.services.mailboxes.open_gmail does first: a mailbox not ``ok``
+        # What netkeep.services.mailboxes.open_gmail does first: a mailbox not ``ok``
         # is refused before any secret is read or Gmail is called.
         def status(session: Session) -> MailboxStatus:
             mailbox = get_scoped(session, mail.user, Mailbox, mailbox_id)
@@ -1510,14 +1510,14 @@ def test_a_mailbox_waiting_out_its_backoff_stays_due(
 
 
 def test_the_reply_backoff_starts_at_one_minute() -> None:
-    from netkeeper.services import campaign_sender
+    from netkeep.services import campaign_sender
 
     assert timedelta(minutes=1) == campaign_sender.REPLY_BACKOFF_FIRST
 
 
 def test_after_the_keychain_is_unlocked_the_poll_status_stops_saying_so(two: TwoBoxes) -> None:
     """The not-ready reason lasts only until a poll opens the mailbox again."""
-    from netkeeper.services import poll_status
+    from netkeep.services import poll_status
 
     mail = two.mail
     start_both(two)

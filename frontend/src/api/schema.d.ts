@@ -389,7 +389,7 @@ export interface paths {
          * Delete Campaign
          * @description Delete a campaign never activated and with no messages (#345), with its steps and
          *     enrollments. ``409``, with the reason, for any other: archive one that sent. The
-         *     answer lists the Gmail drafts left behind: netkeeper never deletes one (ADR 0003).
+         *     answer lists the Gmail drafts left behind: netkeep never deletes one (ADR 0003).
          */
         delete: operations["delete_campaign"];
         options?: never;
@@ -1087,7 +1087,7 @@ export interface paths {
          * Get Contact Stats
          * @description Counts and triage progress over the user's contacts, for a dashboard (spec 10.1).
          *
-         *     ``netkeeper.crm.contacts.contact_stats()`` backs this, ``netkeeper contacts
+         *     ``netkeep.crm.contacts.contact_stats()`` backs this, ``netkeep contacts
          *     stats``, and the triage queue's progress bar alike, so the three numbers
          *     cannot quietly disagree (#90).
          *
@@ -1159,7 +1159,7 @@ export interface paths {
         put?: never;
         /**
          * Confirm Contact
-         * @description Confirm a contact netkeeper read off a connections-page card (#184).
+         * @description Confirm a contact netkeep read off a connections-page card (#184).
          *
          *     Clears `needs_review_at`. A contact not waiting for review is returned as it
          *     is. Until confirmed, or until a sync attaches a URN, such a contact is never
@@ -1400,7 +1400,7 @@ export interface paths {
         put?: never;
         /**
          * Record Outside Response
-         * @description Record a response that came outside netkeeper, and end the enrollments it answers
+         * @description Record a response that came outside netkeep, and end the enrollments it answers
          *     ``replied`` (``opted_out`` for an opt-out), as a detected reply does. No later step
          *     sends. ``422``, with the reason, for a time in the future or before the first send of
          *     an enrollment it would end, or ``do_not_contact`` without an opt-out.
@@ -1461,7 +1461,7 @@ export interface paths {
         put?: never;
         /**
          * Reject Contact
-         * @description Reject a contact netkeeper read off a connections-page card: archive it (#184).
+         * @description Reject a contact netkeep read off a connections-page card: archive it (#184).
          *
          *     Never a delete. `needs_review_at` stays set, so unarchiving brings back an
          *     unconfirmed contact. `409` for a contact that is not waiting for review.
@@ -1583,7 +1583,7 @@ export interface paths {
         };
         /**
          * List Changed Jobs
-         * @description Live contacts netkeeper saw change position in the last 30 days, newest first (spec 9.8).
+         * @description Live contacts netkeep saw change position in the last 30 days, newest first (spec 9.8).
          *
          *     A change is one an enrichment visit noticed (a contact snapshot), dated when
          *     it was noticed, not the start date on the profile (#286).
@@ -1782,8 +1782,8 @@ export interface paths {
         };
         /**
          * Get Leftover Drafts
-         * @description Drafts netkeeper left in Gmail, for you to clean up by hand. Read-only: it never
-         *     calls Gmail, and netkeeper deletes nothing there.
+         * @description Drafts netkeep left in Gmail, for you to clean up by hand. Read-only: it never
+         *     calls Gmail, and netkeep deletes nothing there.
          */
         get: operations["get_gmail_leftover_drafts"];
         put?: never;
@@ -1823,7 +1823,7 @@ export interface paths {
         /**
          * Import History
          * @description Import the old tool's campaigns and the people its workbook names, as
-         *     ``netkeeper history import`` does. A dry run rolls the transaction back.
+         *     ``netkeep history import`` does. A dry run rolls the transaction back.
          */
         post: operations["import_history"];
         delete?: never;
@@ -1844,7 +1844,7 @@ export interface paths {
         /**
          * Scan History Gmail
          * @description Search Gmail, read-only, for what the imported recipients sent back, as
-         *     ``netkeeper history scan-gmail`` does. A scan Gmail stops saves what it finished and
+         *     ``netkeep history scan-gmail`` does. A scan Gmail stops saves what it finished and
          *     answers with ``stopped``; run it again to continue.
          */
         post: operations["scan_history_gmail"];
@@ -1898,7 +1898,7 @@ export interface paths {
          *
          *     Read straight from the upload FastAPI has already received — ``file.file``
          *     is the ``SpooledTemporaryFile`` the multipart parser wrote it to, and
-         *     :func:`netkeeper.linkedin.archive.open_archive` reads any seekable binary
+         *     :func:`netkeep.linkedin.archive.open_archive` reads any seekable binary
          *     stream, so nothing here copies it into a second in-memory buffer. That
          *     parsing happens before this handler ever runs, on every upload regardless
          *     of size, since neither this app nor its FastAPI defaults put a limit on a
@@ -1907,16 +1907,16 @@ export interface paths {
          *     plain (not ``async``) handler, like the rest of this router, so FastAPI
          *     runs it in a worker thread rather than blocking the event loop on it.
          *
-         *     Run through the same :func:`netkeeper.crm.archive.import_archive` that
-         *     ``netkeeper import archive`` uses on a path, so the two report the same
+         *     Run through the same :func:`netkeep.crm.archive.import_archive` that
+         *     ``netkeep import archive`` uses on a path, so the two report the same
          *     counts for the same archive. Re-uploading the same export adds nothing
          *     (see that function's idempotence). A zip that is not a LinkedIn export, or
          *     one that fails a guard (its total size, member count, compression ratio,
          *     a member's path, or being password-protected), answers 422 naming what
          *     was wrong — including one merely damaged in transit, never a 500 — and
          *     nothing is decompressed before those checks pass. The body
-         *     (:class:`~netkeeper.web.schemas.ArchiveRefusalOut`) carries a ``code``
-         *     (:class:`~netkeeper.linkedin.archive.ArchiveRefusalCode`) alongside the
+         *     (:class:`~netkeep.web.schemas.ArchiveRefusalOut`) carries a ``code``
+         *     (:class:`~netkeep.linkedin.archive.ArchiveRefusalCode`) alongside the
          *     message on every refusal, so a client can act on why without parsing it.
          */
         post: operations["import_archive"];
@@ -2193,9 +2193,9 @@ export interface paths {
         };
         /**
          * Get Browser
-         * @description ``netkeeper browser launch``'s instructions, as data (spec 9.1, ADR 0002).
+         * @description ``netkeep browser launch``'s instructions, as data (spec 9.1, ADR 0002).
          *
-         *     Only a person starts netkeeper's Chrome, and a run never does (ADR 0012); this
+         *     Only a person starts netkeep's Chrome, and a run never does (ADR 0012); this
          *     shows the command for a person to run themselves. Everything below comes from config -- no
          *     attach, so this never awaits browser work (CLAUDE.md). The address is the one in
          *     force (the file, then the Settings page, #597): after a change Chrome is started
@@ -2225,7 +2225,7 @@ export interface paths {
          * @description Start a Check connection run; answers at once, before any browser work.
          *
          *     The run visits no page, so it spends no budget, and the session flag, heat, and
-         *     active hours don't stop it, as they don't stop ``netkeeper preflight``.
+         *     active hours don't stop it, as they don't stop ``netkeep preflight``.
          */
         post: operations["check_linkedin_browser"];
         delete?: never;
@@ -2243,14 +2243,14 @@ export interface paths {
         };
         /**
          * Get Browser Health
-         * @description What netkeeper already knows about Chrome and the session, never a fresh probe (#181).
+         * @description What netkeep already knows about Chrome and the session, never a fresh probe (#181).
          *
-         *     The ``linkedin session`` posture row (the last ``netkeeper preflight`` or
+         *     The ``linkedin session`` posture row (the last ``netkeep preflight`` or
          *     ``posture --probe``, or the newest run that read LinkedIn, under the session
          *     flag), and the newest run that could not reach Chrome when that is newer.
          *     Nothing here attaches to the browser (spec 9.9, CLAUDE.md); that takes a live
-         *     check (``netkeeper preflight`` or a Check connection run). For the **Start Chrome**
-         *     button (#599), whether netkeeper's Chrome is running is read from its profile's
+         *     check (``netkeep preflight`` or a Check connection run). For the **Start Chrome**
+         *     button (#599), whether netkeep's Chrome is running is read from its profile's
          *     lock file, the same reading as the posture report's dedicated-profile row, and
          *     whether a run holds the browser from the browser lock files.
          */
@@ -2274,7 +2274,7 @@ export interface paths {
         put?: never;
         /**
          * Start Browser
-         * @description Start netkeeper's Chrome with the UI in an app window, or open the window in it (#636).
+         * @description Start netkeep's Chrome with the UI in an app window, or open the window in it (#636).
          *
          *     Your act, from a button (ADR 0012, rule 5). It submits the launch to the task runner
          *     and answers ``202`` at once: the checks before a spawn can take seconds, and nothing
@@ -2364,7 +2364,7 @@ export interface paths {
         /**
          * Acknowledge Inbox First Poll
          * @description You checked older LinkedIn replies by hand: clear the posture warning that the first
-         *     inbox poll could not read back far enough. ``netkeeper linkedin inbox-acknowledge``.
+         *     inbox poll could not read back far enough. ``netkeep linkedin inbox-acknowledge``.
          *     Touches no browser and visits nothing.
          */
         post: operations["acknowledge_linkedin_inbox_first_poll"];
@@ -2386,7 +2386,7 @@ export interface paths {
         /**
          * Forget Inbox Owner
          * @description Forget which LinkedIn mailbox the inbox poll recorded, after you changed accounts
-         *     (#583): ``netkeeper linkedin inbox-forget-owner``. The next poll records whichever
+         *     (#583): ``netkeep linkedin inbox-forget-owner``. The next poll records whichever
          *     mailbox the page shows, so scheduled polls wait until a person runs one (#592).
          *     Touches no browser and visits nothing, and leaves your own
          *     contact's LinkedIn ID as it is.
@@ -2652,7 +2652,7 @@ export interface paths {
          *
          *     A run already going is not stopped (cancel does that). Due fires met while
          *     paused are skipped and their cadence moves on, so unpausing starts nothing at
-         *     once. The pause survives a restart of ``netkeeper serve``.
+         *     once. The pause survives a restart of ``netkeep serve``.
          */
         post: operations["pause_linkedin_schedule"];
         delete?: never;
@@ -2672,7 +2672,7 @@ export interface paths {
         put?: never;
         /**
          * Reset Linkedin Breaker
-         * @description Reset the tripped LinkedIn breakers (#583): ``netkeeper linkedin schedule
+         * @description Reset the tripped LinkedIn breakers (#583): ``netkeep linkedin schedule
          *     reset-breaker``, so scheduled connections, enrichment, and inbox runs may fire again
          *     when due. Like the command, it clears all five breakers at once.
          *
@@ -2719,7 +2719,7 @@ export interface paths {
         put?: never;
         /**
          * Clear Session Flag Route
-         * @description Clear the session flag by hand: ``netkeeper linkedin clear-flag`` (#181).
+         * @description Clear the session flag by hand: ``netkeep linkedin clear-flag`` (#181).
          *
          *     Needs ``confirm: true`` and the flag the person was shown (``outcome``,
          *     ``flagged_at``). The command's refusals apply as they are: no flag set is
@@ -2764,7 +2764,7 @@ export interface paths {
          *     A list whose filter does not compile is listed like any other, with
          *     ``broken`` saying why and no count, rather than failing the request: this
          *     is the page someone would use to find and fix it, so one bad list may not
-         *     hide the rest (:func:`netkeeper.crm.lists.member_counts`).
+         *     hide the rest (:func:`netkeep.crm.lists.member_counts`).
          */
         get: operations["list_lists"];
         put?: never;
@@ -2859,7 +2859,7 @@ export interface paths {
         };
         /**
          * Get Login Item
-         * @description Whether netkeeper starts at login, from the plist and launchctl.
+         * @description Whether netkeep starts at login, from the plist and launchctl.
          */
         get: operations["get_login_item"];
         /**
@@ -2885,7 +2885,7 @@ export interface paths {
         put?: never;
         /**
          * Repair Login Item
-         * @description Rewrite the plist for this netkeeper and adopt an old script's agent.
+         * @description Rewrite the plist for this netkeep and adopt an old script's agent.
          */
         post: operations["repair_login_item"];
         delete?: never;
@@ -3303,7 +3303,7 @@ export interface paths {
         put?: never;
         /**
          * Restart Serve
-         * @description Restart ``netkeeper serve`` so settings it reads at startup apply, never in the
+         * @description Restart ``netkeep serve`` so settings it reads at startup apply, never in the
          *     middle of work: ``409`` names what is running, unless ``when_idle`` asks to wait for
          *     it. ``user`` is unused; every route resolves the current user.
          */
@@ -3381,7 +3381,7 @@ export interface paths {
         };
         /**
          * Get Setup
-         * @description Every setup step in order, with its state, from what netkeeper already stores.
+         * @description Every setup step in order, with its state, from what netkeep already stores.
          */
         get: operations["get_setup"];
         put?: never;
@@ -4118,7 +4118,7 @@ export interface components {
         };
         /**
          * ArchiveConnectionCountsOut
-         * @description What ``Connections.csv`` did (:class:`netkeeper.crm.archive.ConnectionCounts`).
+         * @description What ``Connections.csv`` did (:class:`netkeep.crm.archive.ConnectionCounts`).
          */
         ArchiveConnectionCountsOut: {
             /** Created */
@@ -4171,7 +4171,7 @@ export interface components {
         };
         /**
          * ArchiveInvitationCountsOut
-         * @description What ``Invitations.csv`` did (:class:`netkeeper.crm.archive.InvitationCounts`).
+         * @description What ``Invitations.csv`` did (:class:`netkeep.crm.archive.InvitationCounts`).
          */
         ArchiveInvitationCountsOut: {
             /** Added */
@@ -4191,7 +4191,7 @@ export interface components {
         };
         /**
          * ArchiveMessageCountsOut
-         * @description What ``messages.csv`` did (:class:`netkeeper.crm.archive.MessageCounts`).
+         * @description What ``messages.csv`` did (:class:`netkeep.crm.archive.MessageCounts`).
          */
         ArchiveMessageCountsOut: {
             /** Added */
@@ -4238,7 +4238,7 @@ export interface components {
          * @description The ``422`` body of a refused archive upload.
          *
          *     ``detail`` is the human-readable reason, free to reword; ``code`` is what
-         *     a client should actually switch on (:class:`~netkeeper.linkedin.archive.ArchiveRefusalCode`),
+         *     a client should actually switch on (:class:`~netkeep.linkedin.archive.ArchiveRefusalCode`),
          *     present on every refusal this endpoint can produce, and stable across a
          *     reword of ``detail`` — the wizard this feeds (P1-21) keys off it rather
          *     than matching words in the message.
@@ -4584,7 +4584,7 @@ export interface components {
         };
         /**
          * BreakerResetIn
-         * @description Reset the tripped LinkedIn breakers (#583): ``netkeeper linkedin schedule
+         * @description Reset the tripped LinkedIn breakers (#583): ``netkeep linkedin schedule
          *     reset-breaker``, which clears all five at once.
          *
          *     ``confirm`` must be true, and ``tripped`` is the keys of the tripped breaker rows the
@@ -4606,9 +4606,9 @@ export interface components {
         };
         /**
          * BrowserHealthOut
-         * @description What netkeeper already knows about Chrome and the LinkedIn session (#181).
+         * @description What netkeep already knows about Chrome and the LinkedIn session (#181).
          *
-         *     Built only from what was recorded: the last ``netkeeper preflight`` or
+         *     Built only from what was recorded: the last ``netkeep preflight`` or
          *     ``posture --probe``, the newest run that read LinkedIn, the session flag, and
          *     the newest run that could not reach Chrome. Nothing here attaches to the
          *     browser; a request handler never does (spec 9.9, CLAUDE.md).
@@ -4649,11 +4649,11 @@ export interface components {
         };
         /**
          * BrowserLaunchOut
-         * @description ``netkeeper browser launch``'s instructions, for the page (spec 9.1, ADR 0002).
+         * @description ``netkeep browser launch``'s instructions, for the page (spec 9.1, ADR 0002).
          *
          *     Read-only and built from config alone -- no attach, no CDP connection, nothing
          *     awaited. Whether Chrome is actually reachable, and whether the session it holds
-         *     is healthy, is what ``netkeeper preflight`` checks; that attaches, so it cannot
+         *     is healthy, is what ``netkeep preflight`` checks; that attaches, so it cannot
          *     run inside a request handler. ``GET /linkedin/browser/health`` reports what the
          *     last preflight or run recorded instead (#181).
          */
@@ -4711,7 +4711,7 @@ export interface components {
          * @description Every action class's counters, today's profile-visit chain, and any risk warning.
          *
          *     ``risk_warning`` is set when the daily profile-visit limit is above the 100
-         *     a day netkeeper was designed around (#318): one plain sentence for the page
+         *     a day netkeep was designed around (#318): one plain sentence for the page
          *     to show as it is. It never blocks anything.
          *
          *     ``profile_view_notice`` is always set (#325): the one sentence saying that
@@ -4971,7 +4971,7 @@ export interface components {
         };
         /**
          * ChangedJobOut
-         * @description A live contact netkeeper saw change position recently: a reason to reconnect (spec 9.8).
+         * @description A live contact netkeep saw change position recently: a reason to reconnect (spec 9.8).
          *
          *     ``current_title`` and ``current_company`` are the contact's now, after the change.
          */
@@ -5626,8 +5626,8 @@ export interface components {
          * ContactStatsOut
          * @description Counts and triage progress over the user's live contacts (spec 10.1).
          *
-         *     ``netkeeper.crm.contacts.contact_stats()`` backs this, ``netkeeper contacts
-         *     stats``, and ``netkeeper.crm.triage.progress()`` all at once, so the CLI,
+         *     ``netkeep.crm.contacts.contact_stats()`` backs this, ``netkeep contacts
+         *     stats``, and ``netkeep.crm.triage.progress()`` all at once, so the CLI,
          *     this endpoint, and the triage queue's progress bar cannot quietly disagree
          *     on what "how many contacts" means (#90; they once did).
          */
@@ -6081,7 +6081,7 @@ export interface components {
          * FilterTree
          * @description The root: a predicate (or none) and the archived-contacts switch.
          *
-         *     The JSON schema carries ``x-netkeeper-fields``: each field's kind, label,
+         *     The JSON schema carries ``x-netkeep-fields``: each field's kind, label,
          *     the ops it takes, and the values of an enum, for the builder.
          */
         "FilterTree-Input": {
@@ -6096,7 +6096,7 @@ export interface components {
          * FilterTree
          * @description The root: a predicate (or none) and the archived-contacts switch.
          *
-         *     The JSON schema carries ``x-netkeeper-fields``: each field's kind, label,
+         *     The JSON schema carries ``x-netkeep-fields``: each field's kind, label,
          *     the ops it takes, and the values of an enum, for the builder.
          */
         "FilterTree-Output": {
@@ -6579,7 +6579,7 @@ export interface components {
         };
         /**
          * ImportDecisionKind
-         * @description What a person decided about a candidate row (:mod:`netkeeper.crm.identity`).
+         * @description What a person decided about a candidate row (:mod:`netkeep.crm.identity`).
          * @enum {string}
          */
         ImportDecisionKind: "merge_into" | "create_new";
@@ -6594,7 +6594,7 @@ export interface components {
          * @description What a column may feed.
          *
          *     The first ten are the scalar columns of ``contacts`` that carry per-field
-         *     provenance (:data:`netkeeper.crm.provenance.PROVENANCE_ORDER`); the last
+         *     provenance (:data:`netkeep.crm.provenance.PROVENANCE_ORDER`); the last
          *     three add child rows, which provenance does not rank. A field a person owns
          *     (``preferred_name``, ``notes``, ``met``, tags) is deliberately absent: no
          *     import touches those (spec 10.5).
@@ -6913,7 +6913,7 @@ export interface components {
         InboxKind: "reply" | "unsubscribe" | "bounce";
         /**
          * InboxOwnerForgetIn
-         * @description Forget the recorded LinkedIn mailbox (#583): ``netkeeper linkedin
+         * @description Forget the recorded LinkedIn mailbox (#583): ``netkeep linkedin
          *     inbox-forget-owner``. ``confirm`` must be true.
          */
         InboxOwnerForgetIn: {
@@ -6955,7 +6955,7 @@ export interface components {
          * @description What happened between you and a contact. ``*_out`` is you reaching out, ``*_in``
          *     them reaching you. ``call`` and ``meeting`` are ones you logged, either way;
          *     ``call_in``, ``meeting_in`` and ``other_in`` are a response to a campaign that came
-         *     outside netkeeper (#512; 0042): a call, meeting them in person, or a text or another
+         *     outside netkeep (#512; 0042): a call, meeting them in person, or a text or another
          *     app. One by email from another address is ``email_in``.
          * @enum {string}
          */
@@ -7364,7 +7364,7 @@ export interface components {
         /**
          * MailboxArmStepsOut
          * @description Where a mailbox is on the way to arming to send (#510): armed for drafts, then
-         *     netkeeper finding its own draft by Message-ID, then a person arming it to send.
+         *     netkeep finding its own draft by Message-ID, then a person arming it to send.
          */
         MailboxArmStepsOut: {
             /** Armed For Drafts */
@@ -7664,11 +7664,11 @@ export interface components {
         };
         /**
          * MetSource
-         * @description Who decided ``met``: the person, or netkeeper on their behalf (spec 10.2).
+         * @description Who decided ``met``: the person, or netkeep on their behalf (spec 10.2).
          *
          *     ``manual`` is the resting state and covers a contact nobody has decided yet.
          *     ``automatic`` is set only by a triage batch the person accepted
-         *     (:func:`netkeeper.crm.triage.apply_suggestion`), so a decision netkeeper made
+         *     (:func:`netkeep.crm.triage.apply_suggestion`), so a decision netkeep made
          *     never reads as one the person made by hand, and the review queue can serve
          *     exactly those contacts back for checking. No import writes either: ``met``
          *     stays a field the person owns.
@@ -7996,7 +7996,7 @@ export interface components {
         };
         /**
          * OutsideResponseIn
-         * @description A response outside netkeeper. ``at`` must carry a timezone, and be neither in the
+         * @description A response outside netkeep. ``at`` must carry a timezone, and be neither in the
          *     future nor before the first message of an enrollment it ends went out. ``outcome``
          *     is optional; ``do_not_contact`` goes with ``opt_out`` only. Without
          *     ``enrollment_id``, every enrollment of the contact that could still send ends; with
@@ -8184,18 +8184,18 @@ export interface components {
          * PostureOut
          * @description Every protection the LinkedIn extractor has, read-only (P2-11, P2-12, CP3).
          *
-         *     Built from `netkeeper.services.posture.posture()` with no browser probe: a
+         *     Built from `netkeep.services.posture.posture()` with no browser probe: a
          *     live attach-and-read-the-session check has to await browser work, which may
          *     not happen inside a request handler (CLAUDE.md), so the session protection
          *     here answers from the last recorded evidence rather than a live check. The live
-         *     checks are `netkeeper preflight` in a terminal and a Check connection run
+         *     checks are `netkeep preflight` in a terminal and a Check connection run
          *     (`POST /linkedin/browser/check`, #652), which the task runner runs.
          *
          *     ``gaps`` are known limits of what this report can see, not warnings; they
          *     never affect ``ok``. Neither do ``notes``: a choice the user is entitled to
          *     make, such as profile visits above 100 a day (#318).
-         *     ``verdict`` is `netkeeper.services.posture.verdict()`'s
-         *     own sentence, exactly as `netkeeper posture` prints it -- "nothing is
+         *     ``verdict`` is `netkeep.services.posture.verdict()`'s
+         *     own sentence, exactly as `netkeep posture` prints it -- "nothing is
          *     misconfigured" on a clean report, never "you are safe" (that module's own
          *     docstring says why: this reads configuration and counters, not whether the
          *     code that would enforce them actually runs).
@@ -8297,7 +8297,7 @@ export interface components {
         /**
          * ProtectionOut
          * @description One row of the posture report (spec section 9): what it is, whether it is in
-         *     force, and anything wrong with it. ``status`` is `netkeeper.services.posture.Status`'s
+         *     force, and anything wrong with it. ``status`` is `netkeep.services.posture.Status`'s
          *     value (``on``, ``off``, ``unknown``); ``off``/``unknown`` always carry a warning.
          *     ``notes`` describe a choice the user made, not a fault, and never affect ``ok``.
          *     ``summary`` is the row in a few words, for the collapsed view (#340): the same
@@ -8433,14 +8433,14 @@ export interface components {
         };
         /**
          * ResponseOutcome
-         * @description What a response outside netkeeper said, when the person records it (#512).
+         * @description What a response outside netkeep said, when the person records it (#512).
          *     ``opt_out`` ends the enrollments ``opted_out``; the rest end them ``replied``.
          * @enum {string}
          */
         ResponseOutcome: "positive" | "neutral" | "not_interested" | "opt_out";
         /**
          * ResponseVia
-         * @description How a contact responded outside netkeeper (#512): a person records it, since
+         * @description How a contact responded outside netkeep (#512): a person records it, since
          *     neither poll can see it.
          * @enum {string}
          */
@@ -8647,7 +8647,7 @@ export interface components {
          *     (#324); it ends ``aborted`` with ``stop_reason`` ``paused``, and resumable.
          *     ``elsewhere_note`` is set while the run is running in another data directory
          *     on this database (#467): a cancel or pause here only sets a flag, so the note
-         *     says to stop that directory's netkeeper process if the run doesn't stop.
+         *     says to stop that directory's netkeep process if the run doesn't stop.
          *     It is null otherwise.
          */
         RunOut: {
@@ -8727,7 +8727,7 @@ export interface components {
          *
          *     ``visit`` is its number in the run, from 1; ``reason`` a fixed code and
          *     ``reason_text`` the same in plain words. The name is the contact's in
-         *     netkeeper, ``None`` for a contact deleted since (``contact_exists`` false).
+         *     netkeep, ``None`` for a contact deleted since (``contact_exists`` false).
          */
         RunVisitReasonOut: {
             /** Contact Exists */
@@ -8793,7 +8793,7 @@ export interface components {
         };
         /**
          * ScheduleArmIn
-         * @description Arming needs ``confirm: true``: it lets netkeeper visit LinkedIn on its own.
+         * @description Arming needs ``confirm: true``: it lets netkeep visit LinkedIn on its own.
          */
         ScheduleArmIn: {
             /** Confirm */
@@ -8926,7 +8926,7 @@ export interface components {
         };
         /**
          * SessionFlagClearIn
-         * @description Clear the session flag by hand (#181), what ``netkeeper linkedin clear-flag`` does.
+         * @description Clear the session flag by hand (#181), what ``netkeep linkedin clear-flag`` does.
          *
          *     ``confirm`` must be true, and ``outcome`` and ``flagged_at`` name the flag the
          *     person saw when they confirmed: the route clears only that exact flag, the same
@@ -8951,7 +8951,7 @@ export interface components {
          *     ``claimable``: the first-browser claim is still open, so ``POST /session/claim``
          *     connects this browser without a link. ``persisted``: the key is in the Keychain;
          *     False when the Keychain refused it and it lives in memory until ``serve`` stops.
-         *     ``open_command``: the ``netkeeper open`` command line that makes a link this server
+         *     ``open_command``: the ``netkeep open`` command line that makes a link this server
          *     accepts, for the connect page to show.
          */
         SessionOut: {
@@ -14787,7 +14787,7 @@ export interface operations {
                     "application/json": components["schemas"]["RunAccepted"];
                 };
             };
-            /** @description Only the local owner account checks netkeeper's Chrome */
+            /** @description Only the local owner account checks netkeep's Chrome */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -14852,7 +14852,7 @@ export interface operations {
                     "application/json": components["schemas"]["BrowserStartAccepted"];
                 };
             };
-            /** @description Only the local owner account starts netkeeper's Chrome */
+            /** @description Only the local owner account starts netkeep's Chrome */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -16628,7 +16628,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A browser already claimed it; use `netkeeper open` */
+            /** @description A browser already claimed it; use `netkeep open` */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -17039,7 +17039,7 @@ export interface operations {
                     "application/zip": string;
                 };
             };
-            /** @description Only the local owner account makes a support bundle, and only from this site's own page or a request with X-Netkeeper-Client */
+            /** @description Only the local owner account makes a support bundle, and only from this site's own page or a request with X-Netkeep-Client */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -17704,7 +17704,7 @@ export interface operations {
             query?: {
                 /** @description The met states the queue holds. Defaults to `unknown`; pass `skip` to revisit, or both to walk the two together. With `decided_by=automatic` and no states, the queue defaults to everything a batch can have decided. */
                 states?: components["schemas"]["ContactMet"][] | null;
-                /** @description Narrow the queue to the contacts whose current `met` was decided this way. `automatic` is the review pass: what netkeeper decided for you, on the same cards, so you can check it. Deciding one by hand makes it `manual` and takes it out of that queue. */
+                /** @description Narrow the queue to the contacts whose current `met` was decided this way. `automatic` is the review pass: what netkeep decided for you, on the same cards, so you can check it. Deciding one by hand makes it `manual` and takes it out of that queue. */
                 decided_by?: components["schemas"]["MetSource"] | null;
             };
             header?: never;
@@ -17796,7 +17796,7 @@ export interface operations {
             query?: {
                 /** @description The met states the queue holds. Defaults to `unknown`; pass `skip` to revisit, or both to walk the two together. With `decided_by=automatic` and no states, the queue defaults to everything a batch can have decided. */
                 states?: components["schemas"]["ContactMet"][] | null;
-                /** @description Narrow the queue to the contacts whose current `met` was decided this way. `automatic` is the review pass: what netkeeper decided for you, on the same cards, so you can check it. Deciding one by hand makes it `manual` and takes it out of that queue. */
+                /** @description Narrow the queue to the contacts whose current `met` was decided this way. `automatic` is the review pass: what netkeep decided for you, on the same cards, so you can check it. Deciding one by hand makes it `manual` and takes it out of that queue. */
                 decided_by?: components["schemas"]["MetSource"] | null;
             };
             header?: never;
@@ -17852,7 +17852,7 @@ export interface operations {
                 after_id?: number | null;
                 /** @description Also return the contact after this one, so the client never waits. */
                 prefetch?: boolean;
-                /** @description Narrow the queue to the contacts whose current `met` was decided this way. `automatic` is the review pass: what netkeeper decided for you, on the same cards, so you can check it. Deciding one by hand makes it `manual` and takes it out of that queue. */
+                /** @description Narrow the queue to the contacts whose current `met` was decided this way. `automatic` is the review pass: what netkeep decided for you, on the same cards, so you can check it. Deciding one by hand makes it `manual` and takes it out of that queue. */
                 decided_by?: components["schemas"]["MetSource"] | null;
             };
             header?: never;
@@ -18011,7 +18011,7 @@ export interface operations {
             query?: {
                 /** @description The met states the queue holds. Defaults to `unknown`; pass `skip` to revisit, or both to walk the two together. With `decided_by=automatic` and no states, the queue defaults to everything a batch can have decided. */
                 states?: components["schemas"]["ContactMet"][] | null;
-                /** @description Narrow the queue to the contacts whose current `met` was decided this way. `automatic` is the review pass: what netkeeper decided for you, on the same cards, so you can check it. Deciding one by hand makes it `manual` and takes it out of that queue. */
+                /** @description Narrow the queue to the contacts whose current `met` was decided this way. `automatic` is the review pass: what netkeep decided for you, on the same cards, so you can check it. Deciding one by hand makes it `manual` and takes it out of that queue. */
                 decided_by?: components["schemas"]["MetSource"] | null;
             };
             header?: never;

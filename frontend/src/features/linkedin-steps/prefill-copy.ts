@@ -6,7 +6,7 @@
  * A prefill run records its outcome as `stop_reason` (`prefilled`, `not_typed`,
  * `too_long`, `partially_typed`, `unknown`, and an auto-send's `send_clicked`, ADR 0008)
  * and the reason as `error`: a fixed phrase,
- * or one of three codes (`netkeeper/linkedin/browser.py`, `page_messaging.py`,
+ * or one of three codes (`netkeep/linkedin/browser.py`, `page_messaging.py`,
  * `messaging.py`, `services/message_send.py`). None of them holds message text, a name,
  * or a URL. A phrase this file does not know is shown as the backend wrote it.
  *
@@ -15,23 +15,23 @@
 
 /** Before you click: what Prefill does, and what you shouldn't do while it types. */
 export const PREFILL_NOTE =
-  'Prefill types the message into a message bubble in Chrome. The person you are writing to may see "typing…" while netkeeper types, and you click Send yourself. Don\'t type or click in Chrome until the prefill finishes.'
+  'Prefill types the message into a message bubble in Chrome. The person you are writing to may see "typing…" while netkeep types, and you click Send yourself. Don\'t type or click in Chrome until the prefill finishes.'
 
 /** While it types. */
-export const TYPING = 'Typing in Chrome… watch the netkeeper Chrome window.'
+export const TYPING = 'Typing in Chrome… watch the netkeep Chrome window.'
 export const TYPING_WARNING =
-  'The person you are writing to may see "typing…" while netkeeper types. Don\'t type or click in Chrome until the prefill finishes.'
+  'The person you are writing to may see "typing…" while netkeep types. Don\'t type or click in Chrome until the prefill finishes.'
 
 /** The first poll hasn't run: scheduled polls wait for one you run by hand. */
-export const FIRST_POLL_COMMAND = 'netkeeper linkedin inbox'
+export const FIRST_POLL_COMMAND = 'netkeep linkedin inbox'
 export const CHECK_INBOX_LABEL = 'Check inbox now'
-export const FIRST_POLL_NOTE = `netkeeper has not read your LinkedIn inbox yet, so LinkedIn prefills are held until it has. Run ${FIRST_POLL_COMMAND} by hand in a terminal, or use ${CHECK_INBOX_LABEL}. Scheduled polls start after the first one.`
+export const FIRST_POLL_NOTE = `netkeep has not read your LinkedIn inbox yet, so LinkedIn prefills are held until it has. Run ${FIRST_POLL_COMMAND} by hand in a terminal, or use ${CHECK_INBOX_LABEL}. Scheduled polls start after the first one.`
 
 /** Close the bubble a refusal that followed the Message click can leave open. */
 export const CLOSE_BUBBLE =
-  'netkeeper opened a message bubble in Chrome and left it open. It is empty. Close it before you prefill again, because netkeeper refuses a page with another message bubble, even a minimized one.'
+  'netkeep opened a message bubble in Chrome and left it open. It is empty. Close it before you prefill again, because netkeep refuses a page with another message bubble, even a minimized one.'
 export const MAYBE_CLOSE_BUBBLE =
-  'If a message bubble is open in Chrome, close it before you prefill again. netkeeper never closes it for you.'
+  'If a message bubble is open in Chrome, close it before you prefill again. netkeep never closes it for you.'
 
 /** Part of the message is in the composer (ADR 0007's wording). */
 export const PARTLY_TYPED =
@@ -44,13 +44,13 @@ export const PARTLY_TYPED_SENT_ANYWAY = 'If you finished and sent it yourself, d
 export const TYPED_WHOLE =
   'The prefill typed the message. It waits for you below: review it in Chrome and click Send yourself.'
 
-/** A message bubble already held text, so netkeeper typed nothing. */
+/** A message bubble already held text, so netkeep typed nothing. */
 export const DRAFT_IN_BUBBLE =
-  'A message bubble in Chrome already holds text, and netkeeper left it alone. Clear the text or close the bubble before you prefill again.'
+  'A message bubble in Chrome already holds text, and netkeep left it alone. Clear the text or close the bubble before you prefill again.'
 
 /** Try again (#445): a step whose last prefill typed nothing waits for you. */
 export const TRY_AGAIN_NOTE =
-  'The last prefill typed nothing. Each waits here until you click Try again; netkeeper never tries one again on its own.'
+  'The last prefill typed nothing. Each waits here until you click Try again; netkeep never tries one again on its own.'
 
 /** After a `not_typed` prefill: where to try it again. */
 export const TRY_AGAIN_STEP = 'To try again, click Try again in the LinkedIn queue.'
@@ -60,7 +60,7 @@ export function confirmBubbleTitle(name: string): string {
   return `Close any message bubble for ${name} in Chrome before you try again`
 }
 export const CONFIRM_BUBBLE_BODY =
-  'The last try clicked Message, so a message bubble for this contact may still be open in Chrome. netkeeper refuses a page with two message bubbles, and a bubble can keep a draft.'
+  'The last try clicked Message, so a message bubble for this contact may still be open in Chrome. netkeep refuses a page with two message bubbles, and a bubble can keep a draft.'
 export const CONFIRM_BUBBLE_LABEL = "It's closed, try again"
 
 /** What the last try did, as the backend recorded it (`LastTryOut`). */
@@ -78,7 +78,7 @@ export function budgetText(last: TryBudget): string {
   if (last.budget_spent === false) {
     return "That try stopped before it opened LinkedIn, so it didn't use one of today's LinkedIn prefills."
   }
-  return "netkeeper can't tell whether that try used one of today's LinkedIn prefills."
+  return "netkeep can't tell whether that try used one of today's LinkedIn prefills."
 }
 
 /** How many prefills today's budget still allows. */
@@ -146,7 +146,7 @@ const BEFORE_CLICK: readonly Rule[] = [
   },
   {
     match: /^the typing plan refused the body/,
-    text: "netkeeper can't type this message as written, for example because it holds a character netkeeper doesn't type. Fix the template.",
+    text: "netkeep can't type this message as written, for example because it holds a character netkeep doesn't type. Fix the template.",
     bubble: 'closed',
   },
   {
@@ -167,7 +167,7 @@ const BEFORE_CLICK: readonly Rule[] = [
   },
   {
     match: 'the contact has no public profile id to open',
-    text: "The contact has no public LinkedIn profile address, so netkeeper can't open the profile.",
+    text: "The contact has no public LinkedIn profile address, so netkeep can't open the profile.",
     bubble: 'closed',
   },
   {
@@ -188,45 +188,45 @@ const BEFORE_CLICK: readonly Rule[] = [
   },
   {
     match: "the tab is not on the contact's profile",
-    text: "The tab wasn't on the contact's profile, so netkeeper didn't click Message.",
+    text: "The tab wasn't on the contact's profile, so netkeep didn't click Message.",
     bubble: 'closed',
   },
   {
     match: 'the tab left the profile before the click',
-    text: "The tab left the contact's profile before netkeeper clicked Message.",
+    text: "The tab left the contact's profile before netkeep clicked Message.",
     bubble: 'closed',
   },
   {
     match: 'the Message control could not be read',
-    text: "netkeeper couldn't read the Message button, so it didn't click it.",
+    text: "netkeep couldn't read the Message button, so it didn't click it.",
     bubble: 'closed',
   },
   {
     match: 'no Message control is visible',
-    text: "The profile's Message button isn't visible, so netkeeper didn't click it.",
+    text: "The profile's Message button isn't visible, so netkeep didn't click it.",
     bubble: 'closed',
   },
   {
     match: 'whether a message bubble is open could not be read',
-    text: "netkeeper couldn't tell whether a message bubble was already open in Chrome, so it didn't click Message.",
+    text: "netkeep couldn't tell whether a message bubble was already open in Chrome, so it didn't click Message.",
     bubble: 'closed',
   },
   {
     match:
-      'a message bubble is already open in this or another LinkedIn tab in the netkeeper Chrome window, minimized ones included; close it, then try again',
-    text: "A message bubble was already open in this or another LinkedIn tab in the netkeeper Chrome window, perhaps minimized, so netkeeper didn't click Message. Close it, then try again. Closing a bubble deletes any draft in it.",
+      'a message bubble is already open in this or another LinkedIn tab in the netkeep Chrome window, minimized ones included; close it, then try again',
+    text: "A message bubble was already open in this or another LinkedIn tab in the netkeep Chrome window, perhaps minimized, so netkeep didn't click Message. Close it, then try again. Closing a bubble deletes any draft in it.",
     bubble: 'closed',
   },
   {
     match: 'no Message control is on screen with nothing over it; close or move what covers it',
-    text: "No Message button on the profile was on screen with nothing covering it, so netkeeper didn't click. Close or minimize what covers it, such as a message bubble, and try again.",
+    text: "No Message button on the profile was on screen with nothing covering it, so netkeep didn't click. Close or minimize what covers it, such as a message bubble, and try again.",
     bubble: 'closed',
   },
-  { match: 'the run was refused', text: 'netkeeper refused to start the run.', bubble: 'closed' },
+  { match: 'the run was refused', text: 'netkeep refused to start the run.', bubble: 'closed' },
   { match: 'the browser was busy', text: 'Chrome was busy with another run.', bubble: 'closed' },
   {
     match: 'the browser was unavailable',
-    text: "netkeeper couldn't reach Chrome.",
+    text: "netkeep couldn't reach Chrome.",
     bubble: 'closed',
   },
   {
@@ -237,12 +237,12 @@ const BEFORE_CLICK: readonly Rule[] = [
   // Auto-send's own gates (ADR 0008), checked before anything opens.
   {
     match: 'auto-send is off',
-    text: 'Auto-send is off in Settings, so netkeeper sent nothing.',
+    text: 'Auto-send is off in Settings, so netkeep sent nothing.',
     bubble: 'closed',
   },
   {
     match: 'the step is not an auto-send step',
-    text: "The step isn't an auto-send step, so netkeeper didn't send it.",
+    text: "The step isn't an auto-send step, so netkeep didn't send it.",
     bubble: 'closed',
   },
   {
@@ -262,32 +262,32 @@ const BEFORE_CLICK: readonly Rule[] = [
   },
   {
     match: 'a reply arrived',
-    text: 'The contact replied while netkeeper typed, so it did not send.',
+    text: 'The contact replied while netkeep typed, so it did not send.',
     bubble: 'closed',
   },
   {
     match: 'the claimed message is no longer waiting to be sent',
-    text: 'The message changed while netkeeper typed, so it did not send.',
+    text: 'The message changed while netkeep typed, so it did not send.',
     bubble: 'closed',
   },
   {
     match: 'the enrollment is gone',
-    text: 'The enrollment is gone, so netkeeper did not send.',
+    text: 'The enrollment is gone, so netkeep did not send.',
     bubble: 'closed',
   },
   {
     match: 'the step no longer passes its guards',
-    text: 'The campaign, the enrollment or the contact changed (paused, removed, or marked do not contact, for example), so netkeeper did not send.',
+    text: 'The campaign, the enrollment or the contact changed (paused, removed, or marked do not contact, for example), so netkeep did not send.',
     bubble: 'closed',
   },
   {
     match: 'scheduled runs are disarmed',
-    text: 'Scheduled LinkedIn runs are disarmed, so netkeeper sent nothing.',
+    text: 'Scheduled LinkedIn runs are disarmed, so netkeep sent nothing.',
     bubble: 'closed',
   },
   {
     match: 'the schedule is paused',
-    text: 'The LinkedIn schedule is paused, so netkeeper sent nothing.',
+    text: 'The LinkedIn schedule is paused, so netkeep sent nothing.',
     bubble: 'closed',
   },
   {
@@ -302,37 +302,37 @@ const AFTER_CLICK: readonly Rule[] = [
   // Auto-send's Send click (ADR 0008): the whole message was typed first.
   {
     match: 'the Send control could not be clicked',
-    text: "Chrome didn't take netkeeper's click on Send, so netkeeper can't tell whether the message went.",
+    text: "Chrome didn't take netkeep's click on Send, so netkeep can't tell whether the message went.",
     bubble: 'open',
   },
   {
     match: /^the Send control|Send control$|^the composer is not in one message form$/,
-    text: "The Send button didn't look the way netkeeper expects, so it didn't click it.",
+    text: "The Send button didn't look the way netkeep expects, so it didn't click it.",
     bubble: 'open',
   },
   {
     match: /^Send was already clicked$|^no send permit$|^the send gates could not be checked$/,
-    text: "netkeeper didn't click Send: a check before the click didn't pass.",
+    text: "netkeep didn't click Send: a check before the click didn't pass.",
     bubble: 'open',
   },
   {
     match: 'the whole body was not typed',
-    text: "The whole message wasn't typed, so netkeeper didn't click Send.",
+    text: "The whole message wasn't typed, so netkeep didn't click Send.",
     bubble: 'open',
   },
   {
     match: 'the Message control was already clicked',
-    text: 'netkeeper had already clicked Message in this run.',
+    text: 'netkeep had already clicked Message in this run.',
     bubble: 'maybe',
   },
   {
     match: 'the Message control could not be clicked',
-    text: "Chrome didn't take netkeeper's click on Message.",
+    text: "Chrome didn't take netkeep's click on Message.",
     bubble: 'maybe',
   },
   {
     match: 'the Message control was not clicked',
-    text: "netkeeper didn't click Message.",
+    text: "netkeep didn't click Message.",
     bubble: 'maybe',
   },
   {
@@ -342,12 +342,12 @@ const AFTER_CLICK: readonly Rule[] = [
   },
   {
     match: 'recipient_name_unreadable',
-    text: "netkeeper couldn't read the recipient's name in the message bubble, so it couldn't check it against the profile.",
+    text: "netkeep couldn't read the recipient's name in the message bubble, so it couldn't check it against the profile.",
     bubble: 'open',
   },
   {
     match: 'another_compose',
-    text: "A second message composer opened while netkeeper was checking, so it couldn't tell which one it would type into.",
+    text: "A second message composer opened while netkeep was checking, so it couldn't tell which one it would type into.",
     bubble: 'open',
   },
   {
@@ -357,7 +357,7 @@ const AFTER_CLICK: readonly Rule[] = [
   },
   {
     match: /compose option/,
-    text: "LinkedIn's answer to the Message click wasn't what netkeeper expected, so it didn't type.",
+    text: "LinkedIn's answer to the Message click wasn't what netkeep expected, so it didn't type.",
     bubble: 'open',
   },
   {
@@ -367,7 +367,7 @@ const AFTER_CLICK: readonly Rule[] = [
   },
   {
     match: /another message (composer|bubble) is on the page/,
-    text: 'Another message bubble is on the page, open or minimized, in this or another LinkedIn tab in the netkeeper Chrome window. Close it before you prefill again. Closing a bubble deletes any draft in it.',
+    text: 'Another message bubble is on the page, open or minimized, in this or another LinkedIn tab in the netkeep Chrome window. Close it before you prefill again. Closing a bubble deletes any draft in it.',
     bubble: 'open',
   },
   {
@@ -382,17 +382,17 @@ const AFTER_CLICK: readonly Rule[] = [
   },
   {
     match: 'the new-message bubble links to more than one person',
-    text: "The message bubble links to more than one person, so netkeeper couldn't confirm it's for this contact.",
+    text: "The message bubble links to more than one person, so netkeep couldn't confirm it's for this contact.",
     bubble: 'open',
   },
   {
     match: 'the new-message bubble links to no profile',
-    text: "The message bubble doesn't link to a profile, so netkeeper couldn't confirm it's for this contact.",
+    text: "The message bubble doesn't link to a profile, so netkeep couldn't confirm it's for this contact.",
     bubble: 'open',
   },
   {
     match: /bubble|composer is not in|recipient/,
-    text: "The message bubble didn't look the way netkeeper expects for this contact, so it didn't type.",
+    text: "The message bubble didn't look the way netkeep expects for this contact, so it didn't type.",
     bubble: 'open',
   },
   { match: "the tab's url changed", text: 'The tab moved to another page.', bubble: 'open' },
@@ -403,29 +403,29 @@ const AFTER_CLICK: readonly Rule[] = [
   },
   {
     match: 'the composer is not empty',
-    text: 'The message box already holds text, so netkeeper left it alone.',
+    text: 'The message box already holds text, so netkeep left it alone.',
     bubble: 'draft',
   },
   {
     match: "the composer's text changed",
-    text: 'The text in the message box changed while netkeeper typed.',
+    text: 'The text in the message box changed while netkeep typed.',
     bubble: 'open',
   },
   {
     match: 'the composer does not hold focus',
-    text: 'The message box lost focus, so netkeeper stopped.',
+    text: 'The message box lost focus, so netkeep stopped.',
     bubble: 'open',
   },
   {
     match: 'the composer could not be read',
-    text: "netkeeper couldn't read the message box, so it stopped.",
+    text: "netkeep couldn't read the message box, so it stopped.",
     bubble: 'open',
   },
   { match: 'a key call failed', text: 'Chrome rejected a keystroke.', bubble: 'open' },
   { match: 'cancelled', text: 'You cancelled the run.', bubble: 'maybe' },
   {
     match: 'interrupted',
-    text: 'netkeeper stopped while the prefill ran.',
+    text: 'netkeep stopped while the prefill ran.',
     bubble: 'maybe',
   },
   {
@@ -435,7 +435,7 @@ const AFTER_CLICK: readonly Rule[] = [
   },
   {
     match: /^no tab with a clicked Message control|^the plan /,
-    text: "netkeeper couldn't start typing.",
+    text: "netkeep couldn't start typing.",
     bubble: 'maybe',
   },
 ]
@@ -523,14 +523,14 @@ export function prefillEnding(
       title:
         stopReason === 'partially_typed'
           ? 'The prefill stopped part of the way through typing.'
-          : "The prefill stopped, and netkeeper can't tell how much it typed.",
+          : "The prefill stopped, and netkeep can't tell how much it typed.",
       reason: why.text,
-      steps: [PARTLY_TYPED, 'netkeeper never clears the composer and never retries a prefill.'],
+      steps: [PARTLY_TYPED, 'netkeep never clears the composer and never retries a prefill.'],
     }
   }
   const steps: string[] = []
   if (stopReason === 'too_long') {
-    steps.push('netkeeper parked the enrollment, so it waits for you. Shorten the template first.')
+    steps.push('netkeep parked the enrollment, so it waits for you. Shorten the template first.')
   }
   // The run's own record of the click wins; the phrase table is for older runs.
   const bubble = bubbleFromCounts(counts, why.bubble)

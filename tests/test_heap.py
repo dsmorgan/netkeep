@@ -20,7 +20,7 @@ from fastapi import FastAPI
 from local_api import LocalKey
 from sqlalchemy.orm import Session
 
-from netkeeper.models import Base
+from netkeep.models import Base
 
 #: Raised by a test below, as a fake raises a module constant.
 RAISED = LookupError("a module-level exception")

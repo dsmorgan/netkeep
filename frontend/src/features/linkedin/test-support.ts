@@ -43,14 +43,14 @@ export const STATUS_CHECKPOINT: LinkedInStatus = {
 
 export const BROWSER_LAUNCH: BrowserLaunch = {
   cdp_url: 'http://127.0.0.1:9222',
-  profile_dir: '/tmp/netkeeper-data-test/chrome-profile',
+  profile_dir: '/tmp/netkeep-data-test/chrome-profile',
   launch_command: [
     'open -na "Google Chrome" --args \\',
     '  --remote-debugging-port=9222 \\',
-    '  --user-data-dir="/tmp/netkeeper-data-test/chrome-profile"',
+    '  --user-data-dir="/tmp/netkeep-data-test/chrome-profile"',
   ],
   remote_host_note: null,
-  check_command: 'netkeeper preflight',
+  check_command: 'netkeep preflight',
 }
 
 /** `GET /linkedin/browser/health` before anything has checked the session (#181). */
@@ -60,8 +60,8 @@ export const BROWSER_HEALTH: BrowserHealth = {
   session_status: 'unknown',
   session_summary: 'not checked yet',
   session_warnings: [
-    'nothing has checked the LinkedIn session yet: no `netkeeper preflight` and no run that' +
-      ' read LinkedIn. Run `netkeeper preflight` in a terminal; this report shows what it finds',
+    'nothing has checked the LinkedIn session yet: no `netkeep preflight` and no run that' +
+      ' read LinkedIn. Run `netkeep preflight` in a terminal; this report shows what it finds',
   ],
   chrome_unreachable_at: null,
   chrome_unreachable_run_id: null,
@@ -151,13 +151,13 @@ export const BUDGET: BudgetStatus = {
     "Enrichment opens each contact's LinkedIn profile from your account, so they may see a" +
     ' visit in Who viewed your profile. Whether they see your name and headline, a partial' +
     ' description (such as someone at your company), or an anonymous viewer depends on the' +
-    " Profile viewing options in LinkedIn's Visibility settings. netkeeper never changes that" +
+    " Profile viewing options in LinkedIn's Visibility settings. netkeep never changes that" +
     ' setting.',
 }
 
 /** What `GET /linkedin/budget` says about a daily profile-visit limit of 150 (#318). */
 export const RISK_WARNING =
-  'Profile visits are set to 150 a day, above the 100 a day netkeeper was designed around.' +
+  'Profile visits are set to 150 a day, above the 100 a day netkeep was designed around.' +
   ' More visits a day make it more likely that LinkedIn restricts your account or asks you to' +
   ' verify it. Heat still slows runs down after LinkedIn throttles a visit.'
 

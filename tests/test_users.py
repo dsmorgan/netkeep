@@ -6,12 +6,12 @@ from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 from typer.testing import CliRunner
 
-from netkeeper import migrations
-from netkeeper.cli import app
-from netkeeper.config import LinkedInSettings, Settings
-from netkeeper.db import database_url, make_engine, make_session_factory
-from netkeeper.models import User, UserKind
-from netkeeper.services.users import ensure_local_user
+from netkeep import migrations
+from netkeep.cli import app
+from netkeep.config import LinkedInSettings, Settings
+from netkeep.db import database_url, make_engine, make_session_factory
+from netkeep.models import User, UserKind
+from netkeep.services.users import ensure_local_user
 
 
 def _users(session: Session) -> list[User]:
@@ -51,7 +51,7 @@ def test_ensure_local_user_resyncs_the_timezone_from_settings(session: Session) 
 
     This used to seed a new row only, which left ``User.timezone`` and
     ``linkedin.timezone`` permanently disagreeing the moment anyone edited the
-    config after `netkeeper db upgrade`. They are read by different things --
+    config after `netkeep db upgrade`. They are read by different things --
     budget counters key off the user row, the active window and the scheduler's
     deferral read the config -- so disagreeing means a day's budget resets at
     an hour the window is open. See ``ensure_local_user``'s docstring.
@@ -76,7 +76,7 @@ def test_ensure_local_user_without_settings_leaves_the_timezone_alone(session: S
     assert user.timezone == "Europe/Berlin"
 
 
-# --- netkeeper db -----------------------------------------------------------
+# --- netkeep db -----------------------------------------------------------
 
 
 @pytest.fixture
@@ -86,7 +86,7 @@ def cli_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
     data = tmp_path / "data"
-    monkeypatch.setenv("NETKEEPER_DATA", str(data))
+    monkeypatch.setenv("NETKEEP_DATA", str(data))
     return data
 
 
@@ -150,7 +150,7 @@ def test_db_current_before_and_after_upgrade(cli_data_dir: Path) -> None:
 def test_ensure_local_user_keeps_the_zone_the_settings_page_set(session: Session) -> None:
     """#597: a start (serve, or db upgrade) syncs the row to the zone in force, the
     Settings page's when the file does not set one, never back to the file's default."""
-    from netkeeper.services import ui_settings
+    from netkeep.services import ui_settings
 
     user = ensure_local_user(session, settings=Settings())
     ui_settings.write(session, user, Settings(), {"linkedin.timezone": "Europe/Berlin"})

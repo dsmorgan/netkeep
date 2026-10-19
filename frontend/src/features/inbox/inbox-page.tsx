@@ -52,7 +52,7 @@ function ChannelBadge({ item }: { item: InboxItem }) {
             : 'bg-muted text-muted-foreground',
       )}
     >
-      {outside ? 'Outside netkeeper' : item.channel === 'linkedin' ? 'LinkedIn' : 'Email'}
+      {outside ? 'Outside netkeep' : item.channel === 'linkedin' ? 'LinkedIn' : 'Email'}
     </span>
   )
 }
@@ -308,7 +308,7 @@ function InboxRow({ item }: { item: InboxItem }) {
 
   return (
     <li
-      aria-label={`${KIND_LABELS[item.kind]} from ${item.contact_name || 'Unnamed contact'}${item.outside_via != null ? ' outside netkeeper' : item.channel === 'linkedin' ? ' on LinkedIn' : ''}`}
+      aria-label={`${KIND_LABELS[item.kind]} from ${item.contact_name || 'Unnamed contact'}${item.outside_via != null ? ' outside netkeep' : item.channel === 'linkedin' ? ' on LinkedIn' : ''}`}
       className="flex flex-col gap-1.5 border-t border-border/60 py-3 first:border-t-0"
     >
       <div className="flex flex-wrap items-center gap-2">
@@ -342,7 +342,7 @@ function InboxRow({ item }: { item: InboxItem }) {
       )}
       {item.outside_via != null ? (
         <p className="text-xs text-muted-foreground">
-          You recorded this response; it came outside netkeeper.
+          You recorded this response; it came outside netkeep.
         </p>
       ) : item.channel === 'email' ? (
         <p className="text-xs text-muted-foreground">Open the thread in Gmail to read the rest.</p>

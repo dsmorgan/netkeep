@@ -1,4 +1,4 @@
-"""netkeeper.crm.tags (spec 8.3, 10.3): tags, assignments, suppressions, rules, runs, defaults."""
+"""netkeep.crm.tags (spec 8.3, 10.3): tags, assignments, suppressions, rules, runs, defaults."""
 
 from __future__ import annotations
 
@@ -20,10 +20,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from time_limit import Stopwatch, scaled
 from typer.testing import CliRunner
 
-from netkeeper import migrations
-from netkeeper.cli import app as cli
-from netkeeper.crm import tags as svc
-from netkeeper.crm.tags import (
+from netkeep import migrations
+from netkeep.cli import app as cli
+from netkeep.crm import tags as svc
+from netkeep.crm.tags import (
     DEFAULT_FIELDS,
     DEFAULT_PATTERNS,
     DEFAULTS,
@@ -57,8 +57,8 @@ from netkeeper.crm.tags import (
     update_rule,
     update_tag,
 )
-from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.models import (
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+from netkeep.models import (
     Contact,
     ContactTag,
     ContactTagSuppression,
@@ -70,9 +70,9 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.scoping import scoped, unscoped
-from netkeeper.services.settings_kv import delete_setting, get_setting, set_setting
-from netkeeper.services.users import ensure_local_user
+from netkeep.scoping import scoped, unscoped
+from netkeep.services.settings_kv import delete_setting, get_setting, set_setting
+from netkeep.services.users import ensure_local_user
 
 NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
 DEFAULT_TAG_NAMES = [default.name for default in DEFAULTS]
@@ -958,7 +958,7 @@ def test_a_rule_that_keeps_timing_out_is_skipped_for_the_rest_of_the_run(
     vp = create_tag(writer, user, "vp")
     rule = create_rule(writer, user, vp.id, RuleField.TITLE, SLOW_PATTERN)
 
-    with caplog.at_level("WARNING", logger="netkeeper.crm.tags"):
+    with caplog.at_level("WARNING", logger="netkeep.crm.tags"):
         result = run_rules(writer, user)
 
     # Only `give_up` searches ran; the last five contacts cost nothing.
@@ -1000,7 +1000,7 @@ def test_a_search_that_times_out_is_no_match_and_is_counted(
     quick = contact_with_title(writer, user, "aa")
     stuck = contact_with_title(writer, user, "a" * 40 + "b")
     miss = contact_with_title(writer, user, "nothing")
-    with caplog.at_level("WARNING", logger="netkeeper.crm.tags"):
+    with caplog.at_level("WARNING", logger="netkeep.crm.tags"):
         preview = preview_matches(writer, user, RuleField.TITLE, slow)
         result = run_rules(writer, user)
     assert preview == svc.RulePreview(count=1, contact_ids=(quick.id,), timeouts=1)
@@ -1360,7 +1360,7 @@ def test_a_default_added_later_reaches_a_database_seeded_before_it_existed(
     """The record is which defaults were offered, not whether any were.
 
     It used to be one boolean, so a default added after somebody started using
-    netkeeper never reached them: the first import wrote "seeded" and every
+    netkeep never reached them: the first import wrote "seeded" and every
     later run read it and stopped. A deleted default still stays deleted --
     its name is in the record either way.
     """
@@ -1474,13 +1474,13 @@ def test_ensure_default_rules_reuses_a_tag_the_user_already_has(
 
 def test_cli_tags_list_and_run_rules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     url = database_url(tmp_path)
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     runner = CliRunner()
 
     engine = make_engine(url)
     migrations.upgrade(engine)
     result = runner.invoke(cli, ["tags", "list"])
-    assert result.exit_code == 1 and "netkeeper db upgrade" in result.stderr
+    assert result.exit_code == 1 and "netkeep db upgrade" in result.stderr
 
     with session_scope(make_session_factory(engine), write=True) as session:
         user = ensure_local_user(session)

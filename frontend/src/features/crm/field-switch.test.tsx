@@ -13,7 +13,7 @@
  * columns (see `SAMPLE`), which is every kind transition there is, and after
  * each switch asserts three things: the tree validates, the field picker shows
  * the field the tree holds, and an enum's value picker shows the value the tree
- * holds. `NETKEEPER_EXHAUSTIVE=1 pnpm test` walks every column instead.
+ * holds. `NETKEEP_EXHAUSTIVE=1 pnpm test` walks every column instead.
  */
 import { useState } from 'react'
 import { fireEvent, render, screen } from '@testing-library/react'
@@ -99,7 +99,7 @@ function representativeSample(fields: readonly FieldSpec[]): FieldSpec[] {
   })
 }
 
-const EXHAUSTIVE = import.meta.env.NETKEEPER_EXHAUSTIVE === '1'
+const EXHAUSTIVE = import.meta.env.NETKEEP_EXHAUSTIVE === '1'
 const SAMPLE: readonly FieldSpec[] = EXHAUSTIVE ? FIELDS : representativeSample(FIELDS)
 
 /** What `valueFits` can tell apart about a column: its kind, or which enum. */

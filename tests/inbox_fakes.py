@@ -12,15 +12,15 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from netkeeper.linkedin.inbox import (
+from netkeep.linkedin.inbox import (
     InboxConversation,
     InboxDelta,
     InboxJobSpec,
     InboxMessage,
     InboxReadStopped,
 )
-from netkeeper.models import SyncRun, SyncRunKind, SyncRunStatus, SyncRunTrigger, User
-from netkeeper.services.linkedin_accounts import ensure_account
+from netkeep.models import SyncRun, SyncRunKind, SyncRunStatus, SyncRunTrigger, User
+from netkeep.services.linkedin_accounts import ensure_account
 
 #: The account owner's own profile URN, invented.
 OWNER_URN = "urn:li:fsd_profile:INVENTEDOWNER"
@@ -96,7 +96,7 @@ def a_thread_with(counterpart: str, at: datetime, *, name: str = "one") -> Inbox
 
 
 class FakeInboxSource:
-    """An :class:`~netkeeper.linkedin.inbox.InboxSource` that returns ``answer``.
+    """An :class:`~netkeep.linkedin.inbox.InboxSource` that returns ``answer``.
 
     ``answer`` is a delta, or an exception to raise (an ``InboxReadStopped`` for a
     wall). ``specs`` records what each read was asked for.

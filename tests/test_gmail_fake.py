@@ -10,7 +10,7 @@ from email.message import EmailMessage
 
 import pytest
 
-from netkeeper.campaigns.gmail import (
+from netkeep.campaigns.gmail import (
     Gmail,
     GmailNotFound,
     GmailRateLimited,
@@ -18,7 +18,7 @@ from netkeeper.campaigns.gmail import (
     GmailTransient,
     ensure_label,
 )
-from netkeeper.campaigns.gmail_fake import MAILER_DAEMON, FakeGmail, normalize_subject
+from netkeep.campaigns.gmail_fake import MAILER_DAEMON, FakeGmail, normalize_subject
 
 T0 = datetime(2026, 10, 6, 14, 0, tzinfo=UTC)
 ME = "sender@example.com"
@@ -411,7 +411,7 @@ def test_history_ids_only_grow(gmail: FakeGmail) -> None:
     seen = [gmail.history_id]
     ref = gmail.send(_mail(), purpose="send step 1")
     seen.append(gmail.history_id)
-    label = gmail.create_label("netkeeper/x", purpose="label")
+    label = gmail.create_label("netkeep/x", purpose="label")
     gmail.modify_labels(ref.id, add=[label.id], purpose="label step 1")
     seen.append(gmail.history_id)
     draft = gmail.create_draft(_mail(msgid="<d@example.com>"), purpose="draft")
@@ -488,7 +488,7 @@ def test_search_operators(gmail: FakeGmail, clock: Clock) -> None:
     clock.advance(5)
     inbound = gmail.deliver(_inbound("Hello"))
     spam = gmail.deliver(_inbound("Win", sender="spam@example.com"), labels=["SPAM"])
-    label = gmail.create_label("netkeeper/First 100", purpose="label")
+    label = gmail.create_label("netkeep/First 100", purpose="label")
     gmail.modify_labels(first.id, add=[label.id], purpose="label step 1")
 
     def search(query: str) -> list[str]:
@@ -498,7 +498,7 @@ def test_search_operators(gmail: FakeGmail, clock: Clock) -> None:
     assert search(f"to:{ADA}") == [first.id]
     assert search("rfc822msgid:<b@example.com>") == [second.id]
     assert search("rfc822msgid:b@example.com") == [second.id]
-    assert search('label:"netkeeper/First 100"') == [first.id]
+    assert search('label:"netkeep/First 100"') == [first.id]
     assert search("in:inbox") == [inbound.id]
     assert spam.id in search("in:anywhere")  # the one search with spam and trash (#267)
     assert spam.id not in search("from:spam@example.com")
@@ -584,8 +584,8 @@ def test_search_refuses_what_it_cannot_read_as_gmail_would(gmail: FakeGmail, que
 
 
 def test_labels(gmail: FakeGmail) -> None:
-    made = ensure_label(gmail, "netkeeper/First 100", purpose="label for campaign 1")
-    assert ensure_label(gmail, "NETKEEPER/first 100", purpose="label for campaign 1") == made
+    made = ensure_label(gmail, "netkeep/First 100", purpose="label for campaign 1")
+    assert ensure_label(gmail, "NETKEEP/first 100", purpose="label for campaign 1") == made
     assert made.type == "user"
     assert {"INBOX", "SENT", "DRAFT"} <= {label.id for label in gmail.list_labels(purpose="l")}
 
@@ -632,7 +632,7 @@ def test_fail_next_fails_once_in_order(gmail: FakeGmail) -> None:
 def test_calls_and_purposes_are_recorded_and_logged(
     gmail: FakeGmail, caplog: pytest.LogCaptureFixture
 ) -> None:
-    caplog.set_level(logging.INFO, logger="netkeeper.campaigns.gmail")
+    caplog.set_level(logging.INFO, logger="netkeep.campaigns.gmail")
     gmail.send(_mail(), purpose="send step 1 for enrollment 14")
     gmail.list_labels(purpose="labels for campaign 2")
     assert gmail.calls == [

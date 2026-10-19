@@ -3,12 +3,12 @@
 Everyone here is invented: fake names, fake ``ACoAAFAKE`` URNs, fake slugs,
 companies that do not exist, ``example.test`` addresses, ``555-01xx`` numbers.
 :func:`details_of` and :func:`contact_info_of` are what a visit to each person
-harvests, as the parsers in :mod:`netkeeper.linkedin.flagship_profile` would hand
+harvests, as the parsers in :mod:`netkeep.linkedin.flagship_profile` would hand
 them back (#190); ``tests/test_page_profiles.py`` drives the real source over real
 flight payloads, and this module stands in for it where a test is about the job or
 the runner, not the page.
 
-:class:`FakeBrowser` is one tab behind the :class:`~netkeeper.linkedin.enrich.ProfileSource`
+:class:`FakeBrowser` is one tab behind the :class:`~netkeep.linkedin.enrich.ProfileSource`
 seam: ``open_profile`` records the navigation, ``scroll`` the plan,
 ``read_profile`` answers the person's details, and ``read_contact_info`` records the
 scroll back up, waits the pause through the ``sleep`` it was given, records the one
@@ -25,10 +25,10 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote, unquote, urlsplit
 
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.enrich import Answer, ScrollCancelled, UnreadableCause, masked
-from netkeeper.linkedin.pacing import ScrollPlan
-from netkeeper.linkedin.voyager import (
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.enrich import Answer, ScrollCancelled, UnreadableCause, masked
+from netkeep.linkedin.pacing import ScrollPlan
+from netkeep.linkedin.voyager import (
     ContactInfo,
     EducationEntry,
     PositionEntry,

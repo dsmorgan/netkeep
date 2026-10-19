@@ -200,7 +200,7 @@ describe('LiveRunCard', () => {
   })
 
   it('shows the note for a run in another data directory only once a stop is asked', async () => {
-    const note = 'This run is in another netkeeper data directory on this database.'
+    const note = 'This run is in another netkeep data directory on this database.'
     const elsewhere = { ...RUNNING, elsewhere_note: note }
     renderCard(
       running({
@@ -218,7 +218,7 @@ describe('LiveRunCard', () => {
   })
 
   it('shows the note after a pause of a run in another data directory', async () => {
-    const note = 'This run is in another netkeeper data directory on this database.'
+    const note = 'This run is in another netkeep data directory on this database.'
     const elsewhere = { ...RUNNING, elsewhere_note: note }
     renderCard(
       running({

@@ -5,11 +5,11 @@ function when(value: string): string {
   return new Date(value).toLocaleString()
 }
 
-/** Why netkeeper hasn't found one of its own drafts here yet, in a sentence. */
+/** Why netkeep hasn't found one of its own drafts here yet, in a sentence. */
 export function waitingText(steps: MailboxArmSteps): string {
   switch (steps.waiting) {
     case 'not_armed':
-      return 'Waits until you arm the mailbox for drafts. netkeeper checks only an armed mailbox.'
+      return 'Waits until you arm the mailbox for drafts. netkeep checks only an armed mailbox.'
     case 'reauth_required':
       return 'Waiting: the mailbox needs you to sign in again. Re-authorize it, and the next check runs.'
     case 'no_draft':
@@ -38,5 +38,5 @@ export function sendText(steps: MailboxArmSteps): string {
 /** Why Arm to send is off, when it is; null when it can be pressed or isn't shown. */
 export function armSendBlocked(mailbox: Mailbox, steps: MailboxArmSteps): string | null {
   if (mailbox.arm !== 'draft' || steps.can_arm_send) return null
-  return 'Arm to send is off until netkeeper finds one of its own drafts in this mailbox.'
+  return 'Arm to send is off until netkeep finds one of its own drafts in this mailbox.'
 }

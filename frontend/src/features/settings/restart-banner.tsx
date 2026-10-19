@@ -14,7 +14,7 @@ import {
 } from './api'
 
 /**
- * **Restart netkeeper** (#597): shown while a setting netkeeper serve reads at startup
+ * **Restart netkeep** (#597): shown while a setting netkeep serve reads at startup
  * has changed, or config.toml changed on disk. The backend never stops serve in the
  * middle of work: while a LinkedIn run, the browser, a task or a campaign send is busy
  * it refuses, and **Restart when idle** asks it to wait for that work instead. Under the
@@ -88,7 +88,7 @@ export function RestartBanner({
   if (phase.kind === 'back') {
     return (
       <p role="status" className="text-sm text-muted-foreground">
-        netkeeper restarted, and the settings above are in force.
+        netkeep restarted, and the settings above are in force.
       </p>
     )
   }
@@ -99,23 +99,23 @@ export function RestartBanner({
   const busy = settings.busy
   return (
     <section
-      aria-label="Restart netkeeper"
+      aria-label="Restart netkeep"
       className={cn('nk-glass space-y-2 p-3 text-sm', toneClasses('warn'))}
     >
       <p>
         {settings.config_changed
-          ? 'config.toml changed since netkeeper started, '
+          ? 'config.toml changed since netkeep started, '
           : 'A setting you changed '}
-        takes effect when netkeeper restarts.
+        takes effect when netkeep restarts.
       </p>
       {settings.config_error !== null && (
         <p role="alert" className="text-destructive">
-          config.toml does not load, so netkeeper would not start again: {settings.config_error}
+          config.toml does not load, so netkeep would not start again: {settings.config_error}
         </p>
       )}
       {busy.length > 0 && (
         <div>
-          <p>{waiting ? 'netkeeper restarts once this is done:' : 'netkeeper is busy:'}</p>
+          <p>{waiting ? 'netkeep restarts once this is done:' : 'netkeep is busy:'}</p>
           <ul className="list-disc pl-5">
             {busy.map((reason) => (
               <li key={reason}>{reason}</li>
@@ -131,14 +131,14 @@ export function RestartBanner({
               disabled={restart.isPending || settings.config_error !== null}
               onClick={() => restart.mutate(busy.length > 0)}
             >
-              {busy.length > 0 ? 'Restart when idle' : 'Restart netkeeper'}
+              {busy.length > 0 ? 'Restart when idle' : 'Restart netkeep'}
             </Button>
           )}
           {waiting && (
             <span role="status" className="text-muted-foreground">
               {busy.length > 0
                 ? 'Waiting to restart… nothing running is cut off.'
-                : 'Restarting… this page reconnects when netkeeper is back.'}
+                : 'Restarting… this page reconnects when netkeep is back.'}
             </span>
           )}
           {waiting && busy.length > 0 && (
@@ -154,20 +154,20 @@ export function RestartBanner({
         </div>
       ) : (
         <p className="text-muted-foreground">
-          This netkeeper cannot restart itself (it runs with --reload, or not as netkeeper serve).
-          Stop it and start it again.
+          This netkeep cannot restart itself (it runs with --reload, or not as netkeep serve). Stop
+          it and start it again.
         </p>
       )}
       {waiting && busy.length > 0 && (
         <p className="text-muted-foreground">
-          Once nothing is running, netkeeper pauses scheduled LinkedIn runs and campaign sends
-          before it restarts. A run you start by hand after that keeps them paused until it ends.
+          Once nothing is running, netkeep pauses scheduled LinkedIn runs and campaign sends before
+          it restarts. A run you start by hand after that keeps them paused until it ends.
         </p>
       )}
       {cancel.isError && <p role="alert">{message(cancel.error)}</p>}
       {phase.kind === 'lost' && (
         <p role="alert" className="text-destructive">
-          netkeeper has not come back. Check its log, or start it again with netkeeper serve.
+          netkeep has not come back. Check its log, or start it again with netkeep serve.
         </p>
       )}
       {restart.isError && <p role="alert">{message(restart.error)}</p>}

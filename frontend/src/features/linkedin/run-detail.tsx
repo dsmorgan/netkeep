@@ -158,7 +158,7 @@ export function RunDetail({
 }
 
 /**
- * The run's own fields that `netkeeper linkedin run <id>` prints beside its counts
+ * The run's own fields that `netkeep linkedin run <id>` prints beside its counts
  * (#405): how far its plan got, its visit cap, and the run it resumes. Also the run
  * that resumed it, which the CLI leaves out. Each shows only when the run has it.
  */

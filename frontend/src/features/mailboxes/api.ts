@@ -115,7 +115,7 @@ export const ARM_LABEL: Record<MailboxArm | 'none', string> = {
 /** What `serve` does with the mailbox, in a sentence, with who armed it and when. */
 export function armText(mailbox: Mailbox): string {
   if (mailbox.arm === null || mailbox.armed_at === null) {
-    return 'Not armed: netkeeper serve makes no drafts and sends nothing from it.'
+    return 'Not armed: netkeep serve makes no drafts and sends nothing from it.'
   }
   const since = new Date(mailbox.send_armed_at ?? mailbox.armed_at).toLocaleString()
   const by = mailbox.armed_by === null ? '' : ` by ${mailbox.armed_by}`

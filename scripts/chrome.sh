@@ -1,19 +1,19 @@
 #!/bin/sh
-# Start the netkeeper Chrome profile with its remote-debugging port, for a person
+# Start the netkeep Chrome profile with its remote-debugging port, for a person
 # to run by hand.
 #
-# A run never starts a browser (ADR 0002, ADR 0012): `netkeeper browser launch`
+# A run never starts a browser (ADR 0002, ADR 0012): `netkeep browser launch`
 # only prints the command, and nothing in the package runs this script. This is
 # that printed command plus the checks a person otherwise does by hand: is it
 # already running, is the port taken by something else, is the profile open
 # without the port, and is a crash-left profile lock in the way.
 #
-# The port and profile come from netkeeper itself (`browser launch --json`), so
+# The port and profile come from netkeep itself (`browser launch --json`), so
 # this starts Chrome where `serve` and `preflight` will look for it.
 set -eu
 
-PROFILE_DIRNAME="chrome-profile"   # netkeeper.services.browser_launch.CHROME_PROFILE_DIRNAME
-DEFAULT_PORT=9222                  # netkeeper.services.browser_launch.DEFAULT_CDP_PORT
+PROFILE_DIRNAME="chrome-profile"   # netkeep.services.browser_launch.CHROME_PROFILE_DIRNAME
+DEFAULT_PORT=9222                  # netkeep.services.browser_launch.DEFAULT_CDP_PORT
 WAIT_SECONDS=30
 
 usage() {
@@ -22,16 +22,16 @@ Usage: scripts/chrome.sh [--port N] [--data-dir PATH | --profile-dir PATH] [--dr
        scripts/chrome.sh --status [--port N] [--data-dir PATH | --profile-dir PATH]
        scripts/chrome.sh --help
 
-Start Chrome on the netkeeper profile with --remote-debugging-port, then wait
+Start Chrome on the netkeep profile with --remote-debugging-port, then wait
 until the port answers. If that Chrome is already up, say so and change nothing.
 
-The port and profile default to what netkeeper uses: linkedin.cdp_url from your
-config, and <data dir>/$PROFILE_DIRNAME. If netkeeper cannot be run, they fall
-back to port $DEFAULT_PORT and \$NETKEEPER_DATA (or the macOS default), with a warning.
+The port and profile default to what netkeep uses: linkedin.cdp_url from your
+config, and <data dir>/$PROFILE_DIRNAME. If netkeep cannot be run, they fall
+back to port $DEFAULT_PORT and \$NETKEEP_DATA (or the macOS default), with a warning.
 
 Options:
   --port N            Debugging port, instead of linkedin.cdp_url's.
-  --data-dir PATH     netkeeper data directory, instead of \$NETKEEPER_DATA.
+  --data-dir PATH     netkeep data directory, instead of \$NETKEEP_DATA.
   --profile-dir PATH  Use this Chrome profile directory instead.
   --status            Report whether the port answers and whether the profile
                       is open. Changes nothing.
@@ -95,18 +95,18 @@ esac
 command -v curl >/dev/null 2>&1 || die "curl is needed to check the debugging port"
 command -v lsof >/dev/null 2>&1 || die "lsof is needed to check what holds the port"
 
-# --- where: ask netkeeper, unless told ------------------------------------------
+# --- where: ask netkeep, unless told ------------------------------------------
 
 repo=$(cd "$(dirname "$0")/.." && pwd -P)
-netkeeper_bin=
-if [ -x "$repo/.venv/bin/netkeeper" ]; then
-  netkeeper_bin="$repo/.venv/bin/netkeeper"
-elif command -v netkeeper >/dev/null 2>&1; then
-  netkeeper_bin=$(command -v netkeeper)
+netkeep_bin=
+if [ -x "$repo/.venv/bin/netkeep" ]; then
+  netkeep_bin="$repo/.venv/bin/netkeep"
+elif command -v netkeep >/dev/null 2>&1; then
+  netkeep_bin=$(command -v netkeep)
 fi
 
-# The python netkeeper was installed with, so a real json parser is available
-# without assuming one sits beside `netkeeper` on PATH (#183 review bug 3/
+# The python netkeep was installed with, so a real json parser is available
+# without assuming one sits beside `netkeep` on PATH (#183 review bug 3/
 # should-fix 2: sed parsing the JSON directly instead mangled a profile path
 # with a quote, a backslash, or non-ASCII text -- json.dumps escapes the last
 # as \uXXXX). Three shapes, tried in order, and read with `head` so a symlinked
@@ -120,9 +120,9 @@ fi
 #     instead to plain `python3` on PATH: the snippet only needs stdlib json,
 #     never the entry point's own interpreter specifically (#183 re-review
 #     should-fix 2).
-netkeeper_python=
-if [ -n "$netkeeper_bin" ]; then
-  shebang=$(head -n1 "$netkeeper_bin" 2>/dev/null) || shebang=
+netkeep_python=
+if [ -n "$netkeep_bin" ]; then
+  shebang=$(head -n1 "$netkeep_bin" 2>/dev/null) || shebang=
   case $shebang in
     '#!/usr/bin/env '*)
       # The first word that is not one of env's own options (-S, -i, -u NAME,
@@ -138,7 +138,7 @@ if [ -n "$netkeeper_bin" ]; then
       done
       if [ -n "$word" ]; then
         case $(basename -- "$word") in
-          python*) netkeeper_python=$(command -v "$word" 2>/dev/null) || netkeeper_python= ;;
+          python*) netkeep_python=$(command -v "$word" 2>/dev/null) || netkeep_python= ;;
         esac
       fi
       ;;
@@ -146,26 +146,26 @@ if [ -n "$netkeeper_bin" ]; then
       candidate=${shebang#'#!'}
       candidate=${candidate%% *}
       case $(basename -- "$candidate") in
-        python*) [ -x "$candidate" ] && netkeeper_python=$candidate ;;
+        python*) [ -x "$candidate" ] && netkeep_python=$candidate ;;
       esac
       ;;
   esac
 fi
-[ -n "$netkeeper_python" ] || netkeeper_python=$(command -v python3 2>/dev/null) || netkeeper_python=
+[ -n "$netkeep_python" ] || netkeep_python=$(command -v python3 2>/dev/null) || netkeep_python=
 
 if [ -z "$port" ] || [ -z "$profile" ]; then
   answer=
-  if [ -n "$netkeeper_bin" ]; then
+  if [ -n "$netkeep_bin" ]; then
     if [ -n "$data_dir" ]; then
-      answer=$(NETKEEPER_DATA="$data_dir" "$netkeeper_bin" browser launch --json 2>/dev/null) || answer=
+      answer=$(NETKEEP_DATA="$data_dir" "$netkeep_bin" browser launch --json 2>/dev/null) || answer=
     else
-      answer=$("$netkeeper_bin" browser launch --json 2>/dev/null) || answer=
+      answer=$("$netkeep_bin" browser launch --json 2>/dev/null) || answer=
     fi
   fi
   # One field per line: port, profile, remote note (empty when none).
   fields=
-  if [ -n "$answer" ] && [ -n "$netkeeper_python" ]; then
-    fields=$(printf '%s' "$answer" | "$netkeeper_python" -c '
+  if [ -n "$answer" ] && [ -n "$netkeep_python" ]; then
+    fields=$(printf '%s' "$answer" | "$netkeep_python" -c '
 import json, sys
 d = json.load(sys.stdin)
 print(d["port"]); print(d["profile"]); print(d["remote"] or "")' 2>/dev/null) || fields=
@@ -180,23 +180,23 @@ print(d["port"]); print(d["profile"]); print(d["remote"] or "")' 2>/dev/null) ||
     [ -n "$port" ] || port=$asked_port
     [ -n "$profile" ] || profile=$asked_profile
   else
-    if [ -n "$answer" ] && [ -z "$netkeeper_python" ]; then
-      printf 'warning: netkeeper answered but no Python was found to parse it; using the defaults\n' >&2
+    if [ -n "$answer" ] && [ -z "$netkeep_python" ]; then
+      printf 'warning: netkeep answered but no Python was found to parse it; using the defaults\n' >&2
     else
-      printf 'warning: could not ask netkeeper for its port and profile; using the defaults\n' >&2
+      printf 'warning: could not ask netkeep for its port and profile; using the defaults\n' >&2
     fi
     [ -n "$port" ] || port=$DEFAULT_PORT
     if [ -z "$profile" ]; then
-      [ -n "$data_dir" ] || data_dir=${NETKEEPER_DATA:-"$HOME/Library/Application Support/netkeeper"}
+      [ -n "$data_dir" ] || data_dir=${NETKEEP_DATA:-${NETKEEPER_DATA:-"$HOME/Library/Application Support/netkeep"}}
       profile="$data_dir/$PROFILE_DIRNAME"
     fi
   fi
 fi
 
-# #183 review bug 4: the port can come from netkeeper's own JSON, not just
+# #183 review bug 4: the port can come from netkeep's own JSON, not just
 # --port, and that answer was never checked before being handed to curl/lsof.
 case $port in
-  *[!0-9]*) die "the port from \`netkeeper browser launch --json\` must be a number, not '$port'" ;;
+  *[!0-9]*) die "the port from \`netkeep browser launch --json\` must be a number, not '$port'" ;;
 esac
 
 # One spelling of the profile, however it was given. Chrome gets this
@@ -224,7 +224,7 @@ profile_pids() {
 # Chrome, is not one of its own helper processes, and actually has this profile
 # open. Chrome's own check for the first two, and it does not care how the path
 # was spelled when that Chrome was started; the last two guard against a pid
-# the crashed netkeeper Chrome once had, since reused by something else --
+# the crashed netkeep Chrome once had, since reused by something else --
 # your everyday Chrome's main window, or one of its many `--type=` helpers --
 # which is not this profile's holder just because it is also a Chrome (#183 review).
 lock_holder() {
@@ -330,7 +330,7 @@ fi
 if [ -n "$version" ]; then
   if [ -n "$pids" ] || [ -n "$holder" ]; then
     printf 'Already running: %s on port %s, profile %s\n' "$(browser_name "$version")" "$port" "$profile"
-    printf 'Next: netkeeper preflight\n'
+    printf 'Next: netkeep preflight\n'
     exit 0
   fi
   die "port $port already answers as $(browser_name "$version"), but not on this profile. Quit that browser, or pick another port with --port and set linkedin.cdp_url in your config to match."
@@ -348,7 +348,7 @@ if [ -n "$pids" ] || [ -n "$holder" ]; then
   other_port=$(holder_other_port "$running_pid")
   # #183 re-review nit 4: an escape hatch for the one case none of this is
   # proof against -- the heuristics above are still a guess, not a guarantee.
-  escape="If pid $running_pid isn't netkeeper's Chrome, remove $profile/SingletonLock."
+  escape="If pid $running_pid isn't netkeep's Chrome, remove $profile/SingletonLock."
   if [ -n "$other_port" ] && [ "$other_port" != "$port" ]; then
     die "Chrome is running on this profile on port $other_port, not $port (pid $running_pid$via). Use --port $other_port to match it, or quit that window with Cmd-Q and run this again. $escape"
   fi
@@ -382,7 +382,7 @@ else
   mkdir -p "$profile"
 fi
 
-# The same two flags `netkeeper browser launch` prints; nothing else, so this
+# The same two flags `netkeep browser launch` prints; nothing else, so this
 # Chrome looks like any other.
 case $(uname -s) in
   Darwin)
@@ -419,7 +419,7 @@ while [ "$waited" -lt "$WAIT_SECONDS" ]; do
   version=$(cdp_version)
   if [ -n "$version" ]; then
     printf 'Ready: %s\n' "$(browser_name "$version")"
-    printf 'Next: log in to LinkedIn in that window if it asks, then run: netkeeper preflight\n'
+    printf 'Next: log in to LinkedIn in that window if it asks, then run: netkeep preflight\n'
     exit 0
   fi
   sleep 1

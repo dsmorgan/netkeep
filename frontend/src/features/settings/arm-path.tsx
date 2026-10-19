@@ -13,7 +13,7 @@ interface ArmPathProps {
 }
 
 /**
- * The way to arming a mailbox to send (#510): armed for drafts, then netkeeper finding
+ * The way to arming a mailbox to send (#510): armed for drafts, then netkeep finding
  * one of its own drafts by Message-ID, then a person arming it to send. Each step shows
  * its state, and a blocked Arm to send says why and offers the next step.
  */
@@ -35,7 +35,7 @@ export function ArmPath({ mailbox, steps, onCheckNow, checking, blockedId }: Arm
           </span>
         </li>
         <li>
-          <span className="font-medium">netkeeper found its own draft.</span>{' '}
+          <span className="font-medium">netkeep found its own draft.</span>{' '}
           <span className="text-muted-foreground">{waitingText(steps)}</span>
           {!found && steps.check_requested_at !== null && (
             <span className="text-muted-foreground"> A check runs within a minute.</span>
@@ -43,7 +43,7 @@ export function ArmPath({ mailbox, steps, onCheckNow, checking, blockedId }: Arm
           {waitingOnServe && (
             <span className="text-muted-foreground">
               {' '}
-              netkeeper serve isn’t running, so nothing checks for the draft until you start it.
+              netkeep serve isn’t running, so nothing checks for the draft until you start it.
             </span>
           )}
         </li>
@@ -77,11 +77,11 @@ export function ArmPath({ mailbox, steps, onCheckNow, checking, blockedId }: Arm
         </div>
       )}
       <p className="text-xs text-muted-foreground">
-        netkeeper finds each message again by the Message-ID it sets, so before it sends on its own,
-        it checks that Gmail keeps that Message-ID. Arm to send lets netkeeper serve send campaign
+        netkeep finds each message again by the Message-ID it sets, so before it sends on its own,
+        it checks that Gmail keeps that Message-ID. Arm to send lets netkeep serve send campaign
         email from this mailbox with no one pressing Send. Until then, every step is a draft you
-        send yourself. Disarm takes all of that back: from the next minute, netkeeper makes no
-        drafts and sends nothing until you arm the mailbox again, starting with drafts.
+        send yourself. Disarm takes all of that back: from the next minute, netkeep makes no drafts
+        and sends nothing until you arm the mailbox again, starting with drafts.
       </p>
     </section>
   )

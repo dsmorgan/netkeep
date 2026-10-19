@@ -20,29 +20,29 @@ from sqlalchemy import Engine, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.campaigns.templates import (
+from netkeep.campaigns.templates import (
     REMOVED_FIELD_BLOCK,
     describe_removed_field_campaigns,
     removed_field_campaigns,
 )
-from netkeeper.config import LegacyMe, Settings
-from netkeeper.crm import contacts as crm_contacts
-from netkeeper.crm import identity, triage
-from netkeeper.crm.apply import _mark_seen, age_unseen, known_urns
-from netkeeper.crm.duplicates import possible_duplicates
-from netkeeper.crm.filters import FilterTree
-from netkeeper.crm.interactions import NotFound as InteractionNotFound
-from netkeeper.crm.interactions import add_interaction, delete_interaction, update_interaction
-from netkeeper.crm.lists import create_list, list_members
-from netkeeper.crm.self_contact import (
+from netkeep.config import LegacyMe, Settings
+from netkeep.crm import contacts as crm_contacts
+from netkeep.crm import identity, triage
+from netkeep.crm.apply import _mark_seen, age_unseen, known_urns
+from netkeep.crm.duplicates import possible_duplicates
+from netkeep.crm.filters import FilterTree
+from netkeep.crm.interactions import NotFound as InteractionNotFound
+from netkeep.crm.interactions import add_interaction, delete_interaction, update_interaction
+from netkeep.crm.lists import create_list, list_members
+from netkeep.crm.self_contact import (
     InvalidSelfValue,
     ensure_self_contact,
     get_self_contact,
     update_self_contact,
 )
-from netkeeper.crm.tags import contact_counts, create_rule, create_tag, run_rules
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.crm.tags import contact_counts, create_rule, create_tag, run_rules
+from netkeep.db import session_scope
+from netkeep.models import (
     Campaign,
     CampaignStatus,
     Contact,
@@ -59,15 +59,15 @@ from netkeeper.models import (
     TagSource,
     User,
 )
-from netkeeper.scoping import get_scoped, scoped, scoped_contacts, scoped_contacts_count
-from netkeeper.services import campaign_review, dashboard, enrich_plan
-from netkeeper.services import campaigns as campaign_service
-from netkeeper.services.campaign_engine import enroll as engine_enroll
-from netkeeper.services.campaign_guards import Reason
-from netkeeper.services.linkedin_accounts import ensure_account
-from netkeeper.web.app import create_app
+from netkeep.scoping import get_scoped, scoped, scoped_contacts, scoped_contacts_count
+from netkeep.services import campaign_review, dashboard, enrich_plan
+from netkeep.services import campaigns as campaign_service
+from netkeep.services.campaign_engine import enroll as engine_enroll
+from netkeep.services.campaign_guards import Reason
+from netkeep.services.linkedin_accounts import ensure_account
+from netkeep.web.app import create_app
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 NOW = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)
 SELF_EMAIL = "selfie@example.test"
 SELF_URN = "urn:li:fsd_profile/SELF000001"
@@ -517,13 +517,13 @@ async def test_the_app_start_warns_about_them(
     async with app.router.lifespan_context(app):
         with session_scope(_factory(app), write=True) as session:
             _use_me(session, session.scalars(select(User)).one(), "First 100")
-    with caplog.at_level(logging.WARNING, logger="netkeeper.web.app"):
+    with caplog.at_level(logging.WARNING, logger="netkeep.web.app"):
         async with app.router.lifespan_context(app):
             pass
     [warning] = [
         r.getMessage()
         for r in caplog.records
-        if r.name == "netkeeper.web.app" and "removed me.* fields" in r.getMessage()
+        if r.name == "netkeep.web.app" and "removed me.* fields" in r.getMessage()
     ]
     assert "'First 100'" in warning and "removed me.* fields" in warning
     assert "fix the template, then have the step use its newest version" in warning
@@ -550,7 +550,7 @@ def test_the_guidance_is_the_path_that_unblocks_a_campaign(writer: Session, user
     the step adopt the fixed version (#397)."""
     fix = (
         "fix the template, then have the step use its newest version"
-        " (Use newest version on the campaign page, or `netkeeper campaigns adopt-template`)"
+        " (Use newest version on the campaign page, or `netkeep campaigns adopt-template`)"
     )
     assert f"blocked: template uses removed field me.*; {fix}" == REMOVED_FIELD_BLOCK
     _use_me(writer, user, "First 100")

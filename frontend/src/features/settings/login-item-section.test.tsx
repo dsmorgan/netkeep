@@ -8,9 +8,9 @@ import type { LoginItem } from './api'
 import { LoginItemSection } from './login-item-section'
 
 const REGISTERED =
-  'Registered. netkeeper will start by itself the next time you log in to this Mac. Nothing changes now, because netkeeper is already running.'
+  'Registered. netkeep will start by itself the next time you log in to this Mac. Nothing changes now, because netkeep is already running.'
 const STARTED =
-  'Started. netkeeper is starting now, and will start by itself every time you log in to this Mac.'
+  'Started. netkeep is starting now, and will start by itself every time you log in to this Mac.'
 
 const OFF: LoginItem = {
   supported: true,
@@ -19,9 +19,9 @@ const OFF: LoginItem = {
   enabled: false,
   running_under_launchd: false,
   this_server_is_the_login_item: false,
-  label: 'fun.tnkr.netkeeper',
-  plist_path: '/Users/x/Library/LaunchAgents/fun.tnkr.netkeeper.plist',
-  log_path: '/data/logs/netkeeper.log',
+  label: 'fun.tnkr.netkeep',
+  plist_path: '/Users/x/Library/LaunchAgents/fun.tnkr.netkeep.plist',
+  log_path: '/data/logs/netkeep.log',
   points_elsewhere: null,
   legacy: false,
 }
@@ -65,7 +65,7 @@ function renderSection(initial: LoginItem, onPut?: (enabled: boolean) => Respons
 describe('LoginItemSection', () => {
   it('shows the state the server read and turns it on', async () => {
     const { puts } = renderSection(OFF)
-    const box = await screen.findByRole('checkbox', { name: 'Start netkeeper when I log in' })
+    const box = await screen.findByRole('checkbox', { name: 'Start netkeep when I log in' })
     expect(box).not.toBeChecked()
     fireEvent.click(box)
     await waitFor(() => expect(puts).toEqual([true]))
@@ -94,7 +94,7 @@ describe('LoginItemSection', () => {
     'Registered: starts at next login',
     'Running from login agent',
     'Needs repair',
-    'Points at a different netkeeper',
+    'Points at a different netkeep',
   ])('shows the state %s', async (state) => {
     renderSection({ ...OFF, state })
     expect(await screen.findByText(state)).toBeInTheDocument()
@@ -102,10 +102,8 @@ describe('LoginItemSection', () => {
 
   it('tells you how to check and links the launchctl entry', async () => {
     renderSection({ ...OFF, enabled: true, state: 'Registered: starts at next login' })
-    expect(
-      await screen.findByText(/open netkeeper's bookmark without starting/),
-    ).toBeInTheDocument()
-    expect(screen.getByText('fun.tnkr.netkeeper')).toBeInTheDocument()
+    expect(await screen.findByText(/open netkeep's bookmark without starting/)).toBeInTheDocument()
+    expect(screen.getByText('fun.tnkr.netkeep')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: "If the page doesn't open" })).toHaveAttribute(
       'href',
       expect.stringContaining('troubleshooting.md#run-at-login-does-nothing'),
@@ -120,7 +118,7 @@ describe('LoginItemSection', () => {
 
   it('says why the switch is disabled off macOS', async () => {
     renderSection({ ...OFF, supported: false, unsupported_reason: 'Run at login needs macOS.' })
-    const box = await screen.findByRole('checkbox', { name: 'Start netkeeper when I log in' })
+    const box = await screen.findByRole('checkbox', { name: 'Start netkeep when I log in' })
     expect(box).toHaveAttribute('aria-disabled', 'true')
     expect(screen.getByText('Run at login needs macOS.')).toBeInTheDocument()
   })
@@ -131,9 +129,9 @@ describe('LoginItemSection', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('launchctl enable failed')
   })
 
-  it('warns when the agent runs another netkeeper', async () => {
-    renderSection({ ...OFF, enabled: true, points_elsewhere: '/old/checkout/.venv/bin/netkeeper' })
-    expect(await screen.findByRole('alert')).toHaveTextContent('/old/checkout/.venv/bin/netkeeper')
+  it('warns when the agent runs another netkeep', async () => {
+    renderSection({ ...OFF, enabled: true, points_elsewhere: '/old/checkout/.venv/bin/netkeep' })
+    expect(await screen.findByRole('alert')).toHaveTextContent('/old/checkout/.venv/bin/netkeep')
   })
 
   it('offers Repair for an old script agent, and never says to turn it off and on', async () => {

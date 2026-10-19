@@ -1,4 +1,4 @@
-# netkeeper frontend
+# netkeep frontend
 
 React 19, TypeScript, Vite, TanStack Router and Query, Tailwind CSS v4, and shadcn/ui (Base UI primitives, `base-nova` preset, components copied into `src/components/ui/`). In development Vite proxies `/api` to `http://127.0.0.1:8000`; in production the backend serves `dist/` itself, so the API client uses an empty `baseUrl`.
 
@@ -16,9 +16,9 @@ React 19, TypeScript, Vite, TanStack Router and Query, Tailwind CSS v4, and shad
 
 ## Generated client
 
-`src/api/schema.d.ts` is generated from `openapi.json` by `pnpm gen` and committed; never edit it by hand. `src/api/client.ts` wraps it with `openapi-fetch` and adds the `X-Netkeeper-Client: 1` header the backend's CSRF rule requires.
+`src/api/schema.d.ts` is generated from `openapi.json` by `pnpm gen` and committed; never edit it by hand. `src/api/client.ts` wraps it with `openapi-fetch` and adds the `X-Netkeep-Client: 1` header the backend's CSRF rule requires.
 
-`openapi.json` is exported from the FastAPI app by `make gen-client` at the repo root (`netkeeper openapi export --out frontend/openapi.json`, then `pnpm gen`). Rerun it whenever the API changes; the backend test suite fails when the committed file is stale.
+`openapi.json` is exported from the FastAPI app by `make gen-client` at the repo root (`netkeep openapi export --out frontend/openapi.json`, then `pnpm gen`). Rerun it whenever the API changes; the backend test suite fails when the committed file is stale.
 
 ## Where things are
 

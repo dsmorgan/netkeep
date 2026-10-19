@@ -1,6 +1,6 @@
 """An email reply stops an enrollment that has sent only on LinkedIn (#571).
 
-The Gmail reply poll (:func:`netkeeper.services.campaign_replies.poll_replies`) watches
+The Gmail reply poll (:func:`netkeep.services.campaign_replies.poll_replies`) watches
 such an enrollment through an armed mailbox: mail from one of the contact's known
 addresses, dated after the enrollment's first send, is its reply. Nothing else is, and
 nothing in Gmail changes for it. Every address and message is invented, and Gmail is
@@ -20,9 +20,9 @@ import pytest
 from campaign_fakes import ARMED_FOR_SEND, NOW, make_mailbox
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.campaigns.gmail_fake import FakeGmail
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.campaigns.gmail_fake import FakeGmail
+from netkeep.db import session_scope
+from netkeep.models import (
     Campaign,
     Contact,
     Enrollment,
@@ -36,8 +36,8 @@ from netkeeper.models import (
     TemplateChannel,
     User,
 )
-from netkeeper.scoping import get_scoped, scoped
-from netkeeper.services import campaign_replies as replies
+from netkeep.scoping import get_scoped, scoped
+from netkeep.services import campaign_replies as replies
 
 QUORBELLE = "quorbelle@fictionary.example"
 FIRST_SEND = NOW - timedelta(days=2)

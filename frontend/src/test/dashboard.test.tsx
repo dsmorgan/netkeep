@@ -44,7 +44,7 @@ function draftRun(id: number) {
 
 /**
  * `GET /api/v1/lists` on a real server: `ensure_validated_list` seeds this
- * smart list at every start (`netkeeper/web/app.py`), before any contact
+ * smart list at every start (`netkeep/web/app.py`), before any contact
  * exists (PR #129 review, finding 1), marked `builtin` (#133). A fake that defaults `lists` to `[]` renders a state
  * the server only reaches if the user deletes the seeded list, which is
  * exactly what hid "build a list" reading "Done" for nobody having built one.
@@ -318,7 +318,7 @@ describe('dashboard: an account with contacts', () => {
     // The CSRF marker (spec 14.2) rides on every request this page makes.
     expect(seen.length).toBeGreaterThanOrEqual(3)
     for (const request of seen) {
-      expect(request.headers.get('X-Netkeeper-Client')).toBe('1')
+      expect(request.headers.get('X-Netkeep-Client')).toBe('1')
     }
   })
 

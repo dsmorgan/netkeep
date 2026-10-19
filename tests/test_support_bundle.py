@@ -28,21 +28,21 @@ from sqlalchemy.orm import Session, sessionmaker
 from test_runs_serve import HEADERS
 from typer.testing import CliRunner
 
-from netkeeper import migrations
-from netkeeper.cli import app as cli
-from netkeeper.config import Settings, load_settings
-from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.logging_setup import personal, remove_file_handler, setup_logging
-from netkeeper.models import SyncRun, SyncRunKind, SyncRunStatus, SyncRunTrigger, User, UserKind
-from netkeeper.paths import data_dir
-from netkeeper.scoping import install_scope_guard
-from netkeeper.services import keychain, support_bundle
-from netkeeper.services.linkedin_accounts import ensure_account
-from netkeeper.services.linkedin_session import flag_session
-from netkeeper.services.settings_kv import set_setting
-from netkeeper.services.support_bundle import Level, build_bundle, log_excerpt
-from netkeeper.services.users import ensure_local_user
+from netkeep import migrations
+from netkeep.cli import app as cli
+from netkeep.config import Settings, load_settings
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+from netkeep.linkedin.classify import Outcome
+from netkeep.logging_setup import personal, remove_file_handler, setup_logging
+from netkeep.models import SyncRun, SyncRunKind, SyncRunStatus, SyncRunTrigger, User, UserKind
+from netkeep.paths import data_dir
+from netkeep.scoping import install_scope_guard
+from netkeep.services import keychain, support_bundle
+from netkeep.services.linkedin_accounts import ensure_account
+from netkeep.services.linkedin_session import flag_session
+from netkeep.services.settings_kv import set_setting
+from netkeep.services.support_bundle import Level, build_bundle, log_excerpt
+from netkeep.services.users import ensure_local_user
 
 NOW = datetime(2026, 10, 17, 15, 0, tzinfo=UTC)
 
@@ -93,10 +93,10 @@ SECRETS = (
 def home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """A home directory named after an invented macOS user, and the data directory in it."""
     path = tmp_path / "Users" / USER_DIR
-    data = path / "Library" / "Application Support" / "netkeeper"
+    data = path / "Library" / "Application Support" / "netkeep"
     data.mkdir(parents=True)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: path))
-    monkeypatch.setenv("NETKEEPER_DATA", str(data))
+    monkeypatch.setenv("NETKEEP_DATA", str(data))
     return path
 
 
@@ -104,7 +104,7 @@ def _seed_log() -> None:
     """The log file, through the real setup, as a busy week might leave it."""
     setup_logging()
     try:
-        log = logging.getLogger("netkeeper.test_support_bundle")
+        log = logging.getLogger("netkeep.test_support_bundle")
         log.info("saved contact %s %s", personal(f"{FIRST} {LAST}"), personal(EMAIL))
         log.info(
             "visiting %s (%s)", personal(f"https://www.linkedin.com/in/{SLUG}/"), personal(URN)
@@ -226,7 +226,7 @@ def _build(session_factory: sessionmaker[Session], home: Path, level: Level) -> 
         bundle = build_bundle(
             session, user, settings=settings, level=level, now=NOW + timedelta(days=0)
         )
-    assert bundle.filename == f"netkeeper-support-{level.value}-20261017-150000.zip"
+    assert bundle.filename == f"netkeep-support-{level.value}-20261017-150000.zip"
     return _contents(bundle.data)
 
 
@@ -247,7 +247,7 @@ def test_a_redacted_level_holds_no_personal_value_and_no_secret(
     assert _found(files, PERSONAL) == [], files["posture.txt"]
     assert _found(files, SECRETS) == []
     # It is not empty: the log, the run and the settings all made it in.
-    log_text = files["logs/netkeeper.log"]
+    log_text = files["logs/netkeep.log"]
     assert "<personal-1>" in log_text
     assert "<email-" in log_text
     assert "<secret>" in log_text
@@ -283,7 +283,7 @@ def test_every_bundle_has_a_readme_and_a_manifest_of_its_files(
     files = _build(session_factory, home, Level.DETAILED)
     manifest = json.loads(files["manifest.json"])
     assert manifest["level"] == "detailed"
-    assert manifest["netkeeper_version"]
+    assert manifest["netkeep_version"]
     assert manifest["created_at"] == NOW.isoformat()
     assert manifest["problems"] == []
     listed = {item["name"] for item in manifest["files"]}
@@ -296,11 +296,11 @@ def test_every_bundle_has_a_readme_and_a_manifest_of_its_files(
         "jobs.json",
         "runs.json",
         "database.json",
-        "logs/netkeeper.log",
+        "logs/netkeep.log",
         "redactions.json",
     ):
         assert name in files
-    assert "page-structure captures: netkeeper does not store any" in files["README.txt"].lower()
+    assert "page-structure captures: netkeep does not store any" in files["README.txt"].lower()
     types = json.loads(files["redactions.json"])["types"]
     assert types["personal"] >= 1 and types["email"] >= 1
 
@@ -335,16 +335,16 @@ def _record(when: datetime, text: str) -> str:
 
 def test_the_log_excerpt_keeps_whole_records_since_the_cutoff(tmp_path: Path) -> None:
     start = datetime(2026, 10, 1, 12, 0, 0)
-    (tmp_path / "netkeeper.log.2").write_text(
+    (tmp_path / "netkeep.log.2").write_text(
         "orphan tail of an older file\n" + _record(start, "oldest")
     )
-    (tmp_path / "netkeeper.log.1").write_text(
+    (tmp_path / "netkeep.log.1").write_text(
         _record(start + timedelta(days=5), "middle") + "Traceback line\n"
     )
-    (tmp_path / "netkeeper.log").write_text(_record(start + timedelta(days=9), "newest"))
-    (tmp_path / "netkeeper.log.lock").write_text("")
+    (tmp_path / "netkeep.log").write_text(_record(start + timedelta(days=9), "newest"))
+    (tmp_path / "netkeep.log.lock").write_text("")
     excerpt = log_excerpt(tmp_path, since_local=start + timedelta(days=1), max_bytes=10_000)
-    assert excerpt.files == ("netkeeper.log.2", "netkeeper.log.1", "netkeeper.log")
+    assert excerpt.files == ("netkeep.log.2", "netkeep.log.1", "netkeep.log")
     assert "".join(excerpt.parts).splitlines() == [
         _record(start + timedelta(days=5), "middle").strip(),
         "Traceback line",
@@ -355,7 +355,7 @@ def test_the_log_excerpt_keeps_whole_records_since_the_cutoff(tmp_path: Path) ->
 
 def test_the_log_excerpt_drops_the_oldest_records_past_its_size(tmp_path: Path) -> None:
     start = datetime(2026, 10, 1, 12, 0, 0)
-    (tmp_path / "netkeeper.log").write_text(
+    (tmp_path / "netkeep.log").write_text(
         "".join(_record(start + timedelta(minutes=n), f"record {n}") for n in range(10))
     )
     size = len(_record(start, "record 0").encode())
@@ -395,7 +395,7 @@ def test_the_levels_pin_what_they_promise() -> None:
 @pytest.fixture
 def cli_db(monkeypatch: pytest.MonkeyPatch, home: Path) -> Iterator[sessionmaker[Session]]:
     url = database_url(data_dir())
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     engine = make_engine(url)
     migrations.upgrade(engine)
     factory = make_session_factory(engine)

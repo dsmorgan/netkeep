@@ -2,7 +2,7 @@
 
 This guide takes you from a fresh clone to a database full of your LinkedIn connections, sorted into people you've met and people you haven't. It takes an afternoon, most of it waiting for LinkedIn's data export. When you're done, go on to [your first campaign](first-campaign.md).
 
-You use one Chrome for netkeeper: **netkeeper's Chrome**, a Chrome with its own profile and a debug port. It holds LinkedIn and setup steps such as Gmail linkage, and it's where you look for the UI, so you have one place to look ([ADR 0012](../adr/0012-chrome-profiles.md)). netkeeper attaches to it to read LinkedIn and to type LinkedIn messages. netkeeper starts it only when you ask: with **Start Chrome**, with `netkeeper open`, or at startup if you turn that on. A run never starts a browser ([ADR 0002](../adr/0002-attach-only-browser-mode.md)).
+You use one Chrome for netkeep: **netkeep's Chrome**, a Chrome with its own profile and a debug port. It holds LinkedIn and setup steps such as Gmail linkage, and it's where you look for the UI, so you have one place to look ([ADR 0012](../adr/0012-chrome-profiles.md)). netkeep attaches to it to read LinkedIn and to type LinkedIn messages. netkeep starts it only when you ask: with **Start Chrome**, with `netkeep open`, or at startup if you turn that on. A run never starts a browser ([ADR 0002](../adr/0002-attach-only-browser-mode.md)).
 
 The first time, you open the UI at <http://127.0.0.1:8000> yourself, in Chrome. The UI requires Chrome.
 
@@ -19,12 +19,12 @@ git clone https://github.com/dsmorgan/netkeeper.git
 cd netkeeper
 make install
 make build-ui
-.venv/bin/netkeeper serve
+.venv/bin/netkeep serve
 ```
 
 Open <http://127.0.0.1:8000> in Chrome. You see an empty dashboard. `serve` creates and migrates the database itself. Leave it running in its own terminal; press Ctrl+C to stop it.
 
-The commands below use `netkeeper` for short. Run them as `.venv/bin/netkeeper`, or activate the environment first with `source .venv/bin/activate`.
+The commands below use `netkeep` for short. Run them as `.venv/bin/netkeep`, or activate the environment first with `source .venv/bin/activate`.
 
 To start `serve` when you log in, see [Run at login](../../README.md#run-at-login-macos).
 
@@ -36,15 +36,15 @@ Leave the mailbox disarmed for now. You arm it when you build your first campaig
 
 ## 3. Your LinkedIn data export
 
-Request your data from LinkedIn first, since it takes a while to arrive. The **Imports** page has the steps under **Getting your data from LinkedIn**: in LinkedIn, open **Settings & Privacy**, then **Data privacy**, then **Get a copy of your data**. Ask for your full data archive, not just Connections: netkeeper also reads your message and invitation history. LinkedIn emails you a download link, usually within a day. Save the `.zip`.
+Request your data from LinkedIn first, since it takes a while to arrive. The **Imports** page has the steps under **Getting your data from LinkedIn**: in LinkedIn, open **Settings & Privacy**, then **Data privacy**, then **Get a copy of your data**. Ask for your full data archive, not just Connections: netkeep also reads your message and invitation history. LinkedIn emails you a download link, usually within a day. Save the `.zip`.
 
 ## 4. Import it
 
 1. Open **Imports**. Choose **Choose a file** (or drop the file on the page) and pick the `.zip`. You don't need to unzip it.
-2. netkeeper says what it recognized, such as "Recognized: a LinkedIn data archive", and what it would add.
+2. netkeep says what it recognized, such as "Recognized: a LinkedIn data archive", and what it would add.
 3. Choose **Import**. The result lists new contacts, updated contacts, and the conversations and invitations it added.
 
-From a terminal, `netkeeper import archive ~/Downloads/your-archive.zip` does the same.
+From a terminal, `netkeep import archive ~/Downloads/your-archive.zip` does the same.
 
 You can also import a CSV from another source. On **Imports**, choose a `.csv`, map its columns under **Map the columns**, choose **Preview the import**, review any candidates (rows that may be people you already have), then commit.
 
@@ -52,7 +52,7 @@ To undo an import, open **Imports**, then **History**, open the import, and choo
 
 ## 5. Triage
 
-**Triage** asks one question about each contact: have you actually met this person? The evidence panel shows what netkeeper knows, such as messages you exchanged and employers you share.
+**Triage** asks one question about each contact: have you actually met this person? The evidence panel shows what netkeep knows, such as messages you exchanged and employers you share.
 
 | Key | What it does |
 |---|---|
@@ -69,11 +69,11 @@ Then use **Contacts** and **Lists** to sort further. A static list holds the peo
 
 ## 6. The LinkedIn Chrome
 
-1. Start it. On the **LinkedIn** page's **Browser** card, choose **Start Chrome**. netkeeper starts its own Chrome, on its own profile and the debug address in Settings, with netkeeper in its own window, and says how it went. It never starts or uses any other Chrome: when another Chrome holds the debug port, or a run is using the browser, it starts nothing and says what to do. From a terminal, `netkeeper open` does the same. You can also run `make chrome` from the repository, or the command `netkeeper browser launch` prints; the card shows that command too.
-2. In that new window, log in to LinkedIn once. netkeeper never types your password; you sign in yourself. Use this window for your own LinkedIn browsing too, so your activity and netkeeper's share one session.
-3. Check it: `netkeeper preflight`. It attaches, opens one blank tab, reads the names of the profile's LinkedIn cookies and a few browser properties, and closes the tab. It visits no website.
+1. Start it. On the **LinkedIn** page's **Browser** card, choose **Start Chrome**. netkeep starts its own Chrome, on its own profile and the debug address in Settings, with netkeep in its own window, and says how it went. It never starts or uses any other Chrome: when another Chrome holds the debug port, or a run is using the browser, it starts nothing and says what to do. From a terminal, `netkeep open` does the same. You can also run `make chrome` from the repository, or the command `netkeep browser launch` prints; the card shows that command too.
+2. In that new window, log in to LinkedIn once. netkeep never types your password; you sign in yourself. Use this window for your own LinkedIn browsing too, so your activity and netkeep's share one session.
+3. Check it: `netkeep preflight`. It attaches, opens one blank tab, reads the names of the profile's LinkedIn cookies and a few browser properties, and closes the tab. It visits no website.
 
-Start netkeeper's Chrome again whenever you restart your Mac or quit it. The dashboard tells you when it isn't running, with a **Start Chrome** button. To have it start by itself, turn on **Start netkeeper's Chrome when netkeeper starts** in Settings, under **LinkedIn runs**. It's off by default. With [Run at login](../../README.md#run-at-login-macos) also on, Chrome then starts when you log in. netkeeper still starts nothing when its Chrome is already running or a run is using the browser.
+Start netkeep's Chrome again whenever you restart your Mac or quit it. The dashboard tells you when it isn't running, with a **Start Chrome** button. To have it start by itself, turn on **Start netkeep's Chrome when netkeep starts** in Settings, under **LinkedIn runs**. It's off by default. With [Run at login](../../README.md#run-at-login-macos) also on, Chrome then starts when you log in. netkeep still starts nothing when its Chrome is already running or a run is using the browser.
 
 Read [the note about LinkedIn's terms](../../README.md#a-plain-note-about-linkedins-terms) before your first run.
 
@@ -95,7 +95,7 @@ Go through **Settings** once:
 
 - **Sending hours**: when campaign email may go out.
 - **About you**: your name, title, and company, for templates.
-- **LinkedIn budgets** and **LinkedIn active hours**: how much netkeeper does on LinkedIn, and when. The defaults are conservative; treat them as the ceiling.
+- **LinkedIn budgets** and **LinkedIn active hours**: how much netkeep does on LinkedIn, and when. The defaults are conservative; treat them as the ceiling.
 - **Campaign defaults**: daily caps and spacing.
 - **Backups** and **Backup files**: nightly backups (on by default), how many to keep, and **Back up now**. See [Backups and restore](backups.md).
 
@@ -103,4 +103,4 @@ A value in `config.toml`, if you have one, wins over the page.
 
 ## Optional: the old mailing tool's history
 
-If you emailed these people before with another tool, import that history before your first campaign, so netkeeper's guards know whom you already reached and who asked to be left alone. See [Import the old mailing tool's history](../history-import.md).
+If you emailed these people before with another tool, import that history before your first campaign, so netkeep's guards know whom you already reached and who asked to be left alone. See [Import the old mailing tool's history](../history-import.md).

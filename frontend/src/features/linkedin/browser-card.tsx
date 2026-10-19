@@ -20,16 +20,16 @@ function message(error: unknown): string {
 }
 
 /**
- * Browser status and how to start netkeeper's Chrome (spec 9.1, ADR 0012): the
+ * Browser status and how to start netkeep's Chrome (spec 9.1, ADR 0012): the
  * **Start Chrome** button (#599), which runs the one launcher only when you press
- * it, and the command `netkeeper browser launch` prints, for a terminal. A run
+ * it, and the command `netkeep browser launch` prints, for a terminal. A run
  * never starts Chrome.
  *
- * "Last known" (#181) is what netkeeper already recorded, never a fresh look:
- * the last `netkeeper preflight` or run that read LinkedIn, the session flag
+ * "Last known" (#181) is what netkeep already recorded, never a fresh look:
+ * the last `netkeep preflight` or run that read LinkedIn, the session flag
  * over both, and the newest run that could not reach Chrome when that is newer.
  * A live check has to attach, which a request handler may never do (CLAUDE.md),
- * so it stays `netkeeper preflight` in a terminal. This refetches when a run
+ * so it stays `netkeep preflight` in a terminal. This refetches when a run
  * starts or ends (`useRunEvents`, over SSE) and when the tab regains focus,
  * which is when a preflight run in a terminal shows up.
  */
@@ -43,7 +43,7 @@ export function BrowserCard() {
       <CardHeader>
         <CardTitle level={2}>Browser</CardTitle>
         <CardDescription>
-          netkeeper uses its own Chrome. It starts it only when you ask.
+          netkeep uses its own Chrome. It starts it only when you ask.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
@@ -54,7 +54,7 @@ export function BrowserCard() {
               {status.data.can_start_runs ? 'can start runs' : 'cannot start runs'}
             </span>
             {!status.data.can_start_runs &&
-              ' (it was not started with `netkeeper serve`, so it has no browser worker).'}
+              ' (it was not started with `netkeep serve`, so it has no browser worker).'}
           </p>
         )}
 
@@ -73,7 +73,7 @@ export function BrowserCard() {
             </pre>
             <p className="text-muted-foreground">
               Then log in to LinkedIn once in that window, and use it for your own LinkedIn browsing
-              too, so your activity and netkeeper's share one session and one fingerprint.
+              too, so your activity and netkeep's share one session and one fingerprint.
             </p>
             {browser.data.remote_host_note !== null && (
               <p role="alert" className="text-destructive">
@@ -117,14 +117,14 @@ function LastKnown({ health }: { health: BrowserHealth }) {
         <p role="alert" className="text-destructive">
           Run {health.chrome_unreachable_run_id} could not reach Chrome at{' '}
           {formatWhen(health.chrome_unreachable_at)}. Start it with Start Chrome or the command
-          below, then run <code className="font-mono text-xs">netkeeper preflight</code>.
+          below, then run <code className="font-mono text-xs">netkeep preflight</code>.
         </p>
       )}
       {health.running_run_id !== null && (
         <p className="text-muted-foreground">Run {health.running_run_id} is using it now.</p>
       )}
       <p className="text-xs text-muted-foreground">
-        From what netkeeper recorded, as of {formatWhen(health.checked_at)}. This page never checks
+        From what netkeep recorded, as of {formatWhen(health.checked_at)}. This page never checks
         the browser itself.
       </p>
     </section>

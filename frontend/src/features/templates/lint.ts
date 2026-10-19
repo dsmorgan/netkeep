@@ -121,7 +121,7 @@ export function lineRange(text: string, line: number): [number, number] {
 
 /**
  * What each refused construct is, keyed by the name lint puts in `field` for
- * an `unsupported` issue (`_NODE_NAMES` in `netkeeper/campaigns/render.py`).
+ * an `unsupported` issue (`_NODE_NAMES` in `netkeep/campaigns/render.py`).
  * A name not here, like a filter off the allowlist, keeps the server's sentence,
  * which already says "the `tojson` filter is not available".
  */

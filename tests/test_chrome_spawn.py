@@ -1,8 +1,8 @@
-"""``netkeeper/chrome_spawn.py``: the Chrome launcher, its arguments and its refusals (#636).
+"""``netkeep/chrome_spawn.py``: the Chrome launcher, its arguments and its refusals (#636).
 
 Fakes only: no test starts Chrome, opens a port or connects to one (``tests/conftest.py``
 blocks the real ``spawn_chrome`` and ``port_answers``). The arguments are compared as
-parsed arguments with the lines ``netkeeper browser launch`` prints, not as shell text.
+parsed arguments with the lines ``netkeep browser launch`` prints, not as shell text.
 Each refusal is shown refusing, and then shown to be what stops the spawn: the same case
 against a copy of the module with that one check removed starts Chrome.
 """
@@ -20,8 +20,8 @@ from typing import Any
 
 import pytest
 
-from netkeeper import chrome_spawn
-from netkeeper.chrome_spawn import (
+from netkeep import chrome_spawn
+from netkeep.chrome_spawn import (
     LINKEDIN_SIGNIN_URL,
     ChromeLaunch,
     ChromeLauncher,
@@ -30,9 +30,9 @@ from netkeeper.chrome_spawn import (
     chrome_argv,
     configured_port,
 )
-from netkeeper.chrome_spawn import spawn_chrome as real_spawn_chrome
-from netkeeper.services.browser_launch import chrome_launch_command
-from netkeeper.services.chrome_launch import LaunchStatus, PortProbe, Refusal
+from netkeep.chrome_spawn import spawn_chrome as real_spawn_chrome
+from netkeep.services.browser_launch import chrome_launch_command
+from netkeep.services.chrome_launch import LaunchStatus, PortProbe, Refusal
 
 UI_PORT = 8123
 APP_URL = f"http://127.0.0.1:{UI_PORT}/api/v1/session/connect?code=1.ab.cd"
@@ -53,7 +53,7 @@ def test_the_safety_constants_are_these_literals() -> None:
 
 
 def _printed_flags(monkeypatch: pytest.MonkeyPatch, platform: str, profile: Path) -> list[str]:
-    """``netkeeper browser launch``'s printed lines, parsed as a shell would, minus the
+    """``netkeep browser launch``'s printed lines, parsed as a shell would, minus the
     program: ``open -na "Google Chrome" --args`` on macOS, ``google-chrome`` on Linux."""
     monkeypatch.setattr(sys, "platform", platform)
     lines = chrome_launch_command(PORT, profile)
@@ -132,7 +132,7 @@ def test_nothing_else_is_ever_added(tmp_path: Path) -> None:
         "HTTP://127.0.0.1:8123/",
     ],
 )
-def test_the_app_window_opens_only_netkeepers_loopback_ui(tmp_path: Path, url: str) -> None:
+def test_the_app_window_opens_only_netkeeps_loopback_ui(tmp_path: Path, url: str) -> None:
     with pytest.raises(LaunchArgumentError):
         chrome_argv(ChromeLaunch(PORT, tmp_path, url, UI_PORT))
 
@@ -141,7 +141,7 @@ def test_the_app_window_opens_only_netkeepers_loopback_ui(tmp_path: Path, url: s
     "url",
     [APP_URL, "http://localhost:8123/", "http://127.0.0.1:8123/?connect=expired#x"],
 )
-def test_netkeepers_own_ui_link_passes(url: str) -> None:
+def test_netkeeps_own_ui_link_passes(url: str) -> None:
     check_app_url(url, UI_PORT)
 
 
@@ -294,7 +294,7 @@ async def test_the_first_run_is_passed_through(tmp_path: Path) -> None:
     assert launch.first_run and chrome_argv(launch)[-1] == LINKEDIN_SIGNIN_URL
 
 
-async def test_a_running_netkeeper_chrome_gets_the_window(tmp_path: Path) -> None:
+async def test_a_running_netkeep_chrome_gets_the_window(tmp_path: Path) -> None:
     case = _Case(
         answers=True,
         probe=PortProbe(busy=False, browser_pid=LOCK_PID),
@@ -356,7 +356,7 @@ REFUSALS = {
             answers=True, probe=PortProbe(busy=False, browser_pid=999), lock_pid=LOCK_PID
         ),
         Refusal.NOT_DEDICATED,
-        "isn't the one holding netkeeper's profile",
+        "isn't the one holding netkeep's profile",
         "            if check.dedicated and check.browser_pid is not None:\n",
         "            if True:\n",
     ),
@@ -406,7 +406,7 @@ REFUSALS = {
     "the profile open without the port": _Refusal(
         lambda: _Case(lock_pid=LOCK_PID),
         Refusal.PROFILE_WITHOUT_PORT,
-        f"a Chrome (pid {LOCK_PID}) has netkeeper's profile",
+        f"a Chrome (pid {LOCK_PID}) has netkeep's profile",
         "            if lock_pid is not None and self._pid_alive(lock_pid):\n",
         "            if False:\n",
     ),
@@ -444,7 +444,7 @@ def _without(monkeypatch: pytest.MonkeyPatch, old: str, new: str) -> types.Modul
     """A copy of ``chrome_spawn`` with ``old`` replaced; the real module is untouched."""
     source = Path(chrome_spawn.__file__).read_text(encoding="utf-8")
     assert source.count(old) == 1, old
-    module = types.ModuleType("netkeeper_chrome_spawn_mutant")
+    module = types.ModuleType("netkeep_chrome_spawn_mutant")
     monkeypatch.setitem(sys.modules, module.__name__, module)
     exec(compile(source.replace(old, new), "<chrome_spawn mutant>", "exec"), module.__dict__)
     return module
@@ -499,20 +499,20 @@ def _first_run_keywords() -> dict[str, list[str]]:
 
 
 def test_only_the_routes_first_run_flag_reaches_the_launcher() -> None:
-    """``netkeeper open`` and ``serve``'s start at startup (#599) never pass ``first_run``;
+    """``netkeep open`` and ``serve``'s start at startup (#599) never pass ``first_run``;
     the route passes the body's flag, which only setup's first-run button sets, and
     nothing passes a literal True."""
     assert _first_run_keywords() == {
-        "netkeeper/chrome_spawn.py": ["first_run"],  # launch() into its ChromeLaunch
-        "netkeeper/services/chrome_launch.py": ["first_run"],  # submit_launch() into start()
-        "netkeeper/web/api/linkedin.py": ["body.first_run"],  # the body's flag
+        "netkeep/chrome_spawn.py": ["first_run"],  # launch() into its ChromeLaunch
+        "netkeep/services/chrome_launch.py": ["first_run"],  # submit_launch() into start()
+        "netkeep/web/api/linkedin.py": ["body.first_run"],  # the body's flag
     }
     users = [
         str(path.relative_to(PACKAGE.parent))
         for path in sorted(PACKAGE.rglob("*.py"))
         if "LINKEDIN_SIGNIN_URL" in path.read_text(encoding="utf-8")
     ]
-    assert users == ["netkeeper/chrome_spawn.py"]
+    assert users == ["netkeep/chrome_spawn.py"]
 
 
 # --- the settle: success only when the profile's holder is the one expected ----------------

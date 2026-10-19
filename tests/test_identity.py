@@ -1,4 +1,4 @@
-"""netkeeper.crm.identity (spec 8.2): resolution, apply under provenance (spec 10.5), and merge."""
+"""netkeep.crm.identity (spec 8.2): resolution, apply under provenance (spec 10.5), and merge."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ import pytest
 from sqlalchemy import Table
 from sqlalchemy.orm import Session, class_mapper, sessionmaker
 
-from netkeeper.crm import identity
-from netkeeper.crm.identity import (
+from netkeep.crm import identity
+from netkeep.crm.identity import (
     JOB_FIELDS,
     LINK_SCHEMES,
     Candidate,
@@ -32,15 +32,15 @@ from netkeeper.crm.identity import (
     resolve,
     resolve_survivor,
 )
-from netkeeper.crm.lists import add_members, create_list, list_members, member_count
-from netkeeper.crm.provenance import (
+from netkeep.crm.lists import add_members, create_list, list_members, member_count
+from netkeep.crm.provenance import (
     PROVENANCE_FIELDS,
     PROVENANCE_ORDER,
     overridden_fields,
     revert_to_synced,
     set_manual_field,
 )
-from netkeeper.crm.tags import (
+from netkeep.crm.tags import (
     RuleRun,
     create_rule,
     create_tag,
@@ -48,8 +48,8 @@ from netkeeper.crm.tags import (
     tag_contact,
     untag_contact,
 )
-from netkeeper.db import is_writer, session_scope
-from netkeeper.models import (
+from netkeep.db import is_writer, session_scope
+from netkeep.models import (
     CONTACT_CHILDREN,
     Contact,
     ContactAlias,
@@ -79,8 +79,8 @@ from netkeeper.models import (
     User,
     UserOwned,
 )
-from netkeeper.scoping import scoped, scoped_count
-from netkeeper.services.campaign_guards import check_step
+from netkeep.scoping import scoped, scoped_count
+from netkeep.services.campaign_guards import check_step
 
 NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
 LATER = NOW + timedelta(days=1)

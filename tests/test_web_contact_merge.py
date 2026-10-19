@@ -28,11 +28,11 @@ from isolation.harness import acting_as
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.crm.identity import merge
-from netkeeper.crm.lists import add_members, create_list
-from netkeeper.crm.tags import create_tag, tag_contact
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.crm.identity import merge
+from netkeep.crm.lists import add_members, create_list
+from netkeep.crm.tags import create_tag, tag_contact
+from netkeep.db import session_scope
+from netkeep.models import (
     Contact,
     ContactMet,
     EmailStatus,
@@ -49,10 +49,10 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.models.base import Base
-from netkeeper.scoping import scoped
+from netkeep.models.base import Base
+from netkeep.scoping import scoped
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 AT = datetime(2026, 9, 20, 9, 0, tzinfo=UTC)
 
 
@@ -379,7 +379,7 @@ async def test_the_preview_writes_no_merge_log_lines(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     pair = _arrange(factory, owner, bounced)
-    caplog.set_level(logging.DEBUG, logger="netkeeper")
+    caplog.set_level(logging.DEBUG, logger="netkeep")
 
     assert (await _preview(client, pair.survivor, pair.loser)).status_code == 200
 
@@ -712,7 +712,7 @@ async def test_the_hint_writes_nothing(
 
 
 def test_the_hint_limit_and_role_addresses_are_pinned() -> None:
-    from netkeeper.crm.duplicates import DUPLICATE_LIMIT, ROLE_LOCAL_PARTS
+    from netkeep.crm.duplicates import DUPLICATE_LIMIT, ROLE_LOCAL_PARTS
 
     assert DUPLICATE_LIMIT == 5
     assert (

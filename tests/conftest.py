@@ -13,15 +13,15 @@ from local_api import LocalKey
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper import chrome_spawn, migrations
-from netkeeper.campaigns import gmail_oauth
-from netkeeper.config import Settings
-from netkeeper.db import DATABASE_FILENAME, database_url, make_engine, make_session_factory
-from netkeeper.logging_setup import remove_file_handler
-from netkeeper.models import Base
-from netkeeper.scoping import install_scope_guard
-from netkeeper.services import login_item
-from netkeeper.web.app import create_app
+from netkeep import chrome_spawn, cli, migrate_name, migrations, paths
+from netkeep.campaigns import gmail_oauth
+from netkeep.config import Settings
+from netkeep.db import DATABASE_FILENAME, database_url, make_engine, make_session_factory
+from netkeep.logging_setup import remove_file_handler
+from netkeep.models import Base
+from netkeep.scoping import install_scope_guard
+from netkeep.services import login_item
+from netkeep.web.app import create_app
 
 # The per-test time limit (#210), a small heap for short collections (#478), and pytester
 # for the test that shows the limit fails a test.
@@ -35,24 +35,53 @@ def _reset_factory_counters() -> None:
 
 
 @pytest.fixture(autouse=True)
-def _clean_netkeeper_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def _clean_netkeep_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Keep the developer's shell environment, and their data directory, out of every test.
 
-    ``NETKEEPER_DATA`` points at a fresh directory rather than being unset: unset, the
+    ``NETKEEP_DATA`` points at a fresh directory rather than being unset: unset, the
     data directory on macOS is the real one under Application Support, and the
     activity lock writes its lock files there the moment a test opens a browser run.
     A test about the default location deletes the variable itself.
+
+    The names before the rename (``NETKEEPER_*``, #661) are cleared too, so a shell's
+    ``NETKEEPER_DATA`` never reaches a test through the fallback.
     """
     for name in (
-        "NETKEEPER_CONFIG",
-        "NETKEEPER_LOG_LEVEL",
-        "NETKEEPER_LOG_STDERR_LEVEL",
-        "NETKEEPER_DATABASE_URL",
-        "NETKEEPER_FRONTEND_DIST",
-        "NETKEEPER_KEYCHAIN_SERVICE",
+        "NETKEEP_CONFIG",
+        "NETKEEP_LOG_LEVEL",
+        "NETKEEP_LOG_STDERR_LEVEL",
+        "NETKEEP_DATABASE_URL",
+        "NETKEEP_FRONTEND_DIST",
+        "NETKEEP_KEYCHAIN_SERVICE",
+        "NETKEEP_DATA",
     ):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("NETKEEPER_DATA", str(tmp_path / "netkeeper-data"))
+        monkeypatch.delenv(paths.legacy_env_name(name), raising=False)
+    monkeypatch.setenv("NETKEEP_DATA", str(tmp_path / "netkeep-data"))
+    # A fake home folder (#661): a test that resolves the default data directory, or the
+    # one from before the rename, gets one beside tmp_path, never the real one, where a
+    # stray netkeep folder would block the real migration ("both exist").
+    home = tmp_path.parent / f"{tmp_path.name}.home"  # beside tmp_path, not in it
+    home.mkdir(exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+
+
+REAL_HOME = Path.home().resolve()
+"""The real home folder, read before any test can fake it."""
+
+
+@pytest.fixture(autouse=True)
+def _no_real_migration(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test runs the rename's automatic migration (#661), and none reaches the real
+    home folder through the migration: a test of it fakes ``HOME`` and calls it itself."""
+
+    def guard(path: Path) -> None:
+        resolved = path.expanduser().resolve()
+        if resolved == REAL_HOME or REAL_HOME in resolved.parents:
+            raise AssertionError(f"a migration test reached the real home folder: {path}")
+
+    monkeypatch.setattr(migrate_name, "path_guard", guard)
+    monkeypatch.setattr(cli, "_auto_migrate", lambda _command: [])
 
 
 @pytest.fixture(autouse=True)
@@ -120,7 +149,7 @@ def _no_live_port(monkeypatch: pytest.MonkeyPatch) -> None:
 def _no_real_browser(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """No test reaches a real Chrome unless it opts out, and none ever reaches port 9222.
 
-    The only place netkeeper opens a browser connection is
+    The only place netkeep opens a browser connection is
     ``PlaywrightCdpConnector.connect`` (``tests/test_browser_safety.py`` keeps it that
     way), so that is replaced here with a guard that raises
     :class:`RealBrowserBlocked` before Playwright starts -- the CDP socket is opened
@@ -132,9 +161,9 @@ def _no_real_browser(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyP
     A test that must drive a real, isolated Chrome (the opt-in smoke suite under
     ``tests/smoke/``) opts out with ``@pytest.mark.real_cdp``. Even then the connector
     refuses the default ``http://127.0.0.1:9222`` and every other port-9222 address:
-    point ``NETKEEPER_CDP_URL`` at an isolated Chrome on another port.
+    point ``NETKEEP_CDP_URL`` at an isolated Chrome on another port.
     """
-    from netkeeper.linkedin import browser
+    from netkeep.linkedin import browser
 
     real_connect = browser.PlaywrightCdpConnector.connect
     opted_out = request.node.get_closest_marker("real_cdp") is not None
@@ -148,7 +177,7 @@ def _no_real_browser(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyP
         if is_personal_cdp(cdp_url):
             raise RealBrowserBlocked(
                 f"a real_cdp test tried to attach to {cdp_url}, a personal Chrome's debug"
-                " port. Set NETKEEPER_CDP_URL to an isolated Chrome on another port"
+                " port. Set NETKEEP_CDP_URL to an isolated Chrome on another port"
             )
         return await real_connect(self, cdp_url)  # type: ignore[arg-type]
 
@@ -167,7 +196,7 @@ def _no_real_browser(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyP
         if is_personal_cdp(cdp_url):
             raise RealBrowserBlocked(
                 f"a real_cdp test tried to read the pid of {cdp_url}, a personal Chrome's"
-                " debug port. Set NETKEEPER_CDP_URL to an isolated Chrome on another port"
+                " debug port. Set NETKEEP_CDP_URL to an isolated Chrome on another port"
             )
         return await real_read_pid(self, cdp_url)  # type: ignore[arg-type]
 
@@ -216,7 +245,7 @@ def _template(directory: Path, build: Callable[[Engine], None]) -> Path:
     """A SQLite file under ``directory`` that ``build`` filled, closed and checkpointed.
 
     Built straight from a path, never through ``database_url``: a session fixture runs
-    before ``_clean_netkeeper_env`` could clear a ``NETKEEPER_DATABASE_URL``.
+    before ``_clean_netkeep_env`` could clear a ``NETKEEP_DATABASE_URL``.
     """
     file = directory / DATABASE_FILENAME
     engine = make_engine(f"sqlite:///{file}")
@@ -303,7 +332,7 @@ def app(
     migration finds nothing to do (#210); everything else startup does, it still does.
     """
     _copy_template(_migrated_template, tmp_path / "bare")
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", str(tmp_path / "no-dist"))
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", str(tmp_path / "no-dist"))
     return create_app(Settings(), engine=bare_engine)
 
 
@@ -333,7 +362,7 @@ def inside_active_hours(monkeypatch: pytest.MonkeyPatch) -> None:
     something else takes this, so it passes at 3 a.m. too; the refusal itself is
     tested in tests/test_active_hours_stop.py with its own clock.
     """
-    from netkeeper.services import runs
+    from netkeep.services import runs
 
     monkeypatch.setattr(runs, "refuse_if_outside_active_hours", lambda *_, **__: None)
 
@@ -356,13 +385,13 @@ class _ProviderThatFailsIfUsed:
 
 @pytest.fixture
 def no_browser_for_cli_runs(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``netkeeper`` CLI commands in this test get a provider that fails the test if used.
+    """``netkeep`` CLI commands in this test get a provider that fails the test if used.
 
     For a test that expects the CLI to refuse *before* any browser work: if that
     refusal ever goes away (a regression, a mutation), the test fails here instead of
     running a real attach.
     """
-    from netkeeper import cli
+    from netkeep import cli
 
     monkeypatch.setattr(cli, "_provider", lambda *_, **__: _ProviderThatFailsIfUsed())
     monkeypatch.setattr(cli, "AttachBrowserProvider", _ProviderThatFailsIfUsed)

@@ -392,7 +392,7 @@ describe('inbox', () => {
     expect(put?.body).toEqual({ handled: true })
   })
 
-  it('shows a response recorded from outside netkeeper as one, already handled (#512)', async () => {
+  it('shows a response recorded from outside netkeep as one, already handled (#512)', async () => {
     mockFetch(
       inbox({
         total: 1,
@@ -411,14 +411,14 @@ describe('inbox', () => {
     await renderApp('/inbox')
     const reply = within(
       await screen.findByRole('listitem', {
-        name: /^Reply from Tobias Marrowbone outside netkeeper/,
+        name: /^Reply from Tobias Marrowbone outside netkeep/,
       }),
     )
 
-    expect(reply.getByText('Outside netkeeper')).toBeVisible()
+    expect(reply.getByText('Outside netkeep')).toBeVisible()
     expect(reply.getByText('Phone call · Positive')).toBeVisible()
     expect(reply.getByText('Called back; keen to talk.')).toBeVisible()
-    expect(reply.getByText(/came outside netkeeper/)).toBeVisible()
+    expect(reply.getByText(/came outside netkeep/)).toBeVisible()
     expect(reply.queryByText(/Open the thread in Gmail/)).toBeNull()
     expect(reply.getByRole('button', { name: 'Mark unhandled' })).toBeVisible()
   })

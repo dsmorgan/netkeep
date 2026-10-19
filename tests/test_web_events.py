@@ -21,7 +21,7 @@ from sqlalchemy import Engine
 from sqlalchemy.pool import QueuePool
 from time_limit import Stopwatch, scaled
 
-from netkeeper.services.events import Event, EventBus
+from netkeep.services.events import Event, EventBus
 
 Message = MutableMapping[str, Any]
 #: How long a step of the stream may take; it takes milliseconds. The test runs with
@@ -63,7 +63,7 @@ class SSEClient:
                 (b"accept", b"text/event-stream"),
                 (
                     b"cookie",
-                    f"netkeeper_session_80={self._app.state.local_api_key.session_value()}".encode(),
+                    f"netkeep_session_80={self._app.state.local_api_key.session_value()}".encode(),
                 ),
             ],
             "client": ("127.0.0.1", 12345),

@@ -12,14 +12,14 @@ from fastapi import FastAPI
 from sqlalchemy import Engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.crm import identity
-from netkeeper.crm.importer import FIELD_SIZE_LIMIT
-from netkeeper.crm.provenance import set_manual_field
-from netkeeper.db import session_scope
-from netkeeper.models import Contact, ContactSource, User
-from netkeeper.scoping import scoped
+from netkeep.crm import identity
+from netkeep.crm.importer import FIELD_SIZE_LIMIT
+from netkeep.crm.provenance import set_manual_field
+from netkeep.db import session_scope
+from netkeep.models import Contact, ContactSource, User
+from netkeep.scoping import scoped
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 FIXTURES = Path(__file__).parent / "fixtures" / "csv"
 LINKEDHELPER = (FIXTURES / "linkedhelper-sample.csv").read_text()
 NINE_COLUMN = (FIXTURES / "nine-column-sample.csv").read_text()

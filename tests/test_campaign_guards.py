@@ -1,4 +1,4 @@
-"""netkeeper.services.campaign_guards (spec 11.9; item P3-05): who may be enrolled and sent to."""
+"""netkeep.services.campaign_guards (spec 11.9; item P3-05): who may be enrolled and sent to."""
 
 from __future__ import annotations
 
@@ -11,11 +11,11 @@ import factories
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.crm.contacts import merge_contacts
-from netkeeper.crm.interactions import add_interaction
-from netkeeper.crm.self_contact import ensure_self_contact
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.crm.contacts import merge_contacts
+from netkeep.crm.interactions import add_interaction
+from netkeep.crm.self_contact import ensure_self_contact
+from netkeep.db import session_scope
+from netkeep.models import (
     Campaign,
     CampaignStatus,
     CampaignStep,
@@ -28,9 +28,9 @@ from netkeeper.models import (
     TemplateChannel,
     User,
 )
-from netkeeper.scoping import scoped
-from netkeeper.services import campaign_guards as guards
-from netkeeper.services.campaign_guards import (
+from netkeep.scoping import scoped
+from netkeep.services import campaign_guards as guards
+from netkeep.services.campaign_guards import (
     GUARDS,
     ChannelReason,
     ChannelState,

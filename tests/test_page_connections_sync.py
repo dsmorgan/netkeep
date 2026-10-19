@@ -1,7 +1,7 @@
 """#187's done-when, end to end: a sync read from what the page loads, written to contacts.
 
-:func:`netkeeper.services.connections_sync.sync_connections` -- budgets, heat, the run
-row, the mapping, and aging -- over :class:`~netkeeper.linkedin.page_connections.PageConnections`
+:func:`netkeep.services.connections_sync.sync_connections` -- budgets, heat, the run
+row, the mapping, and aging -- over :class:`~netkeep.linkedin.page_connections.PageConnections`
 reading :mod:`flagship_site`'s fake connections page through a real ``BrowserRun``.
 Invented people only; nothing opens a socket.
 """
@@ -19,14 +19,14 @@ from run_fakes import fake_provider
 from sqlalchemy.orm import Session, sessionmaker
 from voyager_pages import PEOPLE, Person
 
-from netkeeper.config import LinkedInSettings
-from netkeeper.db import session_scope
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.connections import StopReason, SyncMode
-from netkeeper.linkedin.page_connections import PageConnections
-from netkeeper.models import Contact, ContactSource, SyncRun, SyncRunStatus, User
-from netkeeper.scoping import scoped
-from netkeeper.services.connections_sync import SyncRunReport, sync_connections
+from netkeep.config import LinkedInSettings
+from netkeep.db import session_scope
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.connections import StopReason, SyncMode
+from netkeep.linkedin.page_connections import PageConnections
+from netkeep.models import Contact, ContactSource, SyncRun, SyncRunStatus, User
+from netkeep.scoping import scoped
+from netkeep.services.connections_sync import SyncRunReport, sync_connections
 
 NOW = datetime(2026, 9, 24, 15, 0, tzinfo=UTC)
 SETTINGS = LinkedInSettings()

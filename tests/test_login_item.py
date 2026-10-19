@@ -16,13 +16,13 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from netkeeper.cli import app as cli
-from netkeeper.paths import default_data_dir
-from netkeeper.services import keychain, login_item
-from netkeeper.services.login_item import LoginItem, LoginItemError, RunResult, State
+from netkeep.cli import app as cli
+from netkeep.paths import default_data_dir
+from netkeep.services import keychain, login_item
+from netkeep.services.login_item import LoginItem, LoginItemError, RunResult, State
 
 UID = 501
-EXE = "/opt/nk/bin/netkeeper"
+EXE = "/opt/nk/bin/netkeep"
 
 
 class FakeLaunchctl:
@@ -105,7 +105,7 @@ def test_enable_writes_a_plist_for_the_installed_executable_and_the_data_dir(
     assert plist["ProgramArguments"] == [EXE, "serve"]
     env = plist["EnvironmentVariables"]
     assert isinstance(env, dict)
-    assert env["NETKEEPER_DATA"] == str(data.resolve())
+    assert env["NETKEEP_DATA"] == str(data.resolve())
     assert plist["StandardOutPath"] == str(data.resolve() / "logs" / "serve.log")
     assert plist["StandardErrorPath"] == str(data.resolve() / "logs" / "serve.err.log")
     assert plist["RunAtLoad"] is True
@@ -170,7 +170,7 @@ def test_two_data_directories_get_two_labels_and_never_clash(
     first = make(launchctl, tmp_path, tmp_path / "one")
     second = make(launchctl, tmp_path, tmp_path / "two")
     assert first.label != second.label
-    assert first.label.startswith("fun.tnkr.netkeeper.")
+    assert first.label.startswith("fun.tnkr.netkeep.")
     first.enable()
     second.enable()
     second.disable()
@@ -183,17 +183,17 @@ def test_the_default_data_directory_keeps_the_plain_label(
     launchctl: FakeLaunchctl, tmp_path: Path
 ) -> None:
     item = make(launchctl, tmp_path, default_data_dir())
-    assert item.label == "fun.tnkr.netkeeper"
+    assert item.label == "fun.tnkr.netkeep"
 
 
 def test_the_label_hash_is_the_keychain_services_hash(
     launchctl: FakeLaunchctl, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     other = tmp_path / "other"
-    monkeypatch.setenv("NETKEEPER_DATA", str(other))
+    monkeypatch.setenv("NETKEEP_DATA", str(other))
     item = make(launchctl, tmp_path, other)
-    assert item.label.removeprefix("fun.tnkr.netkeeper.") == keychain.service_name().removeprefix(
-        "netkeeper@"
+    assert item.label.removeprefix("fun.tnkr.netkeep.") == keychain.service_name().removeprefix(
+        "netkeep@"
     )
 
 
@@ -209,7 +209,7 @@ def test_a_serving_process_registers_the_agent_without_starting_it(
     assert not outcome.started
     assert outcome.status.enabled
     assert not outcome.status.loaded
-    assert outcome.message.startswith("Registered. netkeeper will start by itself")
+    assert outcome.message.startswith("Registered. netkeep will start by itself")
     assert outcome.status.state is State.REGISTERED
 
 
@@ -219,8 +219,8 @@ def test_the_settings_switch_says_registered_and_why_nothing_changes(
     outcome = make(launchctl, tmp_path, data, lock_held=True).enable(serving_here=True)
     assert not outcome.started
     assert outcome.message == (
-        "Registered. netkeeper will start by itself the next time you log in to this Mac."
-        " Nothing changes now, because netkeeper is already running: starting another copy"
+        "Registered. netkeep will start by itself the next time you log in to this Mac."
+        " Nothing changes now, because netkeep is already running: starting another copy"
         " would only fail against the serve lock."
     )
 
@@ -323,7 +323,7 @@ def test_state_is_read_from_the_plist_and_launchctl_not_remembered(
     assert not status.loaded
 
 
-def test_a_plist_that_runs_another_netkeeper_is_flagged(
+def test_a_plist_that_runs_another_netkeep_is_flagged(
     launchctl: FakeLaunchctl, tmp_path: Path, data: Path
 ) -> None:
     item = make(launchctl, tmp_path, data)
@@ -333,7 +333,7 @@ def test_a_plist_that_runs_another_netkeeper_is_flagged(
         agents_dir=tmp_path / "LaunchAgents",
         runner=launchctl,
         uid=UID,
-        executable=Path("/elsewhere/netkeeper"),
+        executable=Path("/elsewhere/netkeep"),
         macos=True,
         environ={},
     )
@@ -361,14 +361,14 @@ def test_each_state_has_its_words(launchctl: FakeLaunchctl, tmp_path: Path, data
         agents_dir=tmp_path / "LaunchAgents",
         runner=launchctl,
         uid=UID,
-        executable=Path("/elsewhere/netkeeper"),
+        executable=Path("/elsewhere/netkeep"),
         macos=True,
         environ={},
     )
-    assert moved.status().state.value == "Points at a different netkeeper"
+    assert moved.status().state.value == "Points at a different netkeep"
     launchctl.loaded.add(off.label)  # an old checkout's agent is usually loaded: still different
     assert moved.status().loaded
-    assert moved.status().state.value == "Points at a different netkeeper"
+    assert moved.status().state.value == "Points at a different netkeep"
 
     other = tmp_path / "other-data"
     write_old_plist(tmp_path, other)
@@ -381,7 +381,7 @@ def test_turning_it_on_with_nothing_running_says_it_started(
     outcome = make(launchctl, tmp_path, data).enable()
     assert outcome.started
     assert outcome.message == (
-        "Started. netkeeper is starting now, and will start by itself every time you log in"
+        "Started. netkeep is starting now, and will start by itself every time you log in"
         " to this Mac."
     )
 
@@ -409,7 +409,7 @@ def test_a_missing_executable_is_an_error_and_writes_nothing(
         macos=True,
         environ={},
     )
-    with pytest.raises(LoginItemError, match="installed netkeeper"):
+    with pytest.raises(LoginItemError, match="installed netkeep"):
         item.enable()
     assert not (tmp_path / "LaunchAgents").exists()
     assert launchctl.calls == []
@@ -422,13 +422,13 @@ def test_the_keychain_and_config_overrides_follow_the_agent(
         launchctl,
         tmp_path,
         data,
-        environ={"NETKEEPER_KEYCHAIN_SERVICE": "mine", "NETKEEPER_CONFIG": "/c/config.toml"},
+        environ={"NETKEEP_KEYCHAIN_SERVICE": "mine", "NETKEEP_CONFIG": "/c/config.toml"},
     )
     item.enable()
     env = read_plist(item)["EnvironmentVariables"]
     assert isinstance(env, dict)
-    assert env["NETKEEPER_KEYCHAIN_SERVICE"] == "mine"
-    assert env["NETKEEPER_CONFIG"] == "/c/config.toml"
+    assert env["NETKEEP_KEYCHAIN_SERVICE"] == "mine"
+    assert env["NETKEEP_CONFIG"] == "/c/config.toml"
 
 
 def test_off_macos_nothing_runs_and_the_reason_is_given(
@@ -483,7 +483,7 @@ def test_cli_exits_non_zero_off_macos(
 
 # -- an agent the removed install script left ----------------------------------------------
 
-OLD_LABEL = "fun.tnkr.netkeeper"
+OLD_LABEL = "fun.tnkr.netkeeper"  # the old script ran before the rename (#661)
 WRAPPER = "/checkout/scripts/serve-launchd.sh"
 
 
@@ -540,20 +540,21 @@ def test_adopting_leaves_an_old_agent_for_another_data_directory_alone(
     assert OLD_LABEL in launchctl.loaded
 
 
-def test_the_default_directorys_label_will_not_overwrite_an_old_agent_for_another(
+def test_the_default_directorys_label_leaves_an_old_agent_for_another_alone(
     launchctl: FakeLaunchctl, tmp_path: Path
 ) -> None:
+    """Since the rename (#661) the old script's plain label is never this one's."""
     other = tmp_path / "other"
     old = write_old_plist(tmp_path, other)
     before = old.read_bytes()
     item = make(launchctl, tmp_path, default_data_dir())
-    with pytest.raises(LoginItemError, match="login-item on"):
-        item.enable()
+    item.enable()
     assert old.read_bytes() == before
-    assert launchctl.calls == []
+    assert item.plist_path != old
+    assert item.plist_path.exists()
 
 
-def test_an_old_agent_with_the_plain_label_is_replaced_in_place(
+def test_an_old_agent_with_the_plain_label_is_replaced_by_the_new_label(
     launchctl: FakeLaunchctl, tmp_path: Path
 ) -> None:
     old = write_old_plist(tmp_path, None, "--host", "127.0.0.1")
@@ -562,9 +563,10 @@ def test_an_old_agent_with_the_plain_label_is_replaced_in_place(
     assert item.status().legacy
     item.enable(keep_arguments=True)
     assert read_plist(item)["ProgramArguments"] == [EXE, "serve", "--host", "127.0.0.1"]
-    assert old == item.plist_path
+    assert not old.exists()
+    assert item.label == "fun.tnkr.netkeep"
     assert not item.status().legacy
-    assert OLD_LABEL in launchctl.loaded  # bootstrapped again, on the new plist
+    assert launchctl.loaded == {"fun.tnkr.netkeep"}
 
 
 def test_repair_from_the_old_agent_does_not_boot_out_the_server_answering(
@@ -642,7 +644,7 @@ def test_a_serve_that_never_lets_go_is_reported_honestly(
     stuck = make(launchctl, tmp_path, data, lock_held=True)
     outcome = stuck.enable()
     assert not outcome.started
-    assert outcome.message.startswith("Registered. netkeeper will start by itself")
+    assert outcome.message.startswith("Registered. netkeep will start by itself")
     assert "not finished stopping" in outcome.message
     assert "already running" not in outcome.message
     assert launchctl.loaded == set()

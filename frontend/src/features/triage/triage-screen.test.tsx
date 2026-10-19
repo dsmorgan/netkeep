@@ -217,7 +217,7 @@ describe('the counters while a decision is still in flight', () => {
    * constant nets to zero and is invisible to a test that waits for the write
    * before it looks. These three assert *during* the round trip, which is the
    * only moment the numbers are the screen's own, and between them they pin
-   * both counters to what `netkeeper.crm.triage.progress` computes:
+   * both counters to what `netkeep.crm.triage.progress` computes:
    * `triaged = total - by_state[unknown]`, `remaining = sum(by_state[states])`.
    */
   function press(key: string) {
@@ -271,7 +271,7 @@ describe('the counters while a decision is still in flight', () => {
 
 describe('the fake backend answers the way the service does', () => {
   it('drops an archived contact out of total and triaged, as progress does', async () => {
-    // `netkeeper.crm.triage.progress` groups over the live contacts only, so
+    // `netkeep.crm.triage.progress` groups over the live contacts only, so
     // archiving somebody you had marked met takes them off both counts. The
     // fake used to count every row, and this header was asserted against
     // numbers the API does not produce.

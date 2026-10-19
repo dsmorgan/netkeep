@@ -28,15 +28,15 @@ describe('renderInlineMarkdown', () => {
   })
 
   it('renders `code` as <code>, not literal backticks', () => {
-    renderText('log in, then run `netkeeper preflight`.')
-    const code = screen.getByText('netkeeper preflight')
+    renderText('log in, then run `netkeep preflight`.')
+    const code = screen.getByText('netkeep preflight')
     expect(code.tagName).toBe('CODE')
     expect(screen.queryByText(/`/)).not.toBeInTheDocument()
   })
 
   it('renders several markers in the same sentence, in order', () => {
-    renderText('run `netkeeper serve`, which is **wired** and *live*.')
-    expect(screen.getByText('netkeeper serve').tagName).toBe('CODE')
+    renderText('run `netkeep serve`, which is **wired** and *live*.')
+    expect(screen.getByText('netkeep serve').tagName).toBe('CODE')
     expect(screen.getByText('wired').tagName).toBe('STRONG')
     expect(screen.getByText('live').tagName).toBe('EM')
   })

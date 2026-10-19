@@ -1,5 +1,5 @@
 /**
- * Recording a response that came outside netkeeper from the contact page (#512). The
+ * Recording a response that came outside netkeep from the contact page (#512). The
  * contact, campaigns and note are invented.
  */
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
@@ -72,7 +72,7 @@ async function openDialog() {
   return within(await screen.findByRole('dialog'))
 }
 
-describe('record a response from outside netkeeper', () => {
+describe('record a response from outside netkeep', () => {
   it('lists the campaigns and ends every one that could still send by default', async () => {
     const seen = serve()
     await renderApp('/contacts/1')

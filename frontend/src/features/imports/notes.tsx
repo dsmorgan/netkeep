@@ -87,12 +87,12 @@ export function Note({
 }
 
 /**
- * The exact sentence `netkeeper.crm.import_runs.DUPLICATE_WARNING_EXPLANATION` carries, word
+ * The exact sentence `netkeep.crm.import_runs.DUPLICATE_WARNING_EXPLANATION` carries, word
  * for word: the CLI's commit summary and this note are meant to read the same way. Nothing
  * shares this string across the Python/TypeScript boundary, so keep the two in sync by hand.
  */
 const DUPLICATE_WARNING_EXPLANATION =
-  'They were kept as separate contacts: netkeeper never matches two rows of the same file ' +
+  'They were kept as separate contacts: netkeep never matches two rows of the same file ' +
   'against each other by name and company alone. Merging any of them is safe, but it means ' +
   'this import can no longer be rolled back.'
 

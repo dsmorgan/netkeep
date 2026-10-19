@@ -27,8 +27,8 @@ export function SettingsPage({ gmail = {} }: { gmail?: GmailOutcome }) {
             them here; config.toml is optional, and a value it sets wins.
           </CardDescription>
           <p className="text-sm text-muted-foreground">
-            netkeeper’s UI requires Google Chrome. Other browsers may work, but they are not tested
-            or supported.
+            netkeep’s UI requires Google Chrome. Other browsers may work, but they are not tested or
+            supported.
           </p>
         </CardHeader>
       </Card>

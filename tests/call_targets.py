@@ -5,7 +5,7 @@ right for a deny-list of method names (``launch``, ``new_context``): any object
 with that method is suspect. It is wrong for "does anything use *this*
 function", which is what posture's enforcement scan asks (#162). By last
 segment, an unrelated ``queue.consume()`` enforces the budget, and
-``spend()`` after ``from netkeeper.services.budgets import consume as spend``
+``spend()`` after ``from netkeep.services.budgets import consume as spend``
 does not.
 
 So this follows Python's own name binding, statically:
@@ -48,7 +48,7 @@ _Bindings = dict[str, str | None]
 
 
 def module_name(path: Path, repo_root: Path) -> str:
-    """``netkeeper/services/budgets.py`` -> ``netkeeper.services.budgets``."""
+    """``netkeep/services/budgets.py`` -> ``netkeep.services.budgets``."""
     parts = list(path.resolve().relative_to(repo_root.resolve()).with_suffix("").parts)
     if parts[-1] == "__init__":
         parts.pop()

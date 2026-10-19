@@ -14,8 +14,8 @@ from messaging_dom import MessagingSite, MessagingTab
 from messaging_pages import OWNER, Member, existing_bubble_html
 from run_fakes import fake_provider
 
-from netkeeper.linkedin.enrich import LINKEDIN_ORIGIN
-from netkeeper.linkedin.page_messaging import PageBubbleCheck
+from netkeep.linkedin.enrich import LINKEDIN_ORIGIN
+from netkeep.linkedin.page_messaging import PageBubbleCheck
 
 PERSON = Member(558, "Quorbelle", "Fictionary", "Invented headline for #558")
 PROFILE = f"{LINKEDIN_ORIGIN}/in/{PERSON.slug}/overlay/contact-info/"

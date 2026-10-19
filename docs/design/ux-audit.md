@@ -4,7 +4,7 @@ Input for the polish design sessions (#604, feeding #605 and #610). It maps toda
 
 Every name, company, address and message in this document and its mockups is invented.
 
-**How this was made.** A read of `frontend/src/` and `netkeeper/web/api/`, plus a run of `netkeeper serve` on a scratch data directory with 40 invented contacts imported from CSV, 26 of them triaged, three templates, a list, and two draft campaigns. Screenshots of every route at desktop width, and of two routes at phone width and in dark mode, went to the design session with the mockups. They are not in the repository.
+**How this was made.** A read of `frontend/src/` and `netkeep/web/api/`, plus a run of `netkeep serve` on a scratch data directory with 40 invented contacts imported from CSV, 26 of them triaged, three templates, a list, and two draft campaigns. Screenshots of every route at desktop width, and of two routes at phone width and in dark mode, went to the design session with the mockups. They are not in the repository.
 
 ## Contents
 
@@ -65,7 +65,7 @@ The settings page is about 6,900 px tall at desktop width. The dashboard is abou
 | Gmail connection and Re-authorize | Banner, Dashboard Mailbox card, Gmail Connection card, Settings Gmail section, Settings setup guide step 7 | When a mailbox needs sign-in, you can see two Re-authorize buttons on one screen (three on Settings). Each card has its own status labels. "Connect" goes three ways: the dashboard sends you to Settings, the Inbox empty state says "Connect Gmail on the Gmail page", and the Gmail page says to use the terminal or Settings. The Gmail page can't connect at all. |
 | Mailbox arm state | Dashboard, Gmail, Settings | Only Settings can change it. The campaign callout says "Arm a mailbox in Settings → Gmail". |
 | Posture | Gmail page (four rows), Settings (all 30) | Auto-send state appears in five more places. |
-| Gmail reply checks and their Check now | Top bar popover, Gmail Reply poll card, campaign Results card | The sentence "netkeeper serve isn't running, so nothing is checked in the background." is copied word for word. The dashboard's "Reply detection is not set up yet" doesn't use poll status at all. |
+| Gmail reply checks and their Check now | Top bar popover, Gmail Reply poll card, campaign Results card | The sentence "netkeep serve isn't running, so nothing is checked in the background." is copied word for word. The dashboard's "Reply detection is not set up yet" doesn't use poll status at all. |
 | "Check now" | Poll status: poll replies soon. Settings mailbox row: check the token and Message-ID | Same label, different actions. |
 | Setup steps | Dashboard (five steps: import, tags, triage, list, export) and the Settings Gmail guide (eight steps) | Two separate ladders with different badge words. Neither covers LinkedIn Chrome or the first sync. "Start here" repeats the import step. |
 | LinkedIn queue and Waiting for you | Dashboard and campaign detail | This one is fine (it's filtered per campaign), but it is the largest card on both pages, even when it's empty. |
@@ -89,11 +89,11 @@ The click counts assume a person who knows where everything is. Real first-time 
 
 | Step | Today | Clicks or commands | Friction |
 |---|---|---|---|
-| Install | Terminal: clone, `make install`, `make build-ui`, `netkeeper serve`, open Chrome at 127.0.0.1:8000 | 4 commands | Out of scope for the UI (#594, #596). The UI's first sight is a dashboard of eleven empty cards. |
+| Install | Terminal: clone, `make install`, `make build-ui`, `netkeep serve`, open Chrome at 127.0.0.1:8000 | 4 commands | Out of scope for the UI (#594, #596). The UI's first sight is a dashboard of eleven empty cards. |
 | Orientation | Dashboard | 0 | "Start here" says to import, but the page doesn't link it until the setup cards at the bottom. The LinkedIn queue, the largest card, warns about an inbox poll the user has never heard of, and offers "Check inbox now" before any Chrome exists. "Build a list" already reads "1 list", because the built-in Validated list counts. |
 | Import | Sidebar › Imports, Choose a file, Import, See your contacts | 4 | Works well for the LinkedIn zip. The entry label varies: "Import contacts", "Import a CSV", "New import". |
 | Gmail | Dashboard › Set up Gmail (lands on Settings), then the eight-step guide inside a 6,900 px page, then Google console in another tab, then back | 8 marks plus 3 forms plus OAuth | The guide is good, but it's buried as the first card of Settings with the rest of Settings below. Nothing afterwards says "leave it disarmed" in the flow itself. Arming is a separate trip to the same card. |
-| LinkedIn Chrome | `/linkedin` › Browser card: copy a command into Terminal, sign in to LinkedIn, then run `netkeeper preflight` in Terminal | 2 commands | The UI can't check that it worked. "Last known session: unknown — not checked yet" stays until a run or preflight. Nothing tells the user this window is separate from their everyday Chrome until they read the card. |
+| LinkedIn Chrome | `/linkedin` › Browser card: copy a command into Terminal, sign in to LinkedIn, then run `netkeep preflight` in Terminal | 2 commands | The UI can't check that it worked. "Last known session: unknown — not checked yet" stays until a run or preflight. Nothing tells the user this window is separate from their everyday Chrome until they read the card. |
 | First sync | `/linkedin` › Start a run: pick Full connections sync, Start run, confirm. Then LinkedIn inbox › Check inbox now. Then Scheduled runs › Arm, confirm | 7 | Order matters (sync, then inbox, then arm) but nothing sequences it. Scheduled job names are raw keys (`connections_incremental: every 24h`). |
 | Triage | Sidebar › Triage, keys | 1 plus keys | Good. The badge (14) is the only pointer to it. |
 
@@ -135,7 +135,7 @@ That is about 30 clicks and three trips to Settings. The callout "Email replies 
 | Heat | `/linkedin` › Heat › Clear heat… | Fine. |
 | Gmail token expired | Global banner › Re-authorize | Good. It only re-authorizes the first stuck mailbox. |
 | "Is everything OK?" | Settings › Posture: 30 rows in one table | No summary, no grouping by severity. "NOT clear: 1 of 30 protections is not in force, 1 warning in all" is at the bottom. |
-| Logs | None in the UI. The application log is `<data_dir>/logs/serve.err.log`, and only under launchd (`scripts/install-launchd.sh`). A `netkeeper serve` started in a terminal writes no file; its log is the terminal | No endpoint, and no file to read from outside launchd. #602 is adding a rotating log file. |
+| Logs | None in the UI. The application log is `<data_dir>/logs/serve.err.log`, and only under launchd (`scripts/install-launchd.sh`). A `netkeep serve` started in a terminal writes no file; its log is the terminal | No endpoint, and no file to read from outside launchd. #602 is adding a rotating log file. |
 | Support bundle | Doesn't exist | — |
 | Restore a backup | Settings shows the command. CLI with serve stopped | By design. Fine. |
 
@@ -175,7 +175,7 @@ CLI-only by design, so not UI gaps:
 ### 3.2 UI needs, backend lacks (for #610)
 
 1. **One setup-state endpoint.** Today the dashboard derives setup from `contacts/stats`, `imports?status=draft` and `lists`, and the Gmail guide has its own `gmail-setup`. A first-run flow needs one answer: about you, contacts, Gmail connected and armed, Chrome reachable and signed in, first full sync, first inbox poll, scheduled runs armed, first triage. Each with done, skipped or blocked, and why.
-2. **A live Chrome check the UI can call.** Something like `POST /linkedin/browser/check`: attach, read the session, detach, as a run with its own lock and budget. `GET /linkedin/browser/health` is deliberately never a probe. The first-run "Check connection" button needs this, or the step stays "run `netkeeper preflight`".
+2. **A live Chrome check the UI can call.** Something like `POST /linkedin/browser/check`: attach, read the session, detach, as a run with its own lock and budget. `GET /linkedin/browser/health` is deliberately never a probe. The first-run "Check connection" button needs this, or the step stays "run `netkeep preflight`".
 3. **A ranked "needs you" feed.** `GET /attention` gives counts and flags. Home needs items: kind, sentence, target, severity, created_at. That covers replies, waiting prefills, retries, a review in progress, a tripped breaker, a session flag, mailbox reauth, leftover drafts, draft imports and triage.
 4. **An "upcoming" feed** that merges `dashboard/next-fires`, the scheduled jobs and poll status into one time-ordered list.
 5. **A health summary**: posture grouped into problems, warnings and on, each problem with its fix action. `GET /posture` has `actions` per row; it needs a severity and a plain-language fix sentence.
@@ -185,7 +185,7 @@ CLI-only by design, so not UI gaps:
 9. **"Skipped" per setup step**, stored per user, so a skipped step stays a reminder instead of a nag.
 10. **Import result copy about LinkedIn reach**: the import result should say how many imported contacts a sync can't match (no profile URL and no email), so they won't be reachable by LinkedIn steps (§2.1). This is mostly frontend copy, plus a count in the commit result.
 
-Not a need: **an automatic first LinkedIn inbox poll.** The first poll stays a poll you start by hand, by design. `FIRST_POLL_BY_HAND` in `netkeeper/services/scheduled_runs.py` holds scheduled inbox polls until a poll you started has completed, because that supervised poll records the LinkedIn mailbox owner that the inbox owner breaker checks against. The same hold applies again after **Forget inbox owner**. #610 must not chain the first poll onto the sync or run it on the user's behalf; the setup flow shows it as a button (§4.4 step 6).
+Not a need: **an automatic first LinkedIn inbox poll.** The first poll stays a poll you start by hand, by design. `FIRST_POLL_BY_HAND` in `netkeep/services/scheduled_runs.py` holds scheduled inbox polls until a poll you started has completed, because that supervised poll records the LinkedIn mailbox owner that the inbox owner breaker checks against. The same hold applies again after **Forget inbox owner**. #610 must not chain the first poll onto the sync or run it on the user's behalf; the setup flow shows it as a button (§4.4 step 6).
 
 ### 3.3 Inconsistent copy and states
 
@@ -274,11 +274,11 @@ The LinkedIn queue's long explanation ("Prefill types the message into a message
 
 Seven steps on `/setup` (see `first-run.html`). Steps 4 to 7 are optional and skippable. A skipped step stays as a reminder on Home's setup bar.
 
-1. **Welcome.** What netkeeper does, and what it never does: never starts Chrome or signs in for you, never deletes in Gmail, never sends before review, never goes over budget.
-2. **About you.** Name, company, time zone. These are templates' merge fields, and netkeeper never sends to this contact.
+1. **Welcome.** What netkeep does, and what it never does: never starts Chrome or signs in for you, never deletes in Gmail, never sends before review, never goes over budget.
+2. **About you.** Name, company, time zone. These are templates' merge fields, and netkeep never sends to this contact.
 3. **Bring in contacts.** Drop a zip or a CSV, see what was recognized, and import. Possible duplicates can be decided now or later. Mentions rollback.
 4. **Connect Gmail.** The six console steps collapsed into a checklist beside a link to the guide, then paste the client, then Connect. It ends with "Sending stays off. Campaigns only make drafts until you arm the mailbox, after a test."
-5. **LinkedIn Chrome.** The launch command with Copy, "sign in in that window", then **Check connection**. This needs the live-check endpoint (§3.2 item 2). Until then the step shows the `netkeeper preflight` command.
+5. **LinkedIn Chrome.** The launch command with Copy, "sign in in that window", then **Check connection**. This needs the live-check endpoint (§3.2 item 2). Until then the step shows the `netkeep preflight` command.
 6. **First sync.** Start the full connections sync and watch its progress inline. When it ends, the step shows a **Check your LinkedIn inbox** button. The user presses it; it never runs on its own. The step explains why: this first check, started by hand while you watch, records which LinkedIn account the inbox belongs to, and scheduled checks wait for it (the same is true after Forget inbox owner). The step also says what the sync did for the import: "The sync added LinkedIn ids to 31 imported contacts it matched by profile URL or email. 6 are possible duplicates to merge, and 3 stay email-only." It is blocked, with a link back, if step 5 was skipped.
 7. **Triage a few.** Five cards with m, n and s, then "the rest wait in Contacts › Triage".
 

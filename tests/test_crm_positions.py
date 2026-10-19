@@ -1,4 +1,4 @@
-"""netkeeper.crm.positions: the user's own job history, CRUD and archive import (P1-26, #84)."""
+"""netkeep.crm.positions: the user's own job history, CRUD and archive import (P1-26, #84)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import factories
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.crm.positions import (
+from netkeep.crm.positions import (
     MISSING,
     InvalidPosition,
     NotFound,
@@ -20,10 +20,10 @@ from netkeeper.crm.positions import (
     list_positions,
     update_position,
 )
-from netkeeper.db import session_scope
-from netkeeper.linkedin.archive import PositionRow
-from netkeeper.models import ContactSource, User, UserPosition
-from netkeeper.scoping import scoped
+from netkeep.db import session_scope
+from netkeep.linkedin.archive import PositionRow
+from netkeep.models import ContactSource, User, UserPosition
+from netkeep.scoping import scoped
 
 NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
 LATER = NOW + timedelta(days=1)

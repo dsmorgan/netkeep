@@ -966,7 +966,7 @@ describe('the archive shape: a zip, or a lone message/invitation file (P1-21)', 
     // Not "the rest of the export" (review finding 8): `ignored_files` is
     // only the unrecognized `.csv` tables, not every file a real export has.
     expect(
-      screen.getByText(/netkeeper also found 2 other tables in the export and didn.t read them\./),
+      screen.getByText(/netkeep also found 2 other tables in the export and didn.t read them\./),
     ).toBeVisible()
     expect(screen.getByText(/Positions\.csv, Skills\.csv/)).toBeVisible()
     expect(screen.queryByText(/the rest of the export/)).toBeNull()
@@ -1150,7 +1150,7 @@ describe('the archive shape: a zip, or a lone message/invitation file (P1-21)', 
   it("falls back to a plain, non-contradictory explanation for a message it doesn't recognize", async () => {
     // Not one of the three current guesses, and no `code` — this is what a
     // message #124 reworded (or one this PR never anticipated) looks like.
-    // The old default asserted "doesn't look like a zip or a CSV netkeeper
+    // The old default asserted "doesn't look like a zip or a CSV netkeep
     // recognizes," which review finding 3 caught contradicting the backend's
     // own, more specific text in two real cases. Nothing here should ever
     // say what the file *is*.
@@ -1168,7 +1168,7 @@ describe('the archive shape: a zip, or a lone message/invitation file (P1-21)', 
     fireEvent.click(screen.getByRole('button', { name: 'Import' }))
 
     const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent("netkeeper couldn't import this file")
+    expect(alert).toHaveTextContent("netkeep couldn't import this file")
     expect(screen.getByText(/downloading a fresh copy from LinkedIn/)).toBeVisible()
     expect(
       screen.getByText(/export\.zip: unexpected end of central directory record/),
@@ -1201,10 +1201,10 @@ describe('the archive shape: a zip, or a lone message/invitation file (P1-21)', 
 
   it.each([
     ['encrypted', 'This zip is password-protected'],
-    ['malformed_table', 'netkeeper found the table it wanted but could not read it'],
+    ['malformed_table', 'netkeep found the table it wanted but could not read it'],
     ['too_large', 'This file is bigger or stranger than a real LinkedIn export'],
     ['too_many_members', 'This file is bigger or stranger than a real LinkedIn export'],
-    ['unsafe_member_path', 'This zip has a file netkeeper will not open'],
+    ['unsafe_member_path', 'This zip has a file netkeep will not open'],
     ['not_a_zip', "This doesn't look like a LinkedIn export"],
   ])('answers %s with its own guidance', async (code, headline) => {
     // The codes a person is least likely to hit and most likely to be
@@ -1248,7 +1248,7 @@ describe('the archive shape: a zip, or a lone message/invitation file (P1-21)', 
     fireEvent.click(screen.getByRole('button', { name: 'Import' }))
 
     const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent("netkeeper couldn't import this file")
+    expect(alert).toHaveTextContent("netkeep couldn't import this file")
     // The backend's own words are still on screen, which is where the
     // specific "what to do" lives when nothing here knows better.
     expect(screen.getByText(/export\.zip: corrupt central directory/)).toBeVisible()

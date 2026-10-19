@@ -1,7 +1,7 @@
 """Two data directories sharing one database (#177 G1, #467).
 
-Two ``NETKEEPER_DATA`` directories can share one database through an explicit
-``NETKEEPER_DATABASE_URL``. The browser lock lives in the data directory, so B
+Two ``NETKEEP_DATA`` directories can share one database through an explicit
+``NETKEEP_DATABASE_URL``. The browser lock lives in the data directory, so B
 can't see A's lock. What B can see is A's run's heartbeat (#467): while it is
 fresh, B refuses to start a run (``create_run``), never fails A's run at its own
 start (``fail_interrupted_runs``), and a cancel from B only sets the flag. Once
@@ -37,17 +37,17 @@ from sqlalchemy.orm import Session, sessionmaker
 from test_migrations import BACKENDS, PG_ENV
 from voyager_pages import Person
 
-from netkeeper import migrations
-from netkeeper.config import Settings
-from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.linkedin import activity_lock
-from netkeeper.linkedin.browser import ActivityLocks, AttachBrowserProvider
-from netkeeper.linkedin.enrich import StopReason
-from netkeeper.models import SyncRun, SyncRunKind, SyncRunStatus, SyncRunTrigger, User
-from netkeeper.scoping import install_scope_guard
-from netkeeper.services import connections_sync, enrichment, runs
-from netkeeper.services.linkedin_accounts import ensure_account
-from netkeeper.worker import BrowserWorker
+from netkeep import migrations
+from netkeep.config import Settings
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+from netkeep.linkedin import activity_lock
+from netkeep.linkedin.browser import ActivityLocks, AttachBrowserProvider
+from netkeep.linkedin.enrich import StopReason
+from netkeep.models import SyncRun, SyncRunKind, SyncRunStatus, SyncRunTrigger, User
+from netkeep.scoping import install_scope_guard
+from netkeep.services import connections_sync, enrichment, runs
+from netkeep.services.linkedin_accounts import ensure_account
+from netkeep.worker import BrowserWorker
 
 NOW = datetime(2026, 9, 23, 15, 0, tzinfo=UTC)
 LATER = NOW + runs.STALE_AFTER
@@ -62,7 +62,7 @@ def data_dirs(
     assert database is not None
     assert Path(database).resolve().is_relative_to(tmp_path.resolve())
     a, b = tmp_path / "data-a", tmp_path / "data-b"
-    monkeypatch.setenv("NETKEEPER_DATA", str(b))
+    monkeypatch.setenv("NETKEEP_DATA", str(b))
     return a, b
 
 
@@ -267,9 +267,9 @@ def test_the_runner_id_names_the_data_directory_not_the_process(
     assert re.fullmatch(r"[0-9a-f]{32}", in_b)
     assert str(b) not in in_b
     assert runs.runner_id() == in_b  # every process on B gets the same id
-    monkeypatch.setenv("NETKEEPER_DATA", str(a))
+    monkeypatch.setenv("NETKEEP_DATA", str(a))
     assert runs.runner_id() != in_b
-    monkeypatch.setenv("NETKEEPER_DATA", str(b / ".." / b.name))
+    monkeypatch.setenv("NETKEEP_DATA", str(b / ".." / b.name))
     assert runs.runner_id() == in_b  # the same directory, however it is spelled
     monkeypatch.setattr("socket.gethostname", lambda: "another-host")
     assert runs.runner_id() != in_b
@@ -575,10 +575,10 @@ async def test_the_heartbeat_keeps_a_run_alive_and_stops_with_its_block(
         return lambda: _stored(session_factory, user_id, run_id).heartbeat_at == at
 
     a, b = data_dirs
-    monkeypatch.setenv("NETKEEPER_DATA", str(a))  # A's process enters the block
+    monkeypatch.setenv("NETKEEP_DATA", str(a))  # A's process enters the block
     task = asyncio.create_task(a_s_runner())
     await _until(beat_at(NOW))
-    monkeypatch.setenv("NETKEEPER_DATA", str(b))  # and B looks at the row
+    monkeypatch.setenv("NETKEEP_DATA", str(b))  # and B looks at the row
     assert _stored(session_factory, user_id, run_id).heartbeat_by not in (None, runs.runner_id())
     clock.at = NOW + timedelta(hours=1)
     await _until(beat_at(clock.at))
@@ -689,11 +689,11 @@ async def test_the_worker_keeps_a_live_run_s_heartbeat_so_b_cannot_start_another
     )
     gate = Gate()  # never opened: the run waits between pages
     worker = BrowserWorker(provider, session_factory, Settings().linkedin, clock=clock, sleep=gate)
-    monkeypatch.setenv("NETKEEPER_DATA", str(a))  # A's process starts the run
+    monkeypatch.setenv("NETKEEP_DATA", str(a))  # A's process starts the run
     task = asyncio.create_task(worker.execute(run_id, user_id))
     try:
         await _until(lambda: _stored(session_factory, user_id, run_id).heartbeat_at is not None)
-        monkeypatch.setenv("NETKEEPER_DATA", str(data_dirs[1]))  # B looks at the row
+        monkeypatch.setenv("NETKEEP_DATA", str(data_dirs[1]))  # B looks at the row
         assert runs.runs_elsewhere(_stored(session_factory, user_id, run_id))
         await _until(lambda: gate.calls > 0)
         clock.at = NOW + timedelta(hours=1)

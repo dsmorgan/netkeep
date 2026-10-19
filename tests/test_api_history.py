@@ -19,10 +19,10 @@ from openpyxl import Workbook
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.campaigns.gmail import GmailRateLimited
-from netkeeper.campaigns.gmail_fake import FakeGmail
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.campaigns.gmail import GmailRateLimited
+from netkeep.campaigns.gmail_fake import FakeGmail
+from netkeep.db import session_scope
+from netkeep.models import (
     Contact,
     HistoryCampaign,
     HistoryRecipient,
@@ -30,11 +30,11 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.scoping import scoped_count
-from netkeeper.services import history_scan
-from netkeeper.web.api import history as history_api
+from netkeep.scoping import scoped_count
+from netkeep.services import history_scan
+from netkeep.web.api import history as history_api
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 ME = "me@example.test"
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 COUNTED = (HistoryCampaign, HistoryRecipient, Interaction, Contact)

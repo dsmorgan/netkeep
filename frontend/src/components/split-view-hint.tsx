@@ -3,9 +3,9 @@ export const SPLIT_VIEW_HELP_URL = 'https://support.google.com/chrome/answer/169
 
 /**
  * Tells you how to keep a guide and the page it links to side by side. A web page
- * can't ask Chrome for a split view, and netkeeper never launches or drives your
+ * can't ask Chrome for a split view, and netkeep never launches or drives your
  * browser, so the guidance is text. Put it once near the top of any guide whose
- * links open outside netkeeper, and open those links in a new tab
+ * links open outside netkeep, and open those links in a new tab
  * (`target="_blank" rel="noopener noreferrer"`).
  */
 export function SplitViewHint() {

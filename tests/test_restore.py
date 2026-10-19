@@ -1,4 +1,4 @@
-"""P6-04: ``netkeeper restore``, the nightly backup in ``serve``, the serve lock, and
+"""P6-04: ``netkeep restore``, the nightly backup in ``serve``, the serve lock, and
 ``/backups`` for the Settings page."""
 
 from __future__ import annotations
@@ -19,21 +19,21 @@ from fastapi import FastAPI
 from sqlalchemy import Engine
 from typer.testing import CliRunner
 
-from netkeeper import migrations
-from netkeeper.cli import app as cli
-from netkeeper.config import BackupSettings, Settings
-from netkeeper.db import (
+from netkeep import migrations
+from netkeep.cli import app as cli
+from netkeep.config import BackupSettings, Settings
+from netkeep.db import (
     DATABASE_FILENAME,
     database_url,
     make_engine,
     make_session_factory,
     session_scope,
 )
-from netkeeper.models import Base, SettingKV
-from netkeeper.scoping import install_scope_guard
-from netkeeper.services import backup as backup_service
-from netkeeper.services import serve_lock, ui_settings
-from netkeeper.services.backup import (
+from netkeep.models import Base, SettingKV
+from netkeep.scoping import install_scope_guard
+from netkeep.services import backup as backup_service
+from netkeep.services import serve_lock, ui_settings
+from netkeep.services.backup import (
     BackupError,
     DatabaseInUse,
     RestoreError,
@@ -45,13 +45,13 @@ from netkeeper.services.backup import (
     prune_backups,
     restore_backup,
 )
-from netkeeper.services.backup_job import NightlyBackups, backs_up
-from netkeeper.services.scheduled_runs import ServeExtractor
-from netkeeper.services.users import ensure_local_user
-from netkeeper.web.api.backups import restore_command
-from netkeeper.web.app import create_app
+from netkeep.services.backup_job import NightlyBackups, backs_up
+from netkeep.services.scheduled_runs import ServeExtractor
+from netkeep.services.users import ensure_local_user
+from netkeep.web.api.backups import restore_command
+from netkeep.web.app import create_app
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 NY = "America/New_York"
 # 2026-10-16 02:30 in New York (EDT, UTC-4): before that night's 03:00.
 BEFORE_THREE = datetime(2026, 10, 16, 6, 30, tzinfo=UTC)
@@ -64,10 +64,10 @@ STAMP_10_02 = datetime(2026, 10, 2, 9, 0, tzinfo=UTC)
 
 @pytest.fixture
 def data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """NETKEEPER_DATA (the CLI's data directory) holding a migrated database with the
+    """NETKEEP_DATA (the CLI's data directory) holding a migrated database with the
     local user and one marker row."""
     directory = tmp_path / "data"
-    monkeypatch.setenv("NETKEEPER_DATA", str(directory))
+    monkeypatch.setenv("NETKEEP_DATA", str(directory))
     cwd = tmp_path / "cwd"
     cwd.mkdir()
     monkeypatch.chdir(cwd)
@@ -139,7 +139,7 @@ def test_restore_yields_a_database_that_passes_the_migration_diff(data: Path) ->
         assert connection.execute("PRAGMA integrity_check").fetchone() == ("ok",)
 
 
-def test_a_backup_from_an_older_netkeeper_is_upgraded_to_head(data: Path) -> None:
+def test_a_backup_from_an_older_netkeep_is_upgraded_to_head(data: Path) -> None:
     engine = make_engine(database_url(data))
     try:
         migrations.downgrade(engine, "-3")
@@ -169,7 +169,7 @@ def test_restore_backs_up_the_database_in_place_first(data: Path) -> None:
     result = restore_backup(saved, database_url(data), data / "backups", now=when)
 
     assert result.previous == data / "backups" / backup_name(when, pre_restore=True)
-    assert result.previous.name == "netkeeper-20261002T090000Z-pre-restore.sqlite3"
+    assert result.previous.name == "netkeep-20261002T090000Z-pre-restore.sqlite3"
     assert _marker(result.previous) == "work since the backup"
     assert _marker(data / DATABASE_FILENAME) == "original"
     # Nothing was pruned: both backups are still there.
@@ -249,7 +249,7 @@ def test_another_open_connection_refuses_the_restore_and_changes_nothing(
         before = _files(data)
         assert f"{DATABASE_FILENAME}-wal" in before
 
-        with pytest.raises(DatabaseInUse, match="another netkeeper process has the database"):
+        with pytest.raises(DatabaseInUse, match="another netkeep process has the database"):
             restore_backup(saved, database_url(data), data / "backups")
 
         assert _files(data) == before  # byte for byte, the WAL and the shm included
@@ -304,20 +304,20 @@ def test_a_file_that_is_not_a_database_is_refused_before_anything_changes(
     junk.write_bytes(b"not a database at all" * 100)
     before = (data / DATABASE_FILENAME).read_bytes()
 
-    with pytest.raises(RestoreError, match="not a netkeeper database"):
+    with pytest.raises(RestoreError, match="not a netkeep database"):
         restore_backup(junk, database_url(data), data / "backups")
 
     assert (data / DATABASE_FILENAME).read_bytes() == before
     assert list_backups(data / "backups") == []  # no backup of the database in place either
 
 
-def test_a_backup_from_a_newer_netkeeper_is_refused(data: Path) -> None:
+def test_a_backup_from_a_newer_netkeep_is_refused(data: Path) -> None:
     saved = _backup_now(data, datetime(2026, 10, 1, tzinfo=UTC))
     with closing(sqlite3.connect(saved)) as connection:
         connection.execute("UPDATE alembic_version SET version_num = '9999'")
         connection.commit()
 
-    with pytest.raises(RestoreError, match="migration 9999, which this netkeeper does not know"):
+    with pytest.raises(RestoreError, match="migration 9999, which this netkeep does not know"):
         restore_backup(saved, database_url(data), data / "backups")
 
 
@@ -339,10 +339,10 @@ def test_find_backup_takes_a_name_or_a_path(data: Path, tmp_path: Path) -> None:
     shutil.copyfile(saved, elsewhere)
     assert find_backup(str(elsewhere), data / "backups") == elsewhere
     with pytest.raises(RestoreError, match="no such backup"):
-        find_backup("netkeeper-20200101T000000Z.sqlite3", data / "backups")
+        find_backup("netkeep-20200101T000000Z.sqlite3", data / "backups")
 
 
-# --- netkeeper restore --------------------------------------------------------------
+# --- netkeep restore --------------------------------------------------------------
 
 
 def test_restore_command_says_what_it_did(data: Path) -> None:
@@ -356,7 +356,7 @@ def test_restore_command_says_what_it_did(data: Path) -> None:
     assert f"backed up the database in place to {previous}" in result.stdout
     assert f"restored {saved}" in result.stdout
     assert f"migration {migrations.head_revision()}" in result.stdout
-    assert f"to undo, run: netkeeper restore {previous.name}" in result.stdout
+    assert f"to undo, run: netkeep restore {previous.name}" in result.stdout
     assert _marker(data / DATABASE_FILENAME) == "original"
 
 
@@ -479,7 +479,7 @@ def test_restore_command_refuses_while_serve_runs(data: Path) -> None:
         held.release()
 
     assert result.exit_code == 1
-    assert "netkeeper serve is running" in result.stderr
+    assert "netkeep serve is running" in result.stderr
     assert _marker(data / DATABASE_FILENAME) == "live"
     assert len(list_backups(data / "backups")) == 1
 
@@ -497,7 +497,7 @@ def test_restore_command_holds_the_serve_lock_while_it_works(
         seen.append(True)
         return real(*args, **kwargs)
 
-    monkeypatch.setattr("netkeeper.cli.restore_backup", spy)
+    monkeypatch.setattr("netkeep.cli.restore_backup", spy)
     result = CliRunner().invoke(cli, ["restore", saved.name])
 
     assert result.exit_code == 0, result.output
@@ -506,7 +506,7 @@ def test_restore_command_holds_the_serve_lock_while_it_works(
 
 
 def test_restore_command_with_an_unknown_name_fails(data: Path) -> None:
-    result = CliRunner().invoke(cli, ["restore", "netkeeper-20200101T000000Z.sqlite3"])
+    result = CliRunner().invoke(cli, ["restore", "netkeep-20200101T000000Z.sqlite3"])
     assert result.exit_code == 1
     assert "no such backup" in result.stderr
 
@@ -523,14 +523,14 @@ async def test_serve_holds_the_serve_lock_and_a_second_one_refuses(
     import conftest
 
     conftest._copy_template(_migrated_template, tmp_path / "bare")
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", str(tmp_path / "no-dist"))
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", str(tmp_path / "no-dist"))
     extractor = ServeExtractor(executor=lambda factory, bus: object())  # type: ignore[arg-type,return-value]
     served = create_app(Settings(), engine=bare_engine, extractor=extractor)
     async with served.router.lifespan_context(served):
         with pytest.raises(serve_lock.ServeRunning):
             serve_lock.claim()
         second = create_app(Settings(), engine=bare_engine, extractor=extractor)
-        with pytest.raises(RuntimeError, match="netkeeper serve cannot start"):
+        with pytest.raises(RuntimeError, match="netkeep serve cannot start"):
             async with second.router.lifespan_context(second):
                 pass
     serve_lock.claim().release()  # released at shutdown
@@ -646,7 +646,7 @@ async def test_serve_starts_and_stops_the_nightly_job(
     import conftest
 
     conftest._copy_template(_migrated_template, tmp_path / "bare")
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", str(tmp_path / "no-dist"))
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", str(tmp_path / "no-dist"))
     started: list[NightlyBackups] = []
     real_start = NightlyBackups.start
 
@@ -660,7 +660,7 @@ async def test_serve_starts_and_stops_the_nightly_job(
     async with served.router.lifespan_context(served):
         (job,) = started
         assert job._task is not None and not job._task.done()
-        assert job.backups_dir == tmp_path / "netkeeper-data" / "backups"
+        assert job.backups_dir == tmp_path / "netkeep-data" / "backups"
     assert job._task is None
 
 
@@ -672,16 +672,16 @@ async def test_get_backups_lists_them_with_the_restore_command(
 ) -> None:
     empty = (await client.get("/api/v1/backups")).json()
     assert empty == {
-        "directory": str(tmp_path / "netkeeper-data" / "backups"),
+        "directory": str(tmp_path / "netkeep-data" / "backups"),
         "available": True,
         "backups": [],
     }
     made = await client.post("/api/v1/backups", headers=CSRF)
     assert made.status_code == 201, made.text
     (listed,) = made.json()["backups"]
-    data_dir = tmp_path / "netkeeper-data"
+    data_dir = tmp_path / "netkeep-data"
     assert listed["restore_command"] == (
-        f"NETKEEPER_DATA={data_dir} netkeeper restore {data_dir / 'backups' / listed['name']}"
+        f"NETKEEP_DATA={data_dir} netkeep restore {data_dir / 'backups' / listed['name']}"
     )
     assert listed["pre_restore"] is False
     assert listed["size"] > 0
@@ -691,7 +691,7 @@ async def test_get_backups_lists_them_with_the_restore_command(
 async def test_back_up_now_prunes_to_the_keep_in_force(
     client: httpx.AsyncClient, running_app: FastAPI, tmp_path: Path
 ) -> None:
-    directory = tmp_path / "netkeeper-data" / "backups"
+    directory = tmp_path / "netkeep-data" / "backups"
     directory.mkdir(parents=True)
     for day in (1, 2, 3):
         (directory / backup_name(datetime(2026, 1, day, tzinfo=UTC))).write_bytes(b"x")
@@ -714,7 +714,7 @@ async def test_back_up_now_in_the_same_second_answers_409(
     fixed = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)
     real = backup_service.create_backup
     monkeypatch.setattr(
-        "netkeeper.web.api.backups.create_backup",
+        "netkeep.web.api.backups.create_backup",
         lambda engine, directory: real(engine, directory, now=fixed),
     )
     assert (await client.post("/api/v1/backups", headers=CSRF)).status_code == 201
@@ -730,19 +730,19 @@ def test_serve_command_refuses_cleanly_while_the_lock_is_held(data: Path) -> Non
     finally:
         held.release()
     assert result.exit_code == 1
-    assert "netkeeper serve is already running" in result.stderr
+    assert "netkeep serve is already running" in result.stderr
 
 
 def test_the_restore_command_names_the_data_directory_only_when_one_was_set(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    backup = Path("/Volumes/My Disk/backups/netkeeper-20261016T031000Z.sqlite3")
-    monkeypatch.delenv("NETKEEPER_DATA", raising=False)
+    backup = Path("/Volumes/My Disk/backups/netkeep-20261016T031000Z.sqlite3")
+    monkeypatch.delenv("NETKEEP_DATA", raising=False)
     assert restore_command(backup) == (
-        "netkeeper restore '/Volumes/My Disk/backups/netkeeper-20261016T031000Z.sqlite3'"
+        "netkeep restore '/Volumes/My Disk/backups/netkeep-20261016T031000Z.sqlite3'"
     )
-    monkeypatch.setenv("NETKEEPER_DATA", "/Volumes/My Disk")
-    assert restore_command(backup).startswith("NETKEEPER_DATA='/Volumes/My Disk' netkeeper ")
+    monkeypatch.setenv("NETKEEP_DATA", "/Volumes/My Disk")
+    assert restore_command(backup).startswith("NETKEEP_DATA='/Volumes/My Disk' netkeep ")
 
 
 def test_a_corrupt_backup_is_refused_by_the_integrity_check(data: Path) -> None:
@@ -837,7 +837,7 @@ def test_db_upgrade_refuses_while_the_serve_lock_is_held(data: Path) -> None:
     finally:
         held.release()
     assert result.exit_code == 1
-    assert "netkeeper serve or netkeeper restore is running" in result.stderr
+    assert "netkeep serve or netkeep restore is running" in result.stderr
     assert CliRunner().invoke(cli, ["db", "upgrade"]).exit_code == 0
 
 
@@ -852,7 +852,7 @@ def _abort_after(connection: sqlite3.Connection, steps: int) -> sqlite3.Connecti
 
 
 def _backup_like_files(directory: Path) -> list[str]:
-    return sorted(p.name for p in directory.iterdir() if p.name.startswith("netkeeper-"))
+    return sorted(p.name for p in directory.iterdir() if p.name.startswith("netkeep-"))
 
 
 def test_a_backup_failing_mid_write_leaves_no_backup_file(
@@ -935,7 +935,7 @@ async def test_back_up_now_failing_mid_write_lists_nothing_on_settings(
 
     assert failed.status_code == 409
     assert (await client.get("/api/v1/backups")).json()["backups"] == []
-    directory = tmp_path / "netkeeper-data" / "backups"
+    directory = tmp_path / "netkeep-data" / "backups"
     assert not directory.exists() or _backup_like_files(directory) == []
 
 
@@ -969,5 +969,5 @@ def test_a_backup_killed_mid_write_leaves_only_a_hidden_partial(
     directory = data / "backups"
     assert _backup_like_files(directory) == [saved.name]
     (left,) = [p for p in directory.iterdir() if p.name.endswith(".partial")]
-    assert left.name.startswith(".netkeeper-20261002T090000Z")
+    assert left.name.startswith(".netkeep-20261002T090000Z")
     assert [info.path for info in list_backups(directory)] == [saved]

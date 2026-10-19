@@ -19,7 +19,7 @@ export interface ScanOptions {
 
 /**
  * `POST /history/import`: a dry run unless `apply`, the same service as
- * `netkeeper history import`. The workbook goes up as multipart; see
+ * `netkeep history import`. The workbook goes up as multipart; see
  * `importArchive` in `imports/api.ts` for why the body is cast.
  */
 export async function importHistory(file: File, options: ImportOptions): Promise<HistoryImport> {

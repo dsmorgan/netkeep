@@ -1,6 +1,6 @@
 """``/linkedin``: **Reset breaker** and **Forget inbox owner** (#583).
 
-The web half of ``netkeeper linkedin schedule reset-breaker`` and ``netkeeper linkedin
+The web half of ``netkeep linkedin schedule reset-breaker`` and ``netkeep linkedin
 inbox-forget-owner``. Each calls the command's own service function
 (``route_breaker.reset``, ``inbox_apply.forget_owner``), needs ``confirm: true``, acts
 for the current user only, and refuses with ``409`` when there is nothing to reset or
@@ -23,12 +23,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from test_runs_serve import HEADERS
 
-from netkeeper.crm import inbox_apply
-from netkeeper.crm.self_contact import ensure_self_contact
-from netkeeper.db import session_scope
-from netkeeper.models import SyncRunKind, User, UserKind
-from netkeeper.services import posture, route_breaker
-from netkeeper.services.linkedin_accounts import account_id_for
+from netkeep.crm import inbox_apply
+from netkeep.crm.self_contact import ensure_self_contact
+from netkeep.db import session_scope
+from netkeep.models import SyncRunKind, User, UserKind
+from netkeep.services import posture, route_breaker
+from netkeep.services.linkedin_accounts import account_id_for
 
 RESET_URL = "/api/v1/linkedin/schedule/reset-breaker"
 FORGET_URL = "/api/v1/linkedin/inbox/forget-owner"
@@ -89,7 +89,7 @@ async def test_reset_clears_the_tripped_breaker_through_the_cli_service(
     row = rows["route_changed_breaker"]
     assert row["actions"] == ["reset_breaker"]
     assert "click **Reset breaker** under Posture on the Settings page" in row["warnings"][0]
-    assert "`netkeeper linkedin schedule reset-breaker`" in row["warnings"][0]
+    assert "`netkeep linkedin schedule reset-breaker`" in row["warnings"][0]
     shown = [key for key, r in rows.items() if "reset_breaker" in r["actions"]]
 
     calls: list[int] = []
@@ -206,7 +206,7 @@ async def test_reset_clears_an_unreadable_breaker(
 ) -> None:
     """A corrupt row reads as tripped (fail closed) and its row offers the button, so the
     button has to clear it, as the command does."""
-    from netkeeper.services.settings_kv import set_setting
+    from netkeep.services.settings_kv import set_setting
 
     def corrupt(session: Session, user: User) -> None:
         account_id = account_id_for(session, user)
@@ -323,9 +323,9 @@ async def test_forget_owner_forgets_the_recorded_mailbox(
     row = (await _rows(client))["inbox_owner_breaker"]
     assert row["actions"] == ["reset_breaker", "forget_inbox_owner"]
     assert "click **Forget inbox owner** under Posture" in row["warnings"][0]
-    assert "`netkeeper linkedin inbox-forget-owner`" in row["warnings"][0]
+    assert "`netkeep linkedin inbox-forget-owner`" in row["warnings"][0]
 
-    from netkeeper.web.api import linkedin as linkedin_api
+    from netkeep.web.api import linkedin as linkedin_api
 
     calls: list[int] = []
     real = inbox_apply.forget_owner
@@ -472,8 +472,8 @@ def test_both_routes_are_post_only_and_take_a_writer_session() -> None:
     neither answers any other method."""
     from fastapi.routing import APIRoute
 
-    from netkeeper.web.api.linkedin import router
-    from netkeeper.web.deps import READ_ONLY_ATTR
+    from netkeep.web.api.linkedin import router
+    from netkeep.web.deps import READ_ONLY_ATTR
 
     paths = {"/linkedin/schedule/reset-breaker", "/linkedin/inbox/forget-owner"}
     routes = [r for r in router.routes if isinstance(r, APIRoute) and r.path in paths]

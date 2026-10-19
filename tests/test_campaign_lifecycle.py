@@ -2,7 +2,7 @@
 
 The maintainer's decision on #345: delete only a campaign never activated and with
 no messages; archive one that ever sent, once it is ended; unarchive is allowed;
-netkeeper never deletes a Gmail draft (ADR 0003), it lists them; a campaign is
+netkeep never deletes a Gmail draft (ADR 0003), it lists them; a campaign is
 concluded when every enrollment is terminal, or the person ended it.
 
 The engine's side (an ended or archived campaign never fires) is in
@@ -22,8 +22,8 @@ from campaign_fakes import make_mailbox
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import InstrumentedAttribute, Session, sessionmaker
 
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.db import session_scope
+from netkeep.models import (
     Campaign,
     CampaignStatus,
     CampaignStep,
@@ -39,11 +39,11 @@ from netkeeper.models import (
     TestSend,
     User,
 )
-from netkeeper.models.base import UserOwned
-from netkeeper.scoping import get_scoped, scoped
-from netkeeper.services import campaign_engine, campaign_results
-from netkeeper.services import campaigns as service
-from netkeeper.services.campaigns import CampaignConflict, CampaignNotFound
+from netkeep.models.base import UserOwned
+from netkeep.scoping import get_scoped, scoped
+from netkeep.services import campaign_engine, campaign_results
+from netkeep.services import campaigns as service
+from netkeep.services.campaigns import CampaignConflict, CampaignNotFound
 
 EMAIL2 = (TemplateChannel.EMAIL, TemplateChannel.EMAIL)
 NOW = datetime(2026, 10, 4, 15, 0, tzinfo=UTC)
@@ -468,7 +468,7 @@ def _test_draft(session: Session, user: User, campaign: Campaign, to: str) -> No
             fingerprint="f" * 64,
             to_address=to,
             gmail_draft_id=f"draft-{campaign.id}",
-            rfc822_message_id=f"<test-{campaign.id}@netkeeper.test>",
+            rfc822_message_id=f"<test-{campaign.id}@netkeep.test>",
             sent_at=NOW,
         )
     )

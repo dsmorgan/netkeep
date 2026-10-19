@@ -20,10 +20,10 @@ from sqlalchemy.orm import (
 )
 from sqlalchemy.sql.base import Executable
 
-import netkeeper
-from netkeeper.db import make_session_factory, session_scope
-from netkeeper.models import Base, SettingKV, User, UserKind, UserOwned
-from netkeeper.scoping import (
+import netkeep
+from netkeep.db import make_session_factory, session_scope
+from netkeep.models import Base, SettingKV, User, UserKind, UserOwned
+from netkeep.scoping import (
     SCOPE_OPTION,
     UNSCOPED_OPTION,
     UnscopedQueryError,
@@ -36,8 +36,8 @@ from netkeeper.scoping import (
     scoped_update,
     unscoped,
 )
-from netkeeper.services.settings_kv import delete_setting, get_setting, set_setting
-from netkeeper.services.users import ensure_local_user
+from netkeep.services.settings_kv import delete_setting, get_setting, set_setting
+from netkeep.services.users import ensure_local_user
 
 
 @pytest.fixture
@@ -209,7 +209,7 @@ def test_session_get_with_a_hand_set_mark_loads_the_row(
 def test_unscoped_marks_the_statement_and_logs_at_debug(
     session: Session, users: tuple[User, User], caplog: pytest.LogCaptureFixture
 ) -> None:
-    with caplog.at_level(logging.DEBUG, logger="netkeeper.scoping"):
+    with caplog.at_level(logging.DEBUG, logger="netkeep.scoping"):
         statement = unscoped(select(SettingKV))
     assert statement.get_execution_options() == {UNSCOPED_OPTION: True}
     assert "unscoped statement on SettingKV" in caplog.text
@@ -314,7 +314,7 @@ BULK_BYPASSES = ("bulk_save_objects", "bulk_insert_mappings", "bulk_update_mappi
 
 
 def test_no_bulk_session_operations_in_the_package() -> None:
-    package = Path(netkeeper.__file__).parent
+    package = Path(netkeep.__file__).parent
     guard_module = package / "scoping.py"  # the only place allowed to name them
     hits = sorted(
         f"{path.relative_to(package.parent)}: {name}"
@@ -374,7 +374,7 @@ def test_raise_on_violation_false_logs_and_installing_twice_is_a_no_op(
     factory = make_session_factory(engine)
     install_scope_guard(factory, raise_on_violation=False)
     install_scope_guard(factory)  # no-op: the first install stands
-    with factory() as session, caplog.at_level(logging.ERROR, logger="netkeeper.scoping"):
+    with factory() as session, caplog.at_level(logging.ERROR, logger="netkeep.scoping"):
         assert session.scalars(select(SettingKV)).all() == []
         session.add(SettingKV(key="k", value=1))
         with pytest.raises(Exception, match="NOT NULL"):

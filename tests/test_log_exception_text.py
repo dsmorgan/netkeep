@@ -2,7 +2,7 @@
 
 An exception's message can carry a name, a slug, an address or page text, so a log call
 that interpolates one wraps it in ``personal_exc`` and the support bundle redacts the
-span. A scan of ``netkeeper/`` fails on a new call that does not.
+span. A scan of ``netkeep/`` fails on a new call that does not.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from netkeeper.logging_setup import (
+from netkeep.logging_setup import (
     PERSONAL_CLOSE,
     PERSONAL_OPEN,
     PERSONAL_PATTERN,
@@ -22,7 +22,7 @@ from netkeeper.logging_setup import (
     setup_logging,
 )
 
-PACKAGE = Path(__file__).resolve().parent.parent / "netkeeper"
+PACKAGE = Path(__file__).resolve().parent.parent / "netkeep"
 
 LOG_METHODS = frozenset(
     {"debug", "info", "warning", "warn", "error", "exception", "critical", "log"}
@@ -32,7 +32,7 @@ SAFE_CALLS = frozenset({"type", "personal", "personal_exc", "_kind"})
 #: Attributes of an exception that hold a code or a number, never message text.
 SAFE_ATTRS = frozenset({"code", "status", "status_code"})
 
-#: ``(file relative to netkeeper/, line text)`` pairs allowed to interpolate an exception
+#: ``(file relative to netkeep/, line text)`` pairs allowed to interpolate an exception
 #: unmarked, each with the reason. Keep this empty unless the text provably carries
 #: nothing personal.
 ALLOWED: dict[tuple[str, str], str] = {
@@ -208,9 +208,9 @@ def test_no_log_call_interpolates_exception_text_unmarked() -> None:
         lines = path.read_text().splitlines()
         for lineno in unmarked_exception_logs(path.read_text()):
             if (rel, lines[lineno - 1].strip()) not in ALLOWED:
-                offenders.append(f"netkeeper/{rel}:{lineno}")
+                offenders.append(f"netkeep/{rel}:{lineno}")
     assert not offenders, (
-        "wrap the exception in personal_exc() (netkeeper.logging_setup), or log "
+        "wrap the exception in personal_exc() (netkeep.logging_setup), or log "
         f"type(exc).__name__: {offenders}"
     )
 
@@ -267,7 +267,7 @@ def test_personal_exc_is_plain_on_stderr_and_marks_only_the_message_in_the_file(
 ) -> None:
     setup_logging("INFO")
     exc = ValueError("no such list Quorbelle")
-    logging.getLogger("netkeeper.example").warning("failed: %s", personal_exc(exc))
+    logging.getLogger("netkeep.example").warning("failed: %s", personal_exc(exc))
     for handler in logging.getLogger().handlers:
         handler.flush()
     assert capsys.readouterr().err.endswith("failed: no such list Quorbelle\n")
@@ -280,9 +280,7 @@ def test_personal_exc_is_plain_on_stderr_and_marks_only_the_message_in_the_file(
 
 def test_personal_exc_marks_the_repr_too() -> None:
     setup_logging("INFO")
-    logging.getLogger("netkeeper.example").warning(
-        "failed: %r", personal_exc(KeyError("Quorbelle"))
-    )
+    logging.getLogger("netkeep.example").warning("failed: %r", personal_exc(KeyError("Quorbelle")))
     for handler in logging.getLogger().handlers:
         handler.flush()
     redacted = PERSONAL_PATTERN.sub("<personal>", log_file().read_text())

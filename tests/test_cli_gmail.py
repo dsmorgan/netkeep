@@ -1,4 +1,4 @@
-"""``netkeeper gmail``: client, login, status, check, disconnect (#244, P3-01).
+"""``netkeep gmail``: client, login, status, check, disconnect (#244, P3-01).
 
 ``login`` prints Google's URL and waits for the redirect on a loopback port. The
 tests play the browser: ``_present_authorization_url`` is replaced by one that
@@ -18,26 +18,26 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
 
-from netkeeper import cli as cli_module
-from netkeeper import migrations
-from netkeeper.campaigns import gmail_oauth
-from netkeeper.cli import app as cli
-from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.models import Mailbox, MailboxArm, MailboxStatus, User
-from netkeeper.models.base import utcnow
-from netkeeper.scoping import install_scope_guard, unscoped
-from netkeeper.services import keychain
-from netkeeper.services import mailboxes as mailbox_service
-from netkeeper.services.users import ensure_local_user
+from netkeep import cli as cli_module
+from netkeep import migrations
+from netkeep.campaigns import gmail_oauth
+from netkeep.cli import app as cli
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+from netkeep.models import Mailbox, MailboxArm, MailboxStatus, User
+from netkeep.models.base import utcnow
+from netkeep.scoping import install_scope_guard, unscoped
+from netkeep.services import keychain
+from netkeep.services import mailboxes as mailbox_service
+from netkeep.services.users import ensure_local_user
 
 runner = CliRunner()
 
 
 @pytest.fixture
 def cli_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[sessionmaker[Session]]:
-    """A migrated database with the local user, pointed to by ``NETKEEPER_DATABASE_URL``."""
+    """A migrated database with the local user, pointed to by ``NETKEEP_DATABASE_URL``."""
     url = database_url(tmp_path)
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     engine = make_engine(url)
     migrations.upgrade(engine)
     factory = make_session_factory(engine)
@@ -332,7 +332,7 @@ def test_status_shows_each_step_to_arming_to_send(
     assert f"keychain service: {keychain.service_name()}" in first.output  # #580
     assert f"{FAKE_EMAIL}: arming to send" in first.output
     assert "1. armed for drafts: not yet" in first.output
-    assert "2. netkeeper found its own draft: arm it for drafts first" in first.output
+    assert "2. netkeep found its own draft: arm it for drafts first" in first.output
     assert "3. arm to send: not yet" in first.output
 
     runner.invoke(cli, ["gmail", "arm", FAKE_EMAIL, "--yes"])
@@ -353,6 +353,6 @@ def test_status_shows_each_step_to_arming_to_send(
         row.status = MailboxStatus.OK
         mailbox_service.record_message_id_verified(session, user, mailbox_id, now=utcnow())
     ready = runner.invoke(cli, ["gmail", "status"]).output
-    assert "2. netkeeper found its own draft: done" in ready
-    assert "3. arm to send: ready: `netkeeper gmail arm --send`" in ready
+    assert "2. netkeep found its own draft: done" in ready
+    assert "3. arm to send: ready: `netkeep gmail arm --send`" in ready
     assert _mailbox(cli_db, mailbox_id).arm is MailboxArm.DRAFT  # status never arms

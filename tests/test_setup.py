@@ -20,11 +20,11 @@ from isolation.harness import acting_as
 from sqlalchemy.orm import Session, sessionmaker
 from test_login_item import FakeLaunchctl, make
 
-from netkeeper.crm.lists import create_list
-from netkeeper.crm.self_contact import update_self_contact
-from netkeeper.db import session_scope
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.models import (
+from netkeep.crm.lists import create_list
+from netkeep.crm.self_contact import update_self_contact
+from netkeep.db import session_scope
+from netkeep.linkedin.classify import Outcome
+from netkeep.models import (
     CampaignStatus,
     ContactMet,
     ImportRun,
@@ -38,18 +38,18 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.scoping import get_scoped_contact, scoped_contacts
-from netkeeper.services import keychain
-from netkeeper.services import setup as service
-from netkeeper.services.linkedin_accounts import arm_scheduled_runs, ensure_account
-from netkeeper.services.linkedin_session import flag_session, record_session_evidence
-from netkeeper.services.login_item import LoginItem
-from netkeeper.services.login_item import State as LoginItemState
-from netkeeper.services.login_item import Status as LoginItemStatus
-from netkeeper.services.settings_kv import get_setting, set_setting
+from netkeep.scoping import get_scoped_contact, scoped_contacts
+from netkeep.services import keychain
+from netkeep.services import setup as service
+from netkeep.services.linkedin_accounts import arm_scheduled_runs, ensure_account
+from netkeep.services.linkedin_session import flag_session, record_session_evidence
+from netkeep.services.login_item import LoginItem
+from netkeep.services.login_item import State as LoginItemState
+from netkeep.services.login_item import Status as LoginItemStatus
+from netkeep.services.settings_kv import get_setting, set_setting
 
 URL = "/api/v1/setup"
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 NOW = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)
 S = service.StepState
 K = service.StepKey
@@ -169,10 +169,10 @@ def test_a_fresh_install(db: Db) -> None:
     # Only the first step to do is next on a fresh install.
     assert [key for key, row in steps.items() if row.next] == [K.ABOUT_YOU]
     assert steps[K.FIRST_SYNC].reason == (
-        "Waits for Start netkeeper's Chrome and sign in to LinkedIn."
+        "Waits for Start netkeep's Chrome and sign in to LinkedIn."
     )
     assert steps[K.CAMPAIGN].reason == (
-        "Waits for Import contacts and one of Connect Gmail or Start netkeeper's Chrome"
+        "Waits for Import contacts and one of Connect Gmail or Start netkeep's Chrome"
         " and sign in to LinkedIn."
     )
     assert all(row.reason for row in steps.values())
@@ -374,14 +374,14 @@ def _status(**fields: Any) -> LoginItemStatus:
     values: dict[str, Any] = {
         "supported": True,
         "reason": None,
-        "label": "fun.tnkr.netkeeper",
-        "plist_path": Path("/nowhere/fun.tnkr.netkeeper.plist"),
-        "log_path": Path("/nowhere/netkeeper.log"),
+        "label": "fun.tnkr.netkeep",
+        "plist_path": Path("/nowhere/fun.tnkr.netkeep.plist"),
+        "log_path": Path("/nowhere/netkeep.log"),
         "installed": True,
         "disabled": False,
         "loaded": False,
         "this_serve_is_the_agent": False,
-        "plist_executable": "/nowhere/netkeeper",
+        "plist_executable": "/nowhere/netkeep",
         "stale": False,
         "legacy": False,
     }
@@ -397,14 +397,14 @@ def _status(**fields: Any) -> LoginItemStatus:
         ({"loaded": True}, LoginItemState.RUNNING, S.DONE, "Running from login agent"),
         (
             {"stale": True, "loaded": True},
-            LoginItemState.DIFFERENT_NETKEEPER,
+            LoginItemState.DIFFERENT_NETKEEP,
             S.TODO,
-            "Points at a different netkeeper",
+            "Points at a different netkeep",
         ),
         ({"legacy": True}, LoginItemState.NEEDS_REPAIR, S.TODO, "Needs repair"),
     ],
 )
-def test_the_login_item_is_done_only_registered_for_this_netkeeper(
+def test_the_login_item_is_done_only_registered_for_this_netkeep(
     db: Db, fields: dict[str, Any], shown: LoginItemState, state: S, says: str
 ) -> None:
     status = _status(**fields)

@@ -21,7 +21,7 @@ function message(error: unknown): string {
 /**
  * Whether scheduled runs may fire, always shown plainly (spec 9.4): every
  * install starts disarmed, and arming is the one thing on this page that
- * lets netkeeper contact LinkedIn without a person watching. Arming from the
+ * lets netkeep contact LinkedIn without a person watching. Arming from the
  * UI goes through a confirmation dialog that says exactly that and sends
  * `confirm: true` (the API refuses arming without it); disarming is one
  * click, because backing out of "runs happen on their own" should never be

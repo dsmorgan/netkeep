@@ -15,12 +15,12 @@ import factories
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.config import BudgetSettings, Settings
-from netkeeper.db import session_scope
-from netkeeper.models import User
-from netkeeper.services import budgets, ui_settings, zone_change
-from netkeeper.services.budgets import ActionClass, BudgetExceeded
-from netkeeper.services.linkedin_accounts import ensure_account
+from netkeep.config import BudgetSettings, Settings
+from netkeep.db import session_scope
+from netkeep.models import User
+from netkeep.services import budgets, ui_settings, zone_change
+from netkeep.services.budgets import ActionClass, BudgetExceeded
+from netkeep.services.linkedin_accounts import ensure_account
 
 NOW = datetime(2026, 10, 14, 11, 0, tzinfo=UTC)  # a Wednesday: one ISO week everywhere
 ZONES = ("Etc/GMT+12", "UTC", "Pacific/Kiritimati")

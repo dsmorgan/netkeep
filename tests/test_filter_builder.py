@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-from netkeeper.crm.filters import OPS, PLACEHOLDERS
+from netkeep.crm.filters import OPS, PLACEHOLDERS
 
 CATALOG = Path(__file__).resolve().parents[1] / "frontend/src/features/crm/predicates.ts"
 

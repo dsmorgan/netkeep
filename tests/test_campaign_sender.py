@@ -1,4 +1,4 @@
-"""netkeeper.services.campaign_sender (spec 11.5; item P3-07): send and draft modes,
+"""netkeep.services.campaign_sender (spec 11.5; item P3-07): send and draft modes,
 follow-ups in thread, labels, the drafts poll, and reconciling by Message-ID.
 
 Every test runs the real engine tick against :class:`FakeGmail`. Nothing here
@@ -24,9 +24,9 @@ from inbox_fakes import delta as inbox_delta
 from inbox_fakes import message as inbox_message
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.campaigns import schedule
-from netkeeper.campaigns.compose import message_id_for
-from netkeeper.campaigns.gmail import (
+from netkeep.campaigns import schedule
+from netkeep.campaigns.compose import message_id_for
+from netkeep.campaigns.gmail import (
     Draft,
     GmailAuthError,
     GmailError,
@@ -35,12 +35,12 @@ from netkeeper.campaigns.gmail import (
     GmailTransient,
     MessageRef,
 )
-from netkeeper.campaigns.gmail_fake import FakeGmail
-from netkeeper.config import CampaignSettings
-from netkeeper.crm import inbox_apply
-from netkeeper.crm.contacts import merge_contacts
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.campaigns.gmail_fake import FakeGmail
+from netkeep.config import CampaignSettings
+from netkeep.crm import inbox_apply
+from netkeep.crm.contacts import merge_contacts
+from netkeep.db import session_scope
+from netkeep.models import (
     Campaign,
     Contact,
     Enrollment,
@@ -55,13 +55,13 @@ from netkeeper.models import (
     TemplateChannel,
     User,
 )
-from netkeeper.scoping import get_scoped, scoped
-from netkeeper.services import campaign_engine as engine_module
-from netkeeper.services import campaign_guards as guards
-from netkeeper.services import campaign_replies, sending_hours
-from netkeeper.services import campaign_sender as sender_module
-from netkeeper.services import mailboxes as mailbox_service
-from netkeeper.services.campaign_engine import (
+from netkeep.scoping import get_scoped, scoped
+from netkeep.services import campaign_engine as engine_module
+from netkeep.services import campaign_guards as guards
+from netkeep.services import campaign_replies, sending_hours
+from netkeep.services import campaign_sender as sender_module
+from netkeep.services import mailboxes as mailbox_service
+from netkeep.services.campaign_engine import (
     DRAFT_DISCARDED_REASON,
     DRAFT_MISSING,
     Firing,
@@ -72,8 +72,8 @@ from netkeeper.services.campaign_engine import (
     remove_enrollment,
     run_tick,
 )
-from netkeeper.services.campaign_sender import GmailSender
-from netkeeper.services.mailboxes import MailboxNotReady
+from netkeep.services.campaign_sender import GmailSender
+from netkeep.services.mailboxes import MailboxNotReady
 
 EMAIL = TemplateChannel.EMAIL
 WEEK = timedelta(days=7)
@@ -172,7 +172,7 @@ class Mail:
 
     @property
     def label(self) -> str:
-        return f"netkeeper/{self.campaign.name}"
+        return f"netkeep/{self.campaign.name}"
 
     def tick(self, at: datetime | None = None, *, sender: Any = None) -> TickResult:
         if at is not None:
@@ -355,7 +355,7 @@ def test_a_send_step_goes_out_with_its_message_id_and_label(mail: Mail) -> None:
     assert sent.header("Subject") == "Hello"
     assert sent.header("Message-ID") == expected_message_id(mail, message)
     assert sent.header("In-Reply-To") is None and sent.header("References") is None
-    assert sent.header("From") == "me@example.com"  # Gmail's own, never set by netkeeper
+    assert sent.header("From") == "me@example.com"  # Gmail's own, never set by netkeep
     assert mail.gmail.raw(sent.id).get_content().startswith("Hi First")
     assert mail.labelled() == [sent.id]
     assert mail.enrollment(enrollment_id).next_action_at == NOW + WEEK
@@ -830,7 +830,7 @@ def test_a_canceled_schedule_back_in_drafts_under_a_new_id_is_followed(drafts: M
     """#278 review: canceling a Schedule send puts the message back in Drafts under a new
     draft id. Found there by its Message-ID, it is followed under the new ids, not
     discarded, and is sent from there as any draft is. Of the drafts listed, only the one
-    with its Message-ID is taken: never another netkeeper draft, never the person's."""
+    with its Message-ID is taken: never another netkeep draft, never the person's."""
     enrollment_id = drafts.enroll()
     other_id = drafts.enroll("bea@example.test")
     drafts.tick()
@@ -1036,7 +1036,7 @@ def test_the_find_never_counts_a_scheduled_message_as_sent() -> None:
 
 
 def test_a_follow_up_draft_is_never_made_before_it_is_due(drafts: Mail) -> None:
-    """#278, David's note: netkeeper never stages a later step early, so there is no
+    """#278, David's note: netkeep never stages a later step early, so there is no
     follow-up for the person to schedule ahead. Step 2's draft (a Message row and a Gmail
     draft) exists only from step 2's due time, a week after step 1 went out."""
     enrollment_id = drafts.enroll()
@@ -1345,7 +1345,7 @@ def test_a_leftover_found_as_a_draft_is_drafted(drafts: Mail) -> None:
 
 
 def test_a_merge_discarded_drafts_gmail_draft_stays_for_the_person(drafts: Mail) -> None:
-    """netkeeper deletes nothing in Gmail (ADR 0003): the message records ``discarded``,
+    """netkeep deletes nothing in Gmail (ADR 0003): the message records ``discarded``,
     and its draft stays where it is, untouched, poll after poll."""
     older = drafts.enroll("ada@example.test")
     newer = drafts.enroll("ada.other@example.test")
@@ -1695,7 +1695,7 @@ def test_a_label_that_fails_to_apply_is_looked_up_again(mail: Mail) -> None:
 
 
 def person_writes(mail: Mail, thread_of: MessageRef, subject: str, at: datetime) -> MessageRef:
-    """The person sending their own note in a thread, from Gmail: SENT, not netkeeper's."""
+    """The person sending their own note in a thread, from Gmail: SENT, not netkeep's."""
     first = mail.gmail.raw(thread_of.id)
     note = EmailMessage()
     note["To"] = "ada@example.test"
@@ -1755,7 +1755,7 @@ def test_a_deleted_draft_never_reads_as_sent_from_an_older_note_in_its_thread(
 def test_a_note_the_thread_held_when_the_draft_was_made_never_reads_as_the_draft(
     mixed: Mail,
 ) -> None:
-    """Gmail's clock ahead of netkeeper's: a note dated after the claim, but already in the
+    """Gmail's clock ahead of netkeep's: a note dated after the claim, but already in the
     thread when the draft was made. The draft's thread snapshot rules it out."""
     enrollment_id = mixed.enroll()
     mixed.tick()
@@ -1802,7 +1802,7 @@ def test_a_draft_sent_keeping_its_id_counts_even_with_gmails_clock_behind(drafts
     enrollment_id = drafts.enroll()
     drafts.tick()
     [draft_id] = drafts.gmail.drafts()
-    sent_at = NOW - timedelta(minutes=5)  # Gmail's clock behind netkeeper's
+    sent_at = NOW - timedelta(minutes=5)  # Gmail's clock behind netkeep's
     sent = drafts.gmail.send_draft(draft_id, at=sent_at, keep_id=True)
     drafts.tick(NOW + timedelta(hours=1))
     [message] = drafts.messages(enrollment_id)
@@ -2432,7 +2432,7 @@ def test_a_draft_seen_sent_while_the_search_lagged_still_verifies_the_mailbox(
 ) -> None:
     """#510: the person sends the draft before any poll looks; the poll that sees it sent
     searches while Gmail's search lags. The draft is no longer tracked, but its sent
-    message keeps netkeeper's Message-ID, and the next poll finds it."""
+    message keeps netkeep's Message-ID, and the next poll finds it."""
     set_arm(drafts, MailboxArm.DRAFT, verified=False)
     enrollment_id = drafts.enroll()
     drafts.tick()
@@ -2477,7 +2477,7 @@ def test_a_sent_draft_counts_when_the_oldest_waiting_draft_is_never_found(drafts
 
 
 def test_a_message_gmail_sent_under_its_own_message_id_verifies_nothing(drafts: Mail) -> None:
-    """The check still needs netkeeper's own Message-ID: a sent draft Gmail gave a new
+    """The check still needs netkeep's own Message-ID: a sent draft Gmail gave a new
     one is seen sent (by its thread) but never verifies the mailbox."""
     set_arm(drafts, MailboxArm.DRAFT, verified=False)
     enrollment_id = drafts.enroll()
@@ -2564,7 +2564,7 @@ def test_a_search_answering_another_message_id_verifies_nothing(
     session_factory: sessionmaker[Session],
 ) -> None:
     """The check reads the found message's own Message-ID header: a search that matched
-    something else (Gmail's answer, not netkeeper's message) never verifies."""
+    something else (Gmail's answer, not netkeep's message) never verifies."""
     drafts = make_mail(session_factory, modes=(StepMode.DRAFT,), same_thread=(False,))
     loose = LooseSearch("me@example.com", mailbox_id=drafts.mailbox.id, clock=drafts.clock)
     drafts.gmail = loose
@@ -2696,7 +2696,7 @@ def test_another_mailboxs_sent_draft_never_verifies_this_one(drafts: Mail) -> No
 
 
 def test_the_message_id_check_limits_are_pinned() -> None:
-    from netkeeper.services import message_id_check
+    from netkeep.services import message_id_check
 
     assert sender_module.MESSAGE_ID_CHECKS_MAX == 5
     assert message_id_check.SENT_DRAFTS_CHECKED == 3

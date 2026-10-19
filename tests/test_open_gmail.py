@@ -19,13 +19,13 @@ from gmail_fakes import (
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.campaigns import gmail_oauth
-from netkeeper.campaigns.gmail import GmailAuthError, GmailTransient
-from netkeeper.db import session_scope
-from netkeeper.models import Mailbox, MailboxStatus, User
-from netkeeper.scoping import unscoped
-from netkeeper.services import keychain
-from netkeeper.services import mailboxes as service
+from netkeep.campaigns import gmail_oauth
+from netkeep.campaigns.gmail import GmailAuthError, GmailTransient
+from netkeep.db import session_scope
+from netkeep.models import Mailbox, MailboxStatus, User
+from netkeep.scoping import unscoped
+from netkeep.services import keychain
+from netkeep.services import mailboxes as service
 
 CLIENT = gmail_oauth.OAuthClient(client_id=CLIENT_ID, client_secret=CLIENT_SECRET)
 NOW = datetime(2026, 10, 6, 12, 0, tzinfo=UTC)

@@ -69,9 +69,9 @@ describe('campaign results', () => {
     const card = within(await resultsCard())
     expect(await card.findByRole('link', { name: /^Sent: 6\./ })).toHaveTextContent('to 4 contacts')
     expect(card.getByRole('link', { name: /^Reply rate: 75%\./ })).toHaveTextContent('3 replied')
-    // A response recorded from outside netkeeper is a reply, and says so (#512).
+    // A response recorded from outside netkeep is a reply, and says so (#512).
     expect(card.getByRole('link', { name: /^Reply rate: 75%\./ })).toHaveTextContent(
-      '3 replied, 1 outside netkeeper',
+      '3 replied, 1 outside netkeep',
     )
     expect(card.getByRole('link', { name: /^Bounced: 1\./ })).toBeVisible()
     expect(card.getByRole('link', { name: /^Opted out: 1\./ })).toBeVisible()

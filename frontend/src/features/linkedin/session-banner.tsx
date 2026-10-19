@@ -18,15 +18,15 @@ function message(error: unknown): string {
 
 /**
  * The session flag, as a banner nothing else on the page can outshine (spec
- * 9.7). The two flags clear differently (`netkeeper/services/posture.py`'s
+ * 9.7). The two flags clear differently (`netkeep/services/posture.py`'s
  * `_session_flag`, #168 review F1): a `logged_out` flag clears itself the
- * moment `netkeeper preflight` finds a live session again, so its advice is
- * "log in, then run preflight". `netkeeper` never clears a `checkpoint` flag
+ * moment `netkeep preflight` finds a live session again, so its advice is
+ * "log in, then run preflight". `netkeep` never clears a `checkpoint` flag
  * itself, since a live session cookie is not proof a checkpoint is resolved, so
  * that advice is to resolve it, then clear the flag by hand.
  *
  * "Clear flag", on a `checkpoint` flag only, is that by-hand clear, the same
- * as `netkeeper linkedin clear-flag` (#181), and like the command it always
+ * as `netkeep linkedin clear-flag` (#181), and like the command it always
  * asks first, naming the flag and when it was raised. A `logged_out` flag gets
  * no button: preflight clears it once it sees a live session, which is better
  * evidence than a click (the command still clears either, from a terminal).
@@ -74,8 +74,8 @@ export function SessionBanner({ status }: { status: LinkedInStatus }) {
         if they are armed.
       </p>
       <p>
-        netkeeper cannot tell whether the checkpoint is resolved. Clear it only after you have
-        opened LinkedIn in the netkeeper Chrome profile yourself and the account looks healthy.
+        netkeep cannot tell whether the checkpoint is resolved. Clear it only after you have opened
+        LinkedIn in the netkeep Chrome profile yourself and the account looks healthy.
       </p>
       <p>If the flag changes while this is open, nothing is cleared.</p>
     </ConfirmDialog>
@@ -101,14 +101,14 @@ export function SessionBanner({ status }: { status: LinkedInStatus }) {
         <p className="text-sm">
           {checkpoint ? (
             <>
-              Open LinkedIn yourself in the netkeeper Chrome profile and resolve the checkpoint,
-              then clear the flag here or with{' '}
-              <code className="font-mono text-xs">netkeeper linkedin clear-flag</code>.{when}
+              Open LinkedIn yourself in the netkeep Chrome profile and resolve the checkpoint, then
+              clear the flag here or with{' '}
+              <code className="font-mono text-xs">netkeep linkedin clear-flag</code>.{when}
             </>
           ) : (
             <>
-              Log in to LinkedIn in the netkeeper Chrome profile, then run{' '}
-              <code className="font-mono text-xs">netkeeper preflight</code>, which clears this
+              Log in to LinkedIn in the netkeep Chrome profile, then run{' '}
+              <code className="font-mono text-xs">netkeep preflight</code>, which clears this
               automatically.{when}
             </>
           )}

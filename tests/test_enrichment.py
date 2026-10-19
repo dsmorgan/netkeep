@@ -1,4 +1,4 @@
-"""netkeeper.services.enrichment: a whole enrichment run against a fake tab.
+"""netkeep.services.enrichment: a whole enrichment run against a fake tab.
 
 P2-07's "done when", end to end: a run visits the planned contacts in spec
 9.6's order and writes their harvests; cancel stops it between profiles; a
@@ -36,12 +36,12 @@ from profile_fakes import (
 )
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.config import BudgetSettings, LinkedInSettings, Settings
-from netkeeper.db import session_scope
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.enrich import EnrichResult, StopReason, UnreadableCause
-from netkeeper.linkedin.pacing import plan_enrichment
-from netkeeper.models import (
+from netkeep.config import BudgetSettings, LinkedInSettings, Settings
+from netkeep.db import session_scope
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.enrich import EnrichResult, StopReason, UnreadableCause
+from netkeep.linkedin.pacing import plan_enrichment
+from netkeep.models import (
     Contact,
     ContactMet,
     SyncRun,
@@ -50,11 +50,11 @@ from netkeeper.models import (
     SyncRunTrigger,
     User,
 )
-from netkeeper.scoping import get_scoped
-from netkeeper.services import budgets, enrich_plan, route_breaker, run_diagnostics, runs
-from netkeeper.services import heat as heat_service
-from netkeeper.services.budgets import ActionClass, BudgetExceeded
-from netkeeper.services.enrichment import (
+from netkeep.scoping import get_scoped
+from netkeep.services import budgets, enrich_plan, route_breaker, run_diagnostics, runs
+from netkeep.services import heat as heat_service
+from netkeep.services.budgets import ActionClass, BudgetExceeded
+from netkeep.services.enrichment import (
     ALL_LOST_MIN_CLICKS,
     CANCEL_SLICE_S,
     EnrichRunReport,
@@ -66,10 +66,10 @@ from netkeeper.services.enrichment import (
     resume_enrichment,
     todays_visits,
 )
-from netkeeper.services.linkedin_accounts import ensure_account
-from netkeeper.services.linkedin_session import flag_session, session_flag
-from netkeeper.services.pacing import profiles
-from netkeeper.services.posture import _todays_budget
+from netkeep.services.linkedin_accounts import ensure_account
+from netkeep.services.linkedin_session import flag_session, session_flag
+from netkeep.services.pacing import profiles
+from netkeep.services.posture import _todays_budget
 
 #: A Wednesday, 11:00 in New York: inside the active window, not a weekend.
 NOW = datetime(2026, 9, 23, 15, 0, tzinfo=UTC)
@@ -394,7 +394,7 @@ async def test_budget_spent_elsewhere_mid_run_stops_the_next_visit(
 def test_todays_visits_is_what_posture_reports(
     session_factory: sessionmaker[Session], days: int, at: datetime, multiplier: float
 ) -> None:
-    """One chain, two readers: the run spends exactly what ``netkeeper posture`` says it may."""
+    """One chain, two readers: the run spends exactly what ``netkeep posture`` says it may."""
     settings = Settings(linkedin=SMALL)
     with session_scope(session_factory, write=True) as session:
         user = factories.make_user(session, created_at=at - timedelta(days=days))
@@ -722,7 +722,7 @@ async def test_losing_the_browser_mid_run_is_browser_unavailable_not_error(
     session_factory: sessionmaker[Session],
 ) -> None:
     """#177: Chrome going away mid-run reads like a run that could not attach at all."""
-    from netkeeper.linkedin.browser import BrowserUnavailable
+    from netkeep.linkedin.browser import BrowserUnavailable
 
     people = _people(4)
     user_id, _ = _setup(session_factory, people)
@@ -816,7 +816,7 @@ async def test_the_gate_checks_the_cancel_flag_before_a_visit_as_well(
     matters for a cancel that arrives in between; asked directly, it refuses and
     spends nothing.
     """
-    from netkeeper.services.enrichment import _Gate
+    from netkeep.services.enrichment import _Gate
 
     user_id, _ = _setup(session_factory, _people(1))
     with session_scope(session_factory, write=True) as session:
@@ -846,7 +846,7 @@ async def test_a_broken_observation_aborts_the_plan_and_says_nothing_about_the_s
     session_factory: sessionmaker[Session],
 ) -> None:
     """``ObservationFailed`` carries no answer: no heat, no flag, the plan resumable."""
-    from netkeeper.linkedin.observe import ObservationFailed
+    from netkeep.linkedin.observe import ObservationFailed
 
     people = _people(4)
     user_id, _ = _setup(session_factory, people)
@@ -987,7 +987,7 @@ async def test_a_run_that_dies_keeps_the_reasons_it_had_recorded(
 ) -> None:
     """The record is written as the run goes, so a run ended by exception still says
     why its earlier visits could not be read, and the detail view reads it from there."""
-    from netkeeper.linkedin.observe import ObservationFailed
+    from netkeep.linkedin.observe import ObservationFailed
 
     people = _people(4)
     user_id, ids = _setup(session_factory, people)
@@ -1020,7 +1020,7 @@ async def test_an_unreadable_visits_reason_is_kept_even_when_its_write_fails(
 ) -> None:
     """#415 review: the reason is on the run before the harvest is written, so a write
     that ends the run by exception does not take the reason with it."""
-    from netkeeper.crm import apply as mapping
+    from netkeep.crm import apply as mapping
 
     people = _people(2)
     user_id, ids = _setup(session_factory, people)
@@ -1095,7 +1095,7 @@ async def test_a_harvest_that_fails_to_write_is_not_marked_done(
     session_factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """M19, the other way round: no harvest written, no completion recorded."""
-    from netkeeper.crm import apply as mapping
+    from netkeep.crm import apply as mapping
 
     people = _people(2)
     user_id, _ = _setup(session_factory, people)
@@ -1261,7 +1261,7 @@ async def test_a_visit_read_from_the_page_is_written_and_never_takes_a_value_awa
     from run_fakes import fake_provider
     from voyager_pages import PEOPLE as CAST
 
-    from netkeeper.linkedin.page_profiles import PageProfiles
+    from netkeep.linkedin.page_profiles import PageProfiles
 
     person = CAST[0]
     user_id, ids = _setup(
@@ -1345,7 +1345,7 @@ async def test_a_wall_after_the_contact_info_click_flags_the_session(
     from run_fakes import fake_provider
     from voyager_pages import PEOPLE as CAST
 
-    from netkeeper.linkedin.page_profiles import PageProfiles
+    from netkeep.linkedin.page_profiles import PageProfiles
 
     cast = CAST[:2]
     user_id, _ = _setup(
@@ -1429,7 +1429,7 @@ async def test_a_thin_contact_info_copy_keeps_the_contact_due_and_is_noted_on_th
     from run_fakes import fake_provider
     from voyager_pages import PEOPLE as CAST
 
-    from netkeeper.linkedin.page_profiles import PageProfiles
+    from netkeep.linkedin.page_profiles import PageProfiles
 
     cast = CAST[:2]
     user_id, ids = _setup(

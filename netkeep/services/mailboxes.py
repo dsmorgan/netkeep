@@ -1,0 +1,816 @@
+"""Mailboxes: connect, disconnect, check, and report health (spec 8.5, 11.5; item P3-01).
+
+**Secrets.** Two Keychain entries per user, never a database column
+(:mod:`netkeep.services.keychain`): the OAuth client under
+:data:`CLIENT_SECRET_NAME`, and each mailbox's refresh token under its
+``keychain_ref`` (:func:`token_name`).
+
+**One live mailbox.** Spec 8.5 has one row in v1. Authorizing the address a
+user already has re-authorizes it; authorizing a different address while one
+is ``ok`` or ``reauth_required`` is refused (:class:`OtherMailboxConnected`)
+until that one is disconnected. A disconnected mailbox stays, ``disabled``, for
+the campaigns that name it, and authorizing its address again brings it back.
+
+**Health.** :func:`check_mailbox` refreshes the token. Google's ``invalid_grant``,
+``invalid_client`` or ``unauthorized_client``
+(:data:`~netkeep.campaigns.gmail_oauth.REAUTH_CODES`), or a token or client
+missing from the Keychain, sets the mailbox to ``reauth_required``, which is
+what pauses email steps: the guards read :func:`mailbox_health` (P3-06 wires it
+into ``ChannelState``). Anything else changes nothing: a network failure, a
+5xx, and any other refusal (a proxy's ``407``, an HTML ``403``,
+``invalid_request``, an answer with no access token), which says nothing
+certain about the grant. :func:`poll_mailboxes`
+checks every ``ok`` mailbox of every local user, and ``netkeep serve`` runs it
+every ``[campaigns] reply_poll_minutes`` (:class:`MailboxMonitor`), so a
+revoked token shows as the banner within one poll.
+
+**Arming** (#277). ``serve`` hands a mailbox's campaign steps to Gmail only
+while it is armed (:func:`arm`), and every mailbox starts disarmed. Armed, it
+drafts every step; :func:`arm` with ``send`` lets ``send`` steps go out, and is
+refused (:class:`ArmRefused`) until the mailbox is armed for drafts and a search
+by Message-ID has found a draft made there (:func:`record_message_id_verified`).
+:func:`disarm`, and disconnecting, undo both steps. The engine reads
+:func:`armed` fresh in each claim's writer session, so a change applies from the
+next claim on.
+
+**Sessions.** No HTTP call is made while a session is open: a check reads what
+it needs, closes the session, calls Google, then opens a writer to record the
+result, and records it only when the mailbox is still the one it checked: still
+``ok``, and not authorized again since (``generation``).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import logging
+import re
+import threading
+import time
+from collections.abc import Callable, Collection
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Any, Final
+from urllib.parse import unquote
+
+from sqlalchemy import func
+from sqlalchemy.orm import Session, sessionmaker
+
+from netkeep.campaigns import gmail_oauth
+from netkeep.campaigns.gmail import GmailClient
+from netkeep.db import session_scope
+from netkeep.logging_setup import personal, personal_exc
+from netkeep.models import Mailbox, MailboxArm, MailboxStatus, TestSend, User
+from netkeep.models.base import utcnow
+from netkeep.models.mailboxes import MAILBOX_ARMED_BY_MAX_LENGTH
+from netkeep.scoping import get_scoped, scoped
+from netkeep.services import keychain
+from netkeep.services.events import Event, EventBus
+from netkeep.services.users import local_users
+
+log = logging.getLogger(__name__)
+
+#: The Keychain name of a user's OAuth client (``<user_id>/gmail/oauth_client``).
+CLIENT_SECRET_NAME: Final = "gmail/oauth_client"  # noqa: S105 - an entry name
+
+#: Spec 11.4: a mailbox never sends to more than this many recipients a day,
+#: whatever the config says. Gmail's consumer limit is 500.
+MAILBOX_HARD_MAX_PER_DAY: Final = 400
+
+#: The event the UI's banner listens for.
+STATUS_EVENT: Final = "mailbox.status"
+
+REASON_TOKEN_MISSING: Final = "token_missing"  # noqa: S105 - a status code
+REASON_CLIENT_MISSING: Final = "client_missing"
+REASON_DISCONNECTED: Final = "disconnected"
+REASON_KEYCHAIN_UNAVAILABLE: Final = "keychain_unavailable"  # not stored: the mailbox stays ok
+
+
+class ArmRefused(RuntimeError):
+    """Arming this mailbox this way is not allowed yet; the message says why."""
+
+
+class MailboxNotFound(LookupError):
+    """No mailbox with that id belongs to the user."""
+
+
+class ClientNotConfigured(RuntimeError):
+    """The user has not given netkeep an OAuth client yet."""
+
+
+class OtherMailboxConnected(RuntimeError):
+    """The user authorized a different address while another mailbox is still live."""
+
+    def __init__(self, connected: str, authorized: str) -> None:
+        super().__init__(
+            f"{connected} is already connected; disconnect it before connecting {authorized}"
+        )
+        self.connected = connected
+        self.authorized = authorized
+
+
+def token_name(mailbox_id: int) -> str:
+    """The Keychain name of a mailbox's refresh token."""
+    return f"gmail/mailbox/{mailbox_id}"
+
+
+# --- the OAuth client --------------------------------------------------------------
+
+
+def save_client(user: User, client: gmail_oauth.OAuthClient) -> None:
+    """Keep ``client`` in the Keychain for ``user``, replacing any before it."""
+    keychain.set_secret(user.id, CLIENT_SECRET_NAME, client.to_json())
+
+
+def load_client(user_id: int) -> gmail_oauth.OAuthClient | None:
+    """The user's OAuth client, or None when none is stored (or it is unreadable)."""
+    raw = keychain.get_secret(user_id, CLIENT_SECRET_NAME)
+    if raw is None:
+        return None
+    try:
+        return gmail_oauth.OAuthClient.from_json(raw)
+    except (ValueError, KeyError, TypeError):
+        log.warning("the stored OAuth client for user %d is unreadable; set it again", user_id)
+        return None
+
+
+def require_client(user_id: int) -> gmail_oauth.OAuthClient:
+    client = load_client(user_id)
+    if client is None:
+        raise ClientNotConfigured(
+            "no Gmail OAuth client is set; add the client ID and secret first (docs/gmail-setup.md)"
+        )
+    return client
+
+
+# --- authorizations in flight -----------------------------------------------------
+
+#: How long a person has between starting an authorization and Google's redirect.
+PENDING_TTL: Final = timedelta(minutes=10)
+
+#: At most this many authorizations wait at once; starting another drops the oldest.
+PENDING_MAX: Final = 8
+
+
+#: Where the callback sends the browser when ``return_to`` is absent or refused.
+DEFAULT_RETURN_TO: Final = "/settings"
+
+#: The app pages a Connect Gmail button may return to (#656). Exact paths only.
+RETURN_PATHS: Final = frozenset(
+    {
+        "/",
+        "/settings",
+        "/gmail",
+        "/inbox",
+        "/contacts",
+        "/campaigns",
+        "/campaigns/new",
+        "/imports",
+        "/imports/history",
+        "/imports/runs",
+        "/exports",
+        "/lists",
+        "/linkedin",
+        "/templates",
+        "/triage",
+    }
+)
+
+#: Detail pages: a fixed prefix and a numeric id.
+_RETURN_DETAIL: Final = re.compile(r"/(?:contacts|campaigns|imports/runs)/[0-9]{1,18}")
+
+
+def safe_return_to(value: str | None) -> str:
+    """``value`` when it is a relative app page the callback may redirect to, else ``/settings``.
+
+    This is the open-redirect guard, so it refuses rather than repairs. Only ASCII
+    with no control character or backslash passes; the path must be one of
+    :data:`RETURN_PATHS` (or a detail page) and must not change when percent-decoded,
+    which rules out ``%2f%2f`` and ``/%5c`` and double encoding. The query, if any,
+    is kept; a fragment is not.
+    """
+    if value is None or not value.startswith("/") or len(value) > 500:
+        return DEFAULT_RETURN_TO
+    if not value.isascii() or any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value):
+        return DEFAULT_RETURN_TO
+    if "\\" in value or "#" in value:
+        return DEFAULT_RETURN_TO
+    path, _, query = value.partition("?")
+    if unquote(path) != path or _risky(unquote(query)):
+        return DEFAULT_RETURN_TO
+    if path not in RETURN_PATHS and _RETURN_DETAIL.fullmatch(path) is None:
+        return DEFAULT_RETURN_TO
+    return value
+
+
+def _risky(text: str) -> bool:
+    return "\\" in text or any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in text)
+
+
+class PendingAuthorizations:
+    """Authorizations started from the app, waiting for Google's redirect.
+
+    In memory, per process, never written down: one that outlives a restart is
+    simply started again. Keyed by ``state``; :meth:`take` hands one out at most
+    once, and only to the user who started it, within :data:`PENDING_TTL`. Each
+    remembers the page it started from (:func:`safe_return_to`).
+    Thread-safe, since request handlers run on a thread pool.
+    """
+
+    def __init__(self, *, clock: Callable[[], datetime] = utcnow) -> None:
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._pending: dict[str, tuple[int, gmail_oauth.Authorization, datetime, str]] = {}
+
+    def add(
+        self,
+        user_id: int,
+        authorization: gmail_oauth.Authorization,
+        return_to: str | None = None,
+    ) -> None:
+        with self._lock:
+            self._expire()
+            while len(self._pending) >= PENDING_MAX:
+                self._pending.pop(next(iter(self._pending)))
+            self._pending[authorization.state] = (
+                user_id,
+                authorization,
+                self._clock() + PENDING_TTL,
+                safe_return_to(return_to),
+            )
+
+    def take(self, state: str, user_id: int) -> gmail_oauth.Authorization | None:
+        """The authorization ``state`` names, removed; None when unknown, expired, or not theirs."""
+        found = self.take_with_return(state, user_id)
+        return None if found is None else found[0]
+
+    def take_with_return(
+        self, state: str, user_id: int
+    ) -> tuple[gmail_oauth.Authorization, str] | None:
+        """Like :meth:`take`, with the (already checked) page to return to."""
+        with self._lock:
+            self._expire()
+            found = self._pending.pop(state, None)
+        if found is None or found[0] != user_id:
+            return None
+        return found[1], found[3]
+
+    def _expire(self) -> None:
+        now = self._clock()
+        for state in [key for key, (_, _, until, _) in self._pending.items() if until <= now]:
+            del self._pending[state]
+
+
+# --- rows --------------------------------------------------------------------------
+
+
+def list_mailboxes(session: Session, user: User) -> list[Mailbox]:
+    """The user's mailboxes, oldest first."""
+    return list(session.scalars(scoped(user, Mailbox).order_by(Mailbox.id)))
+
+
+def get_mailbox(session: Session, user: User, mailbox_id: int) -> Mailbox:
+    mailbox = get_scoped(session, user, Mailbox, mailbox_id)
+    if mailbox is None:
+        raise MailboxNotFound(f"no mailbox {mailbox_id}")
+    return mailbox
+
+
+def live_mailbox(session: Session, user: User) -> Mailbox | None:
+    """The user's one mailbox that is not disconnected, if any."""
+    return session.scalars(
+        scoped(user, Mailbox).where(Mailbox.status != MailboxStatus.DISABLED).order_by(Mailbox.id)
+    ).first()
+
+
+def connect(
+    session: Session,
+    user: User,
+    email: str,
+    refresh_token: str,
+    *,
+    daily_cap: int,
+    now: datetime | None = None,
+) -> Mailbox:
+    """Record a successful authorization of ``email``: the row ``ok``, its token stored.
+
+    Needs a writer session. The token is written after the row is flushed; if
+    the Keychain refuses, the exception rolls the row back with the transaction.
+    """
+    email = email.strip().lower()
+    live = live_mailbox(session, user)
+    if live is not None and live.email != email:
+        raise OtherMailboxConnected(live.email, email)
+    mailbox = session.scalars(scoped(user, Mailbox).where(Mailbox.email == email)).first()
+    if mailbox is None:
+        mailbox = Mailbox(
+            user_id=user.id,
+            email=email,
+            keychain_ref="",
+            daily_cap=min(max(daily_cap, 0), MAILBOX_HARD_MAX_PER_DAY),
+        )
+        session.add(mailbox)
+        session.flush()
+        mailbox.keychain_ref = token_name(mailbox.id)
+    if mailbox.status is not MailboxStatus.OK:
+        # Signed in again after a gap (#413): a reply may have come meanwhile, so its
+        # follow-ups that start a new conversation wait for a poll that catches up.
+        mailbox.replies_polled_at = None
+    mailbox.status = MailboxStatus.OK
+    mailbox.status_reason = None
+    mailbox.checked_at = now or utcnow()
+    mailbox.generation += 1  # a check of the grant before this one no longer applies
+    session.flush()
+    keychain.set_secret(user.id, mailbox.keychain_ref, refresh_token)
+    log.info("mailbox %d connected", mailbox.id)
+    return mailbox
+
+
+def disconnect(session: Session, user: User, mailbox: Mailbox) -> Mailbox:
+    """Disable ``mailbox`` and forget its token. Its row stays for the campaigns naming it."""
+    keychain.delete_secret(user.id, mailbox.keychain_ref)
+    mailbox.status = MailboxStatus.DISABLED
+    mailbox.status_reason = REASON_DISCONNECTED
+    _disarm(mailbox)  # a mailbox connected again starts disarmed (#277)
+    session.flush()
+    log.info("mailbox %d disconnected", mailbox.id)
+    return mailbox
+
+
+def status_event(mailbox_id: int, user_id: int, status: MailboxStatus, reason: str | None) -> Event:
+    """The ``mailbox.status`` event the banner listens for."""
+    return Event(
+        type=STATUS_EVENT,
+        data={"mailbox_id": mailbox_id, "status": status.value, "reason": reason},
+        user_id=user_id,
+    )
+
+
+# --- arming (#277) -------------------------------------------------------------------
+
+
+def armed(session: Session, user: User, mailbox_id: int) -> MailboxArm | None:
+    """The user's mailbox's arming, read fresh from the database; None when disarmed or
+    not theirs. What the engine asks before each claim, and the sender before each write."""
+    mailbox = session.scalars(
+        scoped(user, Mailbox)
+        .where(Mailbox.id == mailbox_id)
+        .execution_options(populate_existing=True)
+    ).first()
+    return None if mailbox is None else mailbox.arm
+
+
+def arm(
+    session: Session, user: User, mailbox: Mailbox, mode: MailboxArm, *, by: str, now: datetime
+) -> Mailbox:
+    """Arm ``mailbox`` for drafts, or (a separate step) for sends. Needs a writer session.
+
+    Arming for drafts arms a disarmed mailbox, and takes one armed for sends back to
+    drafts only.
+    Arming for sends is refused (:class:`ArmRefused`) unless the mailbox is already
+    armed for drafts and a draft made there has been found by its Message-ID.
+    A disconnected mailbox is never armed.
+    """
+    if mailbox.status is MailboxStatus.DISABLED:
+        raise ArmRefused(f"{mailbox.email} is disconnected; connect it again first")
+    if mode is MailboxArm.DRAFT:
+        if mailbox.arm is not MailboxArm.DRAFT:
+            mailbox.armed_at = mailbox.armed_at or now
+            mailbox.send_armed_at = None
+            mailbox.armed_by = by[:MAILBOX_ARMED_BY_MAX_LENGTH]
+    else:
+        if mailbox.armed_at is None:
+            raise ArmRefused(
+                f"{mailbox.email} is not armed; arm it for drafts first and let a draft be made"
+            )
+        if mailbox.message_id_verified_at is None:
+            recent = recent_test_drafts(session, user, mailbox)
+            if recent and all(row.not_found_at is not None for row in recent):
+                raise ArmRefused(
+                    f"no netkeep test draft was found in the Drafts of {mailbox.email} at the"
+                    " last check; if you discarded it, make a new test draft from a"
+                    " campaign's review"
+                )
+            raise ArmRefused(
+                f"no draft on {mailbox.email} has been found by its Message-ID yet; while it"
+                " is armed for drafts, `serve` checks for its drafts, a campaign's test draft"
+                " and drafts you already sent included (`netkeep gmail status` says why it"
+                " waits)"
+            )
+        if mailbox.send_armed_at is None:
+            mailbox.send_armed_at = now
+            mailbox.armed_by = by[:MAILBOX_ARMED_BY_MAX_LENGTH]
+    session.flush()
+    log.info("mailbox %d armed for %s by %s", mailbox.id, mailbox.arm, personal(mailbox.armed_by))
+    return mailbox
+
+
+TEST_DRAFTS_CHECKED: Final = 3
+"""The most test drafts one drafts check searches for, per mailbox, newest first (#304)."""
+
+
+def recent_test_drafts(session: Session, user: User, mailbox: Mailbox) -> list[TestSend]:
+    """The newest :data:`TEST_DRAFTS_CHECKED` campaign test drafts made on ``mailbox``
+    (#304): a test is always addressed to its mailbox's own address, so that address is
+    what ties a test draft to the mailbox it was made in."""
+    return list(
+        session.scalars(
+            scoped(user, TestSend)
+            .where(
+                TestSend.gmail_draft_id.is_not(None),
+                TestSend.rfc822_message_id.is_not(None),
+                func.lower(TestSend.to_address) == mailbox.email.lower(),
+            )
+            .order_by(TestSend.sent_at.desc(), TestSend.id.desc())
+            .limit(TEST_DRAFTS_CHECKED)
+            .execution_options(populate_existing=True)
+        )
+    )
+
+
+def disarm(session: Session, user: User, mailbox: Mailbox) -> Mailbox:
+    """Disarm ``mailbox``: nothing more is claimed on it from the next claim on. Needs a
+    writer session. What is already claimed and in the sender's hands is not recalled."""
+    _disarm(mailbox)
+    session.flush()
+    log.info("mailbox %d disarmed", mailbox.id)
+    return mailbox
+
+
+def _disarm(mailbox: Mailbox) -> None:
+    mailbox.armed_at = None
+    mailbox.send_armed_at = None
+    mailbox.armed_by = None
+
+
+def record_message_id_verified(
+    session: Session, user: User, mailbox_id: int, *, now: datetime
+) -> bool:
+    """Record that a draft made on the mailbox was found by its Message-ID, once. True when
+    this call recorded it. Needs a writer session."""
+    mailbox = get_scoped(session, user, Mailbox, mailbox_id)
+    if mailbox is None or mailbox.message_id_verified_at is not None:
+        return False
+    mailbox.message_id_verified_at = now
+    session.flush()
+    log.info("mailbox %d: a draft was found by its Message-ID", mailbox_id)
+    return True
+
+
+# --- health ------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class MailboxHealth:
+    """What the guards need to know about a mailbox (spec 11.9; P3-06 reads it).
+
+    ``healthy`` is ``status == ok``. ``reauth_required`` is the one unhealthy
+    state a person fixes by authorizing again; a ``disabled`` mailbox is
+    neither healthy nor waiting for re-authorization.
+    """
+
+    mailbox_id: int
+    healthy: bool
+    reauth_required: bool
+    daily_cap: int
+
+
+def mailbox_health(session: Session, user: User, mailbox_id: int) -> MailboxHealth | None:
+    """The health of the user's mailbox ``mailbox_id``, read fresh, or None if it is not theirs.
+
+    Reads the row from the database on every call, never from the session's
+    identity map, so a status the poll just changed is seen.
+    """
+    mailbox = session.scalars(
+        scoped(user, Mailbox)
+        .where(Mailbox.id == mailbox_id)
+        .execution_options(populate_existing=True)
+    ).first()
+    if mailbox is None:
+        return None
+    return MailboxHealth(
+        mailbox_id=mailbox.id,
+        healthy=mailbox.status is MailboxStatus.OK,
+        reauth_required=mailbox.status is MailboxStatus.REAUTH_REQUIRED,
+        daily_cap=mailbox.daily_cap,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class CheckResult:
+    """What one check found. ``changed`` is whether it moved the status."""
+
+    mailbox_id: int
+    user_id: int
+    status: MailboxStatus
+    reason: str | None
+    changed: bool
+
+
+def check_mailbox(
+    factory: sessionmaker[Session],
+    user_id: int,
+    mailbox_id: int,
+    *,
+    endpoints: gmail_oauth.GoogleEndpoints | None = None,
+    clock: Callable[[], datetime] = utcnow,
+) -> CheckResult | None:
+    """Refresh the mailbox's token; mark it ``reauth_required`` when the grant is dead.
+
+    Dead means a code in :data:`~netkeep.campaigns.gmail_oauth.REAUTH_CODES`
+    or a secret missing from the Keychain; any other failure leaves it as it is.
+
+    Only an ``ok`` mailbox is checked; any other is returned as it is. None when
+    the user or mailbox is gone. Blocking: call it off the event loop.
+    """
+    with session_scope(factory) as session:
+        user = session.get(User, user_id)
+        if user is None:
+            return None
+        mailbox = get_scoped(session, user, Mailbox, mailbox_id)
+        if mailbox is None:
+            return None
+        if mailbox.status is not MailboxStatus.OK:
+            return CheckResult(mailbox.id, user_id, mailbox.status, mailbox.status_reason, False)
+        ref = mailbox.keychain_ref
+        generation = mailbox.generation
+
+    reason: str | None = None
+    try:
+        client = load_client(user_id)
+        token = keychain.get_secret(user_id, ref)
+        if client is None:
+            reason = REASON_CLIENT_MISSING
+        elif token is None:
+            reason = REASON_TOKEN_MISSING
+        else:
+            gmail_oauth.refresh_access_token(client, token, endpoints=endpoints)
+    except gmail_oauth.OAuthUnavailable as exc:
+        log.info("mailbox %d not checked: %s", mailbox_id, personal_exc(exc))
+        return CheckResult(mailbox_id, user_id, MailboxStatus.OK, None, False)
+    except gmail_oauth.OAuthError as exc:
+        if not gmail_oauth.needs_reauthorization(exc):
+            # Refused, but not in a way that says the grant is dead: try again next poll.
+            log.warning("mailbox %d not checked: Google refused (%s)", mailbox_id, exc.code)
+            return CheckResult(mailbox_id, user_id, MailboxStatus.OK, None, False)
+        reason = exc.code
+    except keychain.KeychainUnavailable as exc:
+        log.warning("mailbox %d not checked: %s", mailbox_id, personal_exc(exc))
+        return CheckResult(mailbox_id, user_id, MailboxStatus.OK, None, False)
+
+    return _record(factory, user_id, mailbox_id, generation, reason, clock)
+
+
+def mark_reauth_required(
+    factory: sessionmaker[Session], user_id: int, mailbox_id: int, generation: int, reason: str
+) -> CheckResult | None:
+    """Set the mailbox ``reauth_required`` for ``reason``, as a failed check would.
+
+    ``generation`` is the mailbox's ``generation`` when the caller read its
+    token: a mailbox a person disconnected or re-authorized since then is left
+    alone. None when the user or mailbox is gone. Opens a writer, so call it
+    with no session open.
+    """
+    return _record(factory, user_id, mailbox_id, generation, reason, utcnow)
+
+
+def _record(
+    factory: sessionmaker[Session],
+    user_id: int,
+    mailbox_id: int,
+    generation: int,
+    reason: str | None,
+    clock: Callable[[], datetime],
+) -> CheckResult | None:
+    """Write what a check found: ``checked_at`` when ``reason`` is None, else the pause.
+
+    Only while the mailbox is still ``ok`` at ``generation``, the one the check
+    asked Google about; ``keychain_ref`` cannot tell, since it survives a
+    re-authorization.
+    """
+    with session_scope(factory, write=True) as session:
+        user = session.get(User, user_id)
+        mailbox = None if user is None else get_scoped(session, user, Mailbox, mailbox_id)
+        if mailbox is None:
+            return None
+        if mailbox.status is not MailboxStatus.OK or mailbox.generation != generation:
+            # A person disconnected or re-authorized it while we were asking Google.
+            return CheckResult(mailbox.id, user_id, mailbox.status, mailbox.status_reason, False)
+        if reason is None:
+            mailbox.checked_at = clock()
+            return CheckResult(mailbox.id, user_id, MailboxStatus.OK, None, False)
+        mailbox.status = MailboxStatus.REAUTH_REQUIRED
+        mailbox.status_reason = reason
+        log.warning("mailbox %d needs re-authorization (%s); email steps pause", mailbox.id, reason)
+        return CheckResult(mailbox.id, user_id, mailbox.status, reason, True)
+
+
+class MailboxNotReady(RuntimeError):
+    """The mailbox cannot send: it is not ``ok``, or its secrets are gone. ``code`` says why."""
+
+    def __init__(self, mailbox_id: int, code: str) -> None:
+        super().__init__(f"mailbox {mailbox_id} is not ready to use ({code})")
+        self.mailbox_id = mailbox_id
+        self.code = code
+
+
+def open_gmail(
+    factory: sessionmaker[Session],
+    user_id: int,
+    mailbox_id: int,
+    *,
+    endpoints: gmail_oauth.GoogleEndpoints | None = None,
+    on_status_change: Callable[[CheckResult], None] | None = None,
+    http: Any = None,
+) -> GmailClient:
+    """A :class:`GmailClient` for the user's ``ok`` mailbox (item P3-02).
+
+    The client renews its access token with P3-01's
+    :func:`~netkeep.campaigns.gmail_oauth.refresh_access_token`, from the
+    OAuth client and refresh token in the Keychain. When Gmail or Google
+    refuses the grant, the mailbox goes ``reauth_required`` by the same path as
+    :func:`check_mailbox`, and ``on_status_change`` hears of it (it runs on the
+    calling thread: an async caller hands :func:`status_event` to the loop).
+
+    :class:`MailboxNotFound` when it is not the user's; :class:`MailboxNotReady`
+    when it is not ``ok``, a secret is missing (which marks the mailbox, as a
+    check would), or the Keychain is locked (which does not). Reads a session
+    and closes it before returning.
+    """
+    with session_scope(factory) as session:
+        user = session.get(User, user_id)
+        mailbox = None if user is None else get_scoped(session, user, Mailbox, mailbox_id)
+        if mailbox is None:
+            raise MailboxNotFound(f"no mailbox {mailbox_id}")
+        if mailbox.status is not MailboxStatus.OK:
+            raise MailboxNotReady(mailbox_id, mailbox.status.value)
+        ref = mailbox.keychain_ref
+        generation = mailbox.generation
+
+    def mark(reason: str) -> None:
+        # Left alone if re-authorized (or disconnected) since this client read its
+        # token: the generation has moved, and the new grant is not the one refused.
+        result = mark_reauth_required(factory, user_id, mailbox_id, generation, reason)
+        if result is not None and result.changed and on_status_change is not None:
+            on_status_change(result)
+
+    try:
+        client = load_client(user_id)
+        token = keychain.get_secret(user_id, ref)
+    except keychain.KeychainUnavailable as exc:
+        # Nothing is known about the grant, so nothing is marked (as in a check).
+        raise MailboxNotReady(mailbox_id, REASON_KEYCHAIN_UNAVAILABLE) from exc
+    if client is None:
+        mark(REASON_CLIENT_MISSING)
+        raise MailboxNotReady(mailbox_id, REASON_CLIENT_MISSING)
+    if token is None:
+        mark(REASON_TOKEN_MISSING)
+        raise MailboxNotReady(mailbox_id, REASON_TOKEN_MISSING)
+
+    def refresh() -> str:
+        return gmail_oauth.refresh_access_token(client, token, endpoints=endpoints)
+
+    return GmailClient(
+        refresh,
+        mailbox_id=mailbox_id,
+        on_auth_failure=lambda error: mark(error.code),
+        http=http,
+    )
+
+
+def poll_mailboxes(
+    factory: sessionmaker[Session],
+    *,
+    endpoints: gmail_oauth.GoogleEndpoints | None = None,
+    clock: Callable[[], datetime] = utcnow,
+    user_ids: Collection[int] | None = None,
+) -> list[CheckResult]:
+    """Check every ``ok`` mailbox of every local user, or of just ``user_ids``. Blocking:
+    run it off the event loop."""
+    with session_scope(factory) as session:
+        users = local_users(session)
+        if user_ids is not None:
+            users = [user for user in users if user.id in user_ids]
+        due = [
+            (user.id, mailbox.id)
+            for user in users
+            for mailbox in session.scalars(
+                scoped(user, Mailbox).where(Mailbox.status == MailboxStatus.OK).order_by(Mailbox.id)
+            )
+        ]
+    results: list[CheckResult] = []
+    for user_id, mailbox_id in due:
+        result = check_mailbox(factory, user_id, mailbox_id, endpoints=endpoints, clock=clock)
+        if result is not None:
+            results.append(result)
+    return results
+
+
+IntervalFor = Callable[[int], float]
+"""One user's poll interval in seconds, read at each tick (#464). Raising means "could
+not read it": that user is not polled this tick."""
+
+#: The longest the monitor sleeps between looking at who is due, so a shorter interval a
+#: person just saved applies within a minute.
+MONITOR_TICK_S: Final = 60.0
+
+
+class MailboxMonitor:
+    """The background poll ``netkeep serve`` runs: :func:`poll_mailboxes` every interval.
+
+    Each status change goes out on the bus as ``mailbox.status``, which the
+    banner listens for. The first poll runs one interval after start.
+
+    The interval is per user (#464): ``interval_for`` answers it, and is read at every
+    tick (at most :data:`MONITOR_TICK_S` apart), so a Settings-page edit applies without
+    a restart. A user whose interval cannot be read is skipped and logged, never polled
+    on another user's interval. Without ``interval_for`` every user polls every
+    ``interval_s``.
+    """
+
+    def __init__(
+        self,
+        factory: sessionmaker[Session],
+        bus: EventBus,
+        *,
+        interval_s: float,
+        endpoints: gmail_oauth.GoogleEndpoints | None = None,
+        interval_for: IntervalFor | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
+        if interval_s <= 0:
+            raise ValueError("the mailbox poll interval must be positive")
+        self._factory = factory
+        self._bus = bus
+        self._interval_s = interval_s
+        self._interval_for: IntervalFor = interval_for or (lambda _user_id: interval_s)
+        self._monotonic = monotonic
+        self._endpoints = endpoints
+        self._task: asyncio.Task[None] | None = None
+        self._started_at = monotonic()
+        self._polled: dict[int, float] = {}
+
+    def start(self) -> None:
+        if self._task is None:
+            self._started_at = self._monotonic()
+            self._task = asyncio.get_running_loop().create_task(self._run(), name="mailbox-poll")
+
+    async def stop(self) -> None:
+        if self._task is None:
+            return
+        self._task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await self._task
+        self._task = None
+
+    async def poll_once(self) -> list[CheckResult]:
+        """One poll of every local user's mailboxes, off the loop, then the events for
+        whatever changed."""
+        return await self._poll(None)
+
+    async def poll_due(self) -> list[CheckResult]:
+        """One tick: the users whose own interval has passed since their last poll."""
+        due = await asyncio.to_thread(self._due_users)
+        if not due:
+            return []
+        return await self._poll(due)
+
+    def _due_users(self) -> list[int]:
+        now = self._monotonic()
+        due: list[int] = []
+        with session_scope(self._factory) as session:
+            user_ids = [user.id for user in local_users(session)]
+        for user_id in user_ids:
+            try:
+                interval = self._interval_for(user_id)
+            except Exception:
+                log.exception(
+                    "mailbox poll: could not read the interval of user %d; not polling them"
+                    " this tick",
+                    user_id,
+                )
+                continue
+            if now - self._polled.get(user_id, self._started_at) >= interval:
+                self._polled[user_id] = now
+                due.append(user_id)
+        return due
+
+    async def _poll(self, user_ids: Collection[int] | None) -> list[CheckResult]:
+        results = await asyncio.to_thread(
+            lambda: poll_mailboxes(self._factory, endpoints=self._endpoints, user_ids=user_ids)
+        )
+        for result in results:
+            if result.changed:
+                self._bus.publish(
+                    status_event(result.mailbox_id, result.user_id, result.status, result.reason)
+                )
+        return results
+
+    async def _run(self) -> None:
+        tick = min(self._interval_s, MONITOR_TICK_S)
+        while True:
+            await asyncio.sleep(tick)
+            try:
+                await self.poll_due()
+            except Exception:
+                log.exception("mailbox poll failed; trying again next interval")

@@ -1,4 +1,4 @@
-"""netkeeper.services.connections_sync: a whole connections sync against a fake source.
+"""netkeep.services.connections_sync: a whole connections sync against a fake source.
 
 This is P2-06's "done when", end to end: a fixture-driven full sync creates and
 updates contacts; an incremental sync stops at the first known page; two
@@ -34,12 +34,12 @@ from voyager_pages import (
     Scripted,
 )
 
-from netkeeper.config import BudgetSettings, LinkedInSettings, Settings
-from netkeeper.crm import apply as mapping
-from netkeeper.db import session_scope
-from netkeeper.linkedin.browser import BrowserUnavailable
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.connections import (
+from netkeep.config import BudgetSettings, LinkedInSettings, Settings
+from netkeep.crm import apply as mapping
+from netkeep.db import session_scope
+from netkeep.linkedin.browser import BrowserUnavailable
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.connections import (
     AnswerLost,
     ConnectionsPage,
     ConnectionsSource,
@@ -49,10 +49,10 @@ from netkeeper.linkedin.connections import (
     SyncMode,
     SyncResult,
 )
-from netkeeper.linkedin.observe import ObservationFailed
-from netkeeper.linkedin.pacing import human_delay
-from netkeeper.linkedin.voyager import ConnectionSummary
-from netkeeper.models import (
+from netkeep.linkedin.observe import ObservationFailed
+from netkeep.linkedin.pacing import human_delay
+from netkeep.linkedin.voyager import ConnectionSummary
+from netkeep.models import (
     Contact,
     ContactAlias,
     LinkedInAccount,
@@ -62,22 +62,22 @@ from netkeeper.models import (
     SyncRunTrigger,
     User,
 )
-from netkeeper.scoping import scoped
-from netkeeper.services import budgets, route_breaker, runs
-from netkeeper.services import heat as heat_service
-from netkeeper.services.budgets import ActionClass
-from netkeeper.services.connections_sync import (
+from netkeep.scoping import scoped
+from netkeep.services import budgets, route_breaker, runs
+from netkeep.services import heat as heat_service
+from netkeep.services.budgets import ActionClass
+from netkeep.services.connections_sync import (
     CANCEL_SLICE_S,
     HeatSkipped,
     SessionFlagged,
     SyncRunReport,
     sync_connections,
 )
-from netkeeper.services.linkedin_accounts import ensure_account
-from netkeeper.services.linkedin_session import clear_session_flag, session_flag
-from netkeeper.services.pacing import profiles
-from netkeeper.services.posture import posture, render_summary
-from netkeeper.services.settings_kv import set_setting
+from netkeep.services.linkedin_accounts import ensure_account
+from netkeep.services.linkedin_session import clear_session_flag, session_flag
+from netkeep.services.pacing import profiles
+from netkeep.services.posture import posture, render_summary
+from netkeep.services.settings_kv import set_setting
 
 NOW = datetime(2026, 9, 23, 15, 0, tzinfo=UTC)
 SETTINGS = LinkedInSettings()
@@ -849,7 +849,7 @@ async def test_a_refused_aging_is_on_the_run_and_in_posture(
     assert f"run {report.run_id}" in aging.warnings[0]
     assert aging.notes == ()
     # #340's short report prints every warning in full and only counts notes, so
-    # a refusal that were a note would vanish from what `netkeeper posture` shows.
+    # a refusal that were a note would vanish from what `netkeep posture` shows.
     assert not found.ok
     flat = " ".join(render_summary(found).split())
     assert f"warning: network aging: {' '.join(aging.warnings[0].split())}" in flat

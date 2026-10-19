@@ -90,7 +90,7 @@ export const browserQuery = queryOptions({
 })
 
 /**
- * What netkeeper already knows about Chrome and the session (#181): the last
+ * What netkeep already knows about Chrome and the session (#181): the last
  * preflight's or run's evidence, and the newest run that could not reach Chrome.
  * The server never probes the browser to answer this.
  */
@@ -197,7 +197,7 @@ export function runContactsQuery(runId: number) {
 /**
  * Why a run's visits or answers could not be read (#405): each unreadable or
  * mismatched enrichment visit with its contact and reason code, and each answer a
- * connections sync lost. Fixed codes and netkeeper's own contacts, nothing from the page.
+ * connections sync lost. Fixed codes and netkeep's own contacts, nothing from the page.
  */
 export function runDiagnosticsQuery(runId: number) {
   return queryOptions({
@@ -215,10 +215,10 @@ export function runDiagnosticsQuery(runId: number) {
   })
 }
 
-// --- netkeeper's Chrome (#599) -------------------------------------------------------------
+// --- netkeep's Chrome (#599) -------------------------------------------------------------
 
 /**
- * Ask `serve` to start netkeeper's Chrome, or open this page in it when it's running
+ * Ask `serve` to start netkeep's Chrome, or open this page in it when it's running
  * (#636's launcher). It answers `202` with a task id at once; how the launch went
  * arrives as `browser.launch` on the event stream. Never `first_run`: that's setup's.
  */
@@ -338,7 +338,7 @@ export async function unpauseSchedule(): Promise<Schedule> {
 // --- the session flag and heat: confirmed manual clears (#181) ---------------------------
 
 /**
- * Clear the session flag: `netkeeper linkedin clear-flag`. Sends the flag the
+ * Clear the session flag: `netkeep linkedin clear-flag`. Sends the flag the
  * person was shown; the server clears only that one and answers 409 if it is gone
  * or changed since.
  */

@@ -1,5 +1,5 @@
 [project]
-name = "netkeeper"
+name = "netkeep"
 version = "0.0.1"
 description = "Keep your professional network warm: LinkedIn contact extractor, local CRM, and reconnect sequences over Gmail and LinkedIn."
 readme = "README.md"
@@ -38,14 +38,14 @@ dependencies = [
   # The Gmail API client (spec 6, 11.5; P3-02). Discovery is the bundled static
   # document, so building the service never fetches one.
   "google-api-python-client>=2.150",
-  # Imported directly by netkeeper/campaigns/gmail.py, not only through the
+  # Imported directly by netkeep/campaigns/gmail.py, not only through the
   # client above. The transport that never resends a write (WriteOnceHttp)
   # subclasses httplib2's; tests/test_gmail_transport.py pins the resend it undoes.
   "google-auth>=2.30",
   "google-auth-httplib2>=0.2",
   "httplib2>=0.22",
   # A recipient domain written in Unicode goes into To as IDNA 2008 (#280). Already
-  # installed through anyio and requests; imported directly by netkeeper/campaigns/compose.py.
+  # installed through anyio and requests; imported directly by netkeep/campaigns/compose.py.
   "idna>=3.7",
   # Reads the old mailing tool's workbook for the history import (#65). Read-only,
   # data_only: a formula's cached value, never one evaluated.
@@ -70,7 +70,9 @@ dev = [
 ]
 
 [project.scripts]
-netkeeper = "netkeeper.cli:app"
+netkeep = "netkeep.cli:app"
+# The old name, for one release after the rename (#661): a note on stderr, then the same CLI.
+netkeeper = "netkeep.cli:legacy_main"
 
 [project.urls]
 Homepage = "https://github.com/dsmorgan/netkeeper"
@@ -81,10 +83,10 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["netkeeper"]
+packages = ["netkeep"]
 
 # The built UI ships inside the package (#596), so an install needs no Node or pnpm.
-# hatch_build.py adds frontend/dist to the wheel as netkeeper/web/ui (and fails the build
+# hatch_build.py adds frontend/dist to the wheel as netkeep/web/ui (and fails the build
 # if it is missing); frontend/dist is gitignored, so the sdist lists it as an artifact.
 # CI and a release run `make build-ui` before `uv build`. An editable install (make
 # install) skips it and serves frontend/dist in place.
@@ -120,7 +122,7 @@ ignore = ["ANN401", "S101", "RUF012"]
 python_version = "3.12"
 strict = true
 warn_unreachable = true
-files = ["netkeeper", "tests", "scripts"]
+files = ["netkeep", "tests", "scripts"]
 
 [[tool.mypy.overrides]]
 module = [
@@ -136,7 +138,7 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-filterwarnings = ["error::DeprecationWarning:netkeeper.*"]
+filterwarnings = ["error::DeprecationWarning:netkeep.*"]
 markers = [
   "slow: seconds of CPU on purpose (the week simulations); skipped by `make test-fast`, and given tests/time_limit.py's longer limit",
   "wall_clock: the body runs with automatic garbage collection held, for a test whose limit is an asyncio or SQLite timeout (tests/time_limit.py, #472)",
@@ -144,7 +146,7 @@ markers = [
 ]
 
 [tool.towncrier]
-package = "netkeeper"
+package = "netkeep"
 directory = "changelog.d"
 filename = "CHANGELOG.md"
 start_string = "<!-- towncrier release notes start -->\n"

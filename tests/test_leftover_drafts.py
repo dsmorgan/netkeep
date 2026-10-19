@@ -1,4 +1,4 @@
-"""``GET /gmail/leftover-drafts``: drafts netkeeper left in Gmail, for cleanup by hand (#543).
+"""``GET /gmail/leftover-drafts``: drafts netkeep left in Gmail, for cleanup by hand (#543).
 
 One test per kind of row (discarded, ended, waiting, test), the flags and the order, the
 rows that are never listed, another user's rows, and no message text in the logs. The
@@ -19,9 +19,9 @@ from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from netkeeper.campaigns.compose import message_id_for
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.campaigns.compose import message_id_for
+from netkeep.db import session_scope
+from netkeep.models import (
     Campaign,
     DoNotSendAddress,
     DoNotSendReason,
@@ -35,9 +35,9 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.scoping import get_scoped
-from netkeeper.services import leftover_drafts as service
-from netkeeper.services import mailboxes as mailbox_service
+from netkeep.scoping import get_scoped
+from netkeep.services import leftover_drafts as service
+from netkeep.services import mailboxes as mailbox_service
 
 AT = datetime(2026, 9, 16, 15, 0, tzinfo=UTC)
 SUBJECT = "Subject-marker-543"

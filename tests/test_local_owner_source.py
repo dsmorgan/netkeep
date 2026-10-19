@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-PACKAGE = Path(__file__).resolve().parents[1] / "netkeeper"
+PACKAGE = Path(__file__).resolve().parents[1] / "netkeep"
 HOME = PACKAGE / "services" / "users.py"
 QUERY = re.compile(r"User\.kind\s*==\s*UserKind\.LOCAL")
 

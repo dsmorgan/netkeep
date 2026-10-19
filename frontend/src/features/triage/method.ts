@@ -49,7 +49,7 @@ export const DECISION_MEANINGS: readonly DecisionMeaning[] = [
     short: 'A connection you have never actually spoken with.',
     long:
       'A connection you have never actually spoken with. It is what is left over after you ' +
-      'mark the people you have met, so netkeeper never decides it from a quiet message ' +
+      'mark the people you have met, so netkeep never decides it from a quiet message ' +
       'history — only you know.',
   },
   {

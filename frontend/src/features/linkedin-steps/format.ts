@@ -25,7 +25,7 @@ export const WAITS_FOR_PREFILL = 'Waits for you to prefill.'
 
 /** The queue's auto-send banner: only steps set to Auto-send send on their own. */
 export const AUTO_SEND_ON_NOTE =
-  'netkeeper sends LinkedIn messages itself for steps set to Auto-send. Steps set to Prefill still wait for you. See Settings, Posture.'
+  'netkeep sends LinkedIn messages itself for steps set to Auto-send. Steps set to Prefill still wait for you. See Settings, Posture.'
 
 /** A due step your sending hours hold, as a sentence. */
 export function heldText(until: string): string {
@@ -42,13 +42,13 @@ export const STALE_AFTER_DAYS = 3
 /**
  * Each refusal reason the claim can give, in plain words. The claim's own
  * (`Refusal`), the engine's skips, and the guards' reasons
- * (`netkeeper/services/linkedin_steps.py`, `campaign_engine.py`, `campaign_guards.py`).
+ * (`netkeep/services/linkedin_steps.py`, `campaign_engine.py`, `campaign_guards.py`).
  * A reason not here is shown as the backend sent it.
  */
 export const REASON_TEXT: Readonly<Record<string, string>> = {
-  run_refused: "netkeeper couldn't start the prefill run, so nothing was typed in Chrome",
+  run_refused: "netkeep couldn't start the prefill run, so nothing was typed in Chrome",
   linkedin_inbox_stale:
-    "held until the inbox is read: netkeeper hasn't read your LinkedIn inbox recently enough to know about replies",
+    "held until the inbox is read: netkeep hasn't read your LinkedIn inbox recently enough to know about replies",
   run_in_progress: 'another LinkedIn run is going; wait for it to finish',
   prefill_open: 'another prefill is open: send or discard it first',
   outside_active_hours: "it's outside your LinkedIn active hours",
@@ -167,12 +167,12 @@ export type AutoSendOutlook = NonNullable<Schedule['auto_send']>
 /**
  * Why the next auto-send check would send nothing, in plain words: one sentence, or its
  * start when the time it ends follows. The backend's `Wait` codes
- * (`netkeeper/services/auto_send_outlook.py`); a code not here is shown spaced out.
+ * (`netkeep/services/auto_send_outlook.py`); a code not here is shown spaced out.
  */
 export const AUTO_SEND_WAIT_TEXT: Readonly<Record<string, string>> = {
   auto_send_off: 'Auto-send is off in Settings.',
   not_scheduled:
-    "The auto-send check isn't scheduled yet. netkeeper serve schedules it when it starts.",
+    "The auto-send check isn't scheduled yet. netkeep serve schedules it when it starts.",
   disarmed: 'Scheduled runs are off, so the auto-send check sends nothing.',
   paused: 'Scheduled runs are paused, so the auto-send check sends nothing.',
   session_flagged:

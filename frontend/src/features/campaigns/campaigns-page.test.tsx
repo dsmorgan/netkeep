@@ -214,8 +214,8 @@ describe('campaign builder', () => {
     // Both modes, each with what it does, and neither picked for you.
     expect(prefill).not.toBeChecked()
     expect(auto).not.toBeChecked()
-    expect(group.getByText(/Waits for you: netkeeper types the message/)).toBeVisible()
-    expect(group.getByText(/Sends on its own: netkeeper types the message/)).toBeVisible()
+    expect(group.getByText(/Waits for you: netkeep types the message/)).toBeVisible()
+    expect(group.getByText(/Sends on its own: netkeep types the message/)).toBeVisible()
     const save = screen.getByRole('button', { name: 'Save draft' })
     expect(save).toBeDisabled()
     expect(screen.getByText(/Pick Prefill or Auto-send for each LinkedIn step\./)).toBeVisible()
@@ -719,7 +719,7 @@ describe('a campaign with a LinkedIn step (#383)', () => {
   })
 
   it.each([
-    [true, 'Sends on its own. netkeeper clicks Send itself.'],
+    [true, 'Sends on its own. netkeep clicks Send itself.'],
     [false, 'Auto-send step, but auto-send is off in Settings, so it waits for you to prefill it.'],
   ])('says whether an auto-send step sends itself (flag %s)', async (on, text) => {
     mockFetch(

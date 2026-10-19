@@ -1,13 +1,13 @@
 """The inbox poll over a real Chrome, against a loopback replica of ``/messaging/`` (#438).
 
-Opt in with ``NETKEEPER_BROWSER_TESTS=1``, same as every other file under
-``tests/smoke/``, and point ``NETKEEPER_CDP_URL`` at an isolated Chrome on an explicit,
+Opt in with ``NETKEEP_BROWSER_TESTS=1``, same as every other file under
+``tests/smoke/``, and point ``NETKEEP_CDP_URL`` at an isolated Chrome on an explicit,
 unused port (never 9222). The only site is the replica this file serves for itself.
 Every person, message and id in it comes from :mod:`messaging_pages`' invented
 fixtures; nothing is read from, or sent to, linkedin.com.
 
-The real :class:`~netkeeper.linkedin.page_inbox.PageInbox` runs through a real
-:class:`~netkeeper.linkedin.browser.BrowserRun`. The replica's page script plays
+The real :class:`~netkeep.linkedin.page_inbox.PageInbox` runs through a real
+:class:`~netkeep.linkedin.browser.BrowserRun`. The replica's page script plays
 LinkedIn's: on load it fetches the conversation list, and when its *list pane* scrolls
 near the bottom it fetches the next older page. A thread's page fetches its own
 messages. Each answer is the fixture's own body, served from the url the fixture builds.
@@ -50,19 +50,19 @@ import messaging_pages as mp
 import pytest
 from inbox_site import conv, people
 
-from netkeeper.linkedin.browser import AttachBrowserProvider
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.inbox import InboxDelta, InboxJobSpec, InboxReadStopped
-from netkeeper.linkedin.messaging_shapes import MESSAGING_PAGE_PATH
-from netkeeper.linkedin.pacing import ScrollProfile
-from netkeeper.linkedin.page_inbox import PageInbox
+from netkeep.linkedin.browser import AttachBrowserProvider
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.inbox import InboxDelta, InboxJobSpec, InboxReadStopped
+from netkeep.linkedin.messaging_shapes import MESSAGING_PAGE_PATH
+from netkeep.linkedin.pacing import ScrollProfile
+from netkeep.linkedin.page_inbox import PageInbox
 
 pytestmark = pytest.mark.skipif(
-    os.environ.get("NETKEEPER_BROWSER_TESTS") != "1",
-    reason="browser smoke suite: start Chrome, then set NETKEEPER_BROWSER_TESTS=1",
+    os.environ.get("NETKEEP_BROWSER_TESTS") != "1",
+    reason="browser smoke suite: start Chrome, then set NETKEEP_BROWSER_TESTS=1",
 )
 
-CDP_URL = os.environ.get("NETKEEPER_CDP_URL", "http://127.0.0.1:9222")
+CDP_URL = os.environ.get("NETKEEP_CDP_URL", "http://127.0.0.1:9222")
 
 T0 = datetime.fromtimestamp(mp.T0 / 1000, tz=UTC)
 
@@ -383,7 +383,7 @@ async def test_older_pages_load_and_the_read_is_complete_against_since(origin: s
     assert len(opened.messages) == 3
     assert source.threads_opened == 1
 
-    # What the page asked for, and nothing netkeeper added: the list, the first older page
+    # What the page asked for, and nothing netkeep added: the list, the first older page
     # only (``since`` was reached there, before the list's end: the second older page was
     # never requested), then the thread's answer.
     older = site.pages[MESSAGING_PAGE_PATH]["older"]

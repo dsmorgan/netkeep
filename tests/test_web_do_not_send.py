@@ -9,11 +9,11 @@ from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.crm import do_not_send
-from netkeeper.db import session_scope
-from netkeeper.models import DoNotSendReason, User, UserKind
+from netkeep.crm import do_not_send
+from netkeep.db import session_scope
+from netkeep.models import DoNotSendReason, User, UserKind
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 
 
 def _seed(app: FastAPI) -> dict[str, int]:

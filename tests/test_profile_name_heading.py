@@ -1,7 +1,7 @@
 """#552: the profile's name from the top card's one ``h2`` when the page has no ``h1``.
 
 The CP8d captures showed LinkedIn's profile with no ``h1``: the name is an ``h2`` with
-hashed classes. :meth:`netkeeper.linkedin.browser.BrowserRun._name_heading` finds it from
+hashed classes. :meth:`netkeep.linkedin.browser.BrowserRun._name_heading` finds it from
 the verified Contact info link, and the chip comparison stays exact. Invented pages
 (:func:`messaging_pages.profile_top_card_html`), the prefill's own fakes.
 """
@@ -20,7 +20,7 @@ from messaging_pages import (
 )
 from test_prefill_page import assert_no_keys, prefill
 
-from netkeeper.linkedin.messaging import MessageOutcomeKind
+from netkeep.linkedin.messaging import MessageOutcomeKind
 
 MBA = f"{ZEPHYRINE.name}, MBA"
 
@@ -41,7 +41,7 @@ def _h2_site(chip: str = ZEPHYRINE.name, **profile: Any) -> MessagingSite:
 async def test_an_h2_only_profile_checks_the_chip_by_the_top_cards_h2(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    with caplog.at_level("INFO", logger="netkeeper.linkedin.browser"):
+    with caplog.at_level("INFO", logger="netkeep.linkedin.browser"):
         ran = await prefill(_h2_site())
     assert ran.kind is MessageOutcomeKind.PREFILLED, ran.result
     assert ran.result.outcome.recipient_name_checked is True
@@ -150,7 +150,7 @@ async def test_an_h2_after_the_contact_info_link_is_not_the_name(
         site.profile_html = site.profile_html.replace(
             "</span></a>", f"</span></a><h2>{ZEPHYRINE.name}</h2>", 1
         )
-    with caplog.at_level("DEBUG", logger="netkeeper.linkedin.browser"):
+    with caplog.at_level("DEBUG", logger="netkeep.linkedin.browser"):
         ran = await prefill(site)
     assert ran.kind is MessageOutcomeKind.PREFILLED, ran.result
     assert ran.result.outcome.recipient_name_checked is False
@@ -160,7 +160,7 @@ async def test_an_h2_after_the_contact_info_link_is_not_the_name(
 async def test_more_than_one_h2_before_the_contact_info_link_has_its_own_reason(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    with caplog.at_level("DEBUG", logger="netkeeper.linkedin.browser"):
+    with caplog.at_level("DEBUG", logger="netkeep.linkedin.browser"):
         ran = await prefill(_h2_site(top_card_h2s=2))
     assert ran.result.outcome.recipient_name_checked is False
     assert "prefill: no name heading (the top card holds more than one h2)" in caplog.text

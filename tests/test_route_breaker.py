@@ -1,10 +1,10 @@
-"""netkeeper.services.route_breaker: the route-changed breaker (spec 9.3, ADR 0006; #189 item 1).
+"""netkeep.services.route_breaker: the route-changed breaker (spec 9.3, ADR 0006; #189 item 1).
 
 The core-side half of the seam: this module opens sessions and reads/writes
-``settings_kv``, the same shape :mod:`netkeeper.services.heat` uses.
+``settings_kv``, the same shape :mod:`netkeep.services.heat` uses.
 ``tests/test_connections_sync.py`` exercises it end to end through a real
 connections sync; ``tests/test_scheduler.py`` exercises the scheduler's own
-gate that reads :func:`~netkeeper.services.route_breaker.tripped`. This file
+gate that reads :func:`~netkeep.services.route_breaker.tripped`. This file
 is the module on its own.
 """
 
@@ -17,10 +17,10 @@ import factories
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.db import session_scope
-from netkeeper.models import SyncRunKind, User
-from netkeeper.services import route_breaker
-from netkeeper.services.settings_kv import get_setting, set_setting
+from netkeep.db import session_scope
+from netkeep.models import SyncRunKind, User
+from netkeep.services import route_breaker
+from netkeep.services.settings_kv import get_setting, set_setting
 
 NOW = datetime(2026, 9, 24, 12, 0, tzinfo=UTC)
 ACCOUNT = 1

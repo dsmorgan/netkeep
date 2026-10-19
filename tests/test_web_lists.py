@@ -11,12 +11,12 @@ from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.crm.filters import MAX_LIST_EXPANSIONS
-from netkeeper.db import session_scope
-from netkeeper.models import ContactList, ContactMet, User, UserKind
-from netkeeper.scoping import get_scoped, scoped_delete
+from netkeep.crm.filters import MAX_LIST_EXPANSIONS
+from netkeep.db import session_scope
+from netkeep.models import ContactList, ContactMet, User, UserKind
+from netkeep.scoping import get_scoped, scoped_delete
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 
 
 @pytest.fixture

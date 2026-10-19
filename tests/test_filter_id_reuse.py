@@ -9,18 +9,18 @@ import factories
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.crm import lists as list_service
-from netkeeper.crm.filters import (
+from netkeep.crm import lists as list_service
+from netkeep.crm.filters import (
     FilterTree,
     compile_where,
     describe,
     parse_filter,
     retire_ids,
 )
-from netkeeper.db import session_scope
-from netkeeper.models import Campaign, CampaignStatus, Contact, ListKind, User
-from netkeeper.scoping import scoped
-from netkeeper.services import campaigns as service
+from netkeep.db import session_scope
+from netkeep.models import Campaign, CampaignStatus, Contact, ListKind, User
+from netkeep.scoping import scoped
+from netkeep.services import campaigns as service
 
 
 @pytest.fixture

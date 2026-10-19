@@ -1,16 +1,16 @@
-"""``netkeeper preflight`` clears the session flag on a live session (#154), and its
+"""``netkeep preflight`` clears the session flag on a live session (#154), and its
 #168-review fix (F1): only a ``LoggedOut`` flag auto-clears. A ``Checkpoint`` flag
 never does -- ``li_at`` being present is not proof a checkpoint is resolved -- and is
-only ever cleared by hand, with ``netkeeper linkedin clear-flag`` (also tested here).
+only ever cleared by hand, with ``netkeep linkedin clear-flag`` (also tested here).
 
 #144 gave `linkedin.session_flag` a writer (`flag_session`, on `Checkpoint` and
 `LoggedOut`) and a way back (`clear_session_flag`), but nothing called the second
-one -- logging back in to the netkeeper Chrome profile never cleared the banner
+one -- logging back in to the netkeep Chrome profile never cleared the banner
 condition. Preflight is the natural place to notice for a `LoggedOut` flag: it
 already learns whether the profile holds a live session (spec 9.1).
 
 `linkedin/preflight.py` may not open a database session (spec 9.10, ADR 0005), so
-the clearing happens in the CLI (`netkeeper.cli._clear_session_flag_after_login`) --
+the clearing happens in the CLI (`netkeep.cli._clear_session_flag_after_login`) --
 this module tests it at the command level, the way a person actually exercises it.
 
 Fixtures here reuse `tests/test_preflight.py`'s cookie-jar helpers; nothing below is
@@ -32,21 +32,21 @@ from test_preflight import FAKE_CSRF_VALUE, cookie, make_context, make_provider,
 from time_limit import Stopwatch
 from typer.testing import CliRunner
 
-from netkeeper import migrations
-from netkeeper.cli import app as cli
-from netkeeper.config import Settings
-from netkeeper.db import (
+from netkeep import migrations
+from netkeep.cli import app as cli
+from netkeep.config import Settings
+from netkeep.db import (
     SQLITE_BUSY_TIMEOUT_MS,
     database_url,
     make_engine,
     make_session_factory,
     session_scope,
 )
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.models import User
-from netkeeper.scoping import install_scope_guard
-from netkeeper.services.linkedin_session import SessionFlag, flag_session, session_flag
-from netkeeper.services.users import ensure_local_user
+from netkeep.linkedin.classify import Outcome
+from netkeep.models import User
+from netkeep.scoping import install_scope_guard
+from netkeep.services.linkedin_session import SessionFlag, flag_session, session_flag
+from netkeep.services.users import ensure_local_user
 
 CHECKPOINT_URL = "https://www.linkedin.com/checkpoint/challenge/?ctx=abc123"
 LOGIN_WALL_URL = "https://www.linkedin.com/uas/login?session_redirect=abc"
@@ -54,12 +54,12 @@ LOGIN_WALL_URL = "https://www.linkedin.com/uas/login?session_redirect=abc"
 
 @pytest.fixture
 def cli_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[sessionmaker[Session]]:
-    """A migrated database with the local user, pointed to by ``NETKEEPER_DATABASE_URL``.
+    """A migrated database with the local user, pointed to by ``NETKEEP_DATABASE_URL``.
 
     Same shape as ``tests/test_cli_posture_rehearse.py``'s fixture of the same name.
     """
     url = database_url(tmp_path)
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     engine = make_engine(url)
     migrations.upgrade(engine)
     factory = make_session_factory(engine)
@@ -90,7 +90,7 @@ def _current_flag(factory: sessionmaker[Session]) -> Outcome | None:
 
 
 def _logged_in(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("netkeeper.cli.AttachBrowserProvider", lambda cdp_url, **_: make_provider())
+    monkeypatch.setattr("netkeep.cli.AttachBrowserProvider", lambda cdp_url, **_: make_provider())
 
 
 # --- F1: only LoggedOut auto-clears; Checkpoint never does -----------------------
@@ -121,7 +121,7 @@ def test_preflight_leaves_a_standing_checkpoint_flag_in_place(
 
     assert result.exit_code == 0, result.output
     assert "leaving the checkpoint session flag in place" in result.output
-    assert "netkeeper linkedin clear-flag" in result.output
+    assert "netkeep linkedin clear-flag" in result.output
     assert _current_flag(cli_db) is Outcome.CHECKPOINT, "a checkpoint flag must survive untouched"
 
 
@@ -140,9 +140,7 @@ def test_preflight_with_an_unreadable_cookie_jar_does_not_attempt_to_clear(
     _flag_a_checkpoint(cli_db)
     context = make_context()
     context.cookie_error = RuntimeError("Protocol error")
-    monkeypatch.setattr(
-        "netkeeper.cli.AttachBrowserProvider", lambda cdp_url: provider_for(context)
-    )
+    monkeypatch.setattr("netkeep.cli.AttachBrowserProvider", lambda cdp_url: provider_for(context))
 
     result = CliRunner().invoke(cli, ["preflight"])
 
@@ -175,7 +173,7 @@ def test_preflight_finding_no_session_does_not_set_the_flag(
 ) -> None:
     """Preflight's cookie-jar read is weaker evidence than a classified LoggedOut."""
     no_session = make_provider(cookies=[cookie("JSESSIONID", FAKE_CSRF_VALUE)])
-    monkeypatch.setattr("netkeeper.cli.AttachBrowserProvider", lambda cdp_url: no_session)
+    monkeypatch.setattr("netkeep.cli.AttachBrowserProvider", lambda cdp_url: no_session)
 
     result = CliRunner().invoke(cli, ["preflight"])
 
@@ -190,7 +188,7 @@ def test_preflight_finding_no_session_leaves_a_standing_checkpoint_flag_alone(
     """NO_SESSION is not LOGGED_IN's opposite: it must not clear the flag either."""
     _flag_a_checkpoint(cli_db)
     no_session = make_provider(cookies=[cookie("JSESSIONID", FAKE_CSRF_VALUE)])
-    monkeypatch.setattr("netkeeper.cli.AttachBrowserProvider", lambda cdp_url: no_session)
+    monkeypatch.setattr("netkeep.cli.AttachBrowserProvider", lambda cdp_url: no_session)
 
     result = CliRunner().invoke(cli, ["preflight"])
 
@@ -206,7 +204,7 @@ def test_preflight_finding_no_session_leaves_a_standing_logged_out_flag_alone(
 ) -> None:
     _flag_logged_out(cli_db)
     no_session = make_provider(cookies=[cookie("JSESSIONID", FAKE_CSRF_VALUE)])
-    monkeypatch.setattr("netkeeper.cli.AttachBrowserProvider", lambda cdp_url: no_session)
+    monkeypatch.setattr("netkeep.cli.AttachBrowserProvider", lambda cdp_url: no_session)
 
     result = CliRunner().invoke(cli, ["preflight"])
 
@@ -220,7 +218,7 @@ def test_preflight_finding_no_session_leaves_a_standing_logged_out_flag_alone(
 def test_preflight_with_no_database_at_all_still_prints_the_report(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """No ``cli_db`` fixture here: this is a fresh install, before `netkeeper db upgrade`.
+    """No ``cli_db`` fixture here: this is a fresh install, before `netkeep db upgrade`.
 
     Preflight answered from the browser alone before this flag existed, and a
     successful attach + live session must still print and exit 0 -- there being
@@ -233,8 +231,8 @@ def test_preflight_with_no_database_at_all_still_prints_the_report(
     database); only the database file is the thing this test pins.
     """
     data_dir = tmp_path / "fresh-install"
-    monkeypatch.setenv("NETKEEPER_DATA", str(data_dir))
-    monkeypatch.delenv("NETKEEPER_DATABASE_URL", raising=False)
+    monkeypatch.setenv("NETKEEP_DATA", str(data_dir))
+    monkeypatch.delenv("NETKEEP_DATABASE_URL", raising=False)
     _logged_in(monkeypatch)
 
     result = CliRunner().invoke(cli, ["preflight"])
@@ -256,7 +254,7 @@ def test_a_database_file_that_exists_but_has_no_schema_is_also_silent(
     """
     db_path = tmp_path / "netkeeper.sqlite3"
     sqlite3.connect(db_path).close()  # a real, valid, but schema-less sqlite file
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", f"sqlite:///{db_path}")
     _logged_in(monkeypatch)
 
     result = CliRunner().invoke(cli, ["preflight"])
@@ -274,12 +272,12 @@ def test_an_unexpected_database_error_is_logged_and_printed_but_stays_exit_zero(
     failing to clear an advisory flag is not a reason to fail a preflight that just
     confirmed the browser and the session are fine.
     """
-    caplog.set_level(logging.WARNING, logger="netkeeper.cli")
+    caplog.set_level(logging.WARNING, logger="netkeep.cli")
 
     def raise_locked(*_args: object, **_kwargs: object) -> None:
         raise OperationalError("SELECT 1", {}, sqlite3.OperationalError("database is locked"))
 
-    monkeypatch.setattr("netkeeper.cli.session_flag", raise_locked)
+    monkeypatch.setattr("netkeep.cli.session_flag", raise_locked)
     _logged_in(monkeypatch)
 
     result = CliRunner().invoke(cli, ["preflight"])
@@ -304,7 +302,7 @@ def test_an_unrelated_exception_while_clearing_is_never_swallowed(
     def raise_unrelated(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("not a database problem at all")
 
-    monkeypatch.setattr("netkeeper.cli.session_flag", raise_unrelated)
+    monkeypatch.setattr("netkeep.cli.session_flag", raise_unrelated)
     _logged_in(monkeypatch)
 
     result = CliRunner().invoke(cli, ["preflight"])
@@ -320,10 +318,10 @@ def test_an_unrelated_exception_while_clearing_is_never_swallowed(
 def test_posture_shows_a_logged_out_flag_cleared_after_a_preflight_that_found_a_session(
     cli_db: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`netkeeper posture`'s own ``session flag`` row, after the CLI command that clears it.
+    """`netkeep posture`'s own ``session flag`` row, after the CLI command that clears it.
 
     A separate process re-reading the persisted flag is the real-world shape of
-    this: run `netkeeper preflight` once to log back in, then `netkeeper posture`
+    this: run `netkeep preflight` once to log back in, then `netkeep posture`
     later to check the banner is gone -- exactly what #154's "done when" asks for.
     """
     _flag_logged_out(cli_db)
@@ -363,10 +361,10 @@ def test_postures_checkpoint_advice_names_the_clear_flag_command(
 
     result = CliRunner().invoke(cli, ["posture", "--no-probe"])
 
-    assert "netkeeper linkedin clear-flag" in result.output
+    assert "netkeep linkedin clear-flag" in result.output
 
 
-# --- netkeeper linkedin clear-flag ------------------------------------------------
+# --- netkeep linkedin clear-flag ------------------------------------------------
 
 
 def test_clear_flag_with_nothing_set_says_so_and_changes_nothing(
@@ -394,7 +392,7 @@ def test_clear_flag_logs_the_flag_it_cleared(
     """#364 S1: the command clears through the same function as the web page, log line and all."""
     _flag_a_checkpoint(cli_db)
 
-    with caplog.at_level(logging.WARNING, logger="netkeeper.services.linkedin_session"):
+    with caplog.at_level(logging.WARNING, logger="netkeep.services.linkedin_session"):
         result = CliRunner().invoke(cli, ["linkedin", "clear-flag", "--yes"])
 
     assert result.exit_code == 0, result.output
@@ -441,8 +439,8 @@ def test_clear_flag_without_a_database_does_not_exit_zero(
     something, so -- like every other write command in this CLI, `tags run-rules`
     among them -- it makes no special allowance for a database that was never set
     up; it fails the same way any of them would."""
-    monkeypatch.setenv("NETKEEPER_DATA", str(tmp_path / "fresh-install"))
-    monkeypatch.delenv("NETKEEPER_DATABASE_URL", raising=False)
+    monkeypatch.setenv("NETKEEP_DATA", str(tmp_path / "fresh-install"))
+    monkeypatch.delenv("NETKEEP_DATABASE_URL", raising=False)
 
     result = CliRunner().invoke(cli, ["linkedin", "clear-flag", "--yes"])
 
@@ -455,7 +453,7 @@ def test_clear_flag_without_a_database_does_not_exit_zero(
 def test_clear_flag_prompt_does_not_hold_the_write_lock(
     cli_db: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A concurrent writer -- standing in for a `netkeeper serve` process -- must
+    """A concurrent writer -- standing in for a `netkeep serve` process -- must
     succeed while the confirmation prompt is on screen. Before the #170 item 1 fix,
     `clear-flag` opened its own writer (`BEGIN IMMEDIATE`) before ever asking, so a
     second engine's writer below would have blocked behind it for the whole
@@ -534,7 +532,7 @@ def test_preflight_with_a_checkpoint_flag_never_opens_a_writer(
         writes.append(write)
         return session_scope(factory, write=write)
 
-    monkeypatch.setattr("netkeeper.cli.session_scope", recording_session_scope)
+    monkeypatch.setattr("netkeep.cli.session_scope", recording_session_scope)
 
     result = CliRunner().invoke(cli, ["preflight"])
 
@@ -573,9 +571,7 @@ def test_preflight_re_checks_the_flag_before_clearing_it(
             _flag_a_checkpoint(cli_db)
         return result
 
-    monkeypatch.setattr(
-        "netkeeper.cli.session_flag", session_flag_that_changes_after_the_first_read
-    )
+    monkeypatch.setattr("netkeep.cli.session_flag", session_flag_that_changes_after_the_first_read)
 
     result = CliRunner().invoke(cli, ["preflight"])
 

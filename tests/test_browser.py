@@ -14,8 +14,8 @@ from typing import cast
 import pytest
 from browser_fakes import FakeBrowser, FakeConnector, FakeContext, FakePage
 
-from netkeeper.linkedin import browser
-from netkeeper.linkedin.browser import (
+from netkeep.linkedin import browser
+from netkeep.linkedin.browser import (
     ATTACH,
     SINGLE_ACCOUNT_KEY,
     ActivityLocks,
@@ -25,7 +25,7 @@ from netkeeper.linkedin.browser import (
     BrowserRun,
     BrowserUnavailable,
 )
-from netkeeper.linkedin.pacing import RestPlan, RestStep, ScrollPlan, ScrollStep
+from netkeep.linkedin.pacing import RestPlan, RestStep, ScrollPlan, ScrollStep
 
 CDP_URL = "http://127.0.0.1:9222"
 LOCAL_PAGE = "http://127.0.0.1:8123/replica/profile.html"
@@ -356,7 +356,7 @@ async def test_one_registry_gates_every_provider_that_shares_it() -> None:
 
 @pytest.mark.wall_clock  # BUSY_TIMEOUT_S bounds an instant refusal (#472)
 async def test_a_second_registry_is_gated_by_the_file_lock() -> None:
-    """Issue #153: a registry of its own is what `netkeeper preflight` in a terminal has.
+    """Issue #153: a registry of its own is what `netkeep preflight` in a terminal has.
 
     Before the file lock, this second provider attached alongside the first. The file
     lock is per open file description, so it refuses a second registry in the same
@@ -1148,7 +1148,7 @@ async def test_scroll_never_jitters_the_pointer_above_the_minimum_header_clearan
 
 
 async def test_scroll_rests_the_pointer_identically_for_the_same_seed() -> None:
-    """Same determinism guarantee as :func:`~netkeeper.linkedin.pacing.scroll_like_a_person`
+    """Same determinism guarantee as :func:`~netkeep.linkedin.pacing.scroll_like_a_person`
     itself (spec P2-04 done-when): same seed, same walk, in this process or another."""
 
     async def moves_for(seed: int) -> list[tuple[float, float]]:
@@ -1185,7 +1185,7 @@ async def test_a_cancelled_scroll_never_moves_the_pointer_or_sends_a_wheel_event
 
 
 def test_the_lock_key_is_the_account_row() -> None:
-    from netkeeper.linkedin import activity_lock
+    from netkeep.linkedin import activity_lock
 
     assert activity_lock.account_key(1) == "account-1" == SINGLE_ACCOUNT_KEY
     assert activity_lock.account_key(12) == "account-12"
@@ -1196,9 +1196,9 @@ def test_the_lock_key_is_the_account_row() -> None:
 
 @pytest.mark.wall_clock  # BUSY_TIMEOUT_S bounds an instant refusal (#472)
 async def test_an_older_process_holding_the_legacy_lock_blocks_account_one() -> None:
-    """A pre-P2-10 netkeeper holds only ``browser-local.lock``; a new hold of account 1
+    """A pre-P2-10 netkeep holds only ``browser-local.lock``; a new hold of account 1
     must not attach alongside it, and a new hold must keep an old one out too."""
-    from netkeeper.linkedin import activity_lock
+    from netkeep.linkedin import activity_lock
 
     old = activity_lock.try_claim(activity_lock.LEGACY_SHARED_KEY)
     assert old is not None
@@ -1225,7 +1225,7 @@ async def test_an_older_process_holding_the_legacy_lock_blocks_account_one() -> 
 
 async def test_the_legacy_lock_goes_with_the_named_partner_account() -> None:
     """#175 review F10: whichever account is the local user's co-claims the legacy lock."""
-    from netkeeper.linkedin import activity_lock
+    from netkeep.linkedin import activity_lock
 
     provider = make_provider(locks=ActivityLocks(legacy_partner="account-5"))
     async with provider.run("account-5"):
@@ -1236,7 +1236,7 @@ async def test_the_legacy_lock_goes_with_the_named_partner_account() -> None:
 
 async def test_a_cancel_during_the_dwell_stops_it_within_one_slice() -> None:
     """#177: with ``cancelled`` given, the dwell is waited out in slices and polled."""
-    from netkeeper.linkedin.browser import SCROLL_CANCEL_SLICE_S
+    from netkeep.linkedin.browser import SCROLL_CANCEL_SLICE_S
 
     connector = FakeConnector()
     provider = make_provider(connector)
@@ -1255,7 +1255,7 @@ async def test_a_cancel_during_the_dwell_stops_it_within_one_slice() -> None:
 
 
 async def test_an_uncancelled_dwell_is_waited_out_in_full_in_slices() -> None:
-    from netkeeper.linkedin.browser import SCROLL_CANCEL_SLICE_S
+    from netkeep.linkedin.browser import SCROLL_CANCEL_SLICE_S
 
     connector = FakeConnector()
     provider = make_provider(connector)

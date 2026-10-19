@@ -16,7 +16,7 @@ import { backend, defaultHandlers, type Call, type Handler } from './test-suppor
  *
  * `source` is the fake `EventSource` already "connected" (spec 14.1's one
  * shared subscription): a test calls `source.emit('run.progress', {...})` to
- * simulate the backend, exactly as `netkeeper/web/api/events.py` would send
+ * simulate the backend, exactly as `netkeep/web/api/events.py` would send
  * it, and asserts the page updated without a reload.
  *
  * `setStatus` drives the same connection's reported status (M1: a test needs

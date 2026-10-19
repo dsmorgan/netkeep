@@ -247,7 +247,7 @@ export function makeContact(index: number, options: { messages?: number } = {}):
 }
 
 /**
- * The fields each kind of decision row records, as `netkeeper.crm.triage` does.
+ * The fields each kind of decision row records, as `netkeep.crm.triage` does.
  *
  * `decide` and `bulk_met` snapshot `(met, triaged_at)`; `set_preferred_name`
  * snapshots `(preferred_name,)`. `_log` then derives `after_state` from the
@@ -488,7 +488,7 @@ export function createFakeBackend(options: FakeBackendOptions = {}): FakeBackend
   }
 
   /**
-   * `netkeeper.crm.triage.progress`: one grouped count over the **live**
+   * `netkeep.crm.triage.progress`: one grouped count over the **live**
    * contacts. Archived and merged-away rows are excluded before grouping, so
    * archiving a contact you had marked met drops both `total` and `triaged`.
    */
@@ -929,7 +929,7 @@ export function createFakeBackend(options: FakeBackendOptions = {}): FakeBackend
       })
     }
 
-    // Confirm and reject (#184), as `netkeeper.crm.contacts` does them: confirm
+    // Confirm and reject (#184), as `netkeep.crm.contacts` does them: confirm
     // clears the mark; reject archives and keeps it, and refuses a contact that
     // is not waiting. The answer is a contact detail; the screen reads two fields.
     const reviewMatch = /^\/api\/v1\/contacts\/(\d+)\/(confirm|reject)$/.exec(url.pathname)

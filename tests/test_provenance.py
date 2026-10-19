@@ -1,4 +1,4 @@
-"""netkeeper.crm.provenance (spec 10.5): the precedence rule, contacts.field_sources,
+"""netkeep.crm.provenance (spec 10.5): the precedence rule, contacts.field_sources,
 and the synced-values ledger a manual override reverts to (CP1, #28)."""
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import insert
 from sqlalchemy.orm import Session
 
-from netkeeper.crm.provenance import (
+from netkeep.crm.provenance import (
     PERSON_OWNED_FIELDS,
     PROVENANCE_FIELDS,
     PROVENANCE_ORDER,
@@ -21,8 +21,8 @@ from netkeeper.crm.provenance import (
     revert_to_synced,
     set_manual_field,
 )
-from netkeeper.models import Contact, ContactMet, ContactSource
-from netkeeper.scoping import scoped
+from netkeep.models import Contact, ContactMet, ContactSource
+from netkeep.scoping import scoped
 
 OBSERVED = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
 OBSERVED_ISO = "2026-09-20T12:00:00+00:00"

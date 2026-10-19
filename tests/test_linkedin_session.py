@@ -1,4 +1,4 @@
-"""netkeeper.services.linkedin_session (spec 8.4, 9.7, 9.10): the session flag
+"""netkeep.services.linkedin_session (spec 8.4, 9.7, 9.10): the session flag
 `classify()`'s Checkpoint and LoggedOut outcomes lead to, held in `settings_kv`
 because `linkedin_account` does not exist yet and every runtime flag already
 lives there.
@@ -17,16 +17,16 @@ import factories
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.db import mark_for_write
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.models import JsonValue
-from netkeeper.services.linkedin_session import (
+from netkeep.db import mark_for_write
+from netkeep.linkedin.classify import Outcome
+from netkeep.models import JsonValue
+from netkeep.services.linkedin_session import (
     SESSION_FLAG_KEY,
     clear_session_flag,
     flag_session,
     session_flag,
 )
-from netkeeper.services.settings_kv import get_setting, set_setting
+from netkeep.services.settings_kv import get_setting, set_setting
 
 # The full url as a caller would pass it -- carrying a query-string token,
 # the way a real checkpoint or login-wall url does.

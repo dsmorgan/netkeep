@@ -22,9 +22,9 @@ from run_fakes import fake_provider
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from netkeeper.db import session_scope
-from netkeeper.linkedin.messaging import MessageOutcome, MessageOutcomeKind
-from netkeeper.models import (
+from netkeep.db import session_scope
+from netkeep.linkedin.messaging import MessageOutcome, MessageOutcomeKind
+from netkeep.models import (
     Enrollment,
     EnrollmentStatus,
     Message,
@@ -37,14 +37,14 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.scoping import get_scoped, scoped
-from netkeeper.services import budgets, runs
-from netkeeper.services.linkedin_accounts import ensure_account
-from netkeeper.services.linkedin_session import record_session_evidence
-from netkeeper.services.linkedin_steps import record_prefill_outcome
-from netkeeper.web.api import linkedin_steps as api
-from netkeeper.web.security import CLIENT_HEADER, CLIENT_HEADER_VALUE
-from netkeeper.worker import BrowserWorker
+from netkeep.scoping import get_scoped, scoped
+from netkeep.services import budgets, runs
+from netkeep.services.linkedin_accounts import ensure_account
+from netkeep.services.linkedin_session import record_session_evidence
+from netkeep.services.linkedin_steps import record_prefill_outcome
+from netkeep.web.api import linkedin_steps as api
+from netkeep.web.security import CLIENT_HEADER, CLIENT_HEADER_VALUE
+from netkeep.worker import BrowserWorker
 
 HEADERS = {CLIENT_HEADER: CLIENT_HEADER_VALUE}
 BASE = "/api/v1/campaigns/linkedin"
@@ -642,7 +642,7 @@ async def test_the_enrollment_row_says_try_again_only_for_a_linkedin_step(
 
 def _hold(app: FastAPI) -> tuple[int, int]:
     """Hold the local user's auto-send, and another user's too; their account ids."""
-    from netkeeper.services.linkedin_steps import AUTO_SEND_HOLD_BUBBLE, hold_auto_send
+    from netkeep.services.linkedin_steps import AUTO_SEND_HOLD_BUBBLE, hold_auto_send
 
     with session_scope(app.state.session_factory, write=True) as session:
         user = _local(session)
@@ -655,7 +655,7 @@ def _hold(app: FastAPI) -> tuple[int, int]:
 
 
 def _held(app: FastAPI) -> tuple[bool, bool]:
-    from netkeeper.services.linkedin_steps import auto_send_hold
+    from netkeep.services.linkedin_steps import auto_send_hold
 
     with session_scope(app.state.session_factory) as session:
         user = _local(session)
@@ -672,7 +672,7 @@ async def test_options_carry_the_hold_and_how_to_clear_it(
     _hold(running_app)
     hold = (await client.get(f"{BASE}/options")).json()["auto_send_hold"]
     assert hold["reason"] == "a message bubble is open in Chrome"
-    assert "netkeeper linkedin auto-send-resume" in hold["how_to_clear"]
+    assert "netkeep linkedin auto-send-resume" in hold["how_to_clear"]
 
 
 async def test_resume_needs_the_csrf_header_and_confirm_and_is_idempotent_and_scoped(

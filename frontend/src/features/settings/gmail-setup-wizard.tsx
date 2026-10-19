@@ -36,7 +36,7 @@ function message(error: unknown): string {
 const EMPTY: GmailSetup = { project_id: null, sender_email: null, done: [], steps: [] }
 
 /**
- * A console page, opened in your own browser. netkeeper never drives it. A page
+ * A console page, opened in your own browser. netkeep never drives it. A page
  * that needs the project ID has no `href` until you save one: it shows as
  * disabled text, with a hint, rather than a link to the wrong project.
  */
@@ -165,7 +165,7 @@ export function GmailSetupWizard({
         </span>
       </div>
       <p className="text-muted-foreground">
-        Each step opens the right page of Google’s console in your browser. netkeeper checks what it
+        Each step opens the right page of Google’s console in your browser. netkeep checks what it
         can (the client, the token, the Gmail API); you mark the rest done. Your app stays in
         Testing, with you as its one test user.
       </p>
@@ -292,8 +292,8 @@ function StepBody({
             bar. Already have a project? Use its <strong>ID</strong>, not its name. In the console,
             choose the project picker at the top; the list shows <strong>Name</strong>,{' '}
             <strong>Type</strong> and <strong>ID</strong>. Google often adds a number to the ID, so{' '}
-            <code className="font-mono">netkeeper</code> might be{' '}
-            <code className="font-mono">netkeeper-510123</code>. Every link below uses the ID, and a
+            <code className="font-mono">netkeep</code> might be{' '}
+            <code className="font-mono">netkeep-510123</code>. Every link below uses the ID, and a
             wrong one lands on a confusing permission page with no error.
           </p>
           {setup.project_id !== null && commands !== null && (
@@ -307,14 +307,14 @@ function StepBody({
               </p>
               {lacksSuffix(setup.project_id) && (
                 <p role="note" className="text-muted-foreground">
-                  Google usually adds a suffix, such as netkeeper-510123. Make sure this is the ID,
+                  Google usually adds a suffix, such as netkeep-510123. Make sure this is the ID,
                   not the name.
                 </p>
               )}
               <p>
                 Open <ConsoleLink href={links.createProject}>New project</ConsoleLink>. Name it{' '}
-                <code className="font-mono">netkeeper</code>, then choose <strong>Edit</strong>{' '}
-                under the project ID and enter this one. Any Google account can own the project.
+                <code className="font-mono">netkeep</code>, then choose <strong>Edit</strong> under
+                the project ID and enter this one. Any Google account can own the project.
               </p>
               <CopyValue label="Project ID" value={setup.project_id} />
               <details>
@@ -323,7 +323,7 @@ function StepBody({
                 </summary>
                 <div className="mt-2 space-y-2">
                   <p className="text-muted-foreground">
-                    Run these yourself in a terminal; netkeeper never runs them.{' '}
+                    Run these yourself in a terminal; netkeep never runs them.{' '}
                     <ConsoleLink
                       href={links.installGcloud}
                       label="Install gcloud (opens in a new tab)"
@@ -370,7 +370,7 @@ function StepBody({
             </details>
           )}
           <p className="text-muted-foreground">
-            netkeeper checks this when you connect your mailbox: if Gmail refuses, this step comes
+            netkeep checks this when you connect your mailbox: if Gmail refuses, this step comes
             back marked as the problem.
           </p>
           <MarkDone step={step} label="Done: it’s enabled" mark={mark} saving={saving} />
@@ -385,7 +385,7 @@ function StepBody({
           </p>
           {hint}
           <div className="space-y-1">
-            <CopyValue label="App name" value="netkeeper" />
+            <CopyValue label="App name" value="netkeep" />
             <CopyValue label="User support email" value={sender} />
             <p>
               <span className="text-muted-foreground">Audience:</span> <strong>External</strong>{' '}
@@ -418,9 +418,9 @@ function StepBody({
           {hint}
           <CopyValue label="Test user" value={sender} />
           <p className="text-muted-foreground">
-            In Testing, Google expires the token after 7 days. netkeeper notices, pauses email
-            steps, and shows a banner; you choose Re-authorize. Publishing (the last step) removes
-            the limit.
+            In Testing, Google expires the token after 7 days. netkeep notices, pauses email steps,
+            and shows a banner; you choose Re-authorize. Publishing (the last step) removes the
+            limit.
           </p>
           <MarkDone step={step} label="Done: I’m a test user" mark={mark} saving={saving} />
         </>
@@ -437,10 +437,10 @@ function StepBody({
               <span className="text-muted-foreground">Application type:</span>{' '}
               <strong>Desktop app</strong>{' '}
               <span className="text-muted-foreground">
-                (not Web application: netkeeper refuses a web client)
+                (not Web application: netkeep refuses a web client)
               </span>
             </p>
-            <CopyValue label="Name" value="netkeeper" />
+            <CopyValue label="Name" value="netkeep" />
           </div>
           <p className="text-muted-foreground">
             Choose <strong>Create</strong>. Keep the dialog open, or download the JSON: the next
@@ -465,8 +465,8 @@ function StepBody({
       if (connected !== undefined) {
         return (
           <p>
-            Connected: <strong>{connected.email}</strong>. netkeeper checked that the token works
-            and that Gmail answers it.
+            Connected: <strong>{connected.email}</strong>. netkeep checked that the token works and
+            that Gmail answers it.
           </p>
         )
       }
@@ -488,13 +488,13 @@ function StepBody({
         <>
           <p>
             Authorize the Gmail account on Google’s page. Google asks for read, compose, send and
-            label access (<code className="font-mono">gmail.modify</code>); netkeeper never deletes
+            label access (<code className="font-mono">gmail.modify</code>); netkeep never deletes
             mail.
           </p>
           <p>
             Google’s page says <strong>Google hasn’t verified this app</strong>. That’s expected:
             the app is yours. Choose <strong>Advanced</strong>, then{' '}
-            <strong>Go to netkeeper (unsafe)</strong>, and leave the Gmail box ticked.
+            <strong>Go to netkeep (unsafe)</strong>, and leave the Gmail box ticked.
           </p>
           {!status.client_configured && (
             <p className="text-muted-foreground">Save the OAuth client first.</p>
@@ -527,10 +527,10 @@ function StepBody({
           {hint}
           <p className="text-muted-foreground">
             A GitHub repository URL (github.com) isn’t a domain you own, so Google’s rules don’t
-            allow it. netkeeper hasn’t confirmed whether the console refuses it for an app that’s
+            allow it. netkeep hasn’t confirmed whether the console refuses it for an app that’s
             never submitted for verification. A GitHub Pages site (you.github.io) probably fits:
             github.io is a public suffix, so you should be able to verify you.github.io in Google
-            Search Console, but netkeeper hasn’t confirmed that either. If you have neither, stay in
+            Search Console, but netkeep hasn’t confirmed that either. If you have neither, stay in
             Testing.
           </p>
           <MarkDone step={step} label="Done: it’s published" mark={mark} saving={saving} />
@@ -571,7 +571,7 @@ function ProjectForm({
           id="gmail-setup-project"
           value={projectId}
           onChange={(event) => setProjectId(event.target.value)}
-          placeholder="netkeeper-ab12cd"
+          placeholder="netkeep-ab12cd"
           autoComplete="off"
           aria-invalid={projectId !== '' && !valid}
           required

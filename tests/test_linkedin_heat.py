@@ -1,4 +1,4 @@
-"""netkeeper.linkedin.heat: pure decay math for the heat score (spec 9.7).
+"""netkeep.linkedin.heat: pure decay math for the heat score (spec 9.7).
 
 No database, no session, no models -- this module lives under ``linkedin/``
 and stays on the pure side of the extractor boundary (ADR 0005, spec 9.10).
@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from netkeeper.linkedin.heat import (
+from netkeep.linkedin.heat import (
     COLD_EPSILON,
     COOLDOWN_FLOOR,
     HeatState,

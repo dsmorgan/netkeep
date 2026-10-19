@@ -30,7 +30,7 @@ export function SendingHoursSection() {
           {current.data !== undefined ? ` (${current.data.timezone})` : ''}. Only a campaign&apos;s
           start ignores them: its first batch goes at the start you choose, whatever the hour, and
           keeps going that day until the daily caps stop it. The rest of that batch, every
-          follow-up, every retry, and anything left over while netkeeper was not running sends only
+          follow-up, every retry, and anything left over while netkeep was not running sends only
           inside these hours.
         </CardDescription>
       </CardHeader>

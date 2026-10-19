@@ -1,4 +1,4 @@
-"""``netkeeper linkedin message-check``: a prefill's steps up to the Message click (#473).
+"""``netkeep linkedin message-check``: a prefill's steps up to the Message click (#473).
 
 CP8's prefills still refused with "no Message control is on screen with nothing over it"
 after #471, and each try spent a prefill and said one category word. The check runs the
@@ -39,15 +39,15 @@ from test_message_click_scroll_back import (
 )
 from typer.testing import CliRunner
 
-from netkeeper import cli as cli_module
-from netkeeper import migrations
-from netkeeper.cli import _message_check_lines
-from netkeeper.cli import app as cli
-from netkeeper.config import Settings
-from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.linkedin import page_messaging
-from netkeeper.linkedin.activity_lock import account_key
-from netkeeper.linkedin.browser import (
+from netkeep import cli as cli_module
+from netkeep import migrations
+from netkeep.cli import _message_check_lines
+from netkeep.cli import app as cli
+from netkeep.config import Settings
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+from netkeep.linkedin import page_messaging
+from netkeep.linkedin.activity_lock import account_key
+from netkeep.linkedin.browser import (
     MESSAGE_NOT_ON_SCREEN,
     BrowserRun,
     HitRelation,
@@ -55,18 +55,18 @@ from netkeeper.linkedin.browser import (
     NotClear,
     href_shape,
 )
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.pacing import scroll_like_a_person
-from netkeeper.linkedin.page_messaging import CHECK_PHASES, MessageCheckResult, PageMessageCheck
-from netkeeper.models import Message, SyncRunKind, SyncRunStatus, SyncRunTrigger, User
-from netkeeper.scoping import install_scope_guard, scoped
-from netkeeper.services import budgets, message_check, runs, scheduler
-from netkeeper.services.budgets import ActionClass
-from netkeeper.services.linkedin_accounts import ensure_account
-from netkeeper.services.linkedin_session import flag_session, session_flag
-from netkeeper.services.scheduled_runs import auto_send_spacing_left
-from netkeeper.services.users import ensure_local_user
-from netkeeper.worker import run_message_check
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.pacing import scroll_like_a_person
+from netkeep.linkedin.page_messaging import CHECK_PHASES, MessageCheckResult, PageMessageCheck
+from netkeep.models import Message, SyncRunKind, SyncRunStatus, SyncRunTrigger, User
+from netkeep.scoping import install_scope_guard, scoped
+from netkeep.services import budgets, message_check, runs, scheduler
+from netkeep.services.budgets import ActionClass
+from netkeep.services.linkedin_accounts import ensure_account
+from netkeep.services.linkedin_session import flag_session, session_flag
+from netkeep.services.scheduled_runs import auto_send_spacing_left
+from netkeep.services.users import ensure_local_user
+from netkeep.worker import run_message_check
 
 PATH = f"/in/{ZEPHYRINE.slug}/"
 HREF = compose_href(ZEPHYRINE, absolute=False)
@@ -542,7 +542,7 @@ async def test_a_page_without_cdp_reports_the_reads_it_could_make(no_scroll: Non
 
 
 async def test_the_detail_read_never_hangs_the_check(monkeypatch: pytest.MonkeyPatch) -> None:
-    from netkeeper.linkedin import browser
+    from netkeep.linkedin import browser
 
     monkeypatch.setattr(browser, "CHECK_DETAIL_TIMEOUT_S", 0.05)
     monkeypatch.setattr(browser, "GEOMETRY_TIMEOUT_S", 0.05)
@@ -560,7 +560,7 @@ async def test_the_detail_read_never_hangs_the_check(monkeypatch: pytest.MonkeyP
 @pytest.fixture
 def cli_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[sessionmaker[Session]]:
     url = database_url(tmp_path)
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     engine = make_engine(url)
     migrations.upgrade(engine)
     factory = make_session_factory(engine)
@@ -978,7 +978,7 @@ async def test_a_covers_label_and_role_text_never_reach_the_report() -> None:
 
 
 def test_a_role_is_a_listed_aria_role_or_other() -> None:
-    from netkeeper.linkedin.browser import _check_role
+    from netkeep.linkedin.browser import _check_role
 
     assert _check_role("div", {"role": "Navigation"}) == "navigation"
     assert _check_role("div", {"role": "region extra words"}) == "region"
@@ -1042,7 +1042,7 @@ async def test_a_session_flagged_after_the_start_refuses_under_the_lock(
 async def test_heat_over_its_threshold_after_the_start_refuses_under_the_lock(
     cli_db: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from netkeeper.services import heat as heat_service
+    from netkeep.services import heat as heat_service
 
     target = _start(cli_db)
     monkeypatch.setattr(heat_service, "should_skip", lambda *_, **__: True)
@@ -1070,7 +1070,7 @@ async def test_heat_over_its_threshold_after_the_start_refuses_under_the_lock(
 def test_a_wall_raises_heat_and_flags_as_a_prefills_does(
     cli_db: sessionmaker[Session], wall: Outcome, heated: bool, flagged: bool
 ) -> None:
-    from netkeeper.services import heat as heat_service
+    from netkeep.services import heat as heat_service
 
     target = _start(cli_db)
     message_check.finish(

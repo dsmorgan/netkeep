@@ -1,4 +1,4 @@
-"""netkeeper.services.campaign_engine (spec 11.3, 11.4; item P3-06): the state machine and tick."""
+"""netkeep.services.campaign_engine (spec 11.3, 11.4; item P3-06): the state machine and tick."""
 
 from __future__ import annotations
 
@@ -19,13 +19,13 @@ from inbox_fakes import record_poll
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.campaigns import gmail, schedule
-from netkeeper.campaigns.compose import message_id_for
-from netkeeper.config import CampaignSettings, Settings
-from netkeeper.crm.contacts import merge_contacts
-from netkeeper.crm.interactions import add_interaction
-from netkeeper.db import make_session_factory, session_scope
-from netkeeper.models import (
+from netkeep.campaigns import gmail, schedule
+from netkeep.campaigns.compose import message_id_for
+from netkeep.config import CampaignSettings, Settings
+from netkeep.crm.contacts import merge_contacts
+from netkeep.crm.interactions import add_interaction
+from netkeep.db import make_session_factory, session_scope
+from netkeep.models import (
     Campaign,
     CampaignMailboxLocked,
     CampaignStatus,
@@ -44,11 +44,11 @@ from netkeeper.models import (
     TemplateChannel,
     User,
 )
-from netkeeper.scoping import get_scoped, install_scope_guard, scoped, scoped_delete, unscoped
-from netkeeper.services import campaign_engine as engine_module
-from netkeeper.services import campaigns as campaign_service
-from netkeeper.services import sending_hours
-from netkeeper.services.campaign_engine import (
+from netkeep.scoping import get_scoped, install_scope_guard, scoped, scoped_delete, unscoped
+from netkeep.services import campaign_engine as engine_module
+from netkeep.services import campaigns as campaign_service
+from netkeep.services import sending_hours
+from netkeep.services.campaign_engine import (
     REVIEW_GATE,
     CampaignEngine,
     CampaignEngineError,
@@ -69,8 +69,8 @@ from netkeeper.services.campaign_engine import (
     run_tick,
     schedule_next,
 )
-from netkeeper.services.events import EventBus
-from netkeeper.services.settings_kv import set_setting
+from netkeep.services.events import EventBus
+from netkeep.services.settings_kv import set_setting
 
 EMAIL = TemplateChannel.EMAIL
 LINKEDIN = TemplateChannel.LINKEDIN
@@ -1362,7 +1362,7 @@ def test_a_template_with_lint_errors_is_parked(world: World) -> None:
     assert blocked.not_sent_error == (
         "blocked: the step's template has lint errors; "
         "fix the template, then have the step use its newest version"
-        " (Use newest version on the campaign page, or `netkeeper campaigns adopt-template`)"
+        " (Use newest version on the campaign page, or `netkeep campaigns adopt-template`)"
     )
 
 
@@ -1383,7 +1383,7 @@ def test_an_active_campaign_using_a_removed_me_field_says_why_it_stopped(world: 
     assert world.enrollment(enrollment_id).not_sent_error == (
         "blocked: template uses removed field me.*; "
         "fix the template, then have the step use its newest version"
-        " (Use newest version on the campaign page, or `netkeeper campaigns adopt-template`)"
+        " (Use newest version on the campaign page, or `netkeep campaigns adopt-template`)"
     )
 
 
@@ -2236,7 +2236,7 @@ def test_a_firing_carries_its_message_id_and_label(world: World) -> None:
         created_at=message.created_at,
         address=world.mailbox.email,
     )
-    assert firing.label == f"netkeeper/{world.campaign.name}"
+    assert firing.label == f"netkeep/{world.campaign.name}"
 
 
 def test_nothing_is_claimed_once_stopping(world: World) -> None:
@@ -2807,7 +2807,7 @@ def test_after_a_zone_change_the_tick_still_counts_this_mornings_sends(
     """#597 re-review: the chooser enforces the email caps from ``count_start``. Two
     sends under UTC at 08:00 and 08:30 fill a cap of 2; at 11:00 the user moves to
     Pacific/Kiritimati, whose day began at 10:00 UTC. Those sends still count."""
-    from netkeeper.services import zone_change
+    from netkeep.services import zone_change
 
     world = make_world(session_factory, daily_cap=2)
     world.hours(any_time=True)

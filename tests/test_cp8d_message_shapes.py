@@ -2,7 +2,7 @@
 
 Both are invented, built from key names only ("Quorbelle Fictionary" style values). The
 capture's group list item was never seen: its shape comes from a single-conversation answer
-of the same type. The realtime event is never read by netkeeper; the test pins that its
+of the same type. The realtime event is never read by netkeep; the test pins that its
 ``result`` is the ``Message`` shape ``_message`` already parses, so a future reader can reuse it.
 """
 
@@ -14,8 +14,8 @@ from typing import Any
 
 import messaging_pages as mp
 
-from netkeeper.linkedin import messaging_shapes as shapes
-from netkeeper.linkedin.messaging_shapes import Kind
+from netkeep.linkedin import messaging_shapes as shapes
+from netkeep.linkedin.messaging_shapes import Kind
 
 #: The captured group had never been named: ``title`` null, and no ``conversationType`` key.
 UNTITLED_GROUP = dataclasses.replace(mp.GROUP, title=None)

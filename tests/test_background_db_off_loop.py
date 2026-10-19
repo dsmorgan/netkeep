@@ -35,14 +35,14 @@ from sqlalchemy import Connection, Engine, event, select
 from sqlalchemy.orm import Session
 from test_runs_serve import HEADERS, START, client_for, heartbeat, served
 
-from netkeeper.config import Settings
-from netkeeper.db import IMMEDIATE_OPTION, database_url, make_engine, off_loop, session_scope
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.models import SyncRunKind, SyncRunStatus, SyncRunTrigger, User, UserKind
-from netkeeper.services import runs, scheduler
-from netkeeper.services.linkedin_accounts import ensure_account
-from netkeeper.services.linkedin_session import flag_session
-from netkeeper.worker import BrowserWorker
+from netkeep.config import Settings
+from netkeep.db import IMMEDIATE_OPTION, database_url, make_engine, off_loop, session_scope
+from netkeep.linkedin.classify import Outcome
+from netkeep.models import SyncRunKind, SyncRunStatus, SyncRunTrigger, User, UserKind
+from netkeep.services import runs, scheduler
+from netkeep.services.linkedin_accounts import ensure_account
+from netkeep.services.linkedin_session import flag_session
+from netkeep.worker import BrowserWorker
 
 #: Short enough that the old deadlock fails fast; the fixed path never waits it out.
 BUSY_TIMEOUT_MS = 300
@@ -56,8 +56,8 @@ pytestmark = pytest.mark.wall_clock
 @pytest.fixture
 def engine(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Engine]:
     """A fresh database whose every connection has the short busy timeout."""
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", str(tmp_path / "no-dist"))
-    monkeypatch.setattr("netkeeper.db.SQLITE_BUSY_TIMEOUT_MS", BUSY_TIMEOUT_MS)
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", str(tmp_path / "no-dist"))
+    monkeypatch.setattr("netkeep.db.SQLITE_BUSY_TIMEOUT_MS", BUSY_TIMEOUT_MS)
     engine = make_engine(database_url(tmp_path / "db"))
     yield engine
     engine.dispose()
@@ -90,7 +90,7 @@ class RequestWriteOpened:
             self._armed
             and connection.get_execution_options().get(IMMEDIATE_OPTION)
             and thread is not self._loop_thread
-            and not thread.name.startswith("netkeeper-db")
+            and not thread.name.startswith("netkeep-db")
         ):
             self._armed = False
             self._loop.call_soon_threadsafe(self.event.set)
@@ -218,7 +218,7 @@ async def test_off_loop_runs_on_the_one_background_thread_and_returns_or_raises(
 
     with pytest.raises(ValueError, match="from the thread"):
         await off_loop(boom)
-    assert len(names) == 1 and next(iter(names)).startswith("netkeeper-db")
+    assert len(names) == 1 and next(iter(names)).startswith("netkeep-db")
     assert threading.current_thread().name not in names
 
 

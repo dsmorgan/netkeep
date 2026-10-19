@@ -19,14 +19,14 @@ import pytest
 from campaign_fakes import ARMED_FOR_SEND, NOW, SETTINGS, FakeSender, make_mailbox
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.campaigns import templates as template_service
-from netkeeper.campaigns.render import LintIssue, LintRule, Severity, lint
-from netkeeper.campaigns.templates import activation_errors
-from netkeeper.crm import do_not_send
-from netkeeper.crm import lists as list_service
-from netkeeper.crm.self_contact import update_self_contact
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.campaigns import templates as template_service
+from netkeep.campaigns.render import LintIssue, LintRule, Severity, lint
+from netkeep.campaigns.templates import activation_errors
+from netkeep.crm import do_not_send
+from netkeep.crm import lists as list_service
+from netkeep.crm.self_contact import update_self_contact
+from netkeep.db import session_scope
+from netkeep.models import (
     Campaign,
     CampaignStatus,
     CampaignStep,
@@ -42,10 +42,10 @@ from netkeeper.models import (
     TemplateChannel,
     User,
 )
-from netkeeper.scoping import get_scoped, scoped
-from netkeeper.services import campaign_engine, campaign_review
-from netkeeper.services.campaign_engine import Decision, Skip, run_tick
-from netkeeper.services.campaign_guards import Reason, check_step
+from netkeep.scoping import get_scoped, scoped
+from netkeep.services import campaign_engine, campaign_review
+from netkeep.services.campaign_engine import Decision, Skip, run_tick
+from netkeep.services.campaign_guards import Reason, check_step
 
 
 @dataclass
@@ -492,7 +492,7 @@ def _linkedin_reviewing(
 def newlines_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     """The newline flag as it was before P4-03 (#382), and as it goes back to if a later
     capture shows Shift+Enter sending: the tests that use it pin the refusing branch."""
-    from netkeeper.campaigns import render as render_module
+    from netkeep.campaigns import render as render_module
 
     monkeypatch.setattr(render_module, "SHIFT_ENTER_NEWLINES_ALLOWED", False)
 

@@ -17,9 +17,9 @@ from typing import Any
 import pytest
 from gmail_fakes import RecordingHttp, gmail_error
 
-from netkeeper.campaigns import gmail as gmail_module
-from netkeeper.campaigns import gmail_oauth
-from netkeeper.campaigns.gmail import (
+from netkeep.campaigns import gmail as gmail_module
+from netkeep.campaigns import gmail_oauth
+from netkeep.campaigns.gmail import (
     Gmail,
     GmailAuthError,
     GmailClient,
@@ -82,7 +82,7 @@ def _decode(raw: str) -> EmailMessage:
 
 def test_both_implementations_have_the_interface() -> None:
     """mypy checks these assignments; the fake's own tests use the same Protocol."""
-    from netkeeper.campaigns.gmail_fake import FakeGmail
+    from netkeep.campaigns.gmail_fake import FakeGmail
 
     implementations: list[Gmail] = [_client(RecordingHttp()), FakeGmail()]
     assert len(implementations) == 2
@@ -185,8 +185,8 @@ def test_list_drafts_with_none_is_empty() -> None:
     assert _client(http).list_drafts(purpose="drafts poll for mailbox 3") == []
 
 
-def test_netkeeper_never_deletes_mail() -> None:
-    """ADR 0003: netkeeper deletes nothing in Gmail, drafts included (#273, question 2).
+def test_netkeep_never_deletes_mail() -> None:
+    """ADR 0003: netkeep deletes nothing in Gmail, drafts included (#273, question 2).
     Neither the interface nor the client has a way to, and the client never builds a
     ``delete``, ``trash`` or ``batchDelete`` request."""
     for cls in (Gmail, GmailClient):
@@ -306,19 +306,19 @@ def test_labels_and_modify() -> None:
     http = (
         RecordingHttp()
         .answer(200, {"labels": [{"id": "INBOX", "name": "INBOX", "type": "system"}]})
-        .answer(200, {"id": "Label_1", "name": "netkeeper/First 100", "type": "user"})
+        .answer(200, {"id": "Label_1", "name": "netkeep/First 100", "type": "user"})
         .answer(200, {"id": "m1", "threadId": "m1", "labelIds": ["Label_1"]})
         .answer(200, {"emailAddress": "Sender@Example.com", "historyId": "77"})
     )
     client = _client(http)
     assert client.list_labels(purpose="labels") == [Label("INBOX", "INBOX", "system")]
-    made = client.create_label("netkeeper/First 100", purpose="label for campaign 2")
+    made = client.create_label("netkeep/First 100", purpose="label for campaign 2")
     client.modify_labels("m1", add=[made.id], remove=["UNREAD"], purpose="label step 1")
     profile = client.profile(purpose="baseline history for mailbox 3")
 
-    assert made == Label("Label_1", "netkeeper/First 100", "user")
+    assert made == Label("Label_1", "netkeep/First 100", "user")
     create, modify = http.requests[1], http.requests[2]
-    assert create.json()["name"] == "netkeeper/First 100"
+    assert create.json()["name"] == "netkeep/First 100"
     assert (modify.path, modify.json()) == (
         f"{API}/messages/m1/modify",
         {"addLabelIds": ["Label_1"], "removeLabelIds": ["UNREAD"]},
@@ -507,9 +507,9 @@ def test_a_failing_hook_does_not_hide_the_auth_error(caplog: pytest.LogCaptureFi
 
 def test_ensure_label_finds_an_existing_label_without_case() -> None:
     http = RecordingHttp().answer(
-        200, {"labels": [{"id": "Label_4", "name": "Netkeeper/First 100", "type": "user"}]}
+        200, {"labels": [{"id": "Label_4", "name": "Netkeep/First 100", "type": "user"}]}
     )
-    label = ensure_label(_client(http), "netkeeper/first 100", purpose="label for campaign 2")
+    label = ensure_label(_client(http), "netkeep/first 100", purpose="label for campaign 2")
     assert label.id == "Label_4"
     assert len(http.requests) == 1
 
@@ -518,9 +518,9 @@ def test_ensure_label_creates_a_missing_label() -> None:
     http = (
         RecordingHttp()
         .answer(200, {"labels": []})
-        .answer(200, {"id": "Label_5", "name": "netkeeper/x", "type": "user"})
+        .answer(200, {"id": "Label_5", "name": "netkeep/x", "type": "user"})
     )
-    assert ensure_label(_client(http), "netkeeper/x", purpose="label").id == "Label_5"
+    assert ensure_label(_client(http), "netkeep/x", purpose="label").id == "Label_5"
 
 
 def test_ensure_label_reads_back_a_label_made_in_between() -> None:
@@ -528,16 +528,16 @@ def test_ensure_label_reads_back_a_label_made_in_between() -> None:
         RecordingHttp()
         .answer(200, {"labels": []})
         .answer(409, gmail_error(409, "conflict"))
-        .answer(200, {"labels": [{"id": "Label_6", "name": "netkeeper/x", "type": "user"}]})
+        .answer(200, {"labels": [{"id": "Label_6", "name": "netkeep/x", "type": "user"}]})
     )
-    assert ensure_label(_client(http), "netkeeper/x", purpose="label").id == "Label_6"
+    assert ensure_label(_client(http), "netkeep/x", purpose="label").id == "Label_6"
 
 
 # --- logging ----------------------------------------------------------------------
 
 
 def test_every_call_logs_its_method_and_purpose(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.INFO, logger="netkeeper.campaigns.gmail")
+    caplog.set_level(logging.INFO, logger="netkeep.campaigns.gmail")
     http = RecordingHttp().answer(200, {"id": "m1", "threadId": "m1"})
     _client(http).send(_message(), purpose="  send step 2 for enrollment 14 ")
     assert "gmail messages.send for mailbox 3: send step 2 for enrollment 14" in caplog.messages

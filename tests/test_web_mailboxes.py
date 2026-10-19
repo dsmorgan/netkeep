@@ -14,17 +14,17 @@ from local_api import LocalKey
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.config import CampaignSettings, Settings
-from netkeeper.db import DATABASE_FILENAME, session_scope
-from netkeeper.models import Mailbox, MailboxArm, User, UserKind
-from netkeeper.scoping import unscoped
-from netkeeper.services import keychain
-from netkeeper.services import mailboxes as mailbox_service
-from netkeeper.services.events import EventBus, Subscription
-from netkeeper.services.scheduled_runs import ServeExtractor
-from netkeeper.web.app import create_app
+from netkeep.config import CampaignSettings, Settings
+from netkeep.db import DATABASE_FILENAME, session_scope
+from netkeep.models import Mailbox, MailboxArm, User, UserKind
+from netkeep.scoping import unscoped
+from netkeep.services import keychain
+from netkeep.services import mailboxes as mailbox_service
+from netkeep.services.events import EventBus, Subscription
+from netkeep.services.scheduled_runs import ServeExtractor
+from netkeep.web.app import create_app
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 CALLBACK = "http://127.0.0.1/api/v1/mailboxes/oauth/callback"
 
 
@@ -643,7 +643,7 @@ async def test_check_now_on_an_armed_mailbox_asks_for_the_drafts_check(
 ) -> None:
     """#510: the card's Check now refreshes the token, then asks the running sender for
     the drafts check at the next tick. It never opens Gmail itself."""
-    from netkeeper.services.campaign_sender import GmailSender
+    from netkeep.services.campaign_sender import GmailSender
 
     await _set_client(client)
     await _connect(client, fake_google)
@@ -722,7 +722,7 @@ def _app(
 ) -> FastAPI:
     (tmp_path / "bare").mkdir(parents=True, exist_ok=True)
     shutil.copyfile(template, tmp_path / "bare" / DATABASE_FILENAME)
-    monkeypatch.setenv("NETKEEPER_FRONTEND_DIST", str(tmp_path / "no-dist"))
+    monkeypatch.setenv("NETKEEP_FRONTEND_DIST", str(tmp_path / "no-dist"))
     return create_app(settings, engine=engine, **kwargs)  # type: ignore[arg-type]
 
 

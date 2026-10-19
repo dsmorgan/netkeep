@@ -2,6 +2,8 @@
 
 An ADR records one decision, the context that forced it, and its consequences. They exist so a contributor who arrives later can tell a deliberate choice from an accident.
 
+The project was called netkeeper until 2026-10-19, when it became netkeep (#661). The ADRs written before then say netkeeper and mean netkeep: their text and file names stay as written, and so do the module paths they name (`netkeeper/...` is now `netkeep/...`).
+
 ## Rules
 
 - **One decision per ADR, under about 1,000 words before amendments.** State the decision in a paragraph, list the rules that make it acceptable with a one-line reason each, list the consequences, and stop. If yours runs much longer, you're writing design, and design belongs in [architecture.md](../architecture.md) or a design document under `docs/` that the ADR links to. The spec holds the design; the ADR holds the reasoning.
@@ -27,4 +29,4 @@ An ADR records one decision, the context that forced it, and its consequences. T
 | [0012](0012-chrome-profiles.md) | Chrome profiles: one netkeeper Chrome for the UI, LinkedIn, and setup | Accepted |
 | [0013](0013-local-api-secret.md) | A per-install key for the local API, handed to the browser as a cookie | Accepted |
 
-The mechanics behind ADRs 0006, 0007, and 0008 (the browser inputs, their checks, and their pins) are in [How netkeeper drives a LinkedIn page](../linkedin-browser-inputs.md).
+The mechanics behind ADRs 0006, 0007, and 0008 (the browser inputs, their checks, and their pins) are in [How netkeep drives a LinkedIn page](../linkedin-browser-inputs.md).

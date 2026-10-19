@@ -1,7 +1,7 @@
 /**
- * What a leftover draft's row says (#543): why netkeeper no longer wants it, and the one
+ * What a leftover draft's row says (#543): why netkeep no longer wants it, and the one
  * note it carries. A warning comes first: sending that draft would ignore an opt-out, a
- * bounce or the do-not-send list, and nothing in netkeeper can stop a send made in Gmail.
+ * bounce or the do-not-send list, and nothing in netkeep can stop a send made in Gmail.
  */
 import type { LeftoverDraft } from './api'
 
@@ -13,7 +13,7 @@ const ENDED: Record<string, string> = {
   completed: 'Campaign finished for them',
 }
 
-/** Why netkeeper no longer wants the draft, in a few words. */
+/** Why netkeep no longer wants the draft, in a few words. */
 export function leftoverReason(row: LeftoverDraft): string {
   switch (row.kind) {
     case 'discarded':

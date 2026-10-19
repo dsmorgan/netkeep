@@ -48,7 +48,7 @@ function launch(overrides: Partial<LaunchEvent> = {}): LaunchEvent {
     task_id: 'task-1',
     status: 'started',
     refusal: null,
-    message: 'started netkeeper’s Chrome on port 9333',
+    message: 'started netkeep’s Chrome on port 9333',
     pid: 31,
     ...overrides,
   }
@@ -66,17 +66,15 @@ afterEach(() => {
 })
 
 describe('StartChrome', () => {
-  it('says netkeeper’s Chrome isn’t running and offers the button', async () => {
+  it('says netkeep’s Chrome isn’t running and offers the button', async () => {
     renderButton()
-    expect(await screen.findByText("netkeeper's Chrome isn't running.")).toBeInTheDocument()
+    expect(await screen.findByText("netkeep's Chrome isn't running.")).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Start Chrome' })).toBeEnabled()
   })
 
   it('says it is running, with its pid, from the health read', async () => {
     renderButton({ chrome_running: true, chrome_pid: 4242 })
-    expect(
-      await screen.findByText(/netkeeper's Chrome is running \(pid 4242\)/),
-    ).toBeInTheDocument()
+    expect(await screen.findByText(/netkeep's Chrome is running \(pid 4242\)/)).toBeInTheDocument()
   })
 
   it('is not offered when this process can’t start Chrome', async () => {
@@ -104,7 +102,7 @@ describe('StartChrome', () => {
     expect(starts()).toHaveLength(1)
     act(() => source.emit('browser.launch', launch()))
     expect(await screen.findByRole('status')).toHaveTextContent(
-      "netkeeper's Chrome started, with netkeeper in its own window",
+      "netkeep's Chrome started, with netkeep in its own window",
     )
     expect(screen.getByRole('button', { name: 'Start Chrome' })).toBeEnabled()
   })
@@ -127,15 +125,15 @@ describe('StartChrome', () => {
     act(() => source.emit('browser.launch', launch({ status: 'handed_off' })))
     act(() => answer(jsonResponse({ task_id: 'task-1' }, 202)))
     expect(await screen.findByRole('status')).toHaveTextContent(
-      'It opened netkeeper in a new window.',
+      'It opened netkeep in a new window.',
     )
   })
 
   it.each([
-    ['handed_off', null, 'status', 'ok', 'It opened netkeeper in a new window.'],
+    ['handed_off', null, 'status', 'ok', 'It opened netkeep in a new window.'],
     ['handoff_unconfirmed', null, 'status', 'ok', "couldn't confirm the new window opened"],
     ['failed', null, 'alert', 'bad', "Chrome didn't start. Check that Google Chrome is installed"],
-    ['refused', 'not_dedicated', 'alert', 'warn', "Another Chrome is using netkeeper's debug port"],
+    ['refused', 'not_dedicated', 'alert', 'warn', "Another Chrome is using netkeep's debug port"],
     ['refused', 'profile_without_port', 'alert', 'warn', 'without the debug port'],
     ['refused', 'run_holds_browser', 'alert', 'warn', 'Try again when the run ends.'],
     ['refused', 'remote_address', 'alert', 'warn', 'points at another computer'],
@@ -149,7 +147,7 @@ describe('StartChrome', () => {
       expect(said).toHaveTextContent(words)
       expect(said).toHaveClass('nk-glass', 'nk-tint', `nk-tone-${tone}`)
       if (status !== 'handed_off') {
-        expect(said).toHaveTextContent('netkeeper said: the launcher’s words')
+        expect(said).toHaveTextContent('netkeep said: the launcher’s words')
       }
     },
   )
@@ -157,11 +155,11 @@ describe('StartChrome', () => {
   it('says a launch already under way (409) plainly', async () => {
     renderButton(
       {},
-      { [START]: () => jsonResponse({ detail: "netkeeper's Chrome is already starting" }, 409) },
+      { [START]: () => jsonResponse({ detail: "netkeep's Chrome is already starting" }, 409) },
     )
     fireEvent.click(await screen.findByRole('button', { name: 'Start Chrome' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "netkeeper's Chrome is already starting. Wait for it.",
+      "netkeep's Chrome is already starting. Wait for it.",
     )
   })
 
@@ -171,12 +169,12 @@ describe('StartChrome', () => {
     await press(source, starts, null)
     act(() => vi.advanceTimersByTime(LAUNCH_WAIT_MS))
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "netkeeper didn't hear how the launch went",
+      "netkeep didn't hear how the launch went",
     )
     expect(screen.getByRole('button', { name: 'Start Chrome' })).toBeEnabled()
   })
 
-  it('compact: shown only while netkeeper’s Chrome isn’t running', async () => {
+  it('compact: shown only while netkeep’s Chrome isn’t running', async () => {
     const { calls, unmount } = renderButton({ chrome_running: true, chrome_pid: 1 }, {}, true)
     await waitFor(() => expect(calls.some((call) => call.path.endsWith('/health'))).toBe(true))
     expect(screen.queryByRole('button', { name: 'Start Chrome' })).not.toBeInTheDocument()

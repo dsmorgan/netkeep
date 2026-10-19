@@ -313,7 +313,7 @@ export function BrowserHealthCard() {
       ) : status.data.session_flag !== null ? (
         <p role="alert" className="text-destructive">
           Logged out of LinkedIn. No run touches the browser until you log in and run{' '}
-          <code className="font-mono text-xs">netkeeper preflight</code>.
+          <code className="font-mono text-xs">netkeep preflight</code>.
         </p>
       ) : (
         <Muted>No session flag is raised.</Muted>
@@ -476,7 +476,7 @@ export function RepliesCard() {
 }
 
 /**
- * Contacts netkeeper saw change position recently: the best reason to reconnect
+ * Contacts netkeep saw change position recently: the best reason to reconnect
  * (spec 9.8). A change is one an enrichment visit noticed, dated when it was
  * noticed, not the start date on the profile, which people often fill in late (#286).
  */
@@ -488,7 +488,7 @@ export function ChangedJobsCard() {
       title="Changed jobs"
       description={
         changed.isSuccess
-          ? `New positions netkeeper noticed in the last ${changed.data.days} days.`
+          ? `New positions netkeep noticed in the last ${changed.data.days} days.`
           : undefined
       }
     >
@@ -497,7 +497,7 @@ export function ChangedJobsCard() {
       ) : changed.isError ? (
         <Failed what="Changed jobs" />
       ) : changed.data.items.length === 0 ? (
-        <Muted>netkeeper noticed no position changes in the last {changed.data.days} days.</Muted>
+        <Muted>netkeep noticed no position changes in the last {changed.data.days} days.</Muted>
       ) : (
         <>
           <ul className="flex flex-col gap-1.5">

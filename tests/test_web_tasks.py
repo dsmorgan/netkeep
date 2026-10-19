@@ -3,10 +3,10 @@ import asyncio
 import httpx
 from fastapi import FastAPI
 
-from netkeeper.services.events import EventBus
-from netkeeper.services.tasks import TaskRunner
+from netkeep.services.events import EventBus
+from netkeep.services.tasks import TaskRunner
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 
 
 async def test_ping_answers_202_before_the_work_runs(

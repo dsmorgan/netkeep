@@ -1,4 +1,4 @@
-"""netkeeper.services.linkedin_accounts: one account per user, keyed like the budgets (ADR 0005)."""
+"""netkeep.services.linkedin_accounts: one account per user, keyed like the budgets (ADR 0005)."""
 
 from __future__ import annotations
 
@@ -6,10 +6,10 @@ import factories
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.db import session_scope
-from netkeeper.models import LinkedInAccount
-from netkeeper.scoping import scoped
-from netkeeper.services.linkedin_accounts import (
+from netkeep.db import session_scope
+from netkeep.models import LinkedInAccount
+from netkeep.scoping import scoped
+from netkeep.services.linkedin_accounts import (
     LEGACY_ACCOUNT_ID,
     account_id_for,
     ensure_account,

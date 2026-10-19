@@ -8,7 +8,7 @@ clicking the one **Contact info** control makes it "send" the overlay's
 ``actions/navigation`` request and receive its answer. Every answer reaches the tab's
 ``request`` and ``response`` listeners the way Playwright delivers them.
 
-The control is found the way :meth:`netkeeper.linkedin.browser.BrowserRun.click_contact_info`
+The control is found the way :meth:`netkeep.linkedin.browser.BrowserRun.click_contact_info`
 finds it -- ``get_by_role("link", name="Contact info", exact=True)`` -- and the fake
 records every lookup and every click, so a test can assert there was exactly one click
 and nothing else. The tab has no ``evaluate`` result, no keyboard, and no other
@@ -41,9 +41,9 @@ from flagship_pages import (
 from flagship_site import SHELL, FakeCdpSession, FakeResponse
 from voyager_pages import Person
 
-from netkeeper.linkedin.browser import PageLike
-from netkeeper.linkedin.flagship import CONTACT_DETAILS_SCREEN_ID, NAVIGATION_PATH
-from netkeeper.linkedin.flagship_profile import COMPONENT_PATH
+from netkeep.linkedin.browser import PageLike
+from netkeep.linkedin.flagship import CONTACT_DETAILS_SCREEN_ID, NAVIGATION_PATH
+from netkeep.linkedin.flagship_profile import COMPONENT_PATH
 
 ORIGIN = "https://www.linkedin.com"
 CHECKPOINT_URL = "https://www.linkedin.com/checkpoint/challenge/AgFAKE?ctx=invented"

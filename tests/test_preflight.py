@@ -1,4 +1,4 @@
-"""``netkeeper preflight`` and ``netkeeper browser launch`` (spec 9.1, ADR 0002).
+"""``netkeep preflight`` and ``netkeep browser launch`` (spec 9.1, ADR 0002).
 
 Preflight has to answer "is the LinkedIn session still there" without asking
 linkedin.com, because a check that loads the site is a request the user did not make
@@ -27,9 +27,9 @@ from browser_fakes import FakeBrowser, FakeConnector, FakeContext
 from browser_guard import UNREACHABLE_CDP_URL
 from typer.testing import CliRunner
 
-from netkeeper.cli import app as cli
-from netkeeper.linkedin.browser import ActivityLocks, AttachBrowserProvider
-from netkeeper.linkedin.preflight import Fingerprint, LoginState, preflight
+from netkeep.cli import app as cli
+from netkeep.linkedin.browser import ActivityLocks, AttachBrowserProvider
+from netkeep.linkedin.preflight import Fingerprint, LoginState, preflight
 
 CDP_URL = UNREACHABLE_CDP_URL  # never a real Chrome, even without the guard (#294)
 BUSY_TIMEOUT_S = 1.0
@@ -281,9 +281,9 @@ async def test_the_session_state_is_not_a_classification_outcome() -> None:
     """
     assert "logged_out" not in {state.value for state in LoginState}
 
-    if importlib.util.find_spec("netkeeper.linkedin.classify") is None:
+    if importlib.util.find_spec("netkeep.linkedin.classify") is None:
         pytest.skip("classify lands with P2-03 (#143/#144); the rule above holds either way")
-    outcome = importlib.import_module("netkeeper.linkedin.classify").Outcome
+    outcome = importlib.import_module("netkeep.linkedin.classify").Outcome
     overlap = {state.value for state in LoginState} & {member.value for member in outcome}
     assert not overlap, f"LoginState and Outcome share {sorted(overlap)}"
 
@@ -299,7 +299,7 @@ def runner() -> CliRunner:
 def test_preflight_command_prints_the_session_and_the_fingerprint(
     runner: CliRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("netkeeper.cli.AttachBrowserProvider", lambda cdp_url: make_provider())
+    monkeypatch.setattr("netkeep.cli.AttachBrowserProvider", lambda cdp_url: make_provider())
 
     result = runner.invoke(cli, ["preflight"])
 
@@ -316,24 +316,24 @@ def test_preflight_command_exits_non_zero_when_a_job_could_not_run(
 ) -> None:
     connector = FakeConnector(error=OSError("connection refused"))
     monkeypatch.setattr(
-        "netkeeper.cli.AttachBrowserProvider", lambda cdp_url: make_provider(connector=connector)
+        "netkeep.cli.AttachBrowserProvider", lambda cdp_url: make_provider(connector=connector)
     )
 
     result = runner.invoke(cli, ["preflight"])
 
     assert result.exit_code == 1
     assert "not ready" in result.output
-    assert "netkeeper browser launch" in result.output
+    assert "netkeep browser launch" in result.output
 
 
 def test_browser_launch_prints_the_command_and_runs_nothing(
     runner: CliRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """`browser launch` is instructions. A browser netkeeper starts is ADR 0002's incident."""
-    monkeypatch.setenv("NETKEEPER_DATA", str(tmp_path))
+    """`browser launch` is instructions. A browser netkeep starts is ADR 0002's incident."""
+    monkeypatch.setenv("NETKEEP_DATA", str(tmp_path))
 
     def refuse(*args: object, **kwargs: object) -> None:
-        raise AssertionError("netkeeper started a process")
+        raise AssertionError("netkeep started a process")
 
     monkeypatch.setattr(subprocess, "Popen", refuse)
     monkeypatch.setattr(os, "system", refuse)
@@ -354,7 +354,7 @@ def test_browser_launch_uses_the_port_from_the_config(
 ) -> None:
     config = tmp_path / "config.toml"
     config.write_text('[linkedin]\ncdp_url = "http://127.0.0.1:9333"\n', encoding="utf-8")
-    monkeypatch.setenv("NETKEEPER_DATA", str(tmp_path))
+    monkeypatch.setenv("NETKEEP_DATA", str(tmp_path))
 
     result = runner.invoke(cli, ["--config", str(config), "browser", "launch"])
 

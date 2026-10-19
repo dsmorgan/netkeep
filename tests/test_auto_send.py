@@ -3,8 +3,8 @@
 Two levels, both against :mod:`messaging_dom`'s fake profile, which records every Send
 click and what the composer held when it came:
 
-- **The page**: :class:`~netkeeper.linkedin.page_messaging.PagePrefill` and
-  :meth:`~netkeeper.linkedin.browser.BrowserRun.click_send`, with a hand-made permit.
+- **The page**: :class:`~netkeep.linkedin.page_messaging.PagePrefill` and
+  :meth:`~netkeep.linkedin.browser.BrowserRun.click_send`, with a hand-made permit.
   Every check ``click_send`` makes before the click refuses with no click.
 - **The run**: the scheduler's claim (``claim_auto_send``), the real worker and
   ``message_send``. The flag, the mode, the budget, heat at its skip threshold, active hours and the
@@ -38,9 +38,9 @@ from run_fakes import fake_provider
 from sqlalchemy.orm import Session, sessionmaker
 from test_linkedin_steps import LINKEDIN, Lane, make_lane
 
-from netkeeper import db as db_module
-from netkeeper.config import BudgetSettings, LinkedInSettings, Settings
-from netkeeper.linkedin.browser import (
+from netkeep import db as db_module
+from netkeep.config import BudgetSettings, LinkedInSettings, Settings
+from netkeep.linkedin.browser import (
     CLOSE_HIDDEN_TEXT,
     CLOSE_NAME_UNREAD,
     CLOSE_NOT_FOR_PERSON,
@@ -53,21 +53,21 @@ from netkeeper.linkedin.browser import (
     BubbleRecipient,
     SendClick,
 )
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.messaging import (
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.messaging import (
     MessageJobSpec,
     MessageOutcomeKind,
     PrefillResult,
     SendPermit,
     plan_typing,
 )
-from netkeeper.linkedin.page_messaging import (
+from netkeep.linkedin.page_messaging import (
     SEND_DWELL_MEDIAN_S,
     SEND_DWELL_RANGE_S,
     SEND_DWELL_SIGMA,
     PagePrefill,
 )
-from netkeeper.models import (
+from netkeep.models import (
     CampaignStep,
     Enrollment,
     EnrollmentStatus,
@@ -80,8 +80,8 @@ from netkeeper.models import (
     SyncRunTrigger,
     User,
 )
-from netkeeper.scoping import get_scoped, scoped
-from netkeeper.services import (
+from netkeep.scoping import get_scoped, scoped
+from netkeep.services import (
     budgets,
     linkedin_steps,
     message_send,
@@ -90,24 +90,24 @@ from netkeeper.services import (
     scheduler,
     ui_settings,
 )
-from netkeeper.services import heat as heat_service
-from netkeeper.services.budgets import ActionClass
-from netkeeper.services.linkedin_accounts import (
+from netkeep.services import heat as heat_service
+from netkeep.services.budgets import ActionClass
+from netkeep.services.linkedin_accounts import (
     arm_scheduled_runs,
     disarm_scheduled_runs,
     ensure_account,
     pause_schedule,
 )
-from netkeeper.services.linkedin_session import flag_session
-from netkeeper.services.linkedin_steps import (
+from netkeep.services.linkedin_session import flag_session
+from netkeep.services.linkedin_steps import (
     Refusal,
     claim_auto_send,
     claim_prefill,
     record_prefill_outcome,
     waiting_for_you,
 )
-from netkeeper.services.settings_kv import set_setting
-from netkeeper.worker import BrowserWorker
+from netkeep.services.settings_kv import set_setting
+from netkeep.worker import BrowserWorker
 
 BODY = "Hi Zephyrine, good to see you!"
 T0 = datetime(2026, 10, 7, 15, 0, tzinfo=UTC)
@@ -424,7 +424,7 @@ async def test_click_send_refuses_without_a_permit_before_typing_and_a_second_ti
 
 
 def test_the_send_constants_are_pinned() -> None:
-    from netkeeper.linkedin import browser
+    from netkeep.linkedin import browser
 
     assert browser.SEND_CONTROL_ROLE == "button"
     assert browser.SEND_CONTROL_NAME == "Send"
@@ -621,7 +621,7 @@ async def test_a_spent_auto_send_budget_stops_it_before_the_navigation(lane: Lan
     def spend(session: Session, user: User) -> None:
         account = ensure_account(session, user)
         key = budgets._day_key(account.id, ActionClass.LI_MESSAGES_AUTO, NOW.date())
-        from netkeeper.services.settings_kv import set_setting
+        from netkeep.services.settings_kv import set_setting
 
         limit = budgets._limits_for(ActionClass.LI_MESSAGES_AUTO, AUTO.linkedin.budget).day
         set_setting(session, user, key, limit)  # at the limit: consume alone would allow one
@@ -750,7 +750,7 @@ def test_claim_auto_send_on_a_disarmed_account_records_no_run(
 
 
 def test_an_auto_send_claim_refuses_a_prefill_step_and_the_flag_off(lane: Lane) -> None:
-    from netkeeper.services.linkedin_steps import _Claimer, start_auto_send_run
+    from netkeep.services.linkedin_steps import _Claimer, start_auto_send_run
 
     enrollment = lane.enroll(contact=dict(CONTACT))
     off = replace(AUTO, campaigns=replace(AUTO.campaigns, linkedin_auto_send=False))
@@ -792,8 +792,8 @@ def test_create_run_takes_a_scheduled_message_send_only_with_the_auto_send_gate(
 
 
 def test_an_auto_sent_message_is_listed_only_once_stale(lane: Lane) -> None:
-    from netkeeper.linkedin.messaging import MessageOutcome
-    from netkeeper.services import campaign_engine as engine
+    from netkeep.linkedin.messaging import MessageOutcome
+    from netkeep.services import campaign_engine as engine
 
     enrollment = lane.enroll(contact=dict(CONTACT))
     lane.write(lambda s, u: record_poll(s, u, NOW - timedelta(minutes=1)))
@@ -993,7 +993,7 @@ async def test_the_handler_waits_out_the_spacing(lane: Lane) -> None:
 
 
 def test_the_budget_warning_shows_only_with_auto_send_on_above_twenty() -> None:
-    from netkeeper.services.posture import _auto_send
+    from netkeep.services.posture import _auto_send
 
     high = replace(
         AUTO, linkedin=replace(AUTO.linkedin, budget=BudgetSettings(li_messages_auto_per_day=25))
@@ -1241,7 +1241,7 @@ async def test_disarming_pausing_or_turning_auto_send_off_after_the_last_key_sto
     assert message is not None and message.status is MessageStatus.PREFILLED
     assert a.run().notes == f"not sent: {why}"
     rows, _ = lane.read(lambda s, u: waiting_for_you(s, u, limit=10))
-    from netkeeper.web.api.linkedin_steps import _auto_send_notes, _not_sent_reason
+    from netkeep.web.api.linkedin_steps import _auto_send_notes, _not_sent_reason
 
     run_id = rows[0].message.sync_run_id
     notes = lane.read(lambda s, u: _auto_send_notes(s, u, [run_id]))
@@ -1259,7 +1259,7 @@ async def test_a_landed_send_with_its_bubble_closed_holds_nothing(lane: Lane) ->
 async def test_an_auto_send_that_leaves_a_bubble_holds_auto_send_until_resumed(
     lane: Lane,
 ) -> None:
-    from netkeeper.services.posture import _auto_send
+    from netkeep.services.posture import _auto_send
 
     a = Auto(lane, MessagingSite(ZEPHYRINE, before=existing_bubble_html(ZEPHYRINE)))
     await a.execute()
@@ -1340,7 +1340,7 @@ def test_spacing_counts_the_newest_message_send_run_hand_prefills_included(
 
 
 def test_the_claim_refuses_when_li_messages_auto_is_spent(lane: Lane) -> None:
-    from netkeeper.services.settings_kv import set_setting
+    from netkeep.services.settings_kv import set_setting
 
     def spend(session: Session, user: User) -> None:
         account = ensure_account(session, user)
@@ -1355,7 +1355,7 @@ def test_the_claim_refuses_when_li_messages_auto_is_spent(lane: Lane) -> None:
     assert lane.write(lambda s, u: claim_auto_send(s, u, now=NOW, settings=AUTO)) is None
     assert lane.runs() == []
     # And the claim's own check refuses it too, as browser_out_of_budget.
-    from netkeeper.services.linkedin_steps import _Claimer, start_auto_send_run
+    from netkeep.services.linkedin_steps import _Claimer, start_auto_send_run
 
     [enrollment] = [e.id for e in lane.read(lambda s, u: list(s.scalars(scoped(u, Enrollment))))]
     refused = lane.write(
@@ -1404,7 +1404,7 @@ def test_the_claim_reaches_an_auto_send_step_behind_a_long_prefill_backlog(lane:
     import factories
     from campaign_fakes import make_mailbox
 
-    from netkeeper.models import Campaign
+    from netkeep.models import Campaign
 
     def backlog(session: Session, user: User) -> None:
         mailbox = make_mailbox(session, user, email="backlog@example.test")
@@ -1451,7 +1451,7 @@ def test_the_budget_warning_starts_above_twenty_and_reads_the_clamped_limit(
 
 
 def test_posture_lists_the_auto_send_job_only_with_the_flag_on(lane: Lane) -> None:
-    from netkeeper.services.posture import _scheduler_posture
+    from netkeep.services.posture import _scheduler_posture
 
     account = lane.read(lambda s, u: ensure_account(s, u).id)
     on = lane.read(
@@ -1617,7 +1617,7 @@ class _SentButNothingTyped:
     async def prefill(
         self, spec: MessageJobSpec, plan: Any, *, cancelled: Any, permit: Any = None
     ) -> PrefillResult:
-        from netkeeper.linkedin.messaging import MessageOutcome
+        from netkeep.linkedin.messaging import MessageOutcome
 
         return PrefillResult(MessageOutcome(MessageOutcomeKind.NOT_TYPED, "x", None, 0))
 
@@ -2060,7 +2060,7 @@ async def test_a_tab_that_will_not_close_is_not_counted_closed_and_holds(
 
 
 def test_the_close_constants_are_pinned() -> None:
-    from netkeeper.linkedin import browser, page_messaging
+    from netkeep.linkedin import browser, page_messaging
 
     assert browser.CLOSE_CONTROL_ROLE == "button"
     assert browser.CLOSE_CONTROL_PREFIX == "Close your conversation with "
@@ -2074,7 +2074,7 @@ def test_the_close_constants_are_pinned() -> None:
 
 
 def test_the_hold_is_written_for_a_run_that_already_ended(lane: Lane) -> None:
-    from netkeeper.linkedin.messaging import MessageOutcome
+    from netkeep.linkedin.messaging import MessageOutcome
 
     enrollment = lane.enroll(contact=dict(CONTACT))
     lane.write(lambda s, u: record_poll(s, u, NOW - timedelta(minutes=1)))
@@ -2208,7 +2208,7 @@ def test_the_claim_takes_the_oldest_due_auto_send_first(lane: Lane) -> None:
 
 
 def test_posture_passes_the_hold_through(lane: Lane) -> None:
-    from netkeeper.services.posture import posture
+    from netkeep.services.posture import posture
 
     account = lane.read(lambda s, u: ensure_account(s, u).id)
     lane.write(
@@ -2224,7 +2224,7 @@ def test_posture_passes_the_hold_through(lane: Lane) -> None:
     [row] = [p for p in report.protections if p.name == "manual linkedin sends"]
     text = " ".join(row.warnings)
     assert "auto-send is held" in text
-    assert "resume auto-send" in text and "netkeeper linkedin auto-send-resume" in text
+    assert "resume auto-send" in text and "netkeep linkedin auto-send-resume" in text
 
 
 # --- #457 (Try again) with auto-send ------------------------------------------------------
@@ -2286,7 +2286,7 @@ async def test_a_failure_after_the_send_click_is_not_offered_as_try_again(
 
 def _change_enrollment(field: str, value: Any) -> Callable[[Session, User], None]:
     def act(session: Session, user: User) -> None:
-        from netkeeper.models import Enrollment
+        from netkeep.models import Enrollment
 
         for enrollment in session.scalars(scoped(user, Enrollment)):
             setattr(enrollment, field, value)
@@ -2295,7 +2295,7 @@ def _change_enrollment(field: str, value: Any) -> Callable[[Session, User], None
 
 
 def _pause_campaign(session: Session, user: User) -> None:
-    from netkeeper.models import Campaign, CampaignStatus
+    from netkeep.models import Campaign, CampaignStatus
 
     for campaign in session.scalars(scoped(user, Campaign)):
         campaign.status = CampaignStatus.PAUSED
@@ -2304,7 +2304,7 @@ def _pause_campaign(session: Session, user: User) -> None:
 def _reply(session: Session, user: User) -> None:
     import factories
 
-    from netkeeper.models import Enrollment, MessageDirection
+    from netkeep.models import Enrollment, MessageDirection
 
     for enrollment in session.scalars(scoped(user, Enrollment)):
         factories.make_message(
@@ -2317,7 +2317,7 @@ def _reply(session: Session, user: User) -> None:
 
 
 def _do_not_contact(session: Session, user: User) -> None:
-    from netkeeper.models import Contact
+    from netkeep.models import Contact
 
     for contact in session.scalars(scoped(user, Contact)):
         contact.do_not_contact = True
@@ -2388,7 +2388,7 @@ async def test_a_change_to_the_claim_before_the_navigation_opens_nothing(lane: L
 def test_record_quietly_holds_when_recording_fails(
     lane: Lane, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from netkeeper.linkedin.messaging import MessageOutcome
+    from netkeep.linkedin.messaging import MessageOutcome
 
     lane.enroll(contact=dict(CONTACT))
     lane.write(lambda s, u: record_poll(s, u, NOW - timedelta(minutes=1)))
@@ -2430,7 +2430,7 @@ async def test_an_auto_send_leaves_li_prefills_spent_out_so_a_retry_asks_to_conf
 
 
 async def test_a_busy_browser_keeps_the_auto_send_step_due(lane: Lane) -> None:
-    from netkeeper.linkedin.activity_lock import account_key
+    from netkeep.linkedin.activity_lock import account_key
 
     a = Auto(lane)
     account = a.run().linkedin_account_id
@@ -2598,7 +2598,7 @@ async def test_a_bubble_check_that_cannot_read_the_page_holds_auto_send(
 async def test_a_covered_message_control_holds_auto_send(
     lane: Lane, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from netkeeper.linkedin import browser
+    from netkeep.linkedin import browser
 
     monkeypatch.setattr(browser, "choose_message_target", lambda *args, **kwargs: None)
     a = Auto(lane)
@@ -2653,7 +2653,7 @@ async def test_a_pre_click_hold_is_written_when_the_final_record_fails(
 def test_record_quietly_writes_a_pre_click_hold_when_recording_fails(
     lane: Lane, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from netkeeper.linkedin.messaging import MessageOutcome, PreClickHold
+    from netkeep.linkedin.messaging import MessageOutcome, PreClickHold
 
     run_id = _claimed_run(lane)
 
@@ -2709,13 +2709,13 @@ LATE_DIALOG = '<div hidden role="dialog" aria-label="Messaging"><header></header
         (
             LATE_COMPOSER,
             "another message composer is on the page, in an open or minimized bubble,"
-            " in this or another LinkedIn tab in the netkeeper Chrome window;"
+            " in this or another LinkedIn tab in the netkeep Chrome window;"
             " close the other bubbles",
         ),
         (
             LATE_DIALOG,
             "another message bubble is on the page, open or minimized, in this or another"
-            " LinkedIn tab in the netkeeper Chrome window; close the others",
+            " LinkedIn tab in the netkeep Chrome window; close the others",
         ),
     ],
     ids=["second composer", "second dialog"],
@@ -2726,7 +2726,7 @@ async def test_a_bubble_drawn_after_the_pre_click_check_holds_auto_send(
     """#516, item 2 (F9 of the CP8c analysis): the page was clear at the pre-click check
     (#444), and a second bubble draws with the Message click, as a restored bubble may.
     The check after the click refuses with nothing typed, and auto-send holds: the
-    bubble netkeeper didn't expect stays open, so every later auto-send would meet it.
+    bubble netkeep didn't expect stays open, so every later auto-send would meet it.
     The hold comes from ADR 0008's rule 5 (any ending after an attempted Message click
     that didn't close its own tab), not from #444's pre-click map."""
     site = MessagingSite(
@@ -2771,8 +2771,8 @@ async def test_a_composer_drawn_after_send_leaves_the_bubble_open_and_holds(lane
 def test_the_opened_in_front_note_is_not_part_of_the_not_sent_reason() -> None:
     """#195: a run's note that its tab opened in front never reads as part of why an
     auto-send wasn't sent."""
-    from netkeeper.services import runs
-    from netkeeper.web.api.linkedin_steps import _not_sent_reason
+    from netkeep.services import runs
+    from netkeep.web.api.linkedin_steps import _not_sent_reason
 
     notes = f"not sent: the schedule is paused {runs.OPENED_IN_FRONT_NOTE}"
     assert _not_sent_reason(notes) == "the schedule is paused"

@@ -20,7 +20,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-const PROJECT = 'netkeeper-ab12cd'
+const PROJECT = 'netkeep-ab12cd'
 
 /** A fake `/gmail-setup` that keeps what the wizard PUTs, as the backend does. */
 function render(
@@ -74,7 +74,7 @@ describe('Gmail setup guide', () => {
       'https://console.cloud.google.com/projectcreate',
     )
     expect(
-      screen.getByText('gcloud projects create netkeeper-ab12cd --name=netkeeper'),
+      screen.getByText('gcloud projects create netkeep-ab12cd --name=netkeep'),
     ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Done: the project exists' })).toBeEnabled()
   })
@@ -84,7 +84,7 @@ describe('Gmail setup guide', () => {
     await screen.findByLabelText('Project ID')
     const help = screen.getByText(/project picker/)
     expect(help).toHaveTextContent(/Name, Type and ID/)
-    expect(help).toHaveTextContent(/netkeeper-510123/)
+    expect(help).toHaveTextContent(/netkeep-510123/)
   })
 
   it('disables every project link, with a hint, until a project ID is saved', async () => {
@@ -109,7 +109,7 @@ describe('Gmail setup guide', () => {
 
   it('carries the saved project ID in every deep link', async () => {
     const marked = ['project', 'gmail_api', 'branding', 'test_user', 'client_created']
-    render(noClient, { project_id: 'netkeeper-510123', done: marked })
+    render(noClient, { project_id: 'netkeep-510123', done: marked })
     const hrefs: string[] = []
     for (const [stepName, linkName] of [
       [/Enable the Gmail API/, 'Gmail API'],
@@ -124,38 +124,38 @@ describe('Gmail setup guide', () => {
     }
     expect(hrefs).toHaveLength(6)
     for (const href of hrefs) {
-      expect(new URL(href).searchParams.get('project')).toBe('netkeeper-510123')
+      expect(new URL(href).searchParams.get('project')).toBe('netkeep-510123')
     }
   })
 
   it('accepts a pasted console URL and saves its project ID', async () => {
     const { calls } = render(noClient)
     fireEvent.change(await screen.findByLabelText('Project ID'), {
-      target: { value: 'https://console.cloud.google.com/home/dashboard?project=netkeeper-510123' },
+      target: { value: 'https://console.cloud.google.com/home/dashboard?project=netkeep-510123' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() =>
       expect(calls).toContainEqual({
         method: 'PUT',
         path: '/api/v1/gmail-setup',
-        body: { project_id: 'netkeeper-510123', sender_email: null, done: [] },
+        body: { project_id: 'netkeep-510123', sender_email: null, done: [] },
       }),
     )
     expect(screen.getByText(/paste any Google Cloud console URL/)).toBeInTheDocument()
   })
 
   it('links to the project dashboard to check the saved ID', async () => {
-    render(noClient, { project_id: 'netkeeper-510123' })
+    render(noClient, { project_id: 'netkeep-510123' })
     expect(await screen.findByRole('link', { name: 'Check it' })).toHaveAttribute(
       'href',
-      'https://console.cloud.google.com/home/dashboard?project=netkeeper-510123',
+      'https://console.cloud.google.com/home/dashboard?project=netkeep-510123',
     )
     expect(screen.getByText(/If you see a permissions page instead, the ID is wrong/)).toBeVisible()
     expect(screen.queryByText(/Google usually adds a suffix/)).not.toBeInTheDocument()
   })
 
   it('notes, without blocking, an ID with no suffix', async () => {
-    render(noClient, { project_id: 'netkeeper' })
+    render(noClient, { project_id: 'netkeep' })
     expect(await screen.findByText(/Google usually adds a suffix/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Done: the project exists' })).toBeEnabled()
   })
@@ -173,7 +173,7 @@ describe('Gmail setup guide', () => {
     render(noClient)
     fireEvent.click(await screen.findByRole('button', { name: 'Suggest one' }))
     expect((screen.getByLabelText('Project ID') as HTMLInputElement).value).toMatch(
-      /^netkeeper-[a-z0-9]{6}$/,
+      /^netkeep-[a-z0-9]{6}$/,
     )
   })
 
@@ -248,7 +248,7 @@ describe('Gmail setup guide', () => {
       `https://console.cloud.google.com/auth/branding?project=${PROJECT}`,
     )
     fireEvent.click(screen.getByRole('button', { name: 'Copy app name' }))
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith('netkeeper'))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('netkeep'))
     expect(await screen.findByRole('button', { name: 'Copy app name' })).toHaveTextContent('Copied')
     fireEvent.click(screen.getByRole('button', { name: 'Copy user support email' }))
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('me@example.com'))
@@ -305,7 +305,7 @@ describe('Gmail setup guide', () => {
         return jsonResponse(current)
       },
     })
-    const saveStep = await screen.findByRole('button', { name: /Save the client in netkeeper/ })
+    const saveStep = await screen.findByRole('button', { name: /Save the client in netkeep/ })
     expect(saveStep).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByText('5 of 7 steps done')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Client ID'), {
@@ -315,7 +315,7 @@ describe('Gmail setup guide', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save client' }))
 
     expect(await screen.findByText('6 of 7 steps done')).toBeInTheDocument()
-    expect(within(step(/Save the client in netkeeper/)).getByText('checked')).toBeInTheDocument()
+    expect(within(step(/Save the client in netkeep/)).getByText('checked')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Connect your mailbox/ })).toHaveAttribute(
       'aria-expanded',
       'true',
@@ -350,7 +350,7 @@ describe('Gmail setup guide', () => {
       screen.getByText(/A GitHub repository URL \(github.com\) isn’t a domain you own/),
     ).toBeInTheDocument()
     expect(screen.getByText(/A GitHub repository URL/)).toHaveTextContent(
-      'netkeeper hasn’t confirmed that either',
+      'netkeep hasn’t confirmed that either',
     )
     expect(within(step(/Connect your mailbox/)).getByText('checked')).toBeInTheDocument()
 
@@ -395,7 +395,7 @@ describe('Gmail setup guide', () => {
     })
     const body = await screen.findByText(/Authorize the Gmail account on Google’s page/)
     expect(body).toHaveTextContent('gmail.modify')
-    expect(body).toHaveTextContent('netkeeper never deletes mail')
+    expect(body).toHaveTextContent('netkeep never deletes mail')
   })
 
   it('opens any step on request', async () => {

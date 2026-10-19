@@ -51,7 +51,7 @@ function list(id: number, overrides: Partial<ListOut> = {}): ListOut {
 
 /**
  * `GET /api/v1/lists` on a real server: `ensure_validated_list` seeds this
- * smart list at every start (`netkeeper/web/app.py`), marked `builtin` (#133).
+ * smart list at every start (`netkeep/web/app.py`), marked `builtin` (#133).
  * A fixture that defaults to `[]` is the one PR #129's review caught the fake
  * diverging from the server on.
  */

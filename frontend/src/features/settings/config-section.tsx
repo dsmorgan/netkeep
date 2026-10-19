@@ -219,7 +219,7 @@ function FieldRow({
       )}
       {field.restart_pending && (
         <p role="status" className="text-warn-ink">
-          Restart netkeeper to apply this value: the running server still uses the one it started
+          Restart netkeep to apply this value: the running server still uses the one it started
           with.
         </p>
       )}
@@ -295,7 +295,7 @@ function ConfirmedSwitch({ field }: { field: ConfigField }) {
         <Badge variant={field.source === 'file' ? 'secondary' : 'outline'}>
           {SOURCE_LABEL[field.source]}
         </Badge>
-        {on && <Badge variant="destructive">On: netkeeper clicks Send</Badge>}
+        {on && <Badge variant="destructive">On: netkeep clicks Send</Badge>}
       </div>
       <p className="text-muted-foreground">
         {field.help} {field.applies_note}

@@ -1,7 +1,7 @@
 /**
  * Every predicate the filter language defines, as the builder offers them.
  *
- * The filter language lives in `netkeeper/crm/filters.py`. This table is the
+ * The filter language lives in `netkeep/crm/filters.py`. This table is the
  * builder's view of it: one entry per `op`, with the words to show, a fresh
  * node to insert, and a complete example the tests validate against the
  * published JSON Schema.

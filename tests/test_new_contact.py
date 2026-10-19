@@ -1,4 +1,4 @@
-"""Adding a contact by hand (#303): the service, ``POST /contacts``, and ``netkeeper contacts add``.
+"""Adding a contact by hand (#303): the service, ``POST /contacts``, and ``netkeep contacts add``.
 
 The same dedup and checks an import runs: a contact the email or the LinkedIn URL
 finds is never created twice, whatever the case or the URL's spelling; a name,
@@ -22,16 +22,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
 
-from netkeeper import migrations
-from netkeeper.cli import app as cli
-from netkeeper.crm import lists as list_service
-from netkeeper.crm import tags as tag_service
-from netkeeper.crm.contacts import merge_contacts
-from netkeeper.crm.filters import parse_filter
-from netkeeper.crm.importer import is_email_address
-from netkeeper.crm.new_contact import Duplicate, Invalid, NewContact, create_contact
-from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.models import (
+from netkeep import migrations
+from netkeep.cli import app as cli
+from netkeep.crm import lists as list_service
+from netkeep.crm import tags as tag_service
+from netkeep.crm.contacts import merge_contacts
+from netkeep.crm.filters import parse_filter
+from netkeep.crm.importer import is_email_address
+from netkeep.crm.new_contact import Duplicate, Invalid, NewContact, create_contact
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+from netkeep.models import (
     Contact,
     ContactAlias,
     ContactSource,
@@ -42,10 +42,10 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.scoping import install_scope_guard, scoped, scoped_contacts_count, scoped_count
-from netkeeper.services.users import ensure_local_user
+from netkeep.scoping import install_scope_guard, scoped, scoped_contacts_count, scoped_count
+from netkeep.services.users import ensure_local_user
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 
 
 # --- the service ------------------------------------------------------------
@@ -499,7 +499,7 @@ async def test_post_contacts_needs_the_csrf_header(client: httpx.AsyncClient) ->
 @pytest.fixture
 def cli_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[sessionmaker[Session]]:
     url = database_url(tmp_path)
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     engine = make_engine(url)
     migrations.upgrade(engine)
     made = make_session_factory(engine)

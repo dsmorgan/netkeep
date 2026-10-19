@@ -106,7 +106,7 @@ export function EvidencePanel({ card }: { card: TriageCard }) {
         </p>
         {evidence.worked_together.length === 0 ? (
           <p className="mt-1 text-muted-foreground">
-            No shared employer found. netkeeper compares your job history with this person&apos;s
+            No shared employer found. netkeep compares your job history with this person&apos;s
             current company and any past positions on file, so an earlier employer you shared may
             not show here.
           </p>

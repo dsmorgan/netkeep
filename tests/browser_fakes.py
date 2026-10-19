@@ -1,7 +1,7 @@
 """A browser that is not a browser: fakes for the attach path's offline tests.
 
-The real thing needs a Chrome the developer started, so everything netkeeper does to
-a browser goes through the narrow protocols in ``netkeeper.linkedin.browser``, and
+The real thing needs a Chrome the developer started, so everything netkeep does to
+a browser goes through the narrow protocols in ``netkeep.linkedin.browser``, and
 these fakes implement them. mypy checks the fakes against the same protocols the
 Playwright objects satisfy, so a fake that drifts from the real API is a type error.
 
@@ -19,9 +19,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from netkeeper.chrome_profile import SINGLETON_LOCK
-from netkeeper.linkedin.browser import CHROME_PROFILE_DIRNAME, Connection, ContextLike, PageLike
-from netkeeper.paths import data_dir, default_data_dir
+from netkeep.chrome_profile import SINGLETON_LOCK
+from netkeep.linkedin.browser import CHROME_PROFILE_DIRNAME, Connection, ContextLike, PageLike
+from netkeep.paths import data_dir, default_data_dir
 
 #: The pid every fake Chrome names as its browser process, unless a test says otherwise.
 FAKE_CHROME_PID = 4242
@@ -31,7 +31,7 @@ def hold_profile(profile: Path, pid: int = FAKE_CHROME_PID) -> None:
     """Make ``profile`` look held by browser process ``pid``, as Chrome's lock does.
 
     Never under the real data directory: a fake built before a test set
-    ``NETKEEPER_DATA`` would otherwise write a lock into the real profile.
+    ``NETKEEP_DATA`` would otherwise write a lock into the real profile.
     """
     if profile.resolve().is_relative_to(default_data_dir().resolve()):
         raise AssertionError(f"a fake Chrome tried to hold a real profile: {profile}")
@@ -172,7 +172,7 @@ class FakePage:
         self._closed = True
 
     def user_closed_it(self) -> None:
-        """The tab going away without netkeeper noticing: the case ``_ensure_page`` exists for."""
+        """The tab going away without netkeep noticing: the case ``_ensure_page`` exists for."""
         self._closed = True
 
 
@@ -314,7 +314,7 @@ class FakeContext:
         return [page for page in self.pages if not page.is_closed()]
 
     async def close(self) -> None:
-        raise AssertionError("the context belongs to the user; netkeeper never closes it")
+        raise AssertionError("the context belongs to the user; netkeep never closes it")
 
 
 class FakeBrowser:
@@ -342,7 +342,7 @@ class FakeBrowser:
         raise AssertionError("a second context is a second LinkedIn device (ADR 0002)")
 
     async def close(self) -> None:
-        raise AssertionError("netkeeper neither starts nor stops the user's browser")
+        raise AssertionError("netkeep neither starts nor stops the user's browser")
 
 
 class FakeConnector:
@@ -368,7 +368,7 @@ class FakeConnector:
         profile: Path | None = None,
     ) -> None:
         # Fixed now, as the provider fixes its own when it's built: a test that moves
-        # NETKEEPER_DATA while a run is live doesn't move the fake Chrome's profile.
+        # NETKEEP_DATA while a run is live doesn't move the fake Chrome's profile.
         self.profile = data_dir() / CHROME_PROFILE_DIRNAME if profile is None else profile
         self.browsers = [FakeBrowser()] if browsers is None else list(browsers)
         self.error = error

@@ -1,4 +1,4 @@
-/** Labels and rules for recording a response from outside netkeeper (#512). */
+/** Labels and rules for recording a response from outside netkeep (#512). */
 import type { EnrollmentStatus, ResponseOutcome, ResponseVia } from './api'
 
 export const VIA_LABELS: Record<ResponseVia, string> = {

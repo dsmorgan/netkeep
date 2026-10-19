@@ -29,8 +29,8 @@ from messaging_pages import (
 from run_fakes import fake_provider
 from test_prefill_page import assert_no_keys, prefill
 
-from netkeeper.linkedin import browser as browser_module
-from netkeeper.linkedin.browser import (
+from netkeep.linkedin import browser as browser_module
+from netkeep.linkedin.browser import (
     GEOMETRY_TIMEOUT_S,
     HIT_TOLERANCE_PX,
     MESSAGE_MAX_CANDIDATES,
@@ -47,7 +47,7 @@ from netkeeper.linkedin.browser import (
     choose_message_target,
     classify_click_failure,
 )
-from netkeeper.linkedin.messaging import MessageOutcomeKind
+from netkeep.linkedin.messaging import MessageOutcomeKind
 
 VIEWPORT = (1280.0, 800.0)
 
@@ -444,7 +444,7 @@ async def test_minimized_bubbles_from_earlier_prefills_refuse_before_the_click()
     assert_no_keys(ran)
     assert site.tab.clicks == [] and not ran.run.message_click_attempted
     assert ran.result.outcome.reason == (
-        "a message bubble is already open in this or another LinkedIn tab in the netkeeper"
+        "a message bubble is already open in this or another LinkedIn tab in the netkeep"
         " Chrome window, minimized ones included;"
         " close it, then try again"
     )

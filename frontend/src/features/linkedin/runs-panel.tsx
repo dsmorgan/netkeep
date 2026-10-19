@@ -25,7 +25,7 @@ function message(error: unknown): string {
 
 /**
  * Every run, newest first, filterable by kind and status; a row opens its detail
- * (spec 14.1). The Run column is the id `netkeeper linkedin run <id>` takes (#405).
+ * (spec 14.1). The Run column is the id `netkeep linkedin run <id>` takes (#405).
  * The whole row is the click target; the kind, the row's header, is also a button,
  * for the keyboard.
  */

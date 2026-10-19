@@ -9,7 +9,7 @@ from sqlalchemy.dialects import sqlite
 from sqlalchemy.exc import IntegrityError, OperationalError, StatementError
 from sqlalchemy.orm import Session
 
-from netkeeper.db import (
+from netkeep.db import (
     SQLITE_BUSY_TIMEOUT_MS,
     database_url,
     is_writer,
@@ -19,7 +19,7 @@ from netkeeper.db import (
     session_scope,
     sqlite_foreign_keys_disabled,
 )
-from netkeeper.models import SettingKV, User, UserKind, UTCDateTime
+from netkeep.models import SettingKV, User, UserKind, UTCDateTime
 
 # --- database_url -----------------------------------------------------------
 
@@ -27,7 +27,7 @@ from netkeeper.models import SettingKV, User, UserKind, UTCDateTime
 def test_database_url_defaults_to_the_data_dir(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("NETKEEPER_DATA", str(tmp_path / "data"))
+    monkeypatch.setenv("NETKEEP_DATA", str(tmp_path / "data"))
     assert database_url() == f"sqlite:///{tmp_path / 'data' / 'netkeeper.sqlite3'}"
 
 
@@ -36,14 +36,14 @@ def test_database_url_takes_an_explicit_data_dir(tmp_path: Path) -> None:
 
 
 def test_database_url_env_var_wins(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", "postgresql+psycopg://nk@localhost/nk")
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", "postgresql+psycopg://nk@localhost/nk")
     assert database_url(tmp_path) == "postgresql+psycopg://nk@localhost/nk"
 
 
 def test_database_url_empty_env_var_is_unset(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", "")
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", "")
     assert database_url(tmp_path).startswith("sqlite:///")
 
 

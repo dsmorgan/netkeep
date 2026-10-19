@@ -3,8 +3,8 @@ import logging
 
 import pytest
 
-from netkeeper.services.events import Event, EventBus, Subscription
-from netkeeper.services.tasks import DEFAULT_HISTORY, TaskRunner
+from netkeep.services.events import Event, EventBus, Subscription
+from netkeep.services.tasks import DEFAULT_HISTORY, TaskRunner
 
 
 async def _drain(bus: EventBus, subscription: Subscription) -> list[Event]:
@@ -59,7 +59,7 @@ async def test_failure_is_recorded_logged_and_contained(caplog: pytest.LogCaptur
         raise RuntimeError("kaboom")
 
     info = runner.submit("boom", boom, user_id=1)
-    with caplog.at_level(logging.ERROR, logger="netkeeper.services.tasks"):
+    with caplog.at_level(logging.ERROR, logger="netkeep.services.tasks"):
         await runner.join()  # the exception does not escape
 
     done = runner.get(info.id)

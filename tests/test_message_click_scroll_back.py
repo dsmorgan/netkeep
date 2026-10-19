@@ -27,8 +27,8 @@ from run_fakes import fake_provider
 from test_auto_send import auto_spec, page_run, permit, sends
 from test_prefill_page import assert_no_keys, prefill
 
-from netkeeper.linkedin import page_messaging
-from netkeeper.linkedin.browser import (
+from netkeep.linkedin import page_messaging
+from netkeep.linkedin.browser import (
     BUBBLE_BAND_PX,
     MESSAGE_NOT_ON_SCREEN,
     STICKY_HEADER_BAND_PX,
@@ -38,13 +38,13 @@ from netkeeper.linkedin.browser import (
     NotClear,
     not_clear_reason,
 )
-from netkeeper.linkedin.messaging import MessageOutcomeKind
-from netkeeper.linkedin.pacing import (
+from netkeep.linkedin.messaging import MessageOutcomeKind
+from netkeep.linkedin.pacing import (
     BACK_TO_TOP_DELTA_RANGE_PX,
     scroll_back_to_top,
     scroll_like_a_person,
 )
-from netkeeper.linkedin.page_messaging import BRIEF_SCROLL_DELTA_PX, SCROLL_BACK_DELTA_PX
+from netkeep.linkedin.page_messaging import BRIEF_SCROLL_DELTA_PX, SCROLL_BACK_DELTA_PX
 
 VIEWPORT = (1280.0, 800.0)
 #: The invented layout, in document pixels: a fixed global navigation bar, and a sticky

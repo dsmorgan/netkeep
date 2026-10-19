@@ -1,9 +1,9 @@
 """The browser rules a reviewer would otherwise have to hold in their head.
 
-ADR 0002 says netkeeper attaches to a browser the user runs and never starts one,
+ADR 0002 says netkeep attaches to a browser the user runs and never starts one,
 because a second browser identity on a LinkedIn account is what gets accounts
 restricted. Spec 9.1 adds the invariants that keep the attached profile looking like
-itself, and spec 9.10 keeps the database out of ``netkeeper/linkedin/``.
+itself, and spec 9.10 keeps the database out of ``netkeep/linkedin/``.
 
 Those rules are about code that does not exist rather than behavior that does, so
 they are checked by walking the package's syntax tree: the tests below fail on the
@@ -12,7 +12,7 @@ scanner is itself exercised against a snippet that must be caught, because a sca
 that quietly matches nothing would pass forever — and each rule that names one file
 also asserts that the file still matches, so renaming it cannot make the rule vacuous.
 
-Two limits are deliberate. The scan covers ``netkeeper/`` and not ``tests/``: test
+Two limits are deliberate. The scan covers ``netkeep/`` and not ``tests/``: test
 code starts processes (the boundary probe below runs one) and drives fakes that
 imitate the calls the rules forbid. And it reads names, not meanings, so it catches
 the spellings a person would actually write, not every way Python can reach a symbol.
@@ -37,7 +37,7 @@ import boundary
 import pytest
 from boundary import is_forbidden
 
-PACKAGE = Path(__file__).resolve().parents[1] / "netkeeper"
+PACKAGE = Path(__file__).resolve().parents[1] / "netkeep"
 REPO_ROOT = PACKAGE.parent
 LINKEDIN = PACKAGE / "linkedin"
 WEB = PACKAGE / "web"
@@ -50,7 +50,7 @@ MEMORY = Path("<memory>")
 LAUNCH_CALLS = frozenset({"launch", "launch_persistent_context", "launch_server"})
 
 # Ways to start any process, which is how a browser would be started without
-# Playwright. `netkeeper browser launch` prints a command; it never runs one. The
+# Playwright. `netkeep browser launch` prints a command; it never runs one. The
 # asyncio spellings matter most: this package is async throughout and already imports
 # asyncio, so `create_subprocess_exec` is the shortest path from here to a launch.
 #: ``multiprocessing`` and ``concurrent.futures.ProcessPoolExecutor`` start Python
@@ -184,7 +184,7 @@ READ_ONLY_CDP_METHODS: dict[str, frozenset[str]] = {
     "DOMSnapshot.captureSnapshot": frozenset({"computedStyles"}),
 }
 #: #195, the background tab. These aren't reads of the page, so they're kept apart from
-#: the ones above; none of them reaches a tab netkeeper doesn't own:
+#: the ones above; none of them reaches a tab netkeep doesn't own:
 #:
 #: - ``Target.createTarget``: the call ``context.new_page()`` makes, with ``url``,
 #:   ``newWindow`` and ``background`` only (no ``browserContextId``: the default
@@ -282,7 +282,7 @@ TAP_OBSERVERS = frozenset(
 #: The one place the tap's opener is reached from: the observation that asked for it.
 TAP_OPENER = (LINKEDIN / "browser.py", "BrowserRun.observe")
 
-# ADR 0006: netkeeper reads what the page loads and never touches a request. These are
+# ADR 0006: netkeep reads what the page loads and never touches a request. These are
 # Playwright's ways to hold one and answer it -- a routed request's `continue_`,
 # `fulfill`, and `abort` -- which only exist once something routes, and `route` is
 # refused above; they are named here too so a regression is caught at the call that
@@ -291,7 +291,7 @@ TAP_OPENER = (LINKEDIN / "browser.py", "BrowserRun.observe")
 # that name; `route` and these three already cover every way to reach it.)
 REQUEST_MUTATORS = frozenset({"continue_", "fulfill", "abort"})
 
-# ADR 0006: no request of netkeeper's own through Playwright's API request context
+# ADR 0006: no request of netkeep's own through Playwright's API request context
 # either -- `page.request`, `context.request`, `playwright.request` -- which would send
 # with the profile's cookies from outside the page. The attribute `request` alone is
 # not refused: an observed response's `.request` is how the observation reads the
@@ -487,25 +487,25 @@ CONNECTOR_MODULE = LINKEDIN / "browser.py"
 # Spec 5 and 9.9: a request handler that awaits browser work deadlocks on the tab
 # waiting for its own response, so routes enqueue work on the task runner instead.
 BROWSER_MODULES = (
-    "netkeeper.linkedin.browser",
-    "netkeeper.linkedin.preflight",
+    "netkeep.linkedin.browser",
+    "netkeep.linkedin.preflight",
     # A rehearsal drives a real tab through a whole pacing plan -- minutes of
     # it. Importing it from a route would await browser work inside a request
     # handler exactly as importing the provider would, so it is a browser
     # module here and not only a caller of one below.
-    "netkeeper.linkedin.rehearse",
+    "netkeep.linkedin.rehearse",
     # The run worker (P2-10) attaches and runs a whole run. A route that imported
     # it could await it; routes submit runs to the task runner instead.
-    "netkeeper.worker",
+    "netkeep.worker",
     # #187: the connections source that scrolls a real tab and waits on its answers.
-    "netkeeper.linkedin.page_connections",
+    "netkeep.linkedin.page_connections",
     # #190: the profile source that scrolls, clicks Contact info, and waits on answers.
-    "netkeeper.linkedin.page_profiles",
+    "netkeep.linkedin.page_profiles",
     # #380: the inbox source that scrolls /messaging/, opens threads by navigation, and
     # waits on the page's answers.
-    "netkeeper.linkedin.page_inbox",
+    "netkeep.linkedin.page_inbox",
     # #382: the prefill source that clicks Message and types into the composer.
-    "netkeeper.linkedin.page_messaging",
+    "netkeep.linkedin.page_messaging",
 )
 
 # The modules that may reach the provider at all, as paths from the repository root.
@@ -514,17 +514,17 @@ BROWSER_MODULES = (
 # which is how a shim under services/ would smuggle the browser into a handler.
 BROWSER_CALLERS = frozenset(
     {
-        Path("netkeeper/cli.py"),  # `netkeeper preflight` and `rehearse`, on their own loops
-        Path("netkeeper/linkedin/preflight.py"),  # the report, inside a run
-        Path("netkeeper/linkedin/rehearse.py"),  # the rehearsal, inside a run
-        Path("netkeeper/linkedin/page_connections.py"),  # PageConnections, inside a run (#187)
-        Path("netkeeper/linkedin/page_profiles.py"),  # PageProfiles, inside a run (#190)
-        Path("netkeeper/linkedin/page_inbox.py"),  # PageInbox, inside a run (#380)
-        Path("netkeeper/linkedin/page_messaging.py"),  # PagePrefill, inside a run (#382)
+        Path("netkeep/cli.py"),  # `netkeep preflight` and `rehearse`, on their own loops
+        Path("netkeep/linkedin/preflight.py"),  # the report, inside a run
+        Path("netkeep/linkedin/rehearse.py"),  # the rehearsal, inside a run
+        Path("netkeep/linkedin/page_connections.py"),  # PageConnections, inside a run (#187)
+        Path("netkeep/linkedin/page_profiles.py"),  # PageProfiles, inside a run (#190)
+        Path("netkeep/linkedin/page_inbox.py"),  # PageInbox, inside a run (#380)
+        Path("netkeep/linkedin/page_messaging.py"),  # PagePrefill, inside a run (#382)
         # The run worker (P2-10): takes the lock, attaches, runs a recorded run. Not
         # under web/ or services/, and nothing under either imports it: the app and
         # the runs API hold it only as services.runs.RunExecutor.
-        Path("netkeeper/worker.py"),
+        Path("netkeep/worker.py"),
     }
 )
 
@@ -866,7 +866,7 @@ DYNAMIC_ATTRIBUTES = frozenset(
 #: Each use of a primitive above, by file, enclosing function and primitive, and how
 #: many, with why it is safe. The test compares the whole map, so a new use fails and so
 #: does a stale entry. A computed ``getattr`` is listed only where its receiver is a
-#: record of netkeeper's own (a dataclass, an ORM row or class, a Pydantic body) and its
+#: record of netkeep's own (a dataclass, an ORM row or class, a Pydantic body) and its
 #: name comes from that record's own field list, never from a module.
 COMPUTED_GETATTR = "getattr() with a name that is not a literal"
 ALLOWED_DYNAMIC_ACCESS: dict[tuple[Path, str, str], int] = {
@@ -874,7 +874,7 @@ ALLOWED_DYNAMIC_ACCESS: dict[tuple[Path, str, str], int] = {
     (PACKAGE / "db.py", "", "import concurrent.futures"): 1,
     # The support bundle reads installed package versions; metadata imports no code.
     (PACKAGE / "services" / "support_bundle.py", "", "import importlib.metadata"): 1,
-    # discover_routers imports each module of netkeeper.web.api, by the names pkgutil
+    # discover_routers imports each module of netkeep.web.api, by the names pkgutil
     # lists in that package's own directory, to collect their routers. Those files are
     # scanned like every other; its one call passes no package
     # (test_router_discovery_imports_only_the_api_package).
@@ -1018,12 +1018,12 @@ def imported_names(source: str, path: Path = MEMORY) -> Iterator[tuple[int, str]
     """Every imported dotted name: the module, and ``module.member`` for ``from`` imports.
 
     Relative imports are resolved against the file's own package, so
-    ``from ..models import User`` reads as ``netkeeper.models``. Skipping that step
+    ``from ..models import User`` reads as ``netkeep.models``. Skipping that step
     would leave every rule here answerable with a dot.
 
     A dynamic import by a literal is read the same way (#660):
-    ``importlib.import_module("netkeeper.chrome_spawn")`` (or ``(".chrome_spawn",
-    "netkeeper")``), ``__import__("netkeeper.chrome_spawn", fromlist=[...])``,
+    ``importlib.import_module("netkeep.chrome_spawn")`` (or ``(".chrome_spawn",
+    "netkeep")``), ``__import__("netkeep.chrome_spawn", fromlist=[...])``,
     ``importlib.util.find_spec(...)`` and ``pkgutil.resolve_name("module:member")``.
     One by a computed name names nothing; :func:`dynamic_access` refuses every
     importer but the one listed, whatever it is handed.
@@ -1090,7 +1090,7 @@ def _literal_imports(node: ast.Call) -> Iterator[str]:
 
 
 def _absolute_module(node: ast.ImportFrom, package: str) -> str | None:
-    """``from .. import x`` in ``netkeeper.linkedin`` is ``netkeeper``."""
+    """``from .. import x`` in ``netkeep.linkedin`` is ``netkeep``."""
     if node.level == 0:
         return node.module
     parts = package.split(".")
@@ -1155,7 +1155,7 @@ def request_mutations(source: str, path: Path = MEMORY) -> Iterator[Finding]:
 
 
 def api_request_sends(source: str, path: Path = MEMORY) -> Iterator[Finding]:
-    """A request of netkeeper's own through an API request context.
+    """A request of netkeep's own through an API request context.
 
     Two readings, so holding the context in a variable is no way around it:
 
@@ -1272,10 +1272,10 @@ def complain(findings: list[Finding], rule: str) -> str:
 def test_no_code_path_launches_a_browser() -> None:
     """ADR 0002's whole point: nothing in the package starts a browser."""
     findings = scan([PACKAGE], launch_calls)
-    assert not findings, complain(findings, "netkeeper may only attach to a browser:")
+    assert not findings, complain(findings, "netkeep may only attach to a browser:")
 
 
-# The one exception (#597): **Restart netkeeper** re-execs serve in place, the same
+# The one exception (#597): **Restart netkeep** re-execs serve in place, the same
 # interpreter and arguments, replacing this process rather than starting another.
 ALLOWED_PROCESS_STARTS = {PACKAGE / "services" / "restart.py": 1}
 
@@ -1286,7 +1286,7 @@ def is_launchctl_import(finding: Finding) -> bool:
 
 
 def test_no_code_path_starts_a_process() -> None:
-    """`netkeeper browser launch` prints a command. Nothing runs one."""
+    """`netkeep browser launch` prints a command. Nothing runs one."""
     findings = [
         f
         for f in scan([PACKAGE], process_starts)
@@ -1305,7 +1305,7 @@ def test_no_code_path_starts_a_process() -> None:
         for f in findings
         if not (f.path in ALLOWED_PROCESS_STARTS and f.detail == "execv() starts a process")
     ]
-    assert not others, complain(others, "netkeeper starts no processes:")
+    assert not others, complain(others, "netkeep starts no processes:")
 
 
 def launchctl_pin_problems(source: str) -> list[str]:
@@ -1413,7 +1413,7 @@ def launchctl_pin_problems(source: str) -> list[str]:
     return problems
 
 
-def test_the_one_process_netkeeper_runs_is_launchctl() -> None:
+def test_the_one_process_netkeep_runs_is_launchctl() -> None:
     """The login item (#600) is the one module that imports ``subprocess``, to run
     ``/bin/launchctl`` for the user's own launchd agent: one call, to the fixed path."""
     source = LOGIN_ITEM.read_text()
@@ -1472,10 +1472,10 @@ def test_the_launchctl_pin_rejects_every_other_way_to_start_a_process(old: str, 
 
 # --- the Chrome launcher's one spawn (#636, ADR 0012) ---------------------------------
 #
-# ADR 0012, rule 2: one launcher is the only process netkeeper starts for a browser. One
+# ADR 0012, rule 2: one launcher is the only process netkeep starts for a browser. One
 # function in one module may spawn, and only the list ``chrome_argv`` builds from config
 # (``tests/test_chrome_spawn.py`` pins that list to the printed command). Nothing else in
-# the package may spawn, including the rest of that module, and only ``netkeeper open``
+# the package may spawn, including the rest of that module, and only ``netkeep open``
 # and ``serve``'s wiring import it.
 
 CHROME_SPAWN = PACKAGE / "chrome_spawn.py"
@@ -1487,8 +1487,8 @@ CHROME_ARGV_FUNCTION = "chrome_argv"
 #: under web/ belongs here: a route reaches the launcher as a ChromeSpawner on app.state.
 CHROME_SPAWN_IMPORTERS = frozenset(
     {
-        Path("netkeeper/cli.py"),  # `netkeeper open`
-        Path("netkeeper/worker.py"),  # serve's wiring: app.state.chrome_launcher
+        Path("netkeep/cli.py"),  # `netkeep open`
+        Path("netkeep/worker.py"),  # serve's wiring: app.state.chrome_launcher
     }
 )
 
@@ -1552,7 +1552,7 @@ def chrome_spawn_pin_problems(source: str) -> list[str]:
             root = node.module.split(".")[0]
             if root in PROCESS_MODULES | _SPAWN_BANNED_IMPORTS | {"asyncio"}:
                 problems.append(f"line {node.lineno}: from {node.module} import ...")
-            if node.module.startswith("netkeeper.linkedin"):
+            if node.module.startswith("netkeep.linkedin"):
                 problems.append(f"line {node.lineno}: imports {node.module}")
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -1560,7 +1560,7 @@ def chrome_spawn_pin_problems(source: str) -> list[str]:
                     problems.append(f"line {node.lineno}: import {alias.name}")
                 if alias.name == "subprocess" and alias.asname:
                     problems.append(f"line {node.lineno}: subprocess imported under an alias")
-                if alias.name.startswith("netkeeper.linkedin"):
+                if alias.name.startswith("netkeep.linkedin"):
                     problems.append(f"line {node.lineno}: imports {alias.name}")
         if isinstance(node, ast.Constant) and node.value == "subprocess":
             problems.append(f"line {node.lineno}: 'subprocess' as a string (getattr?)")
@@ -1711,7 +1711,7 @@ def chrome_spawn_pin_problems(source: str) -> list[str]:
     return problems
 
 
-def test_the_one_process_netkeeper_spawns_is_the_chrome_launchers() -> None:
+def test_the_one_process_netkeep_spawns_is_the_chrome_launchers() -> None:
     """``spawn_chrome`` starts Chrome's binary with ``chrome_argv``'s list, detached, and
     nothing else in ``chrome_spawn.py`` starts anything (#636)."""
     source = CHROME_SPAWN.read_text()
@@ -1735,10 +1735,10 @@ def importers_of(sources: dict[Path, str], modules: tuple[str, ...]) -> set[Path
 
 
 def test_only_the_cli_and_serves_wiring_import_the_chrome_launcher() -> None:
-    """``netkeeper open`` and ``serve``'s wiring, and nothing else: no route, no run."""
+    """``netkeep open`` and ``serve``'s wiring, and nothing else: no route, no run."""
     sources = package_sources()
     assert len(sources) >= 20
-    found = importers_of(sources, ("netkeeper.chrome_spawn",))
+    found = importers_of(sources, ("netkeep.chrome_spawn",))
     assert found == set(CHROME_SPAWN_IMPORTERS), sorted(str(p) for p in found)
     assert (
         CHROME_SPAWN.parent == PACKAGE
@@ -1747,12 +1747,12 @@ def test_only_the_cli_and_serves_wiring_import_the_chrome_launcher() -> None:
 
 def test_the_importer_scan_sees_each_way_to_import_the_launcher() -> None:
     names = [
-        "import netkeeper.chrome_spawn\n",
-        "from netkeeper import chrome_spawn\n",
-        "from netkeeper.chrome_spawn import spawn_chrome\n",
+        "import netkeep.chrome_spawn\n",
+        "from netkeep import chrome_spawn\n",
+        "from netkeep.chrome_spawn import spawn_chrome\n",
     ]
     for snippet in names:
-        assert any(name == "netkeeper.chrome_spawn" for _, name in imported_names(snippet)), snippet
+        assert any(name == "netkeep.chrome_spawn" for _, name in imported_names(snippet)), snippet
 
 
 _SPAWN_RETURN = "    argv = chrome_argv(launch)\n    return subprocess.Popen("
@@ -1803,8 +1803,8 @@ _IN_PORT_ANSWERS = (
         ),
         (_PORT_ANSWERS, f"def spawn_chrome(launch):\n    pass\n\n\n{_PORT_ANSWERS}"),
         (
-            "from netkeeper.chrome_profile",
-            "from netkeeper.linkedin import browser\nfrom netkeeper.chrome_profile",
+            "from netkeep.chrome_profile",
+            "from netkeep.linkedin import browser\nfrom netkeep.chrome_profile",
         ),
         # #658 review: plain imports and dynamic lookups that start a process.
         (_PORT_ANSWERS, f"import ctypes\n\n\n{_PORT_ANSWERS}"),
@@ -1876,7 +1876,7 @@ LAUNCH_REACHES = {
     # Not the function: the setting of the same name, its config field and its read.
     (PACKAGE / "config.py", "LinkedInSettings", "start_chrome_at_startup"): 1,
     (PACKAGE / "worker.py", "start_chrome_at_startup.read", "start_chrome_at_startup"): 1,
-    # The factories: serve's, called once from serve_app, and netkeeper open's, called
+    # The factories: serve's, called once from serve_app, and netkeep open's, called
     # once from open_command. Each builds the class once (and names it as its return
     # type); the class is imported by these two modules only.
     (PACKAGE / "worker.py", "serve_app", "serve_chrome_launcher"): 1,
@@ -1900,7 +1900,7 @@ LAUNCH_REACHES = {
 }
 #: The files that hold a launcher: the reaches above, the launcher's module and its two
 #: importers. Every ``.start`` in them is listed, so a held launcher started anywhere
-#: but ``submit_launch`` and ``netkeeper open`` fails the pin below.
+#: but ``submit_launch`` and ``netkeep open`` fails the pin below.
 LAUNCHER_FILES = (
     PACKAGE / "chrome_spawn.py",
     PACKAGE / "cli.py",
@@ -1909,7 +1909,7 @@ LAUNCHER_FILES = (
     PACKAGE / "worker.py",
 )
 LAUNCHER_STARTS = {
-    # The two launches: the shared submit's task, and `netkeeper open`.
+    # The two launches: the shared submit's task, and `netkeep open`.
     (PACKAGE / "services" / "chrome_launch.py", "submit_launch.run_launch"): 1,
     (PACKAGE / "cli.py", "open_command"): 1,
     # Not a launcher: a lost answer's ``start`` field, ``message_check.start()`` (a run
@@ -1969,7 +1969,7 @@ def test_only_the_button_and_the_startup_setting_reach_a_launch() -> None:
         "the reaches of a Chrome launch changed.\n"
         f"  now:      {sorted((str(p.name), f, n, c) for (p, f, n), c in found.items())}\n"
         f"  expected: {sorted((str(p.name), f, n, c) for (p, f, n), c in LAUNCH_REACHES.items())}\n"
-        "Only you trigger a spawn: a button, netkeeper open, or a setting you turn on"
+        "Only you trigger a spawn: a button, netkeep open, or a setting you turn on"
         " (ADR 0012, rule 5). A run never starts Chrome."
     )
 
@@ -1991,8 +1991,8 @@ _SERVE_APP_ANCHOR = "    app.state.after_listening = lambda: _after_listening(ap
         "    held = app.state.chrome_launcher\n",
         "    held = getattr(app.state, 'chrome_launcher')\n",
         "    held = vars(app.state)['chrome_launcher']\n",
-        "    from netkeeper.services.chrome_launch import submit_launch as go\n",
-        "    import netkeeper.services.chrome_launch as cl\n    cl.submit_launch\n",
+        "    from netkeep.services.chrome_launch import submit_launch as go\n",
+        "    import netkeep.services.chrome_launch as cl\n    cl.submit_launch\n",
     ],
 )
 def test_the_launch_reach_pin_catches_a_planted_caller(line: str) -> None:
@@ -2065,7 +2065,7 @@ def launcher_hold_problems(sources: dict[Path, str]) -> list[str]:
     ``ChromeLauncher(...)`` is built only as the value of a ``return``, in
     ``serve_chrome_launcher`` and ``_open_launcher``; ``serve_chrome_launcher(...)`` is
     only assigned to ``app.state.chrome_launcher``; and ``_open_launcher(...)`` is only
-    the receiver of the one ``.start()`` in ``netkeeper open``. So a launcher is never
+    the receiver of the one ``.start()`` in ``netkeep open``. So a launcher is never
     bound to a local, kept under another attribute, or handed elsewhere."""
     allowed = {
         (PACKAGE / "worker.py", "serve_chrome_launcher"),
@@ -2141,7 +2141,7 @@ def test_the_startup_entry_points_have_no_other_caller(lines: str) -> None:
     [
         "async def go(app):\n    await app.state.after_listening()\n",
         "async def go(app):\n    await getattr(app.state, 'after_listening')()\n",
-        "from netkeeper.worker import start_chrome_at_startup as again\n",
+        "from netkeep.worker import start_chrome_at_startup as again\n",
     ],
 )
 def test_the_startup_hook_is_read_only_by_the_lifespan(module: str) -> None:
@@ -2181,7 +2181,7 @@ def test_a_launcher_cant_be_kept_under_another_attribute() -> None:
             "    port = configured_port(ui_base)\n",
             "    spare = ChromeLauncher\n    port = configured_port(ui_base)\n",
         ),
-        # netkeeper open's launcher held before it's started.
+        # netkeep open's launcher held before it's started.
         (
             "asyncio.run(_open_launcher(cdp_url, base, key).start())",
             "asyncio.run(held.start()) if (held := _open_launcher(cdp_url, base, key)) else None",
@@ -2616,7 +2616,7 @@ def test_the_tap_opener_scanner_sees_every_way_to_reach_it() -> None:
         "        opener = run._open_body_tap\n"
         "        await getattr(run, '_open_body_tap')(page, match, 1)\n"
         "        await functools.partial(run._open_body_tap, page)(match, 1)\n"
-        "        from netkeeper.linkedin.browser import _open_body_tap\n"
+        "        from netkeep.linkedin.browser import _open_body_tap\n"
     )
     found = sorted(i.line for i, _ in name_reaches(source, "_open_body_tap"))
     assert found == [4, 5, 6, 7, 8]
@@ -2754,12 +2754,12 @@ def test_only_the_launchers_probe_reaches_the_identity_read() -> None:
     [
         (PACKAGE / "cli.py", "import websockets\n"),
         (PACKAGE / "services" / "chrome_launch.py", "from websockets.sync import client\n"),
-        (LINKEDIN / "preflight.py", "from netkeeper.linkedin.browser import CdpIdentityReader\n"),
+        (LINKEDIN / "preflight.py", "from netkeep.linkedin.browser import CdpIdentityReader\n"),
         (LINKEDIN / "browser.py", "_HELD = _read_process_info\n"),
         (PACKAGE / "worker.py", "_ALSO = getattr(browser_module, 'CdpIdentityReader')\n"),
         (
             LINKEDIN / "page_inbox.py",
-            "from netkeeper.linkedin.browser import _browser_websocket_url\n",
+            "from netkeep.linkedin.browser import _browser_websocket_url\n",
         ),
     ],
 )
@@ -3095,11 +3095,11 @@ def test_the_raw_connection_pin_catches_a_new_opener(line: str) -> None:
 def test_no_code_path_alters_or_answers_a_request() -> None:
     """ADR 0006: the page's requests are read, never held, changed, or answered."""
     findings = scan([PACKAGE], request_mutations)
-    assert not findings, complain(findings, "netkeeper reads the page's answers only:")
+    assert not findings, complain(findings, "netkeep reads the page's answers only:")
 
 
 def test_no_code_path_sends_through_an_api_request_context() -> None:
-    """ADR 0006: no request of netkeeper's own from outside the page either."""
+    """ADR 0006: no request of netkeep's own from outside the page either."""
     findings = scan([PACKAGE], api_request_sends)
     for path, count in ALLOWED_SUPER_REQUESTS.items():
         hits = [f for f in findings if f.path == path and f.detail == SUPER_REQUEST]
@@ -3110,7 +3110,7 @@ def test_no_code_path_sends_through_an_api_request_context() -> None:
     others = [
         f for f in findings if not (f.path in ALLOWED_SUPER_REQUESTS and f.detail == SUPER_REQUEST)
     ]
-    assert not others, complain(others, "netkeeper sends no requests of its own:")
+    assert not others, complain(others, "netkeep sends no requests of its own:")
 
 
 def test_the_observing_modules_only_listen_and_scroll() -> None:
@@ -3197,7 +3197,7 @@ def test_no_extractor_module_drags_the_database_in(module: str) -> None:
     """The other half of the boundary: what the imports pull in, not what they say.
 
     A helper that looks harmless and imports the ORM two levels down puts a session in
-    the extractor's process just as surely as ``from netkeeper.models import Contact``.
+    the extractor's process just as surely as ``from netkeep.models import Contact``.
 
     This is every module under ``linkedin/``, each in a subprocess of its own, and it
     replaced the per-module copies that ``test_linkedin_archive.py``,
@@ -3410,7 +3410,7 @@ def test_nothing_reaches_a_name_the_scanners_cannot_read() -> None:
 
 def test_router_discovery_imports_only_the_api_package() -> None:
     """The one dynamic import, ``discover_routers``, is called with no package, so it
-    imports only the modules under ``netkeeper/web/api/``, which every rule scans."""
+    imports only the modules under ``netkeep/web/api/``, which every rule scans."""
     calls = [
         (path, node)
         for path, source in package_sources().items()
@@ -3424,7 +3424,7 @@ def test_router_discovery_imports_only_the_api_package() -> None:
         node
         for node in walk(tree)
         if isinstance(node, ast.ImportFrom)
-        and node.module == "netkeeper.web"
+        and node.module == "netkeep.web"
         and [(a.name, a.asname) for a in node.names] == [("api", "api_package")]
     ]
     assert len(imports) == 1
@@ -3582,12 +3582,12 @@ _PLANTED = WEB / "api" / "sneaky.py"
 @pytest.mark.parametrize(
     "snippet",
     [
-        "import importlib\nimportlib.import_module('netkeeper.chrome_spawn')\n",
-        "import importlib\nimportlib.import_module('.chrome_spawn', 'netkeeper')\n",
-        "__import__('netkeeper.chrome_spawn')\n",
-        "__import__('netkeeper', fromlist=['chrome_spawn'])\n",
-        "import importlib.util\nimportlib.util.find_spec('netkeeper.chrome_spawn')\n",
-        "import pkgutil\npkgutil.resolve_name('netkeeper.chrome_spawn:spawn_chrome')\n",
+        "import importlib\nimportlib.import_module('netkeep.chrome_spawn')\n",
+        "import importlib\nimportlib.import_module('.chrome_spawn', 'netkeep')\n",
+        "__import__('netkeep.chrome_spawn')\n",
+        "__import__('netkeep', fromlist=['chrome_spawn'])\n",
+        "import importlib.util\nimportlib.util.find_spec('netkeep.chrome_spawn')\n",
+        "import pkgutil\npkgutil.resolve_name('netkeep.chrome_spawn:spawn_chrome')\n",
     ],
 )
 def test_the_importer_pin_sees_a_literal_dynamic_import(snippet: str) -> None:
@@ -3595,32 +3595,32 @@ def test_the_importer_pin_sees_a_literal_dynamic_import(snippet: str) -> None:
     planted file alone: no other file's findings change, and a new path is never on
     either list.)"""
     planted = {_PLANTED: snippet}
-    assert importers_of(planted, ("netkeeper.chrome_spawn",)) == {_PLANTED.relative_to(REPO_ROOT)}
+    assert importers_of(planted, ("netkeep.chrome_spawn",)) == {_PLANTED.relative_to(REPO_ROOT)}
     assert dynamic_access_counts(planted)
 
 
 @pytest.mark.parametrize(
     "snippet",
     [
-        "import importlib\nimportlib.import_module('netkeeper.' + 'chrome_spawn')\n",
-        "__import__('netkeeper.chrome' + '_spawn')\n",
+        "import importlib\nimportlib.import_module('netkeep.' + 'chrome_spawn')\n",
+        "__import__('netkeep.chrome' + '_spawn')\n",
         "import importlib.util\nimportlib.util.spec_from_file_location('x', 'chrome_spawn.py')\n",
         "import runpy\nrunpy.run_module(name)\n",
-        "import sys\nsys.modules['netkeeper.' + 'chrome_spawn']\n",
+        "import sys\nsys.modules['netkeep.' + 'chrome_spawn']\n",
     ],
 )
 def test_a_computed_import_of_a_pinned_module_is_listed_for_review(snippet: str) -> None:
     """A computed name names no module; the primitive is refused wherever it is unlisted."""
-    assert not importers_of({_PLANTED: snippet}, ("netkeeper.chrome_spawn",))
+    assert not importers_of({_PLANTED: snippet}, ("netkeep.chrome_spawn",))
     assert dynamic_access_counts({_PLANTED: snippet}), snippet
 
 
 @pytest.mark.parametrize(
     "snippet",
     [
-        "import importlib\nimportlib.import_module('netkeeper.linkedin.browser')\n",
-        "__import__('netkeeper.linkedin', fromlist=['preflight'])\n",
-        "import importlib\nimportlib.import_module('...worker', 'netkeeper.web.api')\n",
+        "import importlib\nimportlib.import_module('netkeep.linkedin.browser')\n",
+        "__import__('netkeep.linkedin', fromlist=['preflight'])\n",
+        "import importlib\nimportlib.import_module('...worker', 'netkeep.web.api')\n",
     ],
 )
 def test_the_browser_callers_pin_sees_a_literal_dynamic_import(snippet: str) -> None:
@@ -3639,7 +3639,7 @@ def test_the_browser_callers_pin_sees_a_literal_dynamic_import(snippet: str) -> 
         "def go(app):\n    return app.state.__getattr__('chrome' + '_launcher')\n",
         "import importlib\n"
         "def go(app):\n"
-        "    m = importlib.import_module('netkeeper.services.' + 'chrome_launch')\n"
+        "    m = importlib.import_module('netkeep.services.' + 'chrome_launch')\n"
         "    return getattr(m, 'submit_' + 'launch')\n",
         "def go(app):\n    return globals()['start_chrome' + '_at_startup']\n",
     ],
@@ -3845,21 +3845,21 @@ def test_the_script_scanner_catches_every_spelling() -> None:
 def test_the_forbidden_matcher_reads_dotted_segments() -> None:
     """Shared by both mechanisms now, so it gets its own case.
 
-    Matching characters rather than segments would read a future ``netkeeper.dbg`` as
-    ``netkeeper.db`` and fail a rule nobody broke.
+    Matching characters rather than segments would read a future ``netkeep.dbg`` as
+    ``netkeep.db`` and fail a rule nobody broke.
     """
-    assert is_forbidden("netkeeper.db")
-    assert is_forbidden("netkeeper.models.contacts")
+    assert is_forbidden("netkeep.db")
+    assert is_forbidden("netkeep.models.contacts")
     assert is_forbidden("sqlalchemy.orm")
-    assert not is_forbidden("netkeeper.dbg")
-    assert not is_forbidden("netkeeper.linkedin.browser")
+    assert not is_forbidden("netkeep.dbg")
+    assert not is_forbidden("netkeep.linkedin.browser")
 
 
 def test_database_scanner_catches_an_import() -> None:
-    assert list(database_imports("from netkeeper.models import Contact\n"))
+    assert list(database_imports("from netkeep.models import Contact\n"))
     assert list(database_imports("import sqlalchemy\n"))
-    assert list(database_imports("from netkeeper.crm.tags import list_tags\n"))
-    assert not list(database_imports("from netkeeper.linkedin.browser import BrowserRun\n"))
+    assert list(database_imports("from netkeep.crm.tags import list_tags\n"))
+    assert not list(database_imports("from netkeep.linkedin.browser import BrowserRun\n"))
 
 
 def test_the_scanners_resolve_a_relative_import() -> None:
@@ -3878,8 +3878,8 @@ def test_the_scanners_resolve_a_relative_import() -> None:
 
 
 def test_browser_import_scanner_catches_an_import() -> None:
-    assert list(browser_imports("from netkeeper.linkedin.browser import AttachBrowserProvider\n"))
-    assert not list(browser_imports("from netkeeper.services.tasks import TaskRunner\n"))
+    assert list(browser_imports("from netkeep.linkedin.browser import AttachBrowserProvider\n"))
+    assert not list(browser_imports("from netkeep.services.tasks import TaskRunner\n"))
 
 
 def test_every_browser_module_is_one_the_scanner_would_catch() -> None:
@@ -3889,15 +3889,15 @@ def test_every_browser_module_is_one_the_scanner_would_catch() -> None:
     an entry that is spelled wrong -- or missing -- passes every test in this
     file while guarding nothing. A rehearsal is the case that made this worth
     writing: it drives a real tab through a whole pacing plan, minutes of it,
-    so a future ``netkeeper/web/api/rehearse.py`` importing it would await
+    so a future ``netkeep/web/api/rehearse.py`` importing it would await
     browser work inside a request handler exactly as importing the provider
     would (spec 9.9).
     """
     for module in BROWSER_MODULES:
         assert list(browser_imports(f"from {module} import thing\n")), module
         assert list(browser_imports(f"import {module}\n")), module
-    assert "netkeeper.linkedin.rehearse" in BROWSER_MODULES
-    assert not list(browser_imports("from netkeeper.linkedin.pacing import human_delay\n"))
+    assert "netkeep.linkedin.rehearse" in BROWSER_MODULES
+    assert not list(browser_imports("from netkeep.linkedin.pacing import human_delay\n"))
 
 
 def test_connect_scanner_catches_an_attach() -> None:
@@ -3971,9 +3971,9 @@ def test_the_press_scanner_sees_another_key() -> None:
 
 def test_newlines_are_allowed_only_with_the_shift_enter_press() -> None:
     """ADR 0007: ``SHIFT_ENTER_NEWLINES_ALLOWED`` is true only together with the one
-    Shift+Enter press; and nothing under ``netkeeper/`` passes ``allow_newlines=``, so
+    Shift+Enter press; and nothing under ``netkeep/`` passes ``allow_newlines=``, so
     the module constant is the only switch."""
-    from netkeeper.linkedin import pacing
+    from netkeep.linkedin import pacing
 
     browser = read_source(LINKEDIN / "browser.py")
     if pacing.SHIFT_ENTER_NEWLINES_ALLOWED:
@@ -4057,7 +4057,7 @@ def scoped_locator_strings(source: str) -> Iterator[tuple[str, int, str]]:
 
 
 def test_no_locator_under_linkedin_names_send_or_submit() -> None:
-    """ADR 0007, as ADR 0008 amends it: nothing under ``netkeeper/linkedin/`` builds a
+    """ADR 0007, as ADR 0008 amends it: nothing under ``netkeep/linkedin/`` builds a
     locator from a string that names Send or Submit, except ``BrowserRun._send_control``,
     which names exactly ``"Send"`` and nothing else, and which only ``click_send`` calls."""
     findings = []
@@ -4223,7 +4223,7 @@ def test_the_unclaimed_tab_close_is_only_for_the_tab_the_run_created() -> None:
 # --- #634: runs read only LinkedIn's tabs, and act only on their own -----------------
 
 #: The two names that list what's open in the attached Chrome: a context's tabs
-#: (``pages``) and the browser's contexts (``contexts``). netkeeper's Chrome holds the
+#: (``pages``) and the browser's contexts (``contexts``). netkeep's Chrome holds the
 #: UI and setup tabs too (ADR 0012), so every read of either is a site someone checked.
 TAB_SCAN_NAMES = ("pages", "contexts")
 #: Every such read in the package, how many each function makes, and the filter that
@@ -4262,7 +4262,7 @@ def tab_scans(source: str, path: Path = MEMORY) -> Iterator[Input]:
 
 
 def package_sources() -> dict[Path, str]:
-    """Every file under ``netkeeper/``, by path: what the #634 pins read, and what their
+    """Every file under ``netkeep/``, by path: what the #634 pins read, and what their
     mutation tests change one file of, or add one to."""
     return {path: read_source(path) for path in python_files(PACKAGE)}
 
@@ -4388,7 +4388,7 @@ def test_the_tab_wait_reads_only_a_blank_tab() -> None:
     on ``RUN_TAB_URL``, which the run created its tab on, and claims a tab only when its
     target id is the one Chrome answered. A UI or Google tab you open meanwhile gets
     nothing."""
-    from netkeeper.linkedin import browser
+    from netkeep.linkedin import browser
 
     assert browser.RUN_TAB_URL == "about:blank"
     assert tab_wait_problems(read_source(LINKEDIN / "browser.py")) == []
@@ -5000,9 +5000,9 @@ def test_a_send_permit_is_built_only_by_the_runner_after_the_auto_send_budget() 
 
 def test_auto_send_needs_the_flag_and_the_mode() -> None:
     """The flag and the mode are both read by the one check the runner makes."""
-    from netkeeper.config import Settings
-    from netkeeper.models import StepMode
-    from netkeeper.services.message_send import auto_send_refusal
+    from netkeep.config import Settings
+    from netkeep.models import StepMode
+    from netkeep.services.message_send import auto_send_refusal
 
     assert Settings().campaigns.linkedin_auto_send is False
     assert auto_send_refusal(False, StepMode.AUTO_SEND) == "auto-send is off"

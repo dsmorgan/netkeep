@@ -290,9 +290,9 @@ export function GmailSection({ outcome }: { outcome: GmailOutcome }) {
           disconnecting === null ? Promise.resolve() : disconnect.mutateAsync(disconnecting.id)
         }
       >
-        netkeeper forgets {disconnecting?.email}’s token and stops using it. Email steps pause.
+        netkeep forgets {disconnecting?.email}’s token and stops using it. Email steps pause.
         Campaigns that sent from it keep their history. To revoke access on Google’s side too,
-        remove netkeeper from your Google Account’s third-party access page.
+        remove netkeep from your Google Account’s third-party access page.
       </ConfirmDialog>
 
       <ConfirmDialog
@@ -309,8 +309,8 @@ export function GmailSection({ outcome }: { outcome: GmailOutcome }) {
         onConfirm={() => (arming === null ? Promise.resolve() : arm.mutateAsync(arming))}
       >
         {arming?.mode === 'send'
-          ? `netkeeper serve will send campaign email from ${arming.mailbox.email} on its own, with no one pressing Send. Disarm stops it from the next minute.`
-          : `netkeeper serve will make each due campaign step a Gmail draft in ${arming?.mailbox.email ?? ''}, send steps included. You send each draft yourself.`}
+          ? `netkeep serve will send campaign email from ${arming.mailbox.email} on its own, with no one pressing Send. Disarm stops it from the next minute.`
+          : `netkeep serve will make each due campaign step a Gmail draft in ${arming?.mailbox.email ?? ''}, send steps included. You send each draft yourself.`}
       </ConfirmDialog>
     </Card>
   )

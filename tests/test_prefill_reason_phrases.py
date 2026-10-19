@@ -16,7 +16,7 @@ A new refusing function goes in ``REFUSING_FUNCTIONS``.
 This test finds the phrases in the source (the arguments of the calls that build an
 outcome, and the returns of the checks that refuse) and fails when the file and the
 source disagree. To update the file after adding a refusal, run
-``NETKEEPER_WRITE_PHRASES=1 pytest tests/test_prefill_reason_phrases.py``.
+``NETKEEP_WRITE_PHRASES=1 pytest tests/test_prefill_reason_phrases.py``.
 """
 
 from __future__ import annotations
@@ -30,11 +30,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURE = ROOT / "frontend/src/features/linkedin-steps/prefill-reasons.json"
 SOURCES = (
-    "netkeeper/linkedin/browser.py",
-    "netkeeper/linkedin/page_messaging.py",
-    "netkeeper/linkedin/messaging.py",
-    "netkeeper/services/message_send.py",
-    "netkeeper/worker.py",
+    "netkeep/linkedin/browser.py",
+    "netkeep/linkedin/page_messaging.py",
+    "netkeep/linkedin/messaging.py",
+    "netkeep/services/message_send.py",
+    "netkeep/worker.py",
 )
 #: Calls whose arguments carry a reason.
 OUTCOME_CALLS = frozenset(
@@ -192,9 +192,9 @@ def _is_reason_position(call: str, node: ast.Call, arg: ast.expr) -> bool:
 #: Each is the output of a call or check this scan already reads, so no phrase hides in
 #: it, and each is allowed only in the function named: a local variable of the same name
 #: elsewhere still fails. A new entry needs that same justification.
-_B = "netkeeper/linkedin/browser.py"
-_P = "netkeeper/linkedin/page_messaging.py"
-_M = "netkeeper/services/message_send.py"
+_B = "netkeep/linkedin/browser.py"
+_P = "netkeep/linkedin/page_messaging.py"
+_M = "netkeep/services/message_send.py"
 PASS_THROUGH = frozenset(
     {
         # The refusing checks hand their phrase up: every check's returns are scanned.
@@ -208,7 +208,7 @@ PASS_THROUGH = frozenset(
         (_P, "_not_typed", "reason"),
         (_M, "_not_typed", "reason"),
         (_M, "_after_failure", "reason"),
-        ("netkeeper/worker.py", "_prefill_not_typed", "reason"),
+        ("netkeep/worker.py", "_prefill_not_typed", "reason"),
         # PagePrefill passes on a TypingResult's reason and the click's: both scanned.
         (_P, "_result", "typing.reason"),
         (_P, "prefill", "click.refusal or 'the Message control was not clicked'"),
@@ -244,12 +244,12 @@ def source_phrases() -> set[str]:
 
 def test_the_phrase_list_matches_the_source() -> None:
     found = sorted(source_phrases())
-    if os.environ.get("NETKEEPER_WRITE_PHRASES") == "1":
+    if os.environ.get("NETKEEP_WRITE_PHRASES") == "1":
         FIXTURE.write_text(json.dumps(found, indent=2, ensure_ascii=False) + "\n")
     listed = json.loads(FIXTURE.read_text())
     assert listed == found, (
         "prefill-reasons.json and the source disagree: add words for a new phrase in"
-        " prefill-copy.ts, then regenerate with NETKEEPER_WRITE_PHRASES=1"
+        " prefill-copy.ts, then regenerate with NETKEEP_WRITE_PHRASES=1"
     )
 
 

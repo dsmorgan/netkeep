@@ -1,4 +1,4 @@
-"""Count confirmation tokens (``netkeeper.crm.confirmation``), item P1-05."""
+"""Count confirmation tokens (``netkeep.crm.confirmation``), item P1-05."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from netkeeper.crm.confirmation import (
+from netkeep.crm.confirmation import (
     TOKEN_TTL,
     InvalidToken,
     Signer,

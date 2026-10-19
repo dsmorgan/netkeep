@@ -1,4 +1,4 @@
-"""``netkeeper config adopt`` (#343): move config.toml's values onto the Settings page.
+"""``netkeep config adopt`` (#343): move config.toml's values onto the Settings page.
 
 Every file here is a scratch file under ``tmp_path``.
 """
@@ -15,18 +15,18 @@ import pytest
 from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
 
-from netkeeper import cli as cli_module
-from netkeeper import migrations
-from netkeeper.cli import app as cli
-from netkeeper.config import Settings, load_settings
-from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.models import User, UserKind
-from netkeeper.scoping import install_scope_guard
-from netkeeper.services import config_adopt, ui_settings
-from netkeeper.services.users import ensure_local_user
+from netkeep import cli as cli_module
+from netkeep import migrations
+from netkeep.cli import app as cli
+from netkeep.config import Settings, load_settings
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+from netkeep.models import User, UserKind
+from netkeep.scoping import install_scope_guard
+from netkeep.services import config_adopt, ui_settings
+from netkeep.services.users import ensure_local_user
 
 CONFIG = """\
-# my netkeeper config
+# my netkeep config
 [web]
 port = 8001  # a port of my own
 
@@ -72,7 +72,7 @@ def test_the_plan_moves_what_the_page_holds_and_keeps_the_rest(tmp_path: Path) -
         "linkedin": {"budget": {}},
         "campaigns": {"linkedin_auto_send": False, "send_spacing_floor_s": 60},
     }
-    assert "# my netkeeper config" in adopt.new_text
+    assert "# my netkeep config" in adopt.new_text
     assert "# keep prefills modest" in adopt.new_text
     assert "port = 8001  # a port of my own" in adopt.new_text
     assert "Christmas" not in adopt.new_text
@@ -87,7 +87,7 @@ def test_a_key_written_another_way_stops_the_plan(tmp_path: Path) -> None:
 @pytest.fixture
 def local_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[sessionmaker[Session]]:
     url = database_url(tmp_path / "data")
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     engine = make_engine(url)
     migrations.upgrade(engine)
     factory = make_session_factory(engine)
@@ -279,7 +279,7 @@ def test_adopt_stops_when_the_file_changes_after_the_prompt(
         path.write_text(CONFIG + "\n# edited\n", encoding="utf-8")
         return True
 
-    monkeypatch.setattr("netkeeper.cli.typer.confirm", confirm_while_someone_edits)
+    monkeypatch.setattr("netkeep.cli.typer.confirm", confirm_while_someone_edits)
     result = CliRunner().invoke(cli, ["--config", str(path), "config", "adopt"])
     assert result.exit_code == 1
     assert "config.toml was not changed" in result.output

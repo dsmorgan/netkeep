@@ -22,7 +22,7 @@ export function mailbox(overrides: Partial<Mailbox> = {}): Mailbox {
     status: 'ok',
     status_reason: null,
     daily_cap: 80,
-    label_prefix: 'netkeeper',
+    label_prefix: 'netkeep',
     checked_at: '2026-09-26T12:00:00Z',
     arm: null,
     armed_at: null,
@@ -41,7 +41,7 @@ export function status(overrides: Partial<MailboxStatus> = {}): MailboxStatus {
   return {
     client_configured: true,
     client_id: '1234-fake.apps.googleusercontent.com',
-    keychain_service: 'netkeeper',
+    keychain_service: 'netkeep',
     mailboxes,
     reauth_required: mailboxes.some((row) => row.status === 'reauth_required'),
     arm_steps: [],

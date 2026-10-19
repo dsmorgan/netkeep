@@ -28,9 +28,9 @@ the suite, so the limits keep leaving it out. Collections are timed with
 busy timeout, which a stopwatch cannot adjust, mark the test ``wall_clock``: its body
 runs with automatic collection held (:func:`gc_held`), and the collection runs after it.
 
-``NETKEEPER_TEST_TIME_LIMIT_S``, read when the run starts, sets the per-test limit for
+``NETKEEP_TEST_TIME_LIMIT_S``, read when the run starts, sets the per-test limit for
 an ordinary test (a ``slow`` one gets three times it), and ``0`` turns the guard off.
-``NETKEEPER_TEST_TIME_SCALE`` multiplies a performance budget written with
+``NETKEEP_TEST_TIME_SCALE`` multiplies a performance budget written with
 :func:`scaled`, for a machine that is slower than a laptop (CI sets it). A limit that
 stands for "did not wait out a real timeout" stays unscaled, and below that timeout, so
 a scaled run still fails the wait it guards against. The per-test limit is one of those:
@@ -58,8 +58,8 @@ TIME_LIMIT_S = 10.0
 #: A ``slow`` test's body: the simulations take a few seconds of CPU each, up to about
 #: 10 s under load.
 SLOW_TIME_LIMIT_S = 30.0
-LIMIT_ENV = "NETKEEPER_TEST_TIME_LIMIT_S"
-SCALE_ENV = "NETKEEPER_TEST_TIME_SCALE"
+LIMIT_ENV = "NETKEEP_TEST_TIME_LIMIT_S"
+SCALE_ENV = "NETKEEP_TEST_TIME_SCALE"
 
 _SMOKE = Path(__file__).parent / "smoke"
 _BASE = pytest.StashKey[float]()

@@ -1,4 +1,4 @@
-"""``netkeeper history import`` and ``history scan-gmail`` (#65), against a migrated scratch
+"""``netkeep history import`` and ``history scan-gmail`` (#65), against a migrated scratch
 database under ``tmp_path`` and the Gmail fake. Every person is invented."""
 
 from __future__ import annotations
@@ -18,12 +18,12 @@ from openpyxl import load_workbook
 from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
 
-from netkeeper import migrations
-from netkeeper.campaigns.gmail import GmailRateLimited
-from netkeeper.campaigns.gmail_fake import FakeGmail
-from netkeeper.cli import app as cli
-from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.models import (
+from netkeep import migrations
+from netkeep.campaigns.gmail import GmailRateLimited
+from netkeep.campaigns.gmail_fake import FakeGmail
+from netkeep.cli import app as cli
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+from netkeep.models import (
     Contact,
     DoNotSendAddress,
     HistoryCampaign,
@@ -31,10 +31,10 @@ from netkeeper.models import (
     Interaction,
     UserOwned,
 )
-from netkeeper.scoping import install_scope_guard, scoped_count
-from netkeeper.services import history_scan
-from netkeeper.services import mailboxes as mailbox_service
-from netkeeper.services.users import ensure_local_user
+from netkeep.scoping import install_scope_guard, scoped_count
+from netkeep.services import history_scan
+from netkeep.services import mailboxes as mailbox_service
+from netkeep.services.users import ensure_local_user
 
 runner = CliRunner()
 ME = "me@example.test"
@@ -50,7 +50,7 @@ COUNTED: tuple[type[UserOwned], ...] = (
 @pytest.fixture
 def cli_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[sessionmaker[Session]]:
     url = database_url(tmp_path)
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     engine = make_engine(url)
     migrations.upgrade(engine)
     factory = make_session_factory(engine)

@@ -16,18 +16,18 @@ from campaign_fakes import make_mailbox
 from history_fixtures import Tab, workbook_bytes
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.campaigns.gmail import GmailRateLimited, MessageRef
-from netkeeper.campaigns.gmail_fake import MAILER_DAEMON, FakeGmail
-from netkeeper.crm import apply as mapping
-from netkeeper.crm import do_not_send
-from netkeeper.crm.contacts import confirm_contact
-from netkeeper.crm.history import HISTORY_SUMMARY, awaiting_reply_triage, import_workbook
-from netkeeper.crm.history_workbook import read_workbook
-from netkeeper.crm.identity import merge
-from netkeeper.db import session_scope
-from netkeeper.linkedin.connections import ConnectionsPage, SyncMode
-from netkeeper.linkedin.voyager import ConnectionSummary
-from netkeeper.models import (
+from netkeep.campaigns.gmail import GmailRateLimited, MessageRef
+from netkeep.campaigns.gmail_fake import MAILER_DAEMON, FakeGmail
+from netkeep.crm import apply as mapping
+from netkeep.crm import do_not_send
+from netkeep.crm.contacts import confirm_contact
+from netkeep.crm.history import HISTORY_SUMMARY, awaiting_reply_triage, import_workbook
+from netkeep.crm.history_workbook import read_workbook
+from netkeep.crm.identity import merge
+from netkeep.db import session_scope
+from netkeep.linkedin.connections import ConnectionsPage, SyncMode
+from netkeep.linkedin.voyager import ConnectionSummary
+from netkeep.models import (
     Contact,
     ContactEmail,
     DoNotSendReason,
@@ -38,10 +38,10 @@ from netkeeper.models import (
     InteractionKind,
     User,
 )
-from netkeeper.scoping import scoped, scoped_count
-from netkeeper.services import history_scan
-from netkeeper.services.campaign_guards import Reason, check_enrollment
-from netkeeper.services.history_scan import (
+from netkeep.scoping import scoped, scoped_count
+from netkeep.services import history_scan
+from netkeep.services.campaign_guards import Reason, check_enrollment
+from netkeep.services.history_scan import (
     READ_ONLY_METHODS,
     SEARCH_MAX,
     UNSUBSCRIBE_REASON,

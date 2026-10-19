@@ -12,9 +12,9 @@ from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.crm.inbox_apply import NewInbound
-from netkeeper.db import session_scope
-from netkeeper.models import (
+from netkeep.crm.inbox_apply import NewInbound
+from netkeep.db import session_scope
+from netkeep.models import (
     EnrollmentStatus,
     Message,
     MessageDirection,
@@ -23,10 +23,10 @@ from netkeeper.models import (
     User,
     UserKind,
 )
-from netkeeper.scoping import unscoped
-from netkeeper.services.campaign_replies import record_linkedin_reply
+from netkeep.scoping import unscoped
+from netkeep.services.campaign_replies import record_linkedin_reply
 
-CSRF = {"X-Netkeeper-Client": "1"}
+CSRF = {"X-Netkeep-Client": "1"}
 
 
 def _at(day: int) -> datetime:

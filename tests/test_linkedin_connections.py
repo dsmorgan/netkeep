@@ -1,4 +1,4 @@
-"""netkeeper.linkedin.connections: the connections sync job, with no database (spec 9.4, 9.10).
+"""netkeep.linkedin.connections: the connections sync job, with no database (spec 9.4, 9.10).
 
 Every test drives the job against :class:`voyager_pages.FakeConnectionsSource`, a
 neutral, in-memory ``ConnectionsSource`` over a list of invented people: no request
@@ -8,7 +8,7 @@ for every source -- rather than one source's translation into and out of its
 transport. (Before #189, this drove ``VoyagerConnections`` over a fake Voyager
 transport instead; that wrapper is retired along with the in-page connections
 endpoint it read, unused since P2-17 moved a live sync onto
-:class:`~netkeeper.linkedin.page_connections.PageConnections`. Its own
+:class:`~netkeep.linkedin.page_connections.PageConnections`. Its own
 request/response shape is what ``test_linkedin_voyager.py`` and
 ``test_classify.py`` still test.) No socket is opened and nothing reaches
 linkedin.com. Page sizes are small (3 or 4) so that page boundaries fall inside
@@ -28,9 +28,9 @@ from pathlib import Path
 import pytest
 from voyager_pages import CONNECTIONS_URL, PEOPLE, FakeConnectionsSource, Person, page_body
 
-from netkeeper.linkedin import connections as job
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.connections import (
+from netkeep.linkedin import connections as job
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.connections import (
     AnswerLost,
     ConnectionsPage,
     LostAnswer,
@@ -41,7 +41,7 @@ from netkeeper.linkedin.connections import (
     SyncMode,
     run_connections_sync,
 )
-from netkeeper.linkedin.voyager import ConnectionsPageResult, ConnectionSummary
+from netkeep.linkedin.voyager import ConnectionsPageResult, ConnectionSummary
 
 FIXTURES = Path(__file__).parent / "fixtures" / "voyager"
 NOW = datetime(2026, 9, 23, 15, 0, tzinfo=UTC)
@@ -675,7 +675,7 @@ async def test_a_proven_end_past_the_slack_names_its_offset_and_total(
 ) -> None:
     """#525 review: the proven end replaced the WARNING that named where the list
     ended and the total it fell short of; one INFO line still names both."""
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     people = _hundred()[:79]
     proven = replace(_page(people[40:79], start=40, total=100), ended=True)
     source = FakeConnectionsSource(people, script={1: proven}, total=100)
@@ -690,7 +690,7 @@ async def test_a_proven_end_past_the_slack_names_its_offset_and_total(
 async def test_a_proven_end_within_the_slack_logs_no_such_line(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    caplog.set_level(logging.INFO, logger="netkeeper")
+    caplog.set_level(logging.INFO, logger="netkeep")
     people = _hundred()[:97]
     proven = replace(_page(people[80:97], start=80, total=100), ended=True)
     source = FakeConnectionsSource(people, script={2: proven}, total=100)

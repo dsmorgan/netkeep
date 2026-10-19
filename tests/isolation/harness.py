@@ -12,9 +12,9 @@ from fastapi import FastAPI, Request
 from local_api import LocalKey
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.db import session_scope
-from netkeeper.models import User, UserKind
-from netkeeper.web.security import CLIENT_HEADER, CLIENT_HEADER_VALUE
+from netkeep.db import session_scope
+from netkeep.models import User, UserKind
+from netkeep.web.security import CLIENT_HEADER, CLIENT_HEADER_VALUE
 
 from .registry import Body, ListEndpoint
 

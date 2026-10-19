@@ -20,7 +20,7 @@ from sqlalchemy.orm import (
     selectinload,
 )
 
-from netkeeper.models import (
+from netkeep.models import (
     CONTACT_CHILDREN,
     Base,
     Contact,
@@ -45,7 +45,7 @@ from netkeeper.models import (
     normalize_public_id,
     single_address,
 )
-from netkeeper.scoping import (
+from netkeep.scoping import (
     UnscopedQueryError,
     get_scoped,
     scoped,

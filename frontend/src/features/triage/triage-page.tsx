@@ -106,7 +106,7 @@ const FILTERS: ReadonlyArray<{ value: QueueFilter; label: string }> = [
 ]
 
 /**
- * What netkeeper decided, and the way into checking it.
+ * What netkeep decided, and the way into checking it.
  *
  * The first thing after an import should be the work already done rather than
  * the first stranger (P1-22), so this says how much there is and offers the
@@ -130,12 +130,12 @@ function AutomaticPass({
       >
         {waiting === 0 ? (
           <>
-            Nothing left to review — every decision netkeeper made has been checked. The other
-            queues are where the untriaged are.
+            Nothing left to review — every decision netkeep made has been checked. The other queues
+            are where the untriaged are.
           </>
         ) : (
           <>
-            These {waiting === 1 ? 'is the one contact' : `are the ${waiting} contacts`} netkeeper
+            These {waiting === 1 ? 'is the one contact' : `are the ${waiting} contacts`} netkeep
             decided for you, waiting to be checked. Answering one yourself takes it out of this
             queue; <kbd>u</kbd> puts it back.
           </>
@@ -150,7 +150,7 @@ function AutomaticPass({
       className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/60 px-3 py-2 ring-1 ring-foreground/10"
     >
       <p className="min-w-0 text-sm">
-        netkeeper decided {waiting} {waiting === 1 ? 'contact' : 'contacts'} from a batch you
+        netkeep decided {waiting} {waiting === 1 ? 'contact' : 'contacts'} from a batch you
         accepted. None of them has been checked yet.
       </p>
       <Button size="sm" variant="secondary" onClick={onReview}>

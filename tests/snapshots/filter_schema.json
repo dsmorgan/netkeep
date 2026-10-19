@@ -1057,7 +1057,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "The root: a predicate (or none) and the archived-contacts switch.\n\nThe JSON schema carries ``x-netkeeper-fields``: each field's kind, label,\nthe ops it takes, and the values of an enum, for the builder.",
+  "description": "The root: a predicate (or none) and the archived-contacts switch.\n\nThe JSON schema carries ``x-netkeep-fields``: each field's kind, label,\nthe ops it takes, and the values of an enum, for the builder.",
   "properties": {
     "where": {
       "anyOf": [
@@ -1078,7 +1078,7 @@
   },
   "title": "FilterTree",
   "type": "object",
-  "x-netkeeper-fields": {
+  "x-netkeep-fields": {
     "archived_at": {
       "kind": "datetime",
       "label": "archived",

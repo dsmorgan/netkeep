@@ -1,4 +1,4 @@
-"""netkeeper.campaigns.compose: RFC 2822 building, the Message-ID, threading (P3-07, #269)."""
+"""netkeep.campaigns.compose: RFC 2822 building, the Message-ID, threading (P3-07, #269)."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from email.policy import SMTP
 
 import pytest
 
-from netkeeper.campaigns import compose
-from netkeeper.campaigns.compose import (
+from netkeep.campaigns import compose
+from netkeep.campaigns.compose import (
     ComposeError,
     build_message,
     campaign_label,
@@ -19,7 +19,7 @@ from netkeeper.campaigns.compose import (
     message_id_for,
     reply_subject,
 )
-from netkeeper.campaigns.gmail_fake import normalize_subject
+from netkeep.campaigns.gmail_fake import normalize_subject
 
 CREATED = datetime(2026, 9, 29, 14, 0, 0, 123456, tzinfo=UTC)
 
@@ -60,7 +60,7 @@ def test_the_message_id_is_the_same_every_time_for_one_row() -> None:
 
 def test_the_message_id_is_pinned_to_its_derivation() -> None:
     """A change to the derivation would lose every message sent before it: pinned."""
-    seed = "netkeeper-message-id:v1:1:42:2026-09-29T14:00:00.123456+00:00"
+    seed = "netkeep-message-id:v1:1:42:2026-09-29T14:00:00.123456+00:00"
     expected = hashlib.sha256(seed.encode()).hexdigest()[:32]
     assert _id() == f"<{expected}@example.test>"
 
@@ -81,9 +81,9 @@ def test_the_message_id_differs_for_another_row_user_database_or_mailbox(
     assert _id(**change) != _id()
 
 
-def test_the_message_id_says_nothing_about_the_row_or_netkeeper() -> None:
+def test_the_message_id_says_nothing_about_the_row_or_netkeep() -> None:
     local = _id().split("@")[0]
-    assert "netkeeper" not in local and "42" not in local[:3]
+    assert "netkeep" not in local and "42" not in local[:3]
 
 
 @pytest.mark.parametrize("address", ["me", "me@", "me@exa mple.test", "me@bad>domain"])
@@ -243,8 +243,8 @@ def test_one_bare_address_with_space_around_it_is_sent_to() -> None:
 
 
 def test_campaign_label() -> None:
-    assert campaign_label("netkeeper", "First 100") == "netkeeper/First 100"
-    assert campaign_label("netkeeper/", "  First   100 ") == "netkeeper/First 100"
+    assert campaign_label("netkeep", "First 100") == "netkeep/First 100"
+    assert campaign_label("netkeep/", "  First   100 ") == "netkeep/First 100"
 
 
 # --- #280: Unicode domains, and a subject that is one line -----------------------------

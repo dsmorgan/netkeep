@@ -1,7 +1,7 @@
 """#405: why a run's visits or answers could not be read, read back from the run.
 
-The service (:mod:`netkeeper.services.run_diagnostics`), ``GET
-/linkedin/runs/{id}/diagnostics``, and ``netkeeper linkedin run <id>``, over runs
+The service (:mod:`netkeep.services.run_diagnostics`), ``GET
+/linkedin/runs/{id}/diagnostics``, and ``netkeep linkedin run <id>``, over runs
 recorded directly: what the runner writes is ``tests/test_enrichment.py``'s.
 """
 
@@ -21,15 +21,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
 
-from netkeeper import migrations
-from netkeeper.cli import app as cli
-from netkeeper.config import Settings
-from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.linkedin.enrich import UnreadableCause
-from netkeeper.models import SyncRun, SyncRunKind, SyncRunStatus, SyncRunTrigger, User, UserKind
-from netkeeper.scoping import install_scope_guard
-from netkeeper.services import run_diagnostics, runs
-from netkeeper.services.users import ensure_local_user
+from netkeep import migrations
+from netkeep.cli import app as cli
+from netkeep.config import Settings
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+from netkeep.linkedin.enrich import UnreadableCause
+from netkeep.models import SyncRun, SyncRunKind, SyncRunStatus, SyncRunTrigger, User, UserKind
+from netkeep.scoping import install_scope_guard
+from netkeep.services import run_diagnostics, runs
+from netkeep.services.users import ensure_local_user
 
 NOW = datetime(2026, 10, 4, 15, 30, tzinfo=UTC)
 
@@ -190,7 +190,7 @@ def test_an_enrichment_runs_lost_count_is_not_a_lost_answer_list(
     session = writer
     user = factories.make_user(session)
     run = _run(session, user, counts={"planned": 3, key: 1})
-    with caplog.at_level("WARNING", logger="netkeeper.services.run_diagnostics"):
+    with caplog.at_level("WARNING", logger="netkeep.services.run_diagnostics"):
         found = run_diagnostics.diagnose(session, user, run)
     assert found.lost_answers == ()
     assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
@@ -387,7 +387,7 @@ def test_recurring_groups_reasons_by_contact_and_code_across_runs(writer: Sessio
 @pytest.fixture
 def cli_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[sessionmaker[Session]]:
     url = database_url(tmp_path)
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     engine = make_engine(url)
     migrations.upgrade(engine)
     factory = make_session_factory(engine)

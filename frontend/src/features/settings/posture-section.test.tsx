@@ -48,7 +48,7 @@ const CLEAN: Posture = {
       summary: 'not probed',
       actions: [],
       severity: 'problem',
-      fix: 'Run `netkeeper preflight` in a terminal.',
+      fix: 'Run `netkeep preflight` in a terminal.',
       warnings: ['no browser probe was run, so the session is unknown'],
       notes: [],
     },
@@ -93,7 +93,7 @@ describe('PostureSection', () => {
 
   it('shows the profile-visit risk as a note under the profile_visits budget, verdict clear (#318)', async () => {
     const risk =
-      'Profile visits are set to 150 a day, above the 100 a day netkeeper was designed around.' +
+      'Profile visits are set to 150 a day, above the 100 a day netkeep was designed around.' +
       ' More visits a day make it more likely that LinkedIn restricts your account or asks you' +
       ' to verify it. Heat still slows runs down after LinkedIn throttles a visit.'
     renderSection({
@@ -128,7 +128,7 @@ describe('PostureSection', () => {
     renderSection({
       ...CLEAN,
       gaps: [
-        '**this report reads configuration and counters, never callers.** Run `netkeeper posture` for the terminal version.',
+        '**this report reads configuration and counters, never callers.** Run `netkeep posture` for the terminal version.',
       ],
     })
     fireEvent.click(await screen.findByRole('button', { name: 'Show details' }))
@@ -136,9 +136,9 @@ describe('PostureSection', () => {
       'this report reads configuration and counters, never callers.',
     )
     expect(bold.tagName).toBe('STRONG')
-    expect(screen.getByText('netkeeper posture').tagName).toBe('CODE')
+    expect(screen.getByText('netkeep posture').tagName).toBe('CODE')
     expect(screen.queryByText(/\*\*/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/`netkeeper/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/`netkeep/)).not.toBeInTheDocument()
   })
 
   it('shows the gaps list once expanded', async () => {
@@ -289,13 +289,13 @@ describe('PostureSection: LinkedIn sends and the first inbox poll (#383)', () =>
     notes: [],
   }
   const AUTO_SEND_WARNING =
-    'LinkedIn auto-send is on (campaigns.linkedin_auto_send), so netkeeper sends' +
+    'LinkedIn auto-send is on (campaigns.linkedin_auto_send), so netkeep sends' +
     ' LinkedIn messages itself for steps set to Auto-send, rather than prefilling them for you' +
     ' to send. It is off by default: an automated send is the action LinkedIn restricts hardest'
   const SHORT_POLL_WARNING =
     "the first LinkedIn inbox poll couldn't read back to 2030-01-02; check older LinkedIn" +
     ' replies by hand, then click Acknowledge in Settings, Posture, or run' +
-    ' `netkeeper linkedin inbox-acknowledge`'
+    ' `netkeep linkedin inbox-acknowledge`'
   const SHORT_POLL: Row = {
     name: 'linkedin reply poll',
     key: 'linkedin_reply_poll',
@@ -318,12 +318,12 @@ describe('PostureSection: LinkedIn sends and the first inbox poll (#383)', () =>
         {
           ...SHORT_POLL,
           value:
-            'no complete poll yet; scheduled polls wait for a first one you run by hand: `netkeeper linkedin inbox`',
+            'no complete poll yet; scheduled polls wait for a first one you run by hand: `netkeep linkedin inbox`',
           summary: 'no complete poll yet',
           actions: [],
           warnings: [],
           notes: [
-            'the LinkedIn inbox has not been read: no poll has completed yet; run `netkeeper linkedin inbox` by hand; scheduled polls wait for a first one. LinkedIn prefills wait until a poll completes; nothing is skipped or failed',
+            'the LinkedIn inbox has not been read: no poll has completed yet; run `netkeep linkedin inbox` by hand; scheduled polls wait for a first one. LinkedIn prefills wait until a poll completes; nothing is skipped or failed',
           ],
         },
       ]),
@@ -333,7 +333,7 @@ describe('PostureSection: LinkedIn sends and the first inbox poll (#383)', () =>
     const notes = (await screen.findAllByRole('list', { name: 'Notes' })).find((list) =>
       list.textContent?.includes('no poll has completed yet'),
     )
-    expect(notes).toHaveTextContent('run netkeeper linkedin inbox by hand')
+    expect(notes).toHaveTextContent('run netkeep linkedin inbox by hand')
     expect(notes).toHaveTextContent('LinkedIn prefills wait until a poll completes')
     expect(screen.queryByRole('button', { name: 'Acknowledge' })).toBeNull()
   })
@@ -394,7 +394,7 @@ describe('PostureSection: LinkedIn sends and the first inbox poll (#383)', () =>
 
     await waitFor(() => expect(screen.queryByText('LinkedIn replies to check by hand')).toBeNull())
     expect(posted).toHaveLength(1)
-    expect(posted[0]?.headers.get('X-Netkeeper-Client')).toBe('1')
+    expect(posted[0]?.headers.get('X-Netkeep-Client')).toBe('1')
   })
 
   it('finds the rows by key, not by name', async () => {
@@ -456,9 +456,9 @@ describe('PostureSection: LinkedIn sends and the first inbox poll (#383)', () =>
 describe('PostureSection: Reset breaker and Forget inbox owner (#583)', () => {
   const ROUTE_WARNING =
     '2 connections runs in a row ended route_changed: scheduled connections runs are skipped' +
-    ' until this clears. Run one by hand (`netkeeper linkedin sync`) to check whether the wall' +
+    ' until this clears. Run one by hand (`netkeep linkedin sync`) to check whether the wall' +
     ' is still there, or clear it directly: click **Reset breaker** under Posture on the' +
-    ' Settings page, or run `netkeeper linkedin schedule reset-breaker`'
+    ' Settings page, or run `netkeep linkedin schedule reset-breaker`'
   const ROUTE_TRIPPED: Row = {
     name: 'route-changed breaker',
     key: 'route_changed_breaker',
@@ -482,7 +482,7 @@ describe('PostureSection: Reset breaker and Forget inbox owner (#583)', () => {
     "2 LinkedIn inbox polls in a row showed another mailbox than this account's. To fix it:" +
     ' if Chrome is signed in to another LinkedIn account, sign back in to yours; otherwise' +
     ' click **Forget inbox owner** under Posture on the Settings page, or run' +
-    ' `netkeeper linkedin inbox-forget-owner`.'
+    ' `netkeep linkedin inbox-forget-owner`.'
   const OWNER_TRIPPED: Row = {
     name: 'Inbox owner breaker',
     key: 'inbox_owner_breaker',
@@ -655,7 +655,7 @@ describe('PostureSection: Reset breaker and Forget inbox owner (#583)', () => {
     expect(dialog).toHaveTextContent('cancel and sign back in to yours instead')
     expect(dialog).toHaveTextContent('the next inbox poll records whichever account the page shows')
     expect(dialog).toHaveTextContent(
-      'click Check inbox now on the LinkedIn page, or run netkeeper linkedin inbox.',
+      'click Check inbox now on the LinkedIn page, or run netkeep linkedin inbox.',
     )
     fireEvent.click(within(dialog).getByRole('button', { name: 'Forget inbox owner' }))
 

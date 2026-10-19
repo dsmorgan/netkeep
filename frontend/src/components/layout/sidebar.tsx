@@ -88,7 +88,7 @@ export function Sidebar({ id, open, onClose }: SidebarProps) {
             aria-hidden="true"
             className="size-2.5 rounded-[3px] bg-sidebar-primary shadow-[0_0_0_3px_color-mix(in_oklab,var(--sidebar-primary)_30%,transparent)]"
           />
-          netkeeper
+          netkeep
         </span>
         <Button
           variant="ghost"

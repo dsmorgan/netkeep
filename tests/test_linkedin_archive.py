@@ -1,4 +1,4 @@
-"""netkeeper.linkedin.archive and .conversations: reading an export, with no database.
+"""netkeep.linkedin.archive and .conversations: reading an export, with no database.
 
 The sample archive under ``tests/fixtures/archive`` is hand-written and entirely
 invented, as every fixture in this repository is (CLAUDE.md). It is shaped like
@@ -20,9 +20,9 @@ from pathlib import Path
 
 import pytest
 
-from netkeeper import zipguard
-from netkeeper.linkedin import archive as linkedin_archive
-from netkeeper.linkedin.archive import (
+from netkeep import zipguard
+from netkeep.linkedin import archive as linkedin_archive
+from netkeep.linkedin.archive import (
     Archive,
     ArchiveFormatError,
     ArchiveKind,
@@ -36,7 +36,7 @@ from netkeeper.linkedin.archive import (
     parse_position_date,
     public_id_from_url,
 )
-from netkeeper.linkedin.conversations import Owner, detect_owner, group
+from netkeep.linkedin.conversations import Owner, detect_owner, group
 
 FIXTURES = Path(__file__).parent / "fixtures" / "archive"
 OWNER = "nettie-keeperton"
@@ -704,7 +704,7 @@ def test_missing_cells_are_none_not_empty_strings() -> None:
 
 def test_an_unreadable_date_is_none_and_says_where(caplog: pytest.LogCaptureFixture) -> None:
     with (
-        caplog.at_level(logging.WARNING, logger="netkeeper.linkedin.archive"),
+        caplog.at_level(logging.WARNING, logger="netkeep.linkedin.archive"),
         open_archive(FIXTURES) as archive,
     ):
         rows = list(archive.connections(_member(archive, ArchiveKind.CONNECTIONS)))
@@ -715,7 +715,7 @@ def test_an_unreadable_date_is_none_and_says_where(caplog: pytest.LogCaptureFixt
 
 def test_an_empty_date_is_silent(caplog: pytest.LogCaptureFixture) -> None:
     with (
-        caplog.at_level(logging.WARNING, logger="netkeeper.linkedin.archive"),
+        caplog.at_level(logging.WARNING, logger="netkeep.linkedin.archive"),
         open_archive(FIXTURES) as archive,
     ):
         rows = list(archive.connections(_member(archive, ArchiveKind.CONNECTIONS)))
@@ -944,7 +944,7 @@ def test_the_profile_name_breaks_a_tie() -> None:
 
 
 def test_the_profile_name_settles_a_tie_end_to_end() -> None:
-    """The path :func:`netkeeper.crm.archive.import_archive` takes for a small archive."""
+    """The path :func:`netkeep.crm.archive.import_archive` takes for a small archive."""
     rows = [
         _message("one", "Nettie Keeperton", OWNER, ("Ada Fictional",), ("ada-fictional",)),
         _message("two", "Ada Fictional", "ada-fictional", ("Nettie Keeperton",), (OWNER,)),

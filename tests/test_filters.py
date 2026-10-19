@@ -1,4 +1,4 @@
-"""netkeeper.crm.filters (spec 10.4): parsing, compiling, sorting, paging, describing.
+"""netkeep.crm.filters (spec 10.4): parsing, compiling, sorting, paging, describing.
 
 The JSON schema of the tree is snapshotted in ``tests/snapshots/filter_schema.json``
 because the frontend builder (P1-15) is written against it. When a change to the
@@ -23,7 +23,7 @@ import pytest
 from sqlalchemy import Boolean, Date, Enum, Integer, String, event, inspect
 from sqlalchemy.orm import Session
 
-from netkeeper.crm.filters import (
+from netkeep.crm.filters import (
     FIELDS,
     MAX_LIST_EXPANSIONS,
     NODE_TYPES,
@@ -48,8 +48,8 @@ from netkeeper.crm.filters import (
     parse_filter,
     parse_sort,
 )
-from netkeeper.crm.lists import list_members
-from netkeeper.models import (
+from netkeep.crm.lists import list_members
+from netkeep.models import (
     Contact,
     ContactList,
     ContactMet,
@@ -70,7 +70,7 @@ from netkeeper.models import (
     UserKind,
     UTCDateTime,
 )
-from netkeeper.scoping import SCOPE_OPTION, scoped
+from netkeep.scoping import SCOPE_OPTION, scoped
 
 NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
 TODAY = NOW.date()
@@ -403,7 +403,7 @@ def test_eq_on_who_decided_met(session: Session, user: User) -> None:
     """The review pass, asked of the whole address book rather than of the queue.
 
     ``met_source`` is the column a triage batch writes ``automatic`` into
-    (spec 10.2), so "what did netkeeper decide for me" is a filter, not only a
+    (spec 10.2), so "what did netkeep decide for me" is a filter, not only a
     triage mode. The default is ``manual``, which is what a contact nobody has
     answered for carries too — the question is only meaningful together with
     ``met``.
@@ -630,7 +630,7 @@ def test_an_unknown_timezone_falls_back_to_utc_with_a_warning(
     now = datetime(2026, 9, 20, 2, 0, tzinfo=UTC)
     user = factories.make_user(session, timezone="Mars/Olympus")
     contact = factories.make_contact(session, user, connected_on=date(2026, 9, 19))
-    with caplog.at_level(logging.WARNING, logger="netkeeper.crm.filters"):
+    with caplog.at_level(logging.WARNING, logger="netkeep.crm.filters"):
         assert matching(session, user, {"op": "connected_within_days", "days": 0}, now=now) == []
         assert matching(session, user, {"op": "connected_within_days", "days": 1}, now=now) == [
             contact.id
@@ -1177,7 +1177,7 @@ def test_list_member_never_counts_an_archived_or_merged_member(
 
     ``include_archived`` on the outer tree widens what the *filter* returns; it
     does not make an archived contact a member of a static list, because
-    ``netkeeper.crm.lists`` does not either.
+    ``netkeep.crm.lists`` does not either.
     """
     live = factories.make_contact(session, user)
     archived = factories.make_contact(session, user, archived_at=NOW)
@@ -1437,7 +1437,7 @@ def test_two_trees_naming_the_same_list_pay_for_it_once(session: Session, user: 
 def test_compiling_does_not_flush_the_caller_half_written_row(session: Session, user: User) -> None:
     """``_list``'s ``no_autoflush``: reading a list is not the caller's write.
 
-    ``netkeeper.crm.lists.update_list`` sets the new name and then validates the
+    ``netkeep.crm.lists.update_list`` sets the new name and then validates the
     new filter. Without the guard, the read the compiler does to resolve a
     ``list_member`` autoflushes that rename — a write nobody asked for, on the
     way to deciding whether to write at all.
@@ -1841,10 +1841,10 @@ def test_describe_of_the_remaining_phrasings() -> None:
     assert one({"op": "eq", "field": "do_not_contact", "value": True}) == "do not contact"
     assert one({"op": "neq", "field": "do_not_contact", "value": False}) == "do not contact"
     assert one({"op": "eq", "field": "source", "value": "sync"}) == "from sync"
-    assert one({"op": "eq", "field": "met_source", "value": "automatic"}) == "decided by netkeeper"
+    assert one({"op": "eq", "field": "met_source", "value": "automatic"}) == "decided by netkeep"
     assert one({"op": "eq", "field": "met_source", "value": "manual"}) == "decided by you"
     assert one({"op": "neq", "field": "met_source", "value": "automatic"}) == (
-        "not decided by netkeeper"
+        "not decided by netkeep"
     )
     assert one({"op": "neq", "field": "degree", "value": 1}) == "degree is not 1"
     assert one({"op": "gt", "field": "degree", "value": 1}) == "degree more than 1"
@@ -1880,9 +1880,9 @@ def test_every_example_compiles(session: Session, user: User, tree: dict[str, An
 
 def test_schema_snapshot_is_current() -> None:
     schema = FilterTree.model_json_schema()
-    assert set(schema["x-netkeeper-fields"]) == set(FIELDS)
-    assert schema["x-netkeeper-fields"]["met"]["values"] == [m.value for m in ContactMet]
-    assert schema["x-netkeeper-fields"]["source"]["values"] == [m.value for m in ContactSource]
+    assert set(schema["x-netkeep-fields"]) == set(FIELDS)
+    assert schema["x-netkeep-fields"]["met"]["values"] == [m.value for m in ContactMet]
+    assert schema["x-netkeep-fields"]["source"]["values"] == [m.value for m in ContactSource]
     assert set(schema["$defs"]["FilterNode"]["discriminator"]["mapping"]) == set(OPS)
     current = json.dumps(schema, indent=2) + "\n"
     if os.environ.get("UPDATE_SNAPSHOTS") == "1":

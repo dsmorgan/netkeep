@@ -12,15 +12,15 @@ export { DISCONNECTED_EVENT }
  */
 export type SessionInfo = {
   status: 'connected' | 'disconnected'
-  /** False when the Keychain refused the key and it lives in memory until netkeeper stops. */
+  /** False when the Keychain refused the key and it lives in memory until netkeep stops. */
   persisted: boolean
   /** Another browser or program used the first-browser claim. */
   claimedElsewhere: boolean
-  /** The `netkeeper open` command line that makes a link this server accepts. */
+  /** The `netkeep open` command line that makes a link this server accepts. */
   openCommand: string
 }
 
-const FALLBACK_COMMAND = 'netkeeper open'
+const FALLBACK_COMMAND = 'netkeep open'
 
 let inFlight: Promise<SessionInfo> | null = null
 

@@ -8,9 +8,9 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from netkeeper.config import CampaignSettings, Settings
-from netkeeper.models import Mailbox, MailboxStatus, User
-from netkeeper.services.campaign_engine import Firing, SendOutcome, SendResult
+from netkeep.config import CampaignSettings, Settings
+from netkeep.models import Mailbox, MailboxStatus, User
+from netkeep.services.campaign_engine import Firing, SendOutcome, SendResult
 
 NOW = datetime(2026, 9, 29, 14, 0, tzinfo=UTC)  # a Tuesday
 # There is no send window any more (#338); the name stays for the tests that read it.

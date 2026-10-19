@@ -1,4 +1,4 @@
-"""netkeeper.crm.lists (spec 10.1, 10.4; item P1-08): lists, membership, saved views."""
+"""netkeep.crm.lists (spec 10.1, 10.4; item P1-08): lists, membership, saved views."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ import pytest
 from sqlalchemy import event
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.crm import identity
-from netkeeper.crm.filters import FilterError, SortKey, compile_filter, parse_filter
-from netkeeper.crm.lists import (
+from netkeep.crm import identity
+from netkeep.crm.filters import FilterError, SortKey, compile_filter, parse_filter
+from netkeep.crm.lists import (
     UNSET,
     VALIDATED_FILTER,
     VALIDATED_LIST_NAME,
@@ -44,9 +44,9 @@ from netkeeper.crm.lists import (
     update_list,
     update_view,
 )
-from netkeeper.db import session_scope
-from netkeeper.models import ContactList, ContactMet, ListKind, User, UserKind
-from netkeeper.services.settings_kv import get_setting
+from netkeep.db import session_scope
+from netkeep.models import ContactList, ContactMet, ListKind, User, UserKind
+from netkeep.services.settings_kv import get_setting
 
 # --- fixtures -----------------------------------------------------------
 
@@ -683,7 +683,7 @@ def test_deleting_a_list_warns_about_the_filters_that_named_it(
         ListKind.SMART,
         filter=parse_filter({"where": {"op": "list_member", "list_id": target.id}}),
     )
-    with caplog.at_level("WARNING", logger="netkeeper.crm.lists"):
+    with caplog.at_level("WARNING", logger="netkeep.crm.lists"):
         delete_list(writer, user, target.id)
     assert f"list {naming.id}" in caplog.text
     assert member_count(writer, user, naming.id) == 0

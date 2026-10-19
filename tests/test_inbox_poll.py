@@ -3,7 +3,7 @@
 Everything runs against :class:`inbox_fakes.FakeInboxSource`: no page loads, nothing
 leaves this machine, and every URN and message is invented. The real page source is
 P4-01's (#380); until it lands the worker's default source refuses, and
-``netkeeper serve`` does not schedule the poll.
+``netkeep serve`` does not schedule the poll.
 """
 
 from __future__ import annotations
@@ -24,19 +24,19 @@ from sqlalchemy.orm import Session, sessionmaker
 from test_runs_serve import HEADERS, START, _local, _rows, client_for, heartbeat, serving
 from typer.testing import CliRunner
 
-from netkeeper import cli as cli_module
-from netkeeper import migrations
-from netkeeper.cli import app as cli
-from netkeeper.config import BudgetSettings, LinkedInSettings, Settings
-from netkeeper.crm import inbox_apply
-from netkeeper.crm.self_contact import ensure_self_contact
-from netkeeper.db import database_url, make_engine, make_session_factory, session_scope
-from netkeeper.linkedin.browser import BrowserRun, BrowserUnavailable
-from netkeeper.linkedin.classify import Outcome
-from netkeeper.linkedin.inbox import BOOTSTRAP_MAX_CONVERSATIONS, InboxReadStopped, InboxSource
-from netkeeper.linkedin.observe import ObservationFailed
-from netkeeper.linkedin.page_inbox import PageInbox
-from netkeeper.models import (
+from netkeep import cli as cli_module
+from netkeep import migrations
+from netkeep.cli import app as cli
+from netkeep.config import BudgetSettings, LinkedInSettings, Settings
+from netkeep.crm import inbox_apply
+from netkeep.crm.self_contact import ensure_self_contact
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
+from netkeep.linkedin.browser import BrowserRun, BrowserUnavailable
+from netkeep.linkedin.classify import Outcome
+from netkeep.linkedin.inbox import BOOTSTRAP_MAX_CONVERSATIONS, InboxReadStopped, InboxSource
+from netkeep.linkedin.observe import ObservationFailed
+from netkeep.linkedin.page_inbox import PageInbox
+from netkeep.models import (
     EnrollmentStatus,
     Interaction,
     LiConversation,
@@ -47,26 +47,26 @@ from netkeeper.models import (
     TemplateChannel,
     User,
 )
-from netkeeper.scoping import install_scope_guard, scoped
-from netkeeper.services import budgets, route_breaker, runs, scheduler
-from netkeeper.services import heat as heat_service
-from netkeeper.services.budgets import ActionClass
-from netkeeper.services.inbox_poll import (
+from netkeep.scoping import install_scope_guard, scoped
+from netkeep.services import budgets, route_breaker, runs, scheduler
+from netkeep.services import heat as heat_service
+from netkeep.services.budgets import ActionClass
+from netkeep.services.inbox_poll import (
     FIRST_SHORT,
     INCOMPLETE,
     MAX_CONVERSATIONS_PER_POLL,
     READ,
     poll_inbox,
 )
-from netkeeper.services.linkedin_accounts import arm_scheduled_runs, ensure_account
-from netkeeper.services.linkedin_session import flag_session, session_flag
-from netkeeper.services.posture import PostureReport, Status, posture
-from netkeeper.services.runs import HeatSkipped, SessionFlagged
-from netkeeper.services.scheduled_runs import serve_registry
-from netkeeper.services.scheduler import SERVED_SCHEDULES, JobKind
-from netkeeper.services.settings_kv import get_setting, set_setting
-from netkeeper.services.users import ensure_local_user
-from netkeeper.worker import BrowserWorker, inbox_source
+from netkeep.services.linkedin_accounts import arm_scheduled_runs, ensure_account
+from netkeep.services.linkedin_session import flag_session, session_flag
+from netkeep.services.posture import PostureReport, Status, posture
+from netkeep.services.runs import HeatSkipped, SessionFlagged
+from netkeep.services.scheduled_runs import serve_registry
+from netkeep.services.scheduler import SERVED_SCHEDULES, JobKind
+from netkeep.services.settings_kv import get_setting, set_setting
+from netkeep.services.users import ensure_local_user
+from netkeep.worker import BrowserWorker, inbox_source
 
 NOW = datetime(2026, 9, 23, 15, 0, tzinfo=UTC)
 SETTINGS = LinkedInSettings()
@@ -699,7 +699,7 @@ async def test_the_worker_refuses_a_scheduled_inbox_run_before_the_first_poll_co
 def cli_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[sessionmaker[Session]]:
     """A migrated database with the local user, under tmp_path only."""
     url = database_url(tmp_path)
-    monkeypatch.setenv("NETKEEPER_DATABASE_URL", url)
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     engine = make_engine(url)
     migrations.upgrade(engine)
     factory = make_session_factory(engine)
@@ -968,7 +968,7 @@ def test_a_skipped_first_poll_fire_is_a_skip_and_the_owner_stop_names_its_cure()
     assert (
         "sign back in to yours" in text
         and "otherwise click **Forget inbox owner** under Posture on the Settings page" in text
-        and "or run `netkeeper linkedin inbox-forget-owner`" in text
+        and "or run `netkeep linkedin inbox-forget-owner`" in text
     )
     assert "cannot edit it yet" in text
 
@@ -1150,7 +1150,7 @@ def test_the_posture_warning_names_the_hold_only_while_it_applies(
     _complete_a_manual_poll(session_factory, user_id, NOW - timedelta(hours=1))
     _trip_inbox(session_factory, user_id)
     fresh = _inbox_breaker_warning(session_factory, user_id)
-    assert "netkeeper linkedin inbox" in fresh and "Scheduled inbox polls are skipped" in fresh
+    assert "netkeep linkedin inbox" in fresh and "Scheduled inbox polls are skipped" in fresh
     assert "held until a poll completes" not in fresh
 
     # Ten hours on, the inbox is stale and the hold applies: the warning links to it.
@@ -1502,7 +1502,7 @@ def test_posture_says_why_scheduled_polls_are_held(
     assert _forget(session_factory, user_id)
     (note,) = [n for n in _reply_poll_notes(session_factory, user_id) if "forgotten" in n]
     assert "scheduled polls wait" in note
-    assert "Check inbox now" in note and "`netkeeper linkedin inbox`" in note
+    assert "Check inbox now" in note and "`netkeep linkedin inbox`" in note
     assert "the hold stays: poll again once a conversation shows" in note
 
 

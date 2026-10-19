@@ -21,7 +21,7 @@ function serve(session: Session, claimStatus = 204) {
     const { pathname } = new URL(request.url)
     seen.push(`${request.method} ${pathname}`)
     if (pathname === '/api/v1/session') {
-      return jsonResponse({ persisted: true, open_command: 'netkeeper open', ...session })
+      return jsonResponse({ persisted: true, open_command: 'netkeep open', ...session })
     }
     if (pathname === '/api/v1/session/claim') {
       if (claimStatus === 204) {
@@ -78,7 +78,7 @@ describe('SessionGate', () => {
     serve({ connected: false, claimable: false })
     renderGate()
     expect(await screen.findByRole('heading', { name: 'Connect this browser' })).toBeInTheDocument()
-    expect(screen.getByText('netkeeper open')).toBeInTheDocument()
+    expect(screen.getByText('netkeep open')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Check again' })).toBeInTheDocument()
     expect(screen.queryByText('the app')).not.toBeInTheDocument()
   })
@@ -118,13 +118,13 @@ describe('SessionGate', () => {
     serve({
       connected: false,
       claimable: false,
-      open_command: "NETKEEPER_DATA='/tmp/nk scratch' netkeeper open",
+      open_command: "NETKEEP_DATA='/tmp/nk scratch' netkeep open",
     })
     renderGate()
     expect(
       await screen.findByText(/Another browser or program has already connected/),
     ).toBeInTheDocument()
-    expect(screen.getByText("NETKEEPER_DATA='/tmp/nk scratch' netkeeper open")).toBeInTheDocument()
+    expect(screen.getByText("NETKEEP_DATA='/tmp/nk scratch' netkeep open")).toBeInTheDocument()
   })
 
   it('drops the connect query from the address once it has read it', async () => {
@@ -156,7 +156,7 @@ describe('SessionGate', () => {
     serve({ connected: false, claimable: false, persisted: false })
     renderGate()
     expect(
-      await screen.findByText(/Restart\s+netkeeper, then load this page first/),
+      await screen.findByText(/Restart\s+netkeep, then load this page first/),
     ).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Copy command' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Check again' })).toBeInTheDocument()

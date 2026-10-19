@@ -42,8 +42,8 @@ INI = "[pytest]\nasyncio_default_fixture_loop_scope = function\nmarkers =\n    s
 
 def test_the_limits_are_ten_and_thirty_seconds() -> None:
     assert (time_limit.TIME_LIMIT_S, time_limit.SLOW_TIME_LIMIT_S) == (10.0, 30.0)
-    assert time_limit.LIMIT_ENV == "NETKEEPER_TEST_TIME_LIMIT_S"
-    assert time_limit.SCALE_ENV == "NETKEEPER_TEST_TIME_SCALE"
+    assert time_limit.LIMIT_ENV == "NETKEEP_TEST_TIME_LIMIT_S"
+    assert time_limit.SCALE_ENV == "NETKEEP_TEST_TIME_SCALE"
 
 
 def test_a_test_over_the_limit_fails_and_a_slow_one_gets_longer(

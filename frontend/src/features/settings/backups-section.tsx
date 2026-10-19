@@ -13,7 +13,7 @@ function message(error: unknown): string {
 
 /**
  * The database's backups (P6-04): each with its date, size and the command that restores
- * it, and **Back up now**. Restoring stays in the terminal, because `netkeeper serve` has
+ * it, and **Back up now**. Restoring stays in the terminal, because `netkeep serve` has
  * to be stopped first; the nightly switch and how many to keep are in the Backups
  * settings above.
  */
@@ -30,8 +30,8 @@ export function BackupsSection() {
       <CardHeader>
         <h2 className="font-heading text-sm leading-snug font-bold">Backup files</h2>
         <CardDescription>
-          Snapshots of the database, newest first. To restore one, stop netkeeper serve, then run
-          its command in a terminal: it backs up the database in place first, so you can undo it.
+          Snapshots of the database, newest first. To restore one, stop netkeep serve, then run its
+          command in a terminal: it backs up the database in place first, so you can undo it.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
@@ -44,7 +44,7 @@ export function BackupsSection() {
             </p>
             {!backups.data.available && (
               <p className="text-muted-foreground">
-                This database is not a SQLite file, so netkeeper does not back it up. Use your
+                This database is not a SQLite file, so netkeep does not back it up. Use your
                 database&apos;s own tools.
               </p>
             )}

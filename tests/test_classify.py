@@ -1,4 +1,4 @@
-"""netkeeper.linkedin.classify (spec 9.7): a response's status, url, and body
+"""netkeep.linkedin.classify (spec 9.7): a response's status, url, and body
 in, one of six outcomes out.
 
 Every fixture below is invented, as every fixture in this repository is
@@ -13,7 +13,7 @@ import json
 
 import pytest
 
-from netkeeper.linkedin.classify import Outcome, classify, is_retryable
+from netkeep.linkedin.classify import Outcome, classify, is_retryable
 
 CONNECTIONS_URL = "https://www.linkedin.com/voyager/api/relationships/connections"
 PROFILE_URL = "https://www.linkedin.com/voyager/api/identity/profiles/nettie-keeperton/profileView"

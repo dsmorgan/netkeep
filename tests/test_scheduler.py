@@ -1,4 +1,4 @@
-"""netkeeper.services.scheduler: next-fire persistence, catch-up, reschedule-only-
+"""netkeep.services.scheduler: next-fire persistence, catch-up, reschedule-only-
 on-change, the interleave gap, and heat skip (spec 9.4, 9.5, 9.7, 9.9).
 
 End-to-end restart/downtime behavior through the ``simulate`` harness is in
@@ -20,13 +20,13 @@ import factories
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeeper.config import HeatSettings
-from netkeeper.db import session_scope
-from netkeeper.models import SyncRunKind, User
-from netkeeper.models.base import utcnow
-from netkeeper.services import heat, route_breaker, scheduler
-from netkeeper.services.scheduler import DEFAULT_SCHEDULES
-from netkeeper.services.settings_kv import get_setting, set_setting
+from netkeep.config import HeatSettings
+from netkeep.db import session_scope
+from netkeep.models import SyncRunKind, User
+from netkeep.models.base import utcnow
+from netkeep.services import heat, route_breaker, scheduler
+from netkeep.services.scheduler import DEFAULT_SCHEDULES
+from netkeep.services.settings_kv import get_setting, set_setting
 
 NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
 ACCOUNT = 1

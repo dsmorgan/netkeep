@@ -11,7 +11,7 @@ import { useCallback, useState } from 'react'
 
 import type { ColumnId } from './columns'
 import { DEFAULT_COLUMNS, knownColumns } from './columns'
-const COLUMNS_KEY = 'netkeeper.contacts.columns'
+const COLUMNS_KEY = 'netkeep.contacts.columns'
 
 function read(key: string): unknown {
   try {

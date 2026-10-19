@@ -1,12 +1,12 @@
-"""`netkeeper simulate`: the CLI wrapper (P2-11, #156, #107).
+"""`netkeep simulate`: the CLI wrapper (P2-11, #156, #107).
 
 Unlike `posture` and `rehearse`'s CLI tests (`test_cli_posture_rehearse.py`),
 this one needs no `cli_db` fixture, no migrated database, and no
-`NETKEEPER_DATABASE_URL` -- the whole point of this command is that it never
+`NETKEEP_DATABASE_URL` -- the whole point of this command is that it never
 opens the real one. That absence is itself part of what these tests are
 checking: `test_runs_with_no_database_configured_at_all` would fail loudly
 (a `sqlite3.OperationalError` or similar) if the command reached for
-`netkeeper.db.database_url()` the way every other data-touching command does.
+`netkeep.db.database_url()` the way every other data-touching command does.
 """
 
 from __future__ import annotations
@@ -14,11 +14,11 @@ from __future__ import annotations
 import pytest
 from typer.testing import CliRunner
 
-from netkeeper.cli import app as cli
+from netkeep.cli import app as cli
 
 
 def test_runs_with_no_database_configured_at_all() -> None:
-    """No `NETKEEPER_DATABASE_URL`, no migrated schema, no local user -- proof
+    """No `NETKEEP_DATABASE_URL`, no migrated schema, no local user -- proof
     this command never reaches for the real database the way every other
     data-touching command in this CLI does."""
     result = CliRunner().invoke(cli, ["simulate", "--days", "3", "--throttles", "1", "--seed", "1"])
@@ -65,7 +65,7 @@ def test_refuses_negative_throttles() -> None:
 
 @pytest.mark.slow
 def test_matches_cp3s_demo_invocation() -> None:
-    """The exact invocation #30's demo names: ``netkeeper simulate --days 14
+    """The exact invocation #30's demo names: ``netkeep simulate --days 14
     --throttles 2``. Both requested throttles must actually land -- a review
     of this command caught a version where placing throttles by calendar day
     routinely lost one to a day the weekly budget had already exhausted,
