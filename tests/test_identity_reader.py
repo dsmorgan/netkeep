@@ -15,15 +15,14 @@ Everything else is fakes.
 from __future__ import annotations
 
 import asyncio
-import http.client
 import json
+import socket
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 import pytest
 from browser_guard import RealBrowserBlocked, is_personal_cdp
@@ -56,6 +55,9 @@ def test_the_identity_read_constants_are_these_literals() -> None:
     assert browser.IDENTITY_READ_MAX_BYTES == 65536
     assert browser.PROBE_STEP_TIMEOUT_S == 5.0
     assert NO_WINDOWS_ERROR == "Browser context management is not supported"
+    assert browser.VERSION_REQUEST == (
+        "GET /json/version HTTP/1.1\r\nHost: {netloc}\r\nConnection: close\r\n\r\n"
+    )
 
 
 # --- a fake Chrome on loopback --------------------------------------------------------------
@@ -83,11 +85,19 @@ class _FakeChrome:
     before: list[dict[str, Any]] = field(default_factory=list)
     received: list[dict[str, Any]] = field(default_factory=list)
     gets: list[str] = field(default_factory=list)
+    hosts: list[str] = field(default_factory=list)
+    #: Answer the websocket handshake with ``302 Location: <redirect>`` instead.
+    redirect: str | None = None
     sockets: int = 0
     closed: asyncio.Event = field(default_factory=asyncio.Event)
 
     def process_request(self, connection: ServerConnection, request: Request) -> Response | None:
+        self.hosts.append(request.headers["Host"])
         if request.path != "/json/version":
+            if self.redirect is not None:
+                moved = connection.respond(HTTPStatus.FOUND, "")
+                moved.headers["Location"] = self.redirect
+                return moved
             return None  # the websocket handshake
         self.gets.append(request.path)
         body = self.version_body
@@ -130,32 +140,28 @@ async def _running(chrome: _FakeChrome) -> AsyncIterator[str]:
             _FAKE_PORTS.discard(port)
 
 
-def _only_a_fake(host: str | None, port: int | None) -> None:
-    if host != "127.0.0.1" or port not in _FAKE_PORTS:
-        raise RealBrowserBlocked(f"the reader tried to reach {host}:{port}, not a fake Chrome")
-
-
 @pytest.fixture
 def real_reader(monkeypatch: pytest.MonkeyPatch) -> CdpIdentityReader:
-    """The real reader, whose GET and websocket can reach only a running fake Chrome."""
-    import websockets.asyncio.client
+    """The real reader, whose sockets can connect only to a running fake Chrome.
 
-    real_http = http.client.HTTPConnection
-    real_ws_connect = websockets.asyncio.client.connect
+    Every connect the reader makes, the GET's and the websocket's, a redirect's
+    included, goes through ``socket.socket.connect`` (asyncio calls it), so a mutant
+    that points either anywhere else fails loudly here, before any byte leaves."""
+    real_connect = socket.socket.connect
 
-    def http_connection(host: str, port: int, **kwargs: Any) -> http.client.HTTPConnection:
-        _only_a_fake(host, port)
-        return real_http(host, port, **kwargs)
+    def only_a_fake(self: socket.socket, address: Any) -> None:
+        if not (isinstance(address, tuple) and address[:2] in _fake_addresses()):
+            raise RealBrowserBlocked(f"the reader tried to reach {address!r}, not a fake")
+        real_connect(self, address)
 
-    def ws_connect(url: str, **kwargs: Any) -> Any:
-        parts = urlsplit(url)
-        _only_a_fake(parts.hostname, parts.port)
-        return real_ws_connect(url, **kwargs)
-
-    monkeypatch.setattr(http.client, "HTTPConnection", http_connection)
-    monkeypatch.setattr(websockets.asyncio.client, "connect", ws_connect)
+    monkeypatch.setattr(socket.socket, "connect", only_a_fake)
     monkeypatch.setattr(CdpIdentityReader, "read_pid", REAL_READ_PID)
     return CdpIdentityReader()
+
+
+def _fake_addresses() -> set[tuple[str, int]]:
+    # ::1 on a fake's port too: nothing listens there, which the localhost test needs.
+    return {(host, port) for port in _FAKE_PORTS for host in ("127.0.0.1", "::1")}
 
 
 async def test_the_reader_sends_one_process_info_and_closes(
@@ -248,16 +254,25 @@ async def test_an_answer_that_names_no_one_browser_is_no_pid(
 
 
 @pytest.mark.parametrize(
-    "cdp_url", ["ws://127.0.0.1:9333/devtools/browser/x", "https://127.0.0.1:9333", "9333"]
+    "cdp_url",
+    [
+        "ws://127.0.0.1:9333/devtools/browser/x",
+        "https://127.0.0.1:9333",
+        "9333",
+        "http://127.0.0.1",  # no port: never a default
+        "http://127.0.0.1:0",
+        "http://127.0.0.1:65536",
+        "http://127.0.0.1:x",
+    ],
 )
 async def test_the_reader_reads_only_an_http_address(
     real_reader: CdpIdentityReader, monkeypatch: pytest.MonkeyPatch, cdp_url: str
 ) -> None:
     asked: list[tuple[str, int]] = []
 
-    def no_get(host: str, port: int) -> str:
+    async def no_get(host: str, port: int, netloc: str) -> str:
         asked.append((host, port))
-        return f"ws://{host}:{port}/devtools/browser/0a1b"
+        return f"ws://{netloc}/devtools/browser/0a1b"
 
     async def no_websocket(url: str) -> object:
         return _process_info(CHROME_PID)
@@ -270,8 +285,6 @@ async def test_the_reader_reads_only_an_http_address(
 
 async def test_a_port_that_isnt_listening_is_no_pid(real_reader: CdpIdentityReader) -> None:
     # A port the OS gave this test and took back: nothing listens on it now.
-    import socket
-
     with socket.socket() as held:
         held.bind(("127.0.0.1", 0))
         port = held.getsockname()[1]
@@ -280,6 +293,106 @@ async def test_a_port_that_isnt_listening_is_no_pid(real_reader: CdpIdentityRead
         assert await real_reader.read_pid(f"http://127.0.0.1:{port}") is None
     finally:
         _FAKE_PORTS.discard(port)
+
+
+async def test_a_redirected_handshake_is_refused_and_never_followed(
+    real_reader: CdpIdentityReader,
+) -> None:
+    """#675 review: the websocket library follows redirects unless told not to. A 302 on
+    the handshake, even to another fake that would answer, is no pid, and the second
+    fake hears nothing."""
+    elsewhere = _FakeChrome(result=_process_info(OTHER_PID))
+    async with _running(elsewhere) as target:
+        port = target.rsplit(":", 1)[1]
+        front = _FakeChrome(redirect=f"ws://127.0.0.1:{port}/devtools/browser/zz")
+        async with _running(front) as url:
+            assert await real_reader.read_pid(url) is None
+    assert front.gets == ["/json/version"] and front.sockets == 0
+    assert elsewhere.hosts == [] and elsewhere.received == [] and elsewhere.sockets == 0
+
+
+async def test_a_version_answer_that_isnt_200_is_no_pid_even_naming_a_websocket(
+    real_reader: CdpIdentityReader,
+) -> None:
+    chrome = _FakeChrome(version_status=HTTPStatus.ACCEPTED)
+    async with _running(chrome) as url:
+        assert await real_reader.read_pid(url) is None
+    assert chrome.gets == ["/json/version"] and chrome.sockets == 0
+
+
+async def test_the_get_and_the_websocket_use_the_one_resolved_address(
+    real_reader: CdpIdentityReader, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``localhost`` is resolved once. ::1 refuses (the fake listens on 127.0.0.1 only),
+    so the GET falls to 127.0.0.1, and the websocket goes there too, and says so."""
+    lookups: list[object] = []
+    real_getaddrinfo = asyncio.base_events.BaseEventLoop.getaddrinfo
+
+    async def getaddrinfo(self: Any, host: Any, port: Any, **kwargs: Any) -> Any:
+        if host == "localhost":
+            lookups.append(host)
+            return [
+                (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::1", port, 0, 0)),
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port)),
+            ]
+        return await real_getaddrinfo(self, host, port, **kwargs)
+
+    monkeypatch.setattr(asyncio.base_events.BaseEventLoop, "getaddrinfo", getaddrinfo)
+    chrome = _FakeChrome()
+    async with _running(chrome) as url:
+        port = url.rsplit(":", 1)[1]
+        assert await real_reader.read_pid(f"http://localhost:{port}") == CHROME_PID
+    assert lookups == ["localhost"]
+    assert chrome.hosts == [f"127.0.0.1:{port}", f"127.0.0.1:{port}"]
+
+
+async def test_a_slow_version_answer_ends_at_the_deadline(
+    real_reader: CdpIdentityReader, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A port that drips its answer a byte at a time can't hold the read past its one
+    deadline: the GET runs on the event loop, with no thread left reading after."""
+    monkeypatch.setattr(browser, "PROBE_STEP_TIMEOUT_S", 0.2)
+
+    async def drip(_reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            writer.write(b"HTTP/1.1 200 OK\r\n")
+            while True:
+                writer.write(b"X")
+                await writer.drain()
+                await asyncio.sleep(0.02)
+        except (ConnectionError, asyncio.CancelledError):
+            pass
+        finally:
+            writer.close()
+
+    server = await asyncio.start_server(drip, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    _FAKE_PORTS.add(port)
+    try:
+        async with server:
+            pid = await asyncio.wait_for(real_reader.read_pid(f"http://127.0.0.1:{port}"), 2)
+    finally:
+        _FAKE_PORTS.discard(port)
+    assert pid is None
+
+
+@pytest.mark.parametrize(
+    ("head", "length"),
+    [
+        ("HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n", 12),
+        ("HTTP/1.1 200 OK\r\ncontent-length:3\r\nContent-Type: x\r\n\r\n", 3),
+        ("HTTP/1.0 200\r\nContent-Length: 0\r\n\r\n", 0),
+        ("HTTP/1.1 302 Found\r\nContent-Length: 12\r\n\r\n", None),
+        ("HTTP/1.1 2000 OK\r\nContent-Length: 12\r\n\r\n", None),
+        ("HTTP/1.1 200 OK\r\n\r\n", None),  # no length
+        ("HTTP/1.1 200 OK\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n", None),
+        ("HTTP/1.1 200 OK\r\nContent-Length: -1\r\n\r\n", None),
+        ("HTTP/1.1 200 OK\r\nContent-Length: 65537\r\n\r\n", None),
+        ("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Length: 3\r\n\r\n", None),
+    ],
+)
+def test_only_a_200_with_one_bounded_length_is_read(head: str, length: int | None) -> None:
+    assert browser._ok_content_length(head) == length
 
 
 # --- the launcher, end to end with fakes ------------------------------------------------------
