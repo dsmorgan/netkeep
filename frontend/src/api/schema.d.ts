@@ -8318,8 +8318,11 @@ export interface components {
             name: string;
             /** Notes */
             notes: string[];
-            /** Severity */
-            severity: string;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "problem" | "warning" | "on";
             /** Status */
             status: string;
             /** Summary */

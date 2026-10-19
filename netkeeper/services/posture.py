@@ -339,8 +339,13 @@ class Protection:
     actions: tuple[str, ...] = ()
     """The buttons this row offers right now (#583): :data:`ACTION_RESET_BREAKER`,
     :data:`ACTION_FORGET_INBOX_OWNER`. Empty when none applies."""
+    opted_in: bool = False
+    """The row is not in force because you chose it (#654): LinkedIn auto-send turned on on
+    purpose. It stays ``off`` for ``ok`` and the verdict, but its severity is a warning, not a
+    permanent problem."""
     fix: str | None = None
-    """What to do about this row, in one plain sentence (#654), or None. A row that is not
+    """What to do about this row, in one plain sentence (#654), or None. Light Markdown:
+    ``**Button**`` names and backticked commands. The CLI strips the ``**``. A row that is not
     in force must have one; a row with nothing to say must not; a row that is in force
     with a warning may have one. It explains and ``actions`` are the buttons. Only commands
     and pages that exist are named: a fix that names a button the person cannot find is
@@ -349,7 +354,7 @@ class Protection:
     @property
     def severity(self) -> Severity:
         """:class:`Severity` of this row: problem, warning, or on."""
-        if self.status is not Status.ON:
+        if self.status is not Status.ON and not self.opted_in:
             return Severity.PROBLEM
         return Severity.WARNING if self.warnings else Severity.ON
 
@@ -547,8 +552,8 @@ _READ_FAILURE_ROWS: Final = {
 
 
 READ_FAILURE_FIX: Final = (
-    "Restart `netkeeper serve`, and if the warning comes back, save the setting again on"
-    " the Settings page."
+    "Restart `netkeeper serve`, and if the warning comes back, look in netkeeper's log for"
+    " the error."
 )
 """The fix for a settings read ``serve`` cannot make (#464, #654)."""
 
@@ -888,8 +893,8 @@ def _browser_mode(mode: str, cdp_url: str) -> Protection:
         )
     elif warnings:
         fix = (
-            "Set **Chrome debug address** on the Settings page to an address on this"
-            " machine, such as `http://127.0.0.1:9222`."
+            "Set `cdp_url` under `[linkedin]` in config.toml to an address on this machine,"
+            " such as `http://127.0.0.1:9222`, then restart `netkeeper serve`."
         )
     return Protection(
         name="attach-only browser",
@@ -957,8 +962,10 @@ def _dedicated_profile(probe: SessionProbe | None, running_pid: int | None) -> P
         ),
         key=KEY_DEDICATED_PROFILE,
         fix=(
-            "Quit the Chrome that is using the debug port, then click **Start Chrome** on the"
-            " LinkedIn page."
+            "The Chrome on the debug port is not netkeeper's and is probably your everyday"
+            " Chrome: quit it, then click **Start Chrome** on the LinkedIn page, or change the"
+            " debug address (`cdp_url` under `[linkedin]` in config.toml, or **Chrome debug"
+            " address** on the Settings page)."
         ),
     )
 
@@ -1168,7 +1175,10 @@ def _session_from_evidence(
                 " and no run that read LinkedIn. Run `netkeeper preflight` in a terminal;"
                 " this report shows what it finds",
             ),
-            fix="Run `netkeeper preflight` in a terminal to check the LinkedIn session.",
+            fix=(
+                "Click **Start Chrome** on the LinkedIn page and sign in to LinkedIn, then run"
+                " `netkeeper preflight` in a terminal."
+            ),
         )
     if flag is not None:
         when = f"{local_time_of(flag.flagged_at, zone):%Y-%m-%d %H:%M}"
@@ -1300,8 +1310,8 @@ def _active_hours(
                 " enforced from it",
             ),
             fix=(
-                "Set **Active hours** on the Settings page to a start and an end time in"
-                " HH:MM form."
+                "Set `active_hours` under `[linkedin]` in config.toml to a start and an end"
+                " time in HH:MM form, then restart `netkeeper serve`."
             ),
         )
     start, end = window
@@ -1319,9 +1329,15 @@ def _active_hours(
     value += f"; set in {source}"
     fix = None
     if status is Status.OFF:
-        fix = "Set **Active hours** on the Settings page to the hours you are usually online."
+        fix = (
+            "Set `active_hours` under `[linkedin]` in config.toml to the hours you are"
+            " usually online, then restart `netkeeper serve`."
+        )
     elif zone_warning is not None:
-        fix = "Set **Time zone** on the Settings page to a zone name such as America/New_York."
+        fix = (
+            "Set `timezone` under `[linkedin]` in config.toml to a zone name such as"
+            " America/New_York, then restart `netkeeper serve`."
+        )
     return Protection(
         name="active hours", status=status, value=value, warnings=tuple(warnings), fix=fix
     )
@@ -1375,7 +1391,10 @@ def _account_timezone(user: User, configured: str) -> Protection:
             f" are read in {configured}. Set linkedin.timezone and the user's timezone to"
             " the same zone, or a day's budget resets at an hour the window is open",
         ),
-        fix="Save **Time zone** on the Settings page again, so budgets and hours use one zone.",
+        fix=(
+            "Restart `netkeeper serve`, which sets your account's zone to the **Time zone**"
+            " setting, so budgets and hours use one zone."
+        ),
     )
 
 
@@ -1551,9 +1570,11 @@ def _auto_send(settings: Settings, hold: AutoSendHold | None = None) -> Protecti
                 else (f"auto-send is held: {hold.reason}. {AUTO_SEND_HOLD_CLEAR}",)
             ),
         ),
+        opted_in=True,
         fix=(
-            "Turn off **LinkedIn auto-send** on the Settings page if you want to send each"
-            " LinkedIn message yourself."
+            "Auto-send is on by your choice; turn off **LinkedIn auto-send** on the Settings"
+            " page (or remove `linkedin_auto_send` from config.toml if it sets it) to send"
+            " each LinkedIn message yourself."
         ),
     )
 
@@ -1617,8 +1638,8 @@ def _budget(action: ActionClass, snapshot: BudgetSnapshot, settings: Settings) -
         brief=", ".join(parts),
         # A count past its limit is the limit working: it clears when the day or week rolls over.
         fix=(
-            "Lower this limit on the Settings page, or under `[linkedin.budget]` in"
-            " config.toml, to the hard max or below."
+            "Set this limit under `[linkedin.budget]` in config.toml to a value at or below the"
+            " one in `config.example.toml`, then restart `netkeeper serve`."
             if above_max
             else None
         ),
@@ -1852,8 +1873,9 @@ def _send_records(session: Session, user: User, *, now: datetime) -> Protection:
         value=f"{emails} email and {linkedin} LinkedIn send(s) with no recorded outcome",
         warnings=tuple(warnings),
         fix=(
-            "Open each LinkedIn conversation to see whether the message went out, then run"
-            " `netkeeper campaigns linkedin discard <message ID>` once its run has ended."
+            "Check each conversation in LinkedIn, then, under **Waiting for you** on the"
+            " dashboard, click **I sent it, check now** if the message went out or"
+            " **Discard** if it did not."
             if linkedin
             else "Keep `netkeeper serve` running, which settles each email send by its Message-ID."
         ),
@@ -2523,7 +2545,18 @@ def _inbox_owner_breaker(
             f" is not, and connections syncs are unaffected.{waits} To fix it: {fix}."
             f" {then}",
         ),
-        fix=f"{fix[0].upper()}{fix[1:]}.",
+        fix=(
+            "If Chrome is signed in to another LinkedIn account, sign back in to yours, then"
+            " run `netkeeper linkedin inbox` by hand, which releases the breaker when it"
+            " completes; if it is already your account, no fix exists yet because netkeeper"
+            " cannot edit your own contact's LinkedIn ID, so click **Reset breaker** under"
+            " Posture on the Settings page and expect the mismatch to return on the next poll."
+            if inbox_apply.self_contact_has_urn(session, user)
+            else "If Chrome is signed in to another LinkedIn account, sign back in to yours,"
+            " then run `netkeeper linkedin inbox` by hand, which releases the breaker when it"
+            " completes; if you use another account on purpose, click **Forget inbox owner**"
+            " under Posture on the Settings page, then run `netkeeper linkedin inbox` by hand."
+        ),
     )
 
 
@@ -2631,8 +2664,8 @@ def _heat(posture_of_heat: HeatPosture, heat_settings: HeatSettings) -> Protecti
         )
     elif posture_of_heat.tripped:
         fix = (
-            "Wait for the score to cool, or click **Clear heat** on the LinkedIn page if the"
-            " block was something else."
+            "Wait for the score to cool, or click **Clear heat** on the LinkedIn page if you"
+            " are sure LinkedIn did not throttle you or show a checkpoint."
         )
     return Protection(
         name="heat", status=status, value=f"{level}, {raised}", warnings=tuple(warnings), fix=fix
@@ -2939,7 +2972,8 @@ def _fix_lines(report: PostureReport) -> list[str]:
         return []
     lines = [""]
     for row in rows:
-        lines.extend(_wrapped(f"{row.name}: {row.fix}", first="fix: ", rest="     "))
+        text = (row.fix or "").replace("**", "")
+        lines.extend(_wrapped(f"{row.name}: {text}", first="fix: ", rest="     "))
     return lines
 
 

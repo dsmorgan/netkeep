@@ -58,7 +58,8 @@ async def test_every_row_has_a_severity_and_the_fix_the_service_builds(
     session_row = rows["linkedin session"]
     assert session_row["severity"] == "problem"
     assert session_row["fix"] == (
-        "Run `netkeeper preflight` in a terminal to check the LinkedIn session."
+        "Click **Start Chrome** on the LinkedIn page and sign in to LinkedIn, then run"
+        " `netkeeper preflight` in a terminal."
     )
     for row in rows.values():
         assert (row["status"] != "on") == (row["severity"] == "problem")

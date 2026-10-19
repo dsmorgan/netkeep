@@ -24,6 +24,8 @@ function renderSection(posture: Posture | 'error') {
   )
 }
 
+type Row = Posture['protections'][number]
+
 const CLEAN: Posture = {
   checked_at: '2026-09-24T10:00:00Z',
   timezone: 'America/New_York',
@@ -46,6 +48,7 @@ const CLEAN: Posture = {
       summary: 'not probed',
       actions: [],
       severity: 'problem',
+      fix: 'Run `netkeeper preflight` in a terminal.',
       warnings: ['no browser probe was run, so the session is unknown'],
       notes: [],
     },
@@ -274,7 +277,7 @@ describe('PostureSection', () => {
 })
 
 describe('PostureSection: LinkedIn sends and the first inbox poll (#383)', () => {
-  const MANUAL_ON = {
+  const MANUAL_ON: Row = {
     name: 'manual linkedin sends',
     key: 'manual_linkedin_sends',
     status: 'on',
@@ -293,7 +296,7 @@ describe('PostureSection: LinkedIn sends and the first inbox poll (#383)', () =>
     "the first LinkedIn inbox poll couldn't read back to 2030-01-02; check older LinkedIn" +
     ' replies by hand, then click Acknowledge in Settings, Posture, or run' +
     ' `netkeeper linkedin inbox-acknowledge`'
-  const SHORT_POLL = {
+  const SHORT_POLL: Row = {
     name: 'linkedin reply poll',
     key: 'linkedin_reply_poll',
     status: 'on',
@@ -352,7 +355,8 @@ describe('PostureSection: LinkedIn sends and the first inbox poll (#383)', () =>
           value: 'auto-send ON',
           summary: 'auto-send ON',
           actions: [],
-          severity: 'problem',
+          severity: 'warning',
+          fix: 'Auto-send is on by your choice; turn off **LinkedIn auto-send** on the Settings page.',
           warnings: [AUTO_SEND_WARNING],
         },
       ]),
@@ -455,7 +459,7 @@ describe('PostureSection: Reset breaker and Forget inbox owner (#583)', () => {
     ' until this clears. Run one by hand (`netkeeper linkedin sync`) to check whether the wall' +
     ' is still there, or clear it directly: click **Reset breaker** under Posture on the' +
     ' Settings page, or run `netkeeper linkedin schedule reset-breaker`'
-  const ROUTE_TRIPPED = {
+  const ROUTE_TRIPPED: Row = {
     name: 'route-changed breaker',
     key: 'route_changed_breaker',
     status: 'on',
@@ -466,12 +470,12 @@ describe('PostureSection: Reset breaker and Forget inbox owner (#583)', () => {
     warnings: [ROUTE_WARNING],
     notes: [],
   }
-  const ROUTE_CLEAR = {
+  const ROUTE_CLEAR: Row = {
     ...ROUTE_TRIPPED,
     value: 'clear: no consecutive connections runs have ended route_changed',
     summary: 'clear: no consecutive connections runs have ended route_changed',
     actions: [],
-    severity: 'warning',
+    severity: 'on',
     warnings: [],
   }
   const OWNER_WARNING =
@@ -479,7 +483,7 @@ describe('PostureSection: Reset breaker and Forget inbox owner (#583)', () => {
     ' if Chrome is signed in to another LinkedIn account, sign back in to yours; otherwise' +
     ' click **Forget inbox owner** under Posture on the Settings page, or run' +
     ' `netkeeper linkedin inbox-forget-owner`.'
-  const OWNER_TRIPPED = {
+  const OWNER_TRIPPED: Row = {
     name: 'Inbox owner breaker',
     key: 'inbox_owner_breaker',
     status: 'on',

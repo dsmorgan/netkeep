@@ -134,7 +134,9 @@ def test_posture_prints_the_fix_for_a_row_that_is_not_in_force(
     for flags in (["--no-probe"], ["--no-probe", "--details"]):
         out = CliRunner().invoke(cli, ["posture", *flags]).output
 
-        assert "fix: linkedin session: Run `netkeeper preflight` in a terminal" in out
+        assert "fix: linkedin session: Click Start Chrome on the LinkedIn page" in out
+        fix_lines = [line for line in out.splitlines() if line.startswith("fix:")]
+        assert fix_lines and all("**" not in line for line in fix_lines)
         assert out.index("warning: linkedin session") < out.index("fix: linkedin session")
         assert out.index("fix: linkedin session") < out.index("NOT clear")
 

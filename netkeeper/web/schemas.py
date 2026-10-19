@@ -2278,6 +2278,10 @@ class BrowserHealthOut(BaseModel):
     owner, so **Start Chrome** can work."""
 
 
+SeverityName = Literal["problem", "warning", "on"]
+"""A posture row's severity (#654), as `netkeeper.services.posture.Severity`'s values."""
+
+
 class ProtectionOut(BaseModel):
     """One row of the posture report (spec section 9): what it is, whether it is in
     force, and anything wrong with it. ``status`` is `netkeeper.services.posture.Status`'s
@@ -2299,13 +2303,14 @@ class ProtectionOut(BaseModel):
     actions: list[str] = []
     """The buttons this row offers now (#583): ``reset_breaker`` on a tripped breaker,
     ``forget_inbox_owner`` where an owner mismatch shows that forgetting can fix."""
-    severity: str
+    severity: SeverityName
     """How much the row needs you (#654), for grouping: ``problem`` is a protection that is
     not in force (``off`` or ``unknown``), ``warning`` one in force that still warns, ``on``
     one with nothing to say. Derived from ``status`` and ``warnings``."""
     fix: str | None = None
     """One plain sentence on what to do about the row (#654), or null. Every ``problem``
-    row has one and an ``on`` row never does. It explains; ``actions`` are the buttons."""
+    row has one and an ``on`` row never does. It explains; ``actions`` are the buttons.
+    Light Markdown: ``**Button**`` names and backticked commands, for the page to render."""
 
 
 class PostureOut(BaseModel):
