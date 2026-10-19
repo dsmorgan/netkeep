@@ -16,7 +16,11 @@ Two limits are deliberate. The scan covers ``netkeeper/`` and not ``tests/``: te
 code starts processes (the boundary probe below runs one) and drives fakes that
 imitate the calls the rules forbid. And it reads names, not meanings, so it catches
 the spellings a person would actually write, not every way Python can reach a symbol.
-The offline behavior tests and the opt-in smoke suite are the other two layers.
+What a name can't show -- a module imported by a computed string, an attribute read
+out of a namespace or by a built name -- is listed use by use instead (#660:
+:func:`dynamic_access`), so a new one fails CI and gets a review. What even that can't
+see is listed in its docstring. The offline behavior tests and the opt-in smoke suite
+are the other two layers.
 """
 
 from __future__ import annotations
@@ -48,7 +52,12 @@ LAUNCH_CALLS = frozenset({"launch", "launch_persistent_context", "launch_server"
 # Playwright. `netkeeper browser launch` prints a command; it never runs one. The
 # asyncio spellings matter most: this package is async throughout and already imports
 # asyncio, so `create_subprocess_exec` is the shortest path from here to a launch.
-PROCESS_MODULES = frozenset({"subprocess", "pty", "webbrowser"})
+#: ``multiprocessing`` and ``concurrent.futures.ProcessPoolExecutor`` start Python
+#: processes, which can start anything; ``ctypes`` calls libc's ``fork``/``execve``
+#: directly; ``_posixsubprocess`` is ``subprocess``'s own C spawn (#660).
+PROCESS_MODULES = frozenset(
+    {"subprocess", "pty", "webbrowser", "multiprocessing", "ctypes", "_posixsubprocess"}
+)
 PROCESS_CALLS = frozenset(
     {
         "create_subprocess_exec",
@@ -78,6 +87,8 @@ PROCESS_CALLS = frozenset(
         "posix_spawn",
         "posix_spawnp",
         "startfile",
+        "fork_exec",
+        "ProcessPoolExecutor",
     }
 )
 
@@ -614,11 +625,13 @@ def reached_names(source: str, path: Path = MEMORY) -> Iterator[tuple[int, str]]
       the method to call later, and ``start()`` alone names nothing on the list;
     - the member of a ``from`` import, whatever it is renamed to:
       ``from os import system as sh`` makes ``sh()`` a process start;
-    - a string literal handed to ``getattr`` or ``operator.attrgetter``.
+    - a string literal handed to ``getattr`` or ``operator.attrgetter``;
+    - an attribute a ``match`` class pattern reads: ``case object(system=run)`` (#660).
 
     It cannot see a name built at run time, or one read out of a namespace
-    (``vars(os)["system"]``), which is why every rule here is also a review rule,
-    not only a test.
+    (``vars(os)["system"]``). :func:`dynamic_access` lists every primitive that does
+    that, package-wide (#660), and every rule here is also a review rule, not only a
+    test.
 
     Reading references rather than calls widens the net: an unrelated attribute
     that happens to be *named* ``route`` or ``system`` now fails the build too.
@@ -638,6 +651,9 @@ def reached_names(source: str, path: Path = MEMORY) -> Iterator[tuple[int, str]]
                 if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                     for part in arg.value.split("."):
                         yield node.lineno, part
+        elif isinstance(node, ast.MatchClass):
+            for attr in node.kwd_attrs:
+                yield node.lineno, attr
 
 
 def _attribute_name_arguments(node: ast.Call) -> list[ast.expr]:
@@ -666,17 +682,8 @@ DYNAMIC_ATTRIBUTE_READERS = frozenset(
 )
 
 
-def dynamic_attribute_reads(source: str, path: Path = MEMORY) -> Iterator[Finding]:
-    """Every attribute read whose name the scanners cannot see (#207 review, #196 item 11).
-
-    The scanners read a name handed to ``getattr``, ``__getattribute__``,
-    ``methodcaller``, or ``attrgetter`` only as a string literal: ``getattr(x, "obs" +
-    "erve")`` reaches ``observe`` and names nothing. So where a page is in reach, each
-    of those is a finding when its name is not a literal (an expression, a ``*``
-    argument, no name at all), and when the reader itself is held rather than called
-    (``read = getattr``), since nothing on the later call says it is one.
-    """
-    tree = parse(source)
+def _dynamic_attribute_nodes(tree: ast.AST) -> Iterator[tuple[ast.AST, str]]:
+    """Each node of :func:`dynamic_attribute_reads`, with what is wrong with it."""
     called: set[int] = set()
     for node in walk(tree):
         if not isinstance(node, ast.Call):
@@ -694,14 +701,255 @@ def dynamic_attribute_reads(source: str, path: Path = MEMORY) -> Iterator[Findin
         else:
             ok = bool(names) and len(literal) == len(names) and not starred
         if not ok:
-            yield Finding(path, node.lineno, f"{name}() with a name that is not a literal")
+            yield node, f"{name}() with a name that is not a literal"
     for node in walk(tree):
         if id(node) in called:
             continue
         if isinstance(node, ast.Name) and node.id in DYNAMIC_ATTRIBUTE_READERS:
-            yield Finding(path, node.lineno, f"{node.id} held, not called")
+            yield node, f"{node.id} held, not called"
         elif isinstance(node, ast.Attribute) and node.attr in DYNAMIC_ATTRIBUTE_READERS:
-            yield Finding(path, node.lineno, f"{node.attr} held, not called")
+            yield node, f"{node.attr} held, not called"
+
+
+def dynamic_attribute_reads(source: str, path: Path = MEMORY) -> Iterator[Finding]:
+    """Every attribute read whose name the scanners cannot see (#207 review, #196 item 11).
+
+    The scanners read a name handed to ``getattr``, ``__getattribute__``,
+    ``methodcaller``, or ``attrgetter`` only as a string literal: ``getattr(x, "obs" +
+    "erve")`` reaches ``observe`` and names nothing. So where a page is in reach, each
+    of those is a finding when its name is not a literal (an expression, a ``*``
+    argument, no name at all), and when the reader itself is held rather than called
+    (``read = getattr``), since nothing on the later call says it is one.
+    """
+    for node, detail in _dynamic_attribute_nodes(parse(source)):
+        yield Finding(path, getattr(node, "lineno", 0), detail)
+
+
+# --- What the scanners can't read (#660) ---------------------------------------------------
+#
+# Every rule in this file reads names. A module imported by a computed string, or an
+# attribute read out of a namespace by one, names nothing, so no rule can see it. These
+# are the primitives that do that. Each one is a finding anywhere in the package, and
+# each use the package has is listed below by file, function and primitive, with why it
+# is safe. A new use fails CI, so it gets a review before it lands, whichever rule it
+# would have slipped past: the process ban, the importer pins, or the launch pins.
+
+#: Modules that import code, start processes or call C by a value, or that hand out
+#: every live object or name. Importing any of them is a finding.
+DYNAMIC_MODULES = frozenset(
+    {
+        "_imp",
+        "_posixsubprocess",
+        "builtins",
+        "code",
+        "codeop",
+        "concurrent",
+        "ctypes",
+        "gc",
+        "copyreg",
+        "importlib",
+        "marshal",
+        "multiprocessing",
+        "pickle",
+        "pkgutil",
+        "pty",
+        "pydoc",
+        "runpy",
+        "shelve",
+        "zipimport",
+    }
+)
+
+#: Builtins that import a module, run code, or hand out a namespace, by any name.
+DYNAMIC_BUILTINS = frozenset(
+    {
+        "__builtins__",
+        "__import__",
+        "__loader__",
+        "__spec__",
+        "compile",
+        "eval",
+        "exec",
+        "globals",
+        "locals",
+        "vars",
+    }
+)
+
+#: Attributes that do the same: a module's or an object's namespace (``__dict__``,
+#: Starlette's ``State._state``), a module's ``__getattr__``, its loader, the import
+#: system (``sys.modules``, ``importlib``'s loaders, and the dependencies' import-by-
+#: string helpers: uvicorn's ``import_from_string``, Pydantic's ``ImportString``, entry
+#: points), a frame's namespaces, and the listings that a filter on a built name can pick
+#: from (``inspect.getmembers``, ``object.__subclasses__()``).
+#: Read the way every rule reads a name: an attribute, a ``from`` import, or a literal
+#: handed to ``getattr``.
+DYNAMIC_ATTRIBUTES = frozenset(
+    {
+        "__builtins__",
+        "__dict__",
+        "__getattr__",
+        "__globals__",
+        "__import__",
+        "__loader__",
+        "__spec__",
+        "__subclasses__",
+        "ImportString",
+        "_getframe",
+        "_state",
+        "entry_points",
+        "eval",
+        "exec",
+        "exec_module",
+        "f_builtins",
+        "f_globals",
+        "f_locals",
+        "find_spec",
+        "get_objects",
+        "get_referrers",
+        "getmembers",
+        "getmembers_static",
+        "globals",
+        "import_from_string",
+        "import_module",
+        "import_string",
+        "load_module",
+        "locals",
+        "locate",
+        "module_from_spec",
+        "modules",
+        "resolve_name",
+        "spec_from_file_location",
+        "spec_from_loader",
+        "vars",
+    }
+)
+
+#: Each use of a primitive above, by file, enclosing function and primitive, and how
+#: many, with why it is safe. The test compares the whole map, so a new use fails and so
+#: does a stale entry. A computed ``getattr`` is listed only where its receiver is a
+#: record of netkeeper's own (a dataclass, an ORM row or class, a Pydantic body) and its
+#: name comes from that record's own field list, never from a module.
+COMPUTED_GETATTR = "getattr() with a name that is not a literal"
+ALLOWED_DYNAMIC_ACCESS: dict[tuple[Path, str, str], int] = {
+    # Imports. db.py runs SQLite on threads, never processes (no ProcessPoolExecutor).
+    (PACKAGE / "db.py", "", "import concurrent.futures"): 1,
+    # The support bundle reads installed package versions; metadata imports no code.
+    (PACKAGE / "services" / "support_bundle.py", "", "import importlib.metadata"): 1,
+    # discover_routers imports each module of netkeeper.web.api, by the names pkgutil
+    # lists in that package's own directory, to collect their routers. Those files are
+    # scanned like every other; its one call passes no package
+    # (test_router_discovery_imports_only_the_api_package).
+    (PACKAGE / "web" / "app.py", "", "import importlib"): 1,
+    (PACKAGE / "web" / "app.py", "", "import pkgutil"): 1,
+    (PACKAGE / "web" / "app.py", "discover_routers", ".import_module"): 1,
+    # Not the primitives: Jinja's Environment.globals (cleared, so a template sees no
+    # globals), the template walker's own `getattr` method for a Getattr node, and the
+    # Flight payload's `modules` field.
+    (PACKAGE / "campaigns" / "render.py", "_environment", ".globals"): 1,
+    (PACKAGE / "campaigns" / "render.py", "_Walker.walk", COMPUTED_GETATTR): 1,
+    (PACKAGE / "linkedin" / "flight.py", "is_whole", ".modules"): 1,
+    # A module constant names the attribute: the scope guard's marker and the read-only
+    # route marker.
+    (PACKAGE / "scoping.py", "install_scope_guard", COMPUTED_GETATTR): 1,
+    (PACKAGE / "web" / "deps.py", "writes", COMPUTED_GETATTR): 1,
+    # Settings and config dataclasses, by their own `fields()` or a dotted settings key.
+    (PACKAGE / "config.py", "_render_table", COMPUTED_GETATTR): 1,
+    (PACKAGE / "services" / "support_bundle.py", "settings_leaf_keys", COMPUTED_GETATTR): 1,
+    (PACKAGE / "services" / "ui_settings.py", "_replace_path", COMPUTED_GETATTR): 1,
+    (PACKAGE / "services" / "ui_settings.py", "value_at", COMPUTED_GETATTR): 1,
+    # A counter dataclass's own field, named by an enum value.
+    (PACKAGE / "crm" / "apply.py", "HarvestCounts.add", COMPUTED_GETATTR): 1,
+    (PACKAGE / "services" / "history_scan.py", "KindCount.add", COMPUTED_GETATTR): 1,
+    # A posture row's field, named by the read-failure table.
+    (PACKAGE / "services" / "posture.py", "with_read_failures", COMPUTED_GETATTR): 1,
+    # A Pydantic request body's fields that were set.
+    (PACKAGE / "web" / "schemas.py", "given_fields", COMPUTED_GETATTR): 1,
+    # A contact (the ORM class, a row, a snapshot or an incoming record), by a column or
+    # relationship name from the model's own field lists.
+    (PACKAGE / "crm" / "filters.py", "", COMPUTED_GETATTR): 1,
+    (PACKAGE / "crm" / "identity.py", "IncomingContact.__post_init__", COMPUTED_GETATTR): 1,
+    (PACKAGE / "crm" / "identity.py", "IncomingContact.provided_fields", COMPUTED_GETATTR): 1,
+    (PACKAGE / "crm" / "identity.py", "_enriched_value", COMPUTED_GETATTR): 1,
+    (PACKAGE / "crm" / "identity.py", "_merge_campaign_rows", COMPUTED_GETATTR): 1,
+    (PACKAGE / "crm" / "identity.py", "_merge_scalars", COMPUTED_GETATTR): 2,
+    (PACKAGE / "crm" / "identity.py", "_update", COMPUTED_GETATTR): 4,
+    (PACKAGE / "crm" / "import_runs.py", "_plan", COMPUTED_GETATTR): 1,
+    (PACKAGE / "crm" / "import_runs.py", "_restore", COMPUTED_GETATTR): 1,
+    (PACKAGE / "crm" / "import_runs.py", "contact_effect", COMPUTED_GETATTR): 2,
+    (PACKAGE / "crm" / "import_runs.py", "prefetch_contacts", COMPUTED_GETATTR): 1,
+    (PACKAGE / "crm" / "import_runs.py", "snapshot_contact", COMPUTED_GETATTR): 2,
+    (PACKAGE / "crm" / "provenance.py", "may_overwrite", COMPUTED_GETATTR): 1,
+    (PACKAGE / "crm" / "provenance.py", "overridden_fields", COMPUTED_GETATTR): 1,
+    (PACKAGE / "crm" / "triage.py", "_diverged", COMPUTED_GETATTR): 1,
+    (PACKAGE / "crm" / "triage.py", "_snapshot", COMPUTED_GETATTR): 1,
+    (PACKAGE / "services" / "field_changes.py", "field_changes", COMPUTED_GETATTR): 2,
+    (PACKAGE / "web" / "api" / "contacts.py", "_detail", COMPUTED_GETATTR): 1,
+    (PACKAGE / "web" / "api" / "contacts.py", "_row", COMPUTED_GETATTR): 1,
+}
+
+
+def dynamic_access(source: str, path: Path = MEMORY) -> Iterator[Input]:
+    """Every use of a primitive that reaches a module or a name by a value (#660).
+
+    That is an import of a :data:`DYNAMIC_MODULES` module; a :data:`DYNAMIC_BUILTINS`
+    name in any context (called, held, or passed on); a :data:`DYNAMIC_ATTRIBUTES` name
+    read as an attribute, a ``from`` import member, or a literal to ``getattr``; and
+    each finding of :func:`dynamic_attribute_reads` (a ``getattr`` and its kin with a
+    name that isn't a literal, or the reader held). Each carries its enclosing function,
+    so the allowed uses are pinned where they are.
+
+    What this still can't see, each of which needs a deliberate act a review reads:
+
+    - **Code outside the package.** A dependency that imports or reads an attribute by a
+      string the package hands it, through a helper not named above; and the processes a
+      dependency starts itself (Playwright's own driver).
+    - **A string read as an attribute path by a formatter or a template**:
+      ``"{0.create_subprocess_exec}".format(asyncio)``. Templates go through
+      ``campaigns/render.py``'s sandbox, which refuses attribute access.
+    - **A write by a computed name**: ``setattr(obj, name, value)``. It reaches nothing
+      by itself; the launcher reads it would need are pinned
+      (:func:`launcher_flow_problems`).
+    - **An allowed use handed a name that isn't its own.** Each listed computed
+      ``getattr`` reads a record's own field by that record's field list; the list
+      entry, and its reason, are what a review checks when that code changes.
+    """
+    tree = parse(source)
+    scopes = _scoped(tree)
+    for node in walk(tree):
+        where = scopes.get(id(node), "")
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] in DYNAMIC_MODULES:
+                    yield Input(path, node.lineno, where, f"import {alias.name}")
+        elif isinstance(node, ast.ImportFrom):
+            base = _absolute_module(node, package_of(path)) or ""
+            if base.split(".")[0] in DYNAMIC_MODULES:
+                yield Input(path, node.lineno, where, f"import {base}")
+            for alias in node.names:
+                if alias.name in DYNAMIC_ATTRIBUTES | DYNAMIC_BUILTINS:
+                    yield Input(path, node.lineno, where, f".{alias.name}")
+        elif isinstance(node, ast.Name) and node.id in DYNAMIC_BUILTINS:
+            yield Input(path, node.lineno, where, node.id)
+        elif isinstance(node, ast.Attribute) and node.attr in DYNAMIC_ATTRIBUTES:
+            yield Input(path, node.lineno, where, f".{node.attr}")
+        elif isinstance(node, ast.Call):
+            for arg in _attribute_name_arguments(node):
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    for part in arg.value.split("."):
+                        if part in DYNAMIC_ATTRIBUTES:
+                            yield Input(path, node.lineno, where, f".{part}")
+    for node, detail in _dynamic_attribute_nodes(tree):
+        yield Input(path, getattr(node, "lineno", 0), scopes.get(id(node), ""), detail)
+
+
+def dynamic_access_counts(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int]:
+    found: dict[tuple[Path, str, str], int] = {}
+    for path, source in sources.items():
+        for item in dynamic_access(source, path):
+            key = (path, item.function, item.name)
+            found[key] = found.get(key, 0) + 1
+    return found
 
 
 def imported_names(source: str, path: Path = MEMORY) -> Iterator[tuple[int, str]]:
@@ -710,6 +958,13 @@ def imported_names(source: str, path: Path = MEMORY) -> Iterator[tuple[int, str]
     Relative imports are resolved against the file's own package, so
     ``from ..models import User`` reads as ``netkeeper.models``. Skipping that step
     would leave every rule here answerable with a dot.
+
+    A dynamic import by a literal is read the same way (#660):
+    ``importlib.import_module("netkeeper.chrome_spawn")`` (or ``(".chrome_spawn",
+    "netkeeper")``), ``__import__("netkeeper.chrome_spawn", fromlist=[...])``,
+    ``importlib.util.find_spec(...)`` and ``pkgutil.resolve_name("module:member")``.
+    One by a computed name names nothing; :func:`dynamic_access` refuses every
+    importer but the one listed, whatever it is handed.
     """
     for node in walk(parse(source)):
         if isinstance(node, ast.Import):
@@ -722,6 +977,54 @@ def imported_names(source: str, path: Path = MEMORY) -> Iterator[tuple[int, str]
             yield node.lineno, base
             for alias in node.names:
                 yield node.lineno, f"{base}.{alias.name}"
+        elif isinstance(node, ast.Call):
+            for name in _literal_imports(node):
+                yield node.lineno, name
+
+
+#: The calls that import a module (or find its spec) by a string, and its position.
+DYNAMIC_IMPORTERS = frozenset({"import_module", "__import__", "find_spec", "resolve_name"})
+
+
+def _literal_imports(node: ast.Call) -> Iterator[str]:
+    """The modules a dynamic import names with literals, resolved like a static one."""
+    func = node.func
+    name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+    if name not in DYNAMIC_IMPORTERS or not node.args:
+        return
+
+    def literal(arg: ast.expr | None) -> str | None:
+        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+            return arg.value
+        return None
+
+    target = literal(node.args[0])
+    if target is None:
+        return
+    if name == "resolve_name":
+        module, _, member = target.partition(":")
+        yield module
+        if member:
+            yield f"{module}.{member.split('.')[0]}"
+        return
+    keywords = {k.arg: k.value for k in node.keywords if k.arg}
+    if target.startswith(".") and name in ("import_module", "find_spec"):
+        anchor = literal(node.args[1] if len(node.args) > 1 else keywords.get("package"))
+        if anchor is None:
+            return
+        level = len(target) - len(target.lstrip("."))
+        parts = anchor.split(".")
+        base = ".".join(parts[: len(parts) - (level - 1)] if level > 1 else parts)
+        rest = target.lstrip(".")
+        target = f"{base}.{rest}" if rest else base
+    yield target
+    if name == "__import__":
+        fromlist = node.args[3] if len(node.args) > 3 else keywords.get("fromlist")
+        if isinstance(fromlist, ast.List | ast.Tuple):
+            for item in fromlist.elts:
+                listed = literal(item)
+                if listed is not None:
+                    yield f"{target}.{listed}"
 
 
 def _absolute_module(node: ast.ImportFrom, package: str) -> str | None:
@@ -758,13 +1061,23 @@ def launch_calls(source: str, path: Path = MEMORY) -> Iterator[Finding]:
             yield Finding(path, line, f"{name}() starts a browser (ADR 0002: attach only)")
 
 
+#: What :func:`process_starts` says of a :func:`dynamic_access` use. Those are pinned
+#: use by use by ``test_nothing_reaches_a_name_the_scanners_cannot_read``, so the process
+#: rule leaves them to it.
+DYNAMIC = "reaches a name the scanners can't read:"
+
+
 def process_starts(source: str, path: Path = MEMORY) -> Iterator[Finding]:
+    """Every way ``source`` could start a process: a process module imported (statically
+    or by a literal), a process call reached, or a name reached by a value (#660)."""
     for line, name in imported_names(source, path):
         if name.split(".")[0] in PROCESS_MODULES:
             yield Finding(path, line, f"imports {name}, which can start a process")
     for line, name in reached_names(source, path):
         if name in PROCESS_CALLS:
             yield Finding(path, line, f"{name}() starts a process")
+    for item in dynamic_access(source, path):
+        yield Finding(path, item.line, f"{DYNAMIC} {item.name}")
 
 
 def context_mutations(source: str, path: Path = MEMORY) -> Iterator[Finding]:
@@ -915,7 +1228,9 @@ def test_no_code_path_starts_a_process() -> None:
     findings = [
         f
         for f in scan([PACKAGE], process_starts)
-        if not is_launchctl_import(f) and not is_chrome_spawn_finding(f)
+        if not is_launchctl_import(f)
+        and not is_chrome_spawn_finding(f)
+        and not f.detail.startswith(DYNAMIC)
     ]
     for path, count in ALLOWED_PROCESS_STARTS.items():
         hits = [f for f in findings if f.path == path and f.detail == "execv() starts a process"]
@@ -1346,15 +1661,22 @@ def test_the_one_process_netkeeper_spawns_is_the_chrome_launchers() -> None:
     assert len({f.line for f in hits}) == 1, hits
 
 
+def importers_of(sources: dict[Path, str], modules: tuple[str, ...]) -> set[Path]:
+    """The files that import any of ``modules`` (or a member of one), statically or by a
+    literal dynamic import, as paths from the repository root."""
+    found: set[Path] = set()
+    for path, source in sources.items():
+        for _, name in imported_names(source, path):
+            if name in modules or name.startswith(tuple(f"{m}." for m in modules)):
+                found.add(path.resolve().relative_to(REPO_ROOT))
+    return found
+
+
 def test_only_the_cli_and_serves_wiring_import_the_chrome_launcher() -> None:
     """``netkeeper open`` and ``serve``'s wiring, and nothing else: no route, no run."""
-
-    def importers(source: str, path: Path) -> Iterator[Finding]:
-        for line, name in imported_names(source, path):
-            if name == "netkeeper.chrome_spawn" or name.startswith("netkeeper.chrome_spawn."):
-                yield Finding(path, line, f"imports {name}")
-
-    found = {f.path.resolve().relative_to(REPO_ROOT) for f in scan([PACKAGE], importers)}
+    sources = package_sources()
+    assert len(sources) >= 20
+    found = importers_of(sources, ("netkeeper.chrome_spawn",))
     assert found == set(CHROME_SPAWN_IMPORTERS), sorted(str(p) for p in found)
     assert (
         CHROME_SPAWN.parent == PACKAGE
@@ -1668,7 +1990,7 @@ def _parents(tree: ast.AST) -> dict[int, ast.AST]:
     return {id(child): node for node in walk(tree) for child in ast.iter_child_nodes(node)}
 
 
-def _called(node: ast.AST, name: str) -> TypeGuard[ast.Call]:
+def _called(node: ast.AST | None, name: str) -> TypeGuard[ast.Call]:
     return isinstance(node, ast.Call) and (
         (isinstance(node.func, ast.Name) and node.func.id == name)
         or (isinstance(node.func, ast.Attribute) and node.func.attr == name)
@@ -1814,6 +2136,145 @@ def test_the_hold_pin_catches_a_held_launcher(replace: tuple[str, str]) -> None:
     else:
         raise AssertionError(f"anchor not found: {old}")
     assert launcher_hold_problems(sources) != [] or launch_reach_counts(sources) != LAUNCH_REACHES
+
+
+#: The one function that hands a read launcher back: the route's ``_launcher`` helper.
+LAUNCHER_RETURNERS = frozenset({(PACKAGE / "web" / "api" / "linkedin.py", "_launcher")})
+
+
+def _launcher_read(node: ast.AST) -> bool:
+    """A read of the launcher: ``x.chrome_launcher``, ``getattr(x, "chrome_launcher",
+    ...)``, or the route's ``_launcher(request)``."""
+    if isinstance(node, ast.Attribute):
+        return node.attr == "chrome_launcher" and isinstance(node.ctx, ast.Load)
+    if _called(node, "getattr"):
+        name = node.args[1] if len(node.args) > 1 else None
+        return isinstance(name, ast.Constant) and name.value == "chrome_launcher"
+    return _called(node, "_launcher")
+
+
+def _none_check(parent: ast.AST | None, node: ast.AST) -> bool:
+    """``node is None`` or ``node is not None``, and nothing else."""
+    return (
+        isinstance(parent, ast.Compare)
+        and len(parent.ops) == 1
+        and isinstance(parent.ops[0], ast.Is | ast.IsNot)
+        and id(node) in (id(parent.left), id(parent.comparators[0]))
+        and any(
+            isinstance(side, ast.Constant) and side.value is None
+            for side in (parent.left, parent.comparators[0])
+        )
+    )
+
+
+def launcher_flow_problems(sources: dict[Path, str]) -> list[str]:
+    """Where a launcher read from ``app.state`` goes, in the function that reads it (#660,
+    closing #664's first documented limit).
+
+    A read is checked against ``None``, or bound to one local. That local is only checked
+    against ``None``, handed to ``submit_launch``, or returned by ``_launcher``. So an
+    allowed function can't store the launcher under another name, hand it to anything
+    else, start it, or clone its class.
+    """
+    problems: list[str] = []
+    for path, source in sources.items():
+        tree = parse(source)
+        scopes = _scoped(tree)
+        parents = _parents(tree)
+        held: list[tuple[str, str, int]] = []
+        for node in walk(tree):
+            if not _launcher_read(node):
+                continue
+            where = scopes.get(id(node), "")
+            parent = parents.get(id(node))
+            if _none_check(parent, node):
+                continue
+            targets = (
+                parent.targets
+                if isinstance(parent, ast.Assign)
+                else [parent.target]
+                if isinstance(parent, ast.AnnAssign)
+                else []
+            )
+            if len(targets) == 1 and isinstance(targets[0], ast.Name):
+                held.append((where, targets[0].id, id(targets[0])))
+            else:
+                line = getattr(node, "lineno", 0)
+                problems.append(f"{path.name}:{line}: a launcher read in {where} is kept")
+        for where, name, bound in held:
+            for node in walk(tree):
+                if not (isinstance(node, ast.Name) and node.id == name) or id(node) == bound:
+                    continue
+                scope = scopes.get(id(node), "")
+                if scope != where and not scope.startswith(f"{where}."):
+                    continue
+                parent = parents.get(id(node))
+                if isinstance(parent, ast.keyword):
+                    parent = parents.get(id(parent))
+                if isinstance(node.ctx, ast.Load) and (
+                    _none_check(parent, node)
+                    or (_called(parent, "submit_launch") and parent.func is not node)
+                    or (isinstance(parent, ast.Return) and (path, where) in LAUNCHER_RETURNERS)
+                ):
+                    continue
+                problems.append(f"{path.name}:{node.lineno}: the launcher `{name}` in {scope}")
+    return problems
+
+
+def test_a_read_launcher_goes_only_to_submit_launch() -> None:
+    assert launcher_flow_problems(package_sources()) == []
+
+
+@pytest.mark.parametrize(
+    ("path", "anchor", "line"),
+    [
+        # #664's first documented limit: an allowed function passing the launcher on.
+        (
+            PACKAGE / "worker.py",
+            "    holder = profile_lock_pid(",
+            "    app.state.tasks.spare = launcher\n",
+        ),
+        (PACKAGE / "worker.py", "    holder = profile_lock_pid(", "    clone = type(launcher)\n"),
+        (PACKAGE / "worker.py", "    holder = profile_lock_pid(", "    keep(launcher)\n"),
+        (PACKAGE / "worker.py", "    holder = profile_lock_pid(", "    launcher = launcher\n"),
+        (
+            PACKAGE / "worker.py",
+            "    holder = profile_lock_pid(",
+            "    setattr(app.state, 'k' + 'eeper', launcher)\n",
+        ),
+        (
+            PACKAGE / "web" / "api" / "linkedin.py",
+            "    bus: EventBus = request.app.state.bus\n",
+            "    request.app.state.spare = launcher\n",
+        ),
+        # These two were already caught by the reach and start pins; this pin sees them too.
+        (
+            PACKAGE / "web" / "api" / "linkedin.py",
+            "    bus: EventBus = request.app.state.bus\n",
+            "    spare = _launcher(request)\n    await spare.start()\n",
+        ),
+        (
+            PACKAGE / "web" / "api" / "linkedin.py",
+            "    bus: EventBus = request.app.state.bus\n",
+            "    spares.append(getattr(request.app.state, 'chrome_launcher'))\n",
+        ),
+    ],
+)
+def test_the_launcher_flow_pin_catches_a_launcher_passed_on(
+    path: Path, anchor: str, line: str
+) -> None:
+    sources = package_sources()
+    assert sources[path].count(anchor) == 1, anchor
+    sources[path] = sources[path].replace(anchor, line + anchor, 1)
+    assert launcher_flow_problems(sources) != []
+
+
+def test_the_launcher_flow_pin_catches_a_helper_that_starts_it() -> None:
+    sources = package_sources()
+    sources[PACKAGE / "services" / "chrome_again.py"] = (
+        "async def go(request):\n    held = _launcher(request)\n    await held.start()\n"
+    )
+    assert launcher_flow_problems(sources) != []
 
 
 def test_the_users_browser_context_is_never_mutated() -> None:
@@ -2389,6 +2850,205 @@ def test_the_dynamic_attribute_scanner_catches_a_name_built_at_run_time(snippet:
 )
 def test_the_dynamic_attribute_scanner_passes_a_literal(snippet: str) -> None:
     assert not list(dynamic_attribute_reads(snippet))
+
+
+# --- #660: the names the scanners can't read ----------------------------------------------
+
+
+def test_nothing_reaches_a_name_the_scanners_cannot_read() -> None:
+    """#660: every use of a dynamic-access primitive in the package is one listed in
+    :data:`ALLOWED_DYNAMIC_ACCESS`, by file, function and count. A new one fails here, so
+    it gets a review: it could reach a process start, a pinned module or a launcher by a
+    name no other rule here can see."""
+    found = dynamic_access_counts(package_sources())
+
+    def shown(counts: dict[tuple[Path, str, str], int]) -> list[tuple[str, str, str, int]]:
+        return sorted((str(p.relative_to(PACKAGE)), f, n, c) for (p, f, n), c in counts.items())
+
+    new = {k: v for k, v in found.items() if ALLOWED_DYNAMIC_ACCESS.get(k) != v}
+    gone = {k: v for k, v in ALLOWED_DYNAMIC_ACCESS.items() if found.get(k) != v}
+    assert found == ALLOWED_DYNAMIC_ACCESS, (
+        "the uses of a dynamic import, namespace read or computed getattr changed.\n"
+        f"  now:      {shown(new)}\n"
+        f"  expected: {shown(gone)}\n"
+        "Each reaches a module or a name by a value the safety scanners can't read. Use a"
+        " literal name, or add the use to ALLOWED_DYNAMIC_ACCESS with why it is safe."
+    )
+
+
+def test_router_discovery_imports_only_the_api_package() -> None:
+    """The one dynamic import, ``discover_routers``, is called with no package, so it
+    imports only the modules under ``netkeeper/web/api/``, which every rule scans."""
+    calls = [
+        (path, node)
+        for path, source in package_sources().items()
+        for node in walk(parse(source))
+        if _called(node, "discover_routers")
+    ]
+    assert [path for path, _ in calls] == [WEB / "app.py"]
+    assert all(not node.args and not node.keywords for _, node in calls)
+    tree = parse(read_source(WEB / "app.py"))
+    imports = [
+        node
+        for node in walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.module == "netkeeper.web"
+        and [(a.name, a.asname) for a in node.names] == [("api", "api_package")]
+    ]
+    assert len(imports) == 1
+    (define,) = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "discover_routers"
+    ]
+    assert [ast.unparse(d) for d in define.args.defaults] == ["api_package"]
+
+
+#: Each escape #660 lists, as a snippet: before #660, ``process_starts`` found none of
+#: them (outside ``chrome_spawn.py``, whose own pin bans the primitives by name).
+_PROCESS_ESCAPES = [
+    "import multiprocessing\n",
+    "from multiprocessing import Process\n",
+    "import multiprocessing.pool as mp\n",
+    "import ctypes\n",
+    "from ctypes import CDLL\n",
+    "import _posixsubprocess\n",
+    "from concurrent.futures import ProcessPoolExecutor\n",
+    "pool = concurrent.futures.ProcessPoolExecutor()\n",
+    "import importlib\n",
+    "importlib.import_module('subprocess')\n",
+    "importlib.import_module('sub' + 'process')\n",
+    "importlib.util.spec_from_file_location('x', path)\n",
+    "__import__('subprocess')\n",
+    "start = getattr(__import__('o' + 's'), 'sys' + 'tem')\n",
+    "asyncio.__dict__['create_subprocess_' + 'exec']\n",
+    "socket.os.__dict__['sys' + 'tem']('x')\n",
+    "vars(asyncio)['create_subprocess_' + 'exec']\n",
+    "getattr(asyncio, 'create_subprocess_' + 'exec')\n",
+    "object.__getattribute__(asyncio, 'create_subprocess_' + 'exec')\n",
+    "inspect.getattr_static(asyncio, 'create_subprocess_' + 'exec')\n",
+    "[v for k, v in inspect.getmembers(asyncio) if k.endswith('exec')]\n",
+    "globals()['__builtins__']['__imp' + 'ort__']('subprocess')\n",
+    "__builtins__['__imp' + 'ort__']('subprocess')\n",
+    "asyncio.__getattr__('create_subprocess_' + 'exec')\n",
+    "asyncio.__spec__.loader.load_module()\n",
+    "sys.modules['sub' + 'process']\n",
+    "eval(code)\n",
+    "pkgutil.resolve_name('sub' + 'process:Popen')\n",
+    "[c for c in object.__subclasses__() if c.__name__ == 'Po' + 'pen']\n",
+    "match asyncio:\n    case object(create_subprocess_exec=run):\n        pass\n",
+    "uvicorn.importer.import_from_string('sub' + 'process:Popen')\n",
+]
+
+
+@pytest.mark.parametrize("snippet", _PROCESS_ESCAPES)
+def test_the_process_scanner_catches_each_dynamic_escape(snippet: str) -> None:
+    assert list(process_starts(snippet)), snippet
+
+
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        # Already caught before #660; kept so they stay caught.
+        "os.posix_spawn('/x', [], {})\n",
+        "os.spawnv(os.P_NOWAIT, '/x', [])\n",
+        "os.execv('/x', [])\n",
+        "os.fork()\n",
+        "import pty\n",
+        "getattr(asyncio, 'create_subprocess_exec')\n",
+        "inspect.getattr_static(os, 'system')\n",
+    ],
+)
+def test_the_process_scanner_still_catches_the_literal_spellings(snippet: str) -> None:
+    assert list(process_starts(snippet)), snippet
+
+
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        "from concurrent.futures import ThreadPoolExecutor\n",
+        "getattr(asyncio, 'sleep')\n",
+        "import importlib.metadata as md\n",
+    ],
+)
+def test_the_dynamic_scanner_lists_a_harmless_use_for_review(snippet: str) -> None:
+    """A thread pool, a literal ``getattr`` and package metadata start nothing, so the
+    process rule passes them; a dynamic import is still listed for review (#660)."""
+    starts = [f for f in process_starts(snippet) if not f.detail.startswith(DYNAMIC)]
+    assert not starts, starts
+
+
+_PLANTED = WEB / "api" / "sneaky.py"
+
+
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        "import importlib\nimportlib.import_module('netkeeper.chrome_spawn')\n",
+        "import importlib\nimportlib.import_module('.chrome_spawn', 'netkeeper')\n",
+        "__import__('netkeeper.chrome_spawn')\n",
+        "__import__('netkeeper', fromlist=['chrome_spawn'])\n",
+        "import importlib.util\nimportlib.util.find_spec('netkeeper.chrome_spawn')\n",
+        "import pkgutil\npkgutil.resolve_name('netkeeper.chrome_spawn:spawn_chrome')\n",
+    ],
+)
+def test_the_importer_pin_sees_a_literal_dynamic_import(snippet: str) -> None:
+    """#660: a route that imports the launcher by a literal is an importer of it. (The
+    planted file alone: no other file's findings change, and a new path is never on
+    either list.)"""
+    planted = {_PLANTED: snippet}
+    assert importers_of(planted, ("netkeeper.chrome_spawn",)) == {_PLANTED.relative_to(REPO_ROOT)}
+    assert dynamic_access_counts(planted)
+
+
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        "import importlib\nimportlib.import_module('netkeeper.' + 'chrome_spawn')\n",
+        "__import__('netkeeper.chrome' + '_spawn')\n",
+        "import importlib.util\nimportlib.util.spec_from_file_location('x', 'chrome_spawn.py')\n",
+        "import runpy\nrunpy.run_module(name)\n",
+        "import sys\nsys.modules['netkeeper.' + 'chrome_spawn']\n",
+    ],
+)
+def test_a_computed_import_of_a_pinned_module_is_listed_for_review(snippet: str) -> None:
+    """A computed name names no module; the primitive is refused wherever it is unlisted."""
+    assert not importers_of({_PLANTED: snippet}, ("netkeeper.chrome_spawn",))
+    assert dynamic_access_counts({_PLANTED: snippet}), snippet
+
+
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        "import importlib\nimportlib.import_module('netkeeper.linkedin.browser')\n",
+        "__import__('netkeeper.linkedin', fromlist=['preflight'])\n",
+        "import importlib\nimportlib.import_module('...worker', 'netkeeper.web.api')\n",
+    ],
+)
+def test_the_browser_callers_pin_sees_a_literal_dynamic_import(snippet: str) -> None:
+    """#660: the same for the browser modules (spec 9.9)."""
+    assert list(browser_imports(snippet, _PLANTED)), snippet
+
+
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        # #664's second documented limit: a launcher reached by a computed name.
+        "def go(app):\n    return vars(app.state)['_state']['chrome' + '_launcher'].start()\n",
+        "def go(app):\n    return app.state._state['chrome' + '_launcher'].start()\n",
+        "def go(app):\n    return getattr(app.state, 'chrome' + '_launcher').start()\n",
+        "def go(app):\n    return app.state.__dict__['chrome' + '_launcher']\n",
+        "def go(app):\n    return app.state.__getattr__('chrome' + '_launcher')\n",
+        "import importlib\n"
+        "def go(app):\n"
+        "    m = importlib.import_module('netkeeper.services.' + 'chrome_launch')\n"
+        "    return getattr(m, 'submit_' + 'launch')\n",
+        "def go(app):\n    return globals()['start_chrome' + '_at_startup']\n",
+    ],
+)
+def test_a_launch_name_built_at_run_time_is_listed_for_review(snippet: str) -> None:
+    planted = PACKAGE / "services" / "chrome_again.py"
+    assert dynamic_access_counts({planted: snippet}), snippet
 
 
 def test_cli_is_scanned_for_typing_and_clearing() -> None:
