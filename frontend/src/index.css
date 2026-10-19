@@ -14,15 +14,28 @@
  * The accent is one hue: change `--accent-hue` (and `--accent-chroma` if the
  * new hue needs it) and every accent use follows, in both schemes.
  *
- * Light and dark follow the OS through prefers-color-scheme: there is no
- * `.dark` class toggle, so Tailwind's `dark:` variant keeps its media-query
- * default. Fonts are the system stacks; no web fonts are loaded.
+ * Light is `:root`; dark is the `dark` variant below (#666). The theme switch
+ * sets `data-theme` on <html>: `dark` forces dark, `light` forces light, and no
+ * attribute (Auto) follows the OS through prefers-color-scheme. The dark
+ * tokens and Tailwind's `dark:` utilities both go through that one variant, so
+ * they cannot disagree. Fonts are the system stacks; no web fonts are loaded.
  *
  * `src/theme.test.ts` reads this file and holds every text-on-surface pair to
  * WCAG AA (4.5:1) in both schemes, glass included: it composites each pane
  * over the page and over the brightest spot of the color field. The shadcn
  * token names stay, so the kit's components pick the theme up unchanged.
  */
+
+@custom-variant dark {
+  &:where(:root[data-theme='dark'], :root[data-theme='dark'] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme='light']), :root:not([data-theme='light']) *) {
+      @slot;
+    }
+  }
+}
 
 @theme inline {
   --font-heading: var(--font-sans);
@@ -96,7 +109,7 @@
 }
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
   /* Accent: one hue, one chroma; lightness differs per scheme. */
   --accent-hue: 255;
@@ -194,10 +207,11 @@
   --field-2: #16b4ff;
   --field-3: #ff4fa3;
   --field-4: #ffb547;
-}
 
-@media (prefers-color-scheme: dark) {
-  :root {
+  /* Dark. The `dark` variant at the top decides when: the theme switch, else the OS. */
+  @variant dark {
+    color-scheme: dark;
+
     --accent-lightness: 74%;
 
     --background: #0a0c17;
@@ -409,11 +423,13 @@
     }
   }
 
-  /* Less transparency asked for: solid panes, no field. */
+  /*
+   * Less transparency asked for: solid panes. The field stays: it is the page's
+   * background, not a see-through surface, and the theme test holds page text
+   * to AA on it. macOS's Reduce transparency setting lands here, and hiding the
+   * field with it left the page flat (#666).
+   */
   @media (prefers-reduced-transparency: reduce) {
-    .nk-field {
-      display: none;
-    }
     .nk-glass {
       background-color: var(--card);
       backdrop-filter: none;

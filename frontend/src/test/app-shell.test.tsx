@@ -29,6 +29,27 @@ describe('app shell', () => {
     expect(links.map((link) => link.getAttribute('href'))).toEqual(EXPECTED_HREFS)
   })
 
+  it('has the theme switch in the sidebar, Auto by default (#666)', async () => {
+    await renderApp('/contacts')
+
+    const sidebar = screen.getByRole('navigation', { name: 'Primary' }).closest('aside')
+    const group = within(sidebar as HTMLElement).getByRole('group', { name: 'Theme' })
+    expect(within(group).getByRole('radio', { name: 'Auto' })).toBeChecked()
+  })
+
+  it('puts no painted layer between the color field and the page (#666)', async () => {
+    const { container } = await renderApp('/')
+
+    const field = container.querySelector('.nk-field') as HTMLElement
+    const shell = field.parentElement as HTMLElement
+    expect(shell.firstElementChild).toBe(field)
+    // The sidebar is solid on purpose; everything else that spans the page lets the field through.
+    const content = screen.getByTestId('shell-content')
+    const layers = [shell, content, ...content.querySelectorAll(':scope > header, :scope > main')]
+    expect(layers).toHaveLength(4)
+    for (const layer of layers) expect(layer.className).not.toMatch(/(^|\s)bg-/)
+  })
+
   it('marks the current section active', async () => {
     // Every page has landed: /inbox, in P3-11b, was the last placeholder.
     await renderApp('/inbox')
@@ -113,8 +134,8 @@ describe('app shell', () => {
       expect(screen.getByTestId('shell-content')).toHaveAttribute('inert')
 
       const close = within(drawer).getByRole('button', { name: 'Close navigation' })
-      const links = within(drawer).getAllByRole('link')
-      const last = links.at(-1) as HTMLElement
+      // The theme switch is last; Tab reaches its checked radio (#666).
+      const last = within(drawer).getByRole('radio', { name: 'Auto' })
 
       last.focus()
       fireEvent.keyDown(document, { key: 'Tab' })
