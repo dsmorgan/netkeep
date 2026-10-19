@@ -8,6 +8,63 @@ netkeep pulls your 1st-degree LinkedIn connections and their contact info into a
 
 **Status: working toward 1.0.** Import, the CRM and triage, the LinkedIn extractor, email campaigns over Gmail, and LinkedIn messaging all work. Phase 6 (polish, backups, and these docs) ends with the 1.0 release. The [changelog](CHANGELOG.md) lists what has changed.
 
+## Installing
+
+On macOS 14 or later, paste this into Terminal:
+
+```sh
+curl -fsSL https://github.com/dsmorgan/netkeep/releases/latest/download/install.sh | sh
+```
+
+The installer prints each step before it runs it:
+
+1. If you don't have [uv](https://docs.astral.sh/uv/), it installs it into `~/.local/bin`, using uv's own installer at a pinned version, checked against a pinned SHA-256.
+2. It downloads the release's `constraints.txt` (the dependency versions CI tested) and `SHA256SUMS` over HTTPS, and stops unless the checksums match.
+3. It runs `uv tool install --python 3.12 --managed-python -c constraints.txt netkeep==X.Y.Z`, for the release the installer came from. uv downloads its own Python 3.12 if it needs to.
+4. It runs `netkeep setup`, which turns on the login item and opens the first-run page. A release without `netkeep setup` skips this step and tells you to run `netkeep serve`.
+
+It never uses `sudo` and never writes outside your home directory, and it runs nothing unless the whole script downloaded. To see the steps without running them, add `--dry-run`: `curl -fsSL <url> | sh -s -- --dry-run`. The first release isn't out yet: until it is, install from a checkout (below).
+
+### Download, verify, read, then run
+
+To read the installer before it runs, download it from a specific release, with that release's checksums. Replace `vX.Y.Z` with the release you want from the [Releases](https://github.com/dsmorgan/netkeep/releases) page:
+
+```sh
+curl -fsSLO https://github.com/dsmorgan/netkeep/releases/download/vX.Y.Z/install.sh
+curl -fsSLO https://github.com/dsmorgan/netkeep/releases/download/vX.Y.Z/SHA256SUMS
+grep ' install.sh$' SHA256SUMS | shasum -a 256 -c -   # prints "install.sh: OK"
+less install.sh                                       # read it
+sh install.sh --dry-run                               # the steps it would run
+sh install.sh
+```
+
+The checksums are also in the release notes. Releases are immutable: once published, a release's files can't be replaced.
+
+### Requirements
+
+- macOS 14 or later. The installer supports macOS only; on Linux, run netkeep from a checkout.
+- Google Chrome. The UI requires it: other browsers may work, but they aren't tested or supported, and the UI shows a dismissible banner when you open it elsewhere. The LinkedIn steps drive their own, separate Chrome window, with its own profile (any Chromium build works there); Firefox and Safari have no DevTools protocol and can't be used for them.
+- A Gmail account and your own Google Cloud OAuth client for the email steps. [docs/gmail-setup.md](docs/gmail-setup.md) walks through the setup.
+- Optional, after 1.0: an Anthropic API key for the LLM features, which are deferred until after the 1.0 release. They will stay off unless you configure one.
+
+An installed netkeep needs no Xcode tools, Homebrew, Node or git. To remove it, turn off the login item (`netkeep login-item off`), then run `uv tool uninstall netkeep`. Your data directory and Keychain items stay.
+
+### From a checkout, for development
+
+A checkout also needs the Xcode command-line tools, for `git` (`xcode-select --install`), [uv](https://docs.astral.sh/uv/), and Node.js 22.12 or later with pnpm 10, to build the UI. With Node installed, `corepack enable` gives you the pnpm version the project pins.
+
+```sh
+git clone https://github.com/dsmorgan/netkeep.git
+cd netkeep
+make install                # create .venv and install netkeep
+make build-ui               # build the UI into frontend/dist
+.venv/bin/netkeep serve     # http://127.0.0.1:8000
+```
+
+In a checkout, run netkeep as `.venv/bin/netkeep`. The wheel and sdist that CI builds ship the UI inside the package, so an install from one needs no Node or pnpm. Without `make build-ui` in a checkout, the page says "The frontend is not built".
+
+`make install` also installs the developer tools (tests, linters). You don't need them to use netkeep; `uv sync` installs netkeep alone. After a `git pull`, run `make install` and `make build-ui` again, then restart `serve`.
+
 ## What it does
 
 netkeep is three tools in one, and they only make sense together:
@@ -22,31 +79,9 @@ Everything stays on your machine: one SQLite file, tokens in the macOS Keychain,
 
 The workflow is a five-stage reconnect method: validate your network, enrich it, reconnect in batches of about 100, handle responses, follow up a week later, and keep going weekly. It is described generically in [docs/networking-workflow.md](docs/networking-workflow.md), and [the spec](docs/architecture.md#3-mapping-to-the-reference-workflow) maps every manual step to a netkeep feature. The method comes from [hellophello](https://hellophello.com)'s job-search networking program, which is acknowledged here as the inspiration and appears nowhere in the implementation.
 
-## Requirements
-
-- macOS 14 or later.
-- Xcode command-line tools, for `git`: `xcode-select --install`.
-- [uv](https://docs.astral.sh/uv/). It installs Python 3.12 for you if you don't have it.
-- Node.js 22.12 or later, and pnpm 10, to build the UI once. With Node installed, `corepack enable` gives you the pnpm version the project pins.
-- Google Chrome. The UI requires it: other browsers may work, but they aren't tested or supported, and the UI shows a dismissible banner when you open it elsewhere. The LinkedIn steps drive their own, separate Chrome window, with its own profile (any Chromium build works there); Firefox and Safari have no DevTools protocol and can't be used for them.
-- A Gmail account and your own Google Cloud OAuth client for the email steps. [docs/gmail-setup.md](docs/gmail-setup.md) walks through the setup.
-- Optional, after 1.0: an Anthropic API key for the LLM features, which are deferred until after the 1.0 release. They will stay off unless you configure one.
-
 ## Running
 
-```sh
-git clone https://github.com/dsmorgan/netkeep.git
-cd netkeep
-make install                # create .venv and install netkeep
-make build-ui               # build the UI into frontend/dist
-.venv/bin/netkeep serve   # http://127.0.0.1:8000
-```
-
-Open the address in Google Chrome. `serve` creates the database the first time and migrates it after every update, so you don't need to run `netkeep db upgrade` yourself. The wheel and sdist that CI builds ship the UI inside the package, so an install from one needs no Node or pnpm. Without `make build-ui` in a checkout, the page says "The frontend is not built".
-
-`make install` also installs the developer tools (tests, linters). You don't need them to use netkeep; `uv sync` installs netkeep alone. After a `git pull`, run `make install` and `make build-ui` again, then restart `serve`.
-
-The [setup guide](docs/guide/setup.md) takes you from here to your first import and sync.
+`netkeep serve` runs netkeep at <http://127.0.0.1:8000>; open the address in Google Chrome. `serve` creates the database the first time and migrates it after every update, so you don't need to run `netkeep db upgrade` yourself. The [setup guide](docs/guide/setup.md) takes you from install to your first import and sync.
 
 ### Upgrading from netkeeper
 

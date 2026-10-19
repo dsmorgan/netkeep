@@ -96,6 +96,17 @@ jobs:
           grep -E "^cryptography==48\..*platform_machine == 'x86_64' and sys_platform == 'darwin'" dist/constraints.txt
           grep -E "^cryptography==(49|[5-9][0-9])\..*platform_machine != 'x86_64' or sys_platform != 'darwin'" dist/constraints.txt
 
+      # The one-line installer (ADR 0011 rule 5; #686), with this release's version in
+      # place of its placeholder, so each release's copy installs that release only.
+      - name: Stamp the version into the installer
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          sed "s/^    netkeep_version='@NETKEEP_VERSION@'\$/    netkeep_version='$VERSION'/" scripts/install.sh > dist/install.sh
+          grep -qx "    netkeep_version='$VERSION'" dist/install.sh
+          if grep -q '@NETKEEP_VERSION@' dist/install.sh; then echo "error: install.sh still has its placeholder"; exit 1; fi
+          sh -n dist/install.sh
+
       - name: Check the file names and write SHA256SUMS
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -103,8 +114,8 @@ jobs:
         run: |
           test -f "netkeep-$VERSION-py3-none-any.whl"
           test -f "netkeep-$VERSION.tar.gz"
-          test "$(ls | wc -l)" -eq 3
-          sha256sum "netkeep-$VERSION-py3-none-any.whl" "netkeep-$VERSION.tar.gz" constraints.txt > SHA256SUMS
+          test "$(ls | wc -l)" -eq 4
+          sha256sum "netkeep-$VERSION-py3-none-any.whl" "netkeep-$VERSION.tar.gz" constraints.txt install.sh > SHA256SUMS
           cat SHA256SUMS
           { echo '```'; cat SHA256SUMS; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
@@ -122,6 +133,7 @@ jobs:
           name: release-assets
           path: |
             dist/constraints.txt
+            dist/install.sh
             dist/SHA256SUMS
           if-no-files-found: error
 
@@ -160,6 +172,9 @@ jobs:
       - run: shasum -a 256 -c SHA256SUMS
         working-directory: release
       - run: scripts/smoke-tool-install.sh release
+      # The stamped installer parses and plans its steps on this Mac. A dry run downloads
+      # and installs nothing.
+      - run: sh release/install.sh --dry-run
 
   publish:
     name: Publish to PyPI
@@ -227,7 +242,13 @@ jobs:
             exit 1
           fi
           {
-            echo "Install with uv, using this release's constraints file:"
+            echo "Install on macOS with the one-line installer:"
+            echo
+            echo '```sh'
+            echo "curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/install.sh | sh"
+            echo '```'
+            echo
+            echo "Or install with uv yourself, using this release's constraints file:"
             echo
             echo '```sh'
             echo "curl -fsSLo constraints.txt https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/constraints.txt"
@@ -242,5 +263,5 @@ jobs:
           } > notes.md
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
             --title "netkeep $VERSION" --notes-file notes.md \
-            "netkeep-$VERSION-py3-none-any.whl" "netkeep-$VERSION.tar.gz" constraints.txt SHA256SUMS
+            "netkeep-$VERSION-py3-none-any.whl" "netkeep-$VERSION.tar.gz" constraints.txt install.sh SHA256SUMS
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
