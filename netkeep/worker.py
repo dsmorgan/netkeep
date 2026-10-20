@@ -129,7 +129,7 @@ from netkeep.services.events import Event, EventBus
 from netkeep.services.inbox_poll import poll_inbox
 from netkeep.services.linkedin_accounts import local_account_id, scheduled_runs_armed
 from netkeep.services.posture import SessionProbe
-from netkeep.services.scheduled_runs import ServeExtractor
+from netkeep.services.scheduled_runs import REFUSED_OUTSIDE_HOURS, ServeExtractor
 from netkeep.services.users import local_owner
 from netkeep.web.app import create_app
 
@@ -691,7 +691,9 @@ class BrowserWorker:
                 try:
                     runs.refuse_if_outside_active_hours(settings.linkedin, now=self._clock())
                 except (runs.OutsideActiveHours, runs.RunError) as exc:
-                    return "inactive", str(exc)
+                    # The scheduled handler reads this reason back (#696): the fire
+                    # did not run, so the scheduler moves it to the window's start.
+                    return REFUSED_OUTSIDE_HOURS, str(exc)
             try:
                 runs.refuse_if_flagged_or_hot(
                     session, user, facts.account_id, now=self._clock(), settings=settings.linkedin

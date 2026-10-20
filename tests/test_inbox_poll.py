@@ -62,8 +62,8 @@ from netkeep.services.linkedin_accounts import arm_scheduled_runs, ensure_accoun
 from netkeep.services.linkedin_session import flag_session, session_flag
 from netkeep.services.posture import PostureReport, Status, posture
 from netkeep.services.runs import HeatSkipped, SessionFlagged
-from netkeep.services.scheduled_runs import serve_registry
-from netkeep.services.scheduler import SERVED_SCHEDULES, JobKind
+from netkeep.services.scheduled_runs import REFUSED_OUTSIDE_HOURS, serve_registry
+from netkeep.services.scheduler import SERVED_SCHEDULES, JobKind, JobOutcome
 from netkeep.services.settings_kv import get_setting, set_setting
 from netkeep.services.users import ensure_local_user
 from netkeep.worker import BrowserWorker, inbox_source
@@ -1301,14 +1301,19 @@ async def test_the_worker_refuses_a_scheduled_run_outside_a_window_narrowed_in_s
             user_id = user.id
         _complete_a_manual_poll(factory, user_id, START)
         registry = serve_registry(factory, app.state.executor, app.state.tasks, clock=clock)
-        assert await registry[JobKind.INBOX](_job(user_id, account)) is None
+        # #696: the refusal reaches the scheduler as a skip, so the fire is not counted.
+        outcome = await registry[JobKind.INBOX](_job(user_id, account))
+        assert outcome is JobOutcome.OUTSIDE_HOURS_AFTER_GATE
         await app.state.tasks.join()
     scheduled = [
         r
         for r in _rows(bare_engine)
         if r.kind is SyncRunKind.INBOX and r.trigger is SyncRunTrigger.SCHEDULED
     ]
-    assert [(r.status, r.stop_reason) for r in scheduled] == [(SyncRunStatus.FAILED, "inactive")]
+    assert [(r.status, r.stop_reason) for r in scheduled] == [
+        (SyncRunStatus.FAILED, REFUSED_OUTSIDE_HOURS)
+    ]
+    assert REFUSED_OUTSIDE_HOURS == "inactive"
     assert connector.attaches == 0
 
 
