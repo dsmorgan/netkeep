@@ -873,3 +873,59 @@ def _held(release: asyncio.Event) -> Callable[[], Awaitable[None]]:
         await release.wait()
 
     return heartbeat
+
+
+async def test_an_error_that_persists_logs_one_traceback_then_a_line_a_minute(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#707 review: a look that keeps failing logs its traceback once, and again only for
+    another kind of error; in between, one line at most every ERROR_LOG_S. The reasons it
+    waits on are logged when they change, not at every look."""
+    stops: list[None] = []
+    hook = restart.Restarter(stop=lambda: stops.append(None), mode="exec")
+    now = [0.0]
+    errors: list[BaseException] = (
+        [OSError("locked")] * 50  # 50 looks within a second
+        + [OSError("locked")]  # a minute later: one line
+        + [RuntimeError("other")] * 3  # another kind: its own traceback
+    )
+    looks = [0]
+
+    async def busy() -> list[str]:
+        looks[0] += 1
+        if looks[0] == 51:
+            now[0] += restart_gate.ERROR_LOG_S
+        elif looks[0] <= 50:
+            now[0] += 0.01
+        if errors:
+            raise errors.pop(0)
+        return ["a LinkedIn run (#3) is going"]
+
+    async def quiesce() -> None:
+        pass
+
+    gate = restart_gate.RestartGate(
+        hook,
+        busy=busy,
+        quiesce=quiesce,
+        resume=lambda: None,
+        poll_s=0,
+        monotonic=lambda: now[0],
+    )
+    with caplog.at_level("INFO", logger=restart_gate.__name__):
+        gate.start()
+        await _until(lambda: looks[0] >= 60)
+        assert await gate.cancel()
+    records = [r for r in caplog.records if r.name == restart_gate.__name__]
+    tracebacks = [r for r in records if r.exc_info is not None]
+    assert [r.exc_info[0] for r in tracebacks if r.exc_info] == [OSError, RuntimeError]
+    still = [r.getMessage() for r in records if "still could not check" in r.getMessage()]
+    assert still == [
+        "restart: still could not check what is running (OSError, 50 more times); trying again"
+    ]
+    waits = [r.getMessage() for r in records if r.getMessage().startswith("restart waits")]
+    assert waits == [
+        f"restart waits: {restart_gate.CHECK_FAILED}",
+        "restart waits: a LinkedIn run (#3) is going",
+    ]
+    assert stops == []
