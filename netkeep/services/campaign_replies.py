@@ -62,7 +62,8 @@ is skipped.
   stored.
 - **Reply**: from one of the contact's addresses, after the enrollment's first
   send, in its thread or not. It counts for **every** watch holding that address, so a
-  contact in two campaigns who answers one stops both (#695). Stored as an inbound
+  contact in two campaigns who answers one stops both (#695), and an address two
+  contacts share stops both contacts' enrollments. Stored as an inbound
   message (subject, snippet, thread; never the body) with an ``email_in`` interaction,
   labelled with the campaign's label (in a watched thread, only that thread's campaign's;
   never for a LinkedIn-only watch), and a live enrollment becomes ``replied``. The
@@ -105,18 +106,25 @@ Recording is idempotent per enrollment and message URN. No snippet reaches a log
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from email.utils import parseaddr
 from typing import Final, cast
 
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeep.campaigns.compose import ComposeError, campaign_label, message_id_for
+from netkeep.campaigns.compose import (
+    MESSAGE_ID_HASH_LENGTH,
+    MESSAGE_ID_VERSION,
+    ComposeError,
+    campaign_label,
+    message_id_for,
+)
 from netkeep.campaigns.gmail import Gmail, GmailError, GmailNotFound, History, Message
 from netkeep.config import Settings
 from netkeep.crm import do_not_send
@@ -293,10 +301,10 @@ class Sent:
     gmail_message_id: str
     thread_id: str
     sent_at: datetime
-    rfc822_message_id: str | None = None
-    """The Message-ID netkeep gave it (:func:`~netkeep.campaigns.compose.message_id_for`),
-    for a message ``messages.send`` sent; None for one sent from a draft, which may carry
-    a Message-ID of Gmail's making, so a bounce poll reads Gmail's copy for it."""
+    rfc822_message_ids: tuple[str, ...] = ()
+    """The Message-IDs netkeep may have given it (:func:`_own_message_ids`), for a message
+    ``messages.send`` sent; empty for one sent from a draft, which may carry a Message-ID
+    of Gmail's making, so a bounce poll reads Gmail's copy for it."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -400,7 +408,7 @@ def reply_work(session: Session, user: User, *, now: datetime) -> list[MailboxWa
                 row.gmail_message_id,
                 row.gmail_thread_id,
                 row.sent_at,
-                _own_message_id(user, row, mailbox_of[row.enrollment_id]),
+                _own_message_ids(user, row, mailbox_of[row.enrollment_id]),
             )
         )
     # The first and latest send on any channel (#571): a watch counts from the first, so
@@ -459,18 +467,32 @@ def reply_work(session: Session, user: User, *, now: datetime) -> list[MailboxWa
     ]
 
 
-def _own_message_id(user: User, row: MessageRow, mailbox: Mailbox | None) -> str | None:
-    """The Message-ID ``messages.send`` sent ``row`` with, derived as the engine did; None
-    for a message sent from a draft (its Message-ID may be Gmail's), or with no mailbox
-    address to derive it from."""
+_LEGACY_MESSAGE_ID_SEED: Final = "netkeeper-message-id"
+"""The seed prefix :func:`~netkeep.campaigns.compose.message_id_for` used before the
+rename (#661): a message sent before it carries a Message-ID derived from this. Local
+until #721 gives :mod:`netkeep.campaigns.compose` a shared helper for it."""
+
+
+def _own_message_ids(user: User, row: MessageRow, mailbox: Mailbox | None) -> tuple[str, ...]:
+    """The Message-IDs ``messages.send`` may have sent ``row`` with, derived as the engine
+    did: today's, and the one from before the rename (#661), since the row cannot say
+    which netkeep sent it. An ID netkeep never sent cites nothing, so the extra one is
+    harmless. Empty for a message sent from a draft (its Message-ID may be Gmail's), or
+    with no mailbox address to derive it from."""
     if row.gmail_draft_id is not None or mailbox is None:
-        return None
+        return ()
     try:
-        return message_id_for(
+        current = message_id_for(
             user_id=user.id, message_id=row.id, created_at=row.created_at, address=mailbox.email
         )
     except ComposeError:
-        return None
+        return ()
+    # The same derivation with the old seed (#721 will move this into compose).
+    stamp = row.created_at.astimezone(UTC).isoformat(timespec="microseconds")
+    seed = f"{_LEGACY_MESSAGE_ID_SEED}:{MESSAGE_ID_VERSION}:{user.id}:{row.id}:{stamp}"
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:MESSAGE_ID_HASH_LENGTH]
+    domain = current.rpartition("@")[2]  # what message_id_for checked, and its ">"
+    return current, f"<{digest}@{domain}"
 
 
 # --- reading Gmail -----------------------------------------------------------------------
@@ -666,18 +688,20 @@ class _Poll:
 
     def cited(self) -> dict[str, tuple[Watch, Sent]]:
         """Each sent message's Message-ID, with its watch. Built once per poll, and only
-        when a notice needs it: derived for a message ``messages.send`` sent (#695),
-        read from Gmail's copy for one sent from a draft."""
+        when a notice needs it: derived for a message ``messages.send`` sent (#695), under
+        today's seed and the one from before the rename (#661), and read from Gmail's copy
+        for one sent from a draft."""
         if self._cited is None:
             self._cited = {}
             for watch in self.work.watches:
                 for sent in watch.sent:
-                    rfc822 = sent.rfc822_message_id
-                    if rfc822 is None:
+                    ids = sent.rfc822_message_ids
+                    if not ids:
                         copy = self.copy(sent)
-                        rfc822 = None if copy is None else (copy.header("Message-ID") or "").strip()
-                    if rfc822:
-                        self._cited[rfc822] = (watch, sent)
+                        ids = () if copy is None else ((copy.header("Message-ID") or "").strip(),)
+                    for rfc822 in ids:
+                        if rfc822:
+                            self._cited[rfc822] = (watch, sent)
         return self._cited
 
     def to(self, sent: Sent) -> str | None:
