@@ -104,6 +104,27 @@ Setup prints a note when the login item can't use uv's `~/.local/bin/netkeep` sh
 
 `netkeep setup --remove` turns the login item off. Your data directory, logs and Keychain items stay.
 
+## Updating
+
+`netkeep update` prints each step and stops at the first one that fails. Until it has installed anything, a failure changes nothing: the login item starts again and you're on the version you had.
+
+| What you see | What happened | What to do |
+|---|---|---|
+| "this netkeep runs from a checkout" | `netkeep update` replaces only an installer or `uv tool install` install. | Run `git pull`, then `make install`. |
+| "... holds the serve lock, and it isn't the login item's serve" | You started `netkeep serve` yourself, or a `netkeep restore` is running. | Stop that `serve` (Ctrl+C in its terminal), or wait for the restore, then run `netkeep update` again. |
+| "constraints.txt has SHA-256 ..., but its SHA256SUMS says ..." | A download didn't match its release's checksum. Nothing was installed. | Run it again later. If it keeps happening, [report it](reporting-a-problem.md). |
+| "HTTP 404" for the version you have | Your version has no GitHub release to roll back to, such as a build from a checkout. | Install a release with the installer in the README. |
+| "Rolled back: netkeep X is running again" | The new version failed before its scheduler started, so netkeep put back the version and the database you had. | Look in `<data>/logs/serve.err.log` for why, and [report it](reporting-a-problem.md). |
+| "The update stopped without rolling back" | The new version failed after its scheduler started, so it may have sent messages. Its login item is off. | See below. |
+| "an update from X to Y didn't finish" | An earlier update stopped and left `<data>/update/state.json`. | Once netkeep runs the way you want, delete that file and run `netkeep update` again. |
+
+When the update stops without rolling back, you have two choices:
+
+- Keep the new version. Look in `<data>/logs/serve.err.log` for why it failed, fix that, then run `netkeep login-item on`.
+- Go back to the version you had, knowing that whatever the new version sent or recorded since the backup is forgotten, and could be sent again. Run the `uv tool install ...` command it printed, then `netkeep restore <backup>` with the backup it named, then `netkeep login-item on`.
+
+Then delete `<data>/update/state.json`.
+
 ## Run at login does nothing
 
 Turning on **Start netkeep when I log in** while netkeep is running only registers the login agent. Nothing changes until your next login: netkeep never starts a second copy next to the one you are using. The card's state says where you are:

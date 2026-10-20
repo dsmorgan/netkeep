@@ -51,7 +51,7 @@ from netkeep.models import User
 from netkeep.models.base import utcnow
 from netkeep.paths import data_dir
 from netkeep.scoping import install_scope_guard
-from netkeep.services import local_api_key, serve_lock, ui_settings
+from netkeep.services import local_api_key, serve_lock, ui_settings, update
 from netkeep.services.backup import BACKUPS_DIRNAME
 from netkeep.services.backup_job import NightlyBackups, backs_up
 from netkeep.services.budgets import (
@@ -153,6 +153,10 @@ def create_app(
             started: Settings = app.state.started_settings
             failures: ReadFailures = app.state.read_failures
             if extractor is not None:
+                # #685: during `netkeep update`, record that this version's scheduler may
+                # now run, before anything can send, so a failed update never restores a
+                # backup over what it sent. A marker that can't be written stops serve.
+                update.mark_scheduler_starting(__version__, data_dir())
                 serving = start_serve_scheduler(
                     extractor,
                     app.state.session_factory,

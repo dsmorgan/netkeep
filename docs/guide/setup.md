@@ -48,6 +48,30 @@ make build-ui
 
 From a checkout, run the commands below as `.venv/bin/netkeep`, or activate the environment first with `source .venv/bin/activate`. To start `serve` when you log in, see [Run at login](../../README.md#run-at-login-macos).
 
+### Updating
+
+To update an install from the installer or `uv tool install`, run:
+
+```sh
+netkeep update --check   # only says whether a newer release exists
+netkeep update           # updates to the latest release
+netkeep update --version 1.3.0
+```
+
+netkeep never updates itself: only `netkeep update` installs anything, and `--check` changes nothing. `netkeep update` prints each step as it goes:
+
+1. It downloads the new release's `constraints.txt` and the one for the version you have, over HTTPS from GitHub, and checks each against its release's `SHA256SUMS`. It keeps both in `<data>/update/`.
+2. It stops the login item and waits until `serve` has let go of the serve lock. If you started `netkeep serve` yourself, it refuses: stop that `serve` first.
+3. It backs up the database into `<data>/backups/`, as `netkeep backup` does.
+4. It installs the release with `uv tool install`, with that release's constraints and uv's own Python 3.12.
+5. It hands over to the new version, which starts the login item and checks that `serve` answers with the new version number.
+
+If the install or that check fails, and the new version's `serve` hadn't started its scheduler yet, netkeep goes back by itself: it reinstalls the version you had, restores the backup with the login item off (when the new version had opened the database), starts the login item and checks again. If the scheduler had started, the new version may have sent messages, and restoring the backup would forget them and could send them twice. Then netkeep stops, turns the login item off, and tells you what to do; see [Updating](troubleshooting.md#updating).
+
+If the login item was off, `netkeep update` installs the new version and leaves it off; start netkeep with `netkeep serve`.
+
+A checkout doesn't update this way: run `git pull`, then `make install`.
+
 ## 2. Gmail
 
 Follow [Gmail setup](../gmail-setup.md). In short: on **Settings**, under **Gmail**, the setup guide walks you through creating your own Google Cloud project and OAuth client, one step at a time, and ends with connecting your mailbox. Then, on the **Gmail** page, **Check now** runs a first check of the mailbox for replies.
