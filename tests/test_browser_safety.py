@@ -3320,6 +3320,11 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
                     and node.value.id in modules
                 ):
                     add(path, where, f"socket.{node.attr}")
+                elif node.attr in SOCKET_MODULES:
+                    # #723 review: a module that re-exports socket (``ssl.socket``,
+                    # ``asyncio.base_events.socket``): ``<x>.socket.socket`` is
+                    # ``socket.socket``, and so is the module read on its own.
+                    add(path, where, "socket.socket")
             elif isinstance(node, ast.ImportFrom):
                 for alias in node.names:
                     if alias.name in RAW_CONNECTION_NAMES:
@@ -3340,6 +3345,8 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
                             for part in arg.value.split("."):
                                 if part in SOCKET_TYPES:
                                     add(path, where, f"socket.{part}")
+                        elif any(part in SOCKET_MODULES for part in arg.value.split(".")):
+                            add(path, where, "socket.socket")
     return found
 
 
@@ -3685,19 +3692,22 @@ ALLOWED_ANYIO_REACHES = {
 }
 
 
-def anyio_reaches(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int]:
-    """Each reach of anyio, by file and function: each import of it or from it
-    (``import anyio``, ``from anyio import X`` as ``anyio.X``, a star import as
-    ``anyio.*``), and each use of a name bound to it, read as far as its dotted name
-    goes (``from_thread.run_sync`` as ``anyio.from_thread.run_sync``; a ``getattr``
-    literal as one more part)."""
+def module_reaches(
+    sources: dict[Path, str], roots: frozenset[str]
+) -> dict[tuple[Path, str, str], int]:
+    """Each reach of the modules ``roots`` names (and what is under them), by file and
+    function: each import of one or from one (``import anyio``, ``from anyio import X``
+    as ``anyio.X``, a star import as ``anyio.*``), and each use of a name bound to one,
+    read as far as its dotted name goes (``from_thread.run_sync`` as
+    ``anyio.from_thread.run_sync``; a ``getattr`` literal as one more part). A bare
+    read of a bound name (``_S = socket``) is a reach of its own."""
     found: dict[tuple[Path, str, str], int] = {}
 
     def add(path: Path, where: str, name: str) -> None:
         found[(path, where, name)] = found.get((path, where, name), 0) + 1
 
-    def is_anyio(module: str) -> bool:
-        return module == "anyio" or module.startswith("anyio.")
+    def is_root(module: str) -> bool:
+        return any(module == root or module.startswith(f"{root}.") for root in roots)
 
     for path, source in sources.items():
         tree = parse(source)
@@ -3706,14 +3716,14 @@ def anyio_reaches(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int]:
         for node in walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    if is_anyio(alias.name):
+                    if is_root(alias.name):
                         top = alias.name if alias.asname else alias.name.split(".")[0]
                         bound[alias.asname or top] = top
             elif (
                 isinstance(node, ast.ImportFrom)
                 and node.level == 0
                 and node.module
-                and is_anyio(node.module)
+                and is_root(node.module)
             ):
                 for alias in node.names:
                     if alias.name != "*":
@@ -3726,10 +3736,10 @@ def anyio_reaches(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int]:
             where = scopes.get(id(node), "")
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    if is_anyio(alias.name):
+                    if is_root(alias.name):
                         add(path, where, f"import {alias.name}")
             elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                if is_anyio(node.module):
+                if is_root(node.module):
                     for alias in node.names:
                         add(path, where, f"{node.module}.{alias.name}")
             elif isinstance(node, ast.Attribute | ast.Name) and id(node) not in inner:
@@ -3753,6 +3763,102 @@ def anyio_reaches(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int]:
                     ):
                         add(path, where, f"{base}.{arg.value}")
     return found
+
+
+def anyio_reaches(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int]:
+    """Each reach of anyio (:func:`module_reaches`)."""
+    return module_reaches(sources, frozenset({"anyio"}))
+
+
+def socket_reaches(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int]:
+    """Each reach of a :data:`SOCKET_MODULES` module (:func:`module_reaches`)."""
+    return module_reaches(sources, SOCKET_MODULES)
+
+
+#: #723 review: every reach of ``socket`` or ``_socket``, exactly, by (file, function,
+#: dotted name): count, the way :data:`ALLOWED_ANYIO_REACHES` pins anyio. The
+#: raw-connection pin reads the names that open a connection; this one reads every
+#: other use, so a module held under another name (``_S = socket``) is a finding too.
+ALLOWED_SOCKET_REACHES = {
+    # The launcher's port check (#636), also in ALLOWED_RAW_CONNECTIONS.
+    (PACKAGE / "chrome_spawn.py", "", "import socket"): 1,
+    (PACKAGE / "chrome_spawn.py", "port_answers", "socket.create_connection"): 1,
+    # The OAuth loopback receiver shutting down a connection it accepted.
+    (PACKAGE / "campaigns" / "gmail_oauth.py", "", "import socket"): 1,
+    (
+        PACKAGE / "campaigns" / "gmail_oauth.py",
+        "LoopbackReceiver.__init__.Handler._cut",
+        "socket.SHUT_RDWR",
+    ): 1,
+    # The run lock's owner name: the host name, read, not a connection.
+    (PACKAGE / "services" / "runs.py", "", "import socket"): 1,
+    (PACKAGE / "services" / "runs.py", "runner_id", "socket.gethostname"): 1,
+    # The identity read's address lookup of the CDP host (#675): a constant, no socket.
+    (LINKEDIN / "browser.py", "", "import socket"): 1,
+    (LINKEDIN / "browser.py", "CdpIdentityReader.read", "socket.SOCK_STREAM"): 1,
+}
+
+
+def test_only_the_reviewed_sites_reach_a_socket_module() -> None:
+    found = socket_reaches(package_sources())
+    assert found == ALLOWED_SOCKET_REACHES, sorted(
+        (str(p.relative_to(PACKAGE)), f, n, c)
+        for (p, f, n), c in found.items()
+        if ALLOWED_SOCKET_REACHES.get((p, f, n)) != c
+    )
+
+
+#: #723 review: the spellings that reached ``socket.socket`` past every scan.
+SOCKET_BYPASSES = [
+    "import socket\n_S = socket\n_S.socket().connect(('127.0.0.1', 1))\n",
+    "import ssl\nssl.socket.socket().connect(('127.0.0.1', 1))\n",
+    "import asyncio.base_events\nasyncio.base_events.socket.socket()\n",
+    "import socketserver\nsocketserver.socket.socket()\n",
+]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        SOCKET_BYPASSES[0],
+        "import socket\nsocket.gethostbyname('127.0.0.1')\n",
+        "import _socket\n",
+        "from socket import AF_INET\n",
+        "import socket as s\nkind = s.AF_UNIX\n",
+        "import socket\nf = getattr(socket, 'getaddrinfo')\n",
+    ],
+)
+def test_the_socket_module_pin_catches_a_new_reach(line: str) -> None:
+    sources = package_sources()
+    sources[PACKAGE / "services" / "chrome_launch.py"] += "\n" + line
+    assert socket_reaches(sources) != ALLOWED_SOCKET_REACHES
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        *SOCKET_BYPASSES[1:],
+        "import ssl\nmodule = ssl.socket\n",
+        "import ssl\nmodule = getattr(ssl, 'socket')\n",
+        "import ssl\nmade = ssl._socket.socket()\n",
+    ],
+)
+def test_the_raw_connection_pin_catches_a_reexported_socket(line: str) -> None:
+    sources = package_sources()
+    sources[PACKAGE / "services" / "chrome_launch.py"] += "\n" + line
+    assert raw_connections(sources) != ALLOWED_RAW_CONNECTIONS
+
+
+@pytest.mark.parametrize("line", SOCKET_BYPASSES)
+def test_each_socket_bypass_fails_a_pin(line: str) -> None:
+    """A held module fails the socket-module pin; a re-export fails the raw-connection
+    pin (``ssl`` and the rest are imported, not ``socket``)."""
+    sources = package_sources()
+    sources[PACKAGE / "services" / "chrome_launch.py"] += "\n" + line
+    assert (
+        socket_reaches(sources) != ALLOWED_SOCKET_REACHES
+        or raw_connections(sources) != ALLOWED_RAW_CONNECTIONS
+    )
 
 
 def test_only_the_reviewed_sites_reach_anyio() -> None:
