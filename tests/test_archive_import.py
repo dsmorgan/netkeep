@@ -922,6 +922,34 @@ def test_an_adopted_message_on_a_contact_the_archive_created_counts_as_gained(
     assert _all_contacts(writer, user) == []
 
 
+def test_a_message_the_poll_wrote_itself_is_gained_but_not_counted_as_adopted(
+    writer: Session, user: User, archive: Archive
+) -> None:
+    """``adopted`` counts only the run's own rows the poll claimed (#702). A row the
+    poll wrote on a created contact carries a URN too, but is a plain gain."""
+    report = _run(writer, user, archive)
+    assert report.run_id is not None
+    contact_id = _interactions(writer, user)[0].contact_id
+    add_interaction(
+        writer,
+        user,
+        contact_id,
+        InteractionKind.LI_IN,
+        OBSERVED,
+        "Invented polled message.",
+        source=ContactSource.SYNC,
+        external_id="urn:li:msg_message:(2-QZ,POLLED)",
+    )
+    writer.flush()
+
+    with pytest.raises(import_runs.CreatedContactsChanged) as raised:
+        import_runs.rollback(writer, user, report.run_id)
+
+    assert raised.value.acquired.interactions == 1
+    assert raised.value.acquired.adopted == 0
+    assert "inbox poll" not in str(raised.value)
+
+
 def test_an_archive_imported_again_after_its_rollback_lands_again(
     writer: Session, user: User, archive: Archive
 ) -> None:
@@ -999,16 +1027,7 @@ def test_an_unknown_assistant_log_is_imported_but_named(
     assert "An assistant's chat log" not in caplog.text  # never a body in the log
 
 
-FOREIGN_MESSAGES = (
-    '"CONVERSATION ID","CONVERSATION TITLE","FROM","SENDER PROFILE URL","TO",'
-    '"RECIPIENT PROFILE URLS","DATE","SUBJECT","CONTENT","FOLDER","ATTACHMENTS"\n'
-    '"conv-q1","","Quorbelle Fictionary","https://www.linkedin.com/in/quorbelle-fictionary",'
-    '"Cyd Invented","https://www.linkedin.com/in/cyd-invented","2023-07-01 10:00:00 UTC",'
-    '"","Invented note from someone else\'s export.","INBOX",""\n'
-    '"conv-q2","","Quorbelle Fictionary","https://www.linkedin.com/in/quorbelle-fictionary",'
-    '"Gus Nobody","https://www.linkedin.com/in/gus-nobody","2023-07-02 10:00:00 UTC",'
-    '"","Another invented note from the same stranger.","INBOX",""\n'
-)
+FOREIGN_MESSAGES = (FIXTURES.parent / "foreign_messages.csv").read_text()
 """Someone else's messages table: on its own its traffic names Quorbelle as the owner."""
 
 

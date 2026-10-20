@@ -141,6 +141,26 @@ def test_cli_import_archive_warns_about_a_messages_shaped_file_under_another_nam
     assert "warning:" not in plain.output
 
 
+def test_cli_import_archive_warns_about_a_messages_table_naming_another_owner(
+    cli_db: sessionmaker[Session], tmp_path: Path
+) -> None:
+    """#702: someone else's messages table is skipped, and the summary says so."""
+    root = tmp_path / "export"
+    root.mkdir()
+    for source in FIXTURES_ARCHIVE.iterdir():
+        (root / source.name).write_bytes(source.read_bytes())
+    (root / "aa_other_messages.csv").write_bytes(
+        (FIXTURES_ARCHIVE.parent / "foreign_messages.csv").read_bytes()
+    )
+    result = CliRunner().invoke(cli, ["import", "archive", str(root)])
+    assert result.exit_code == 0, result.output
+    assert (
+        "warning: skipped aa_other_messages.csv: its messages name another owner than the "
+        "first messages table"
+    ) in result.output
+    assert "as message history, but it is not messages.csv" not in result.output
+
+
 def test_cli_import_archive_names_its_run_and_that_run_rolls_back(
     cli_db: sessionmaker[Session],
 ) -> None:
