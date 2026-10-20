@@ -24,7 +24,11 @@ and enrichment). A handler:
    :attr:`~netkeep.services.scheduler.JobOutcome.NOTHING_TO_WATCH` before anything
    else when no live enrollment has a contact with a LinkedIn URN: it records no
    run and attaches to nothing, and the fire counts as skipped;
-5. answers :attr:`~netkeep.services.scheduler.JobOutcome.NOT_DONE` when a full
+5. answers :attr:`~netkeep.services.scheduler.JobOutcome.OUTSIDE_HOURS_AFTER_GATE`
+   when the worker refused the run outside active hours (#696; the window closed, or
+   was narrowed, after the scheduler claimed the fire): the fire counts as skipped, and
+   the scheduler moves it to the window's next start;
+6. answers :attr:`~netkeep.services.scheduler.JobOutcome.NOT_DONE` when a full
    sync ran but lost some of the page's answers (#200,
    :func:`netkeep.services.runs.lost_answers`): it is incomplete and aged
    nobody, so the week's full sync is not done, and the scheduler offers it again
@@ -62,7 +66,7 @@ from netkeep.config import LinkedInSettings, Settings
 from netkeep.crm.inbox_apply import has_anything_to_watch, owner_hold
 from netkeep.db import off_loop, session_scope
 from netkeep.logging_setup import personal_exc
-from netkeep.models import SyncRun, SyncRunKind, SyncRunTrigger, User
+from netkeep.models import SyncRun, SyncRunKind, SyncRunStatus, SyncRunTrigger, User
 from netkeep.models.base import utcnow
 from netkeep.scoping import scoped
 from netkeep.services import runs, ui_settings
@@ -237,6 +241,13 @@ def _handler(
         await tasks.wait(task_id)
         if result() is runs.RunOutcome.RETRY_LATER:
             return JobOutcome.RETRY_LATER
+        if await off_loop(_refused_outside_hours, factory, ctx.user_id, run_id):
+            log.info(
+                "scheduled %s run %d refused outside active hours; it did not run",
+                run_kind.value,
+                run_id,
+            )
+            return JobOutcome.OUTSIDE_HOURS_AFTER_GATE
         lost = (
             await off_loop(_lost_answers, factory, ctx.user_id, run_id)
             if run_kind is SyncRunKind.CONNECTIONS_FULL
@@ -421,6 +432,25 @@ def _auto_send_handler(
         return None
 
     return handle
+
+
+#: The stop reason the worker records on a scheduled run it refuses outside active hours
+#: (#696). The handler reads it back to tell the scheduler the fire did not run.
+REFUSED_OUTSIDE_HOURS: Final = "inactive"
+
+
+def _refused_outside_hours(factory: sessionmaker[Session], user_id: int, run_id: int) -> bool:
+    """Whether the worker refused run ``run_id`` outside active hours (#696): failed with
+    the stop reason ``inactive`` before it ran. False for a run or user that is gone."""
+    with session_scope(factory) as session:
+        user = session.get(User, user_id)
+        if user is None:
+            return False
+        try:
+            run = runs.get_run(session, user, run_id)
+        except runs.RunNotFound:
+            return False
+        return run.status is SyncRunStatus.FAILED and run.stop_reason == REFUSED_OUTSIDE_HOURS
 
 
 def _lost_answers(factory: sessionmaker[Session], user_id: int, run_id: int) -> int:

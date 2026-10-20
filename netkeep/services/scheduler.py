@@ -222,6 +222,12 @@ class JobOutcome(enum.Enum):
     DISARMED_AFTER_GATE = "disarmed_after_gate"
     """The same, for an account found disarmed after the gate let the fire through."""
 
+    OUTSIDE_HOURS_AFTER_GATE = "outside_hours_after_gate"
+    """The worker refused the run outside active hours (#696): the window closed, or was
+    narrowed on the Settings page, after the scheduler claimed the fire. The fire counts
+    as skipped, and the scheduler puts back the state the claim advanced, due at the
+    window's next start, so the run's day (or week) of cadence is not lost."""
+
     FIRST_POLL_BY_HAND = "first_inbox_poll"
     """The inbox poll's first run is a person's (P4-01): no inbox poll has completed
     yet, so a scheduled fire starts nothing. The fire counts as skipped."""
@@ -464,8 +470,10 @@ def _snap_to_active_hours(
     Spec 9.5: "Ticks outside [active hours] park a one-shot job for the window
     start." Applied uniformly to every freshly computed due time -- first
     schedule, catch-up, and settings-change reschedule alike -- so the
-    persisted due time is always already the time the job will actually run,
-    with nothing left to check again at fire time.
+    persisted due time is always already the time the job will actually run.
+    :func:`poll_and_fire` still checks the window at fire time (#696): a heartbeat
+    held past the window's end, or a window narrowed since, finds a due time
+    outside it, and parks it for the next start instead of firing.
     """
     if not respect_active_hours:
         return due
@@ -888,7 +896,28 @@ def sync_account_schedule(
         )
         for kind, schedule in schedules.items()
     }
+
+    def snapped(dues: Mapping[JobKind, datetime]) -> dict[JobKind, datetime]:
+        return {
+            kind: _snap_to_active_hours(
+                when,
+                tz,
+                start=active_start,
+                end=active_end,
+                respect_active_hours=schedules[kind].respect_active_hours,
+            )
+            for kind, when in dues.items()
+        }
+
     staggered = stagger_due_times({kind: r.due for kind, r in results.items()})
+    # A push can carry a due time past the window's end (#696): snap it to the next
+    # start, and stagger again, since two snapped times can meet there. Both steps only
+    # move times later; the hot path's gap covers whatever still meets after this.
+    for _ in schedules:
+        if (inside := snapped(staggered)) == staggered:
+            break
+        staggered = stagger_due_times(inside)
+    staggered = snapped(staggered)
     for kind, when in staggered.items():
         if when != results[kind].due:
             state = _load_state(session, user, account_id, kind)
@@ -940,7 +969,14 @@ def seed_missing_kinds(
         )
         due = result.due
         while any(abs(due - other) < MIN_JOB_KIND_GAP for other in taken):
-            due += MIN_JOB_KIND_GAP
+            # Each push stays in the window (#696): past its end, the next start.
+            due = _snap_to_active_hours(
+                due + MIN_JOB_KIND_GAP,
+                tz,
+                start=active_start,
+                end=active_end,
+                respect_active_hours=schedule.respect_active_hours,
+            )
         if due != result.due:
             state = _load_state(session, user, account_id, kind)
             assert state is not None  # just written by establish_schedule above
@@ -1098,6 +1134,30 @@ def _record_skipped(
     return retry
 
 
+def _park_for_window(
+    session_factory: sessionmaker[Session],
+    user: User,
+    account_id: int,
+    kind: JobKind,
+    *,
+    prior: _JobState,
+    now: datetime,
+    tz: str,
+    active_start: time,
+) -> datetime:
+    """Undo a claim whose run the worker refused outside active hours (#696).
+
+    The state goes back to what it was before the claim (first-setup standing, a
+    re-offer, a catch-up flag), with its due time at the window's next start after
+    ``now``. That is always in the future, whichever window the worker read, so a
+    refusal cannot repeat at every heartbeat.
+    """
+    parked = pacing.next_window_start(now, tz, start=active_start)
+    with session_scope(session_factory, write=True) as session:
+        _store_state(session, user, account_id, kind, replace(prior, due=parked))
+    return parked
+
+
 def _defer_as_catchup(
     session: Session,
     user: User,
@@ -1252,12 +1312,20 @@ async def poll_and_fire(
     run keeps that standing and is offered again :data:`FIRST_SETUP_RETRY` after
     the later of its due time and ``now``. ``clock`` defaults to returning ``now``.
 
+    A due time found outside active hours (#696: a heartbeat held past the window's end
+    by a long run, or a window narrowed since the due time was planned) does not fire
+    and is not skipped: it moves to the window's next start, cadence and first-setup
+    standing untouched, and the call returns ``None``. A handler that answers
+    :attr:`JobOutcome.OUTSIDE_HOURS_AFTER_GATE` (the worker refused the run outside the
+    window after this check) has its claim undone the same way, at the window's next
+    start after ``clock()``, and the result is skipped with that reason.
+
     The writer session that reads and advances the due time is closed *before*
     the (possibly long-running) handler is awaited, so a real job never holds
     the SQLite write lock for its duration.
     """
 
-    def claim() -> tuple[datetime, bool, bool, bool, str | None, datetime] | None:
+    def claim() -> tuple[_JobState, bool, bool, bool, str | None, datetime] | None:
         # The one writer session that reads and advances the due time, run whole
         # off the event loop (#259); it commits before the handler is awaited.
         with session_scope(session_factory, write=True) as session:
@@ -1287,6 +1355,24 @@ async def poll_and_fire(
                     deferred.isoformat(),
                 )
                 return None
+            if schedule.respect_active_hours and not pacing.is_active_at(
+                now, tz, start=active_start, end=active_end
+            ):
+                # Due, but outside the window (#696): a heartbeat held past the window's
+                # end by a long run, or a window narrowed on the Settings page. The
+                # worker would refuse the run, yet the cadence would move on as if it
+                # ran, so nothing fires: the due time moves to the window's next start.
+                parked = pacing.next_window_start(now, tz, start=active_start)
+                _store_state(session, user, account_id, kind, replace(state, due=parked))
+                log.info(
+                    "scheduler: %s for account %d came due outside active hours; parked"
+                    " for the window's start at %s",
+                    kind.value,
+                    account_id,
+                    parked.isoformat(),
+                )
+                return None
+            prior = state
             due = state.due
             is_catchup = state.is_catchup
             was_reoffer = state.resume_due is not None
@@ -1313,12 +1399,13 @@ async def poll_and_fire(
                 handler_ran=skipped_reason is None,
                 now=now,
             )
-        return due, is_catchup, was_reoffer, fired_before, skipped_reason, next_due
+        return prior, is_catchup, was_reoffer, fired_before, skipped_reason, next_due
 
     claimed = await off_loop(claim)
     if claimed is None:
         return None
-    due, is_catchup, was_reoffer, fired_before, skipped_reason, next_due = claimed
+    prior, is_catchup, was_reoffer, fired_before, skipped_reason, next_due = claimed
+    due = prior.due
     fired = skipped_reason is None
     # #598 review: a kind turned off for this user (auto-send, off) still advances its due
     # time above, so turning it on applies within one interval; but a gate skip of it is
@@ -1346,7 +1433,24 @@ async def poll_and_fire(
             user_id=user.id, account_id=account_id, kind=kind, due=due, catch_up=is_catchup
         )
         outcome = await handler(ctx)
-        if outcome in SKIPPED_AFTER_GATE:
+        if outcome is JobOutcome.OUTSIDE_HOURS_AFTER_GATE:
+            # The worker refused the run outside active hours (#696): the window closed,
+            # or was narrowed, between the claim and the run. Skipped, not run, and the
+            # claim is undone whole, with the due time at the window's next start.
+            fired = False
+            skipped_reason = outcome.value
+            next_due = await off_loop(
+                _park_for_window,
+                session_factory,
+                user,
+                account_id,
+                kind,
+                prior=prior,
+                now=clock() if clock is not None else now,
+                tz=tz,
+                active_start=active_start,
+            )
+        elif outcome in SKIPPED_AFTER_GATE:
             # The handler started nothing (#324): the fire was skipped, not run.
             assert outcome is not None
             fired = False
@@ -1485,6 +1589,10 @@ async def poll_once(
                     account_id,
                     kind,
                     after=last_fired_at,
+                    schedule=schedules[kind],
+                    tz=tz,
+                    active_start=user_start,
+                    active_end=user_end,
                 )
                 continue
             result = await poll_and_fire(
@@ -1516,12 +1624,22 @@ def _last_message_send(
     session_factory: sessionmaker[Session], user: User, now: datetime
 ) -> datetime | None:
     """When the user's newest ``message_send`` run ended (``now`` while it still runs),
-    or ``None`` when that is :data:`MIN_JOB_KIND_GAP` or more ago, or there is none."""
+    or ``None`` when that is :data:`MIN_JOB_KIND_GAP` or more ago, or there is none.
+
+    A ``running`` row that :func:`runs.is_stale` judges left behind (#696: a terminal's
+    ``message-check`` killed by SIGKILL never records its end) ended at its last sign of
+    life. Read as still running, it would defer every due kind at every heartbeat, for
+    good, until something else failed the row."""
     with session_scope(session_factory) as session:
         run = runs.latest_run(session, user, SyncRunKind.MESSAGE_SEND)
         if run is None:
             return None
-        ended = run.completed_at if run.completed_at is not None else now
+        if run.completed_at is not None:
+            ended = run.completed_at
+        elif runs.is_stale(session, run, now=now):
+            ended = runs.last_sign_of_life(run)
+        else:
+            ended = now
     return ended if now - ended < MIN_JOB_KIND_GAP else None
 
 
@@ -1549,12 +1667,23 @@ def _defer_past_the_gap(
     kind: JobKind,
     *,
     after: datetime,
+    schedule: JobSchedule,
+    tz: str,
+    active_start: time,
+    active_end: time,
 ) -> None:
     """Push ``kind``'s stored due time to a full :data:`MIN_JOB_KIND_GAP` past the
     fire at ``after``, so the next poll runs it instead of this one running it in
     the same minute. Leaves a due time that is already clear of the gap alone,
-    and never moves one earlier."""
-    target = after + MIN_JOB_KIND_GAP
+    and never moves one earlier. A push past the window's end goes to its next start
+    (#696), like every other due time this module stores."""
+    target = _snap_to_active_hours(
+        after + MIN_JOB_KIND_GAP,
+        tz,
+        start=active_start,
+        end=active_end,
+        respect_active_hours=schedule.respect_active_hours,
+    )
     with session_scope(session_factory, write=True) as session:
         state = _load_state(session, user, account_id, kind)
         if state is None or state.due >= target:

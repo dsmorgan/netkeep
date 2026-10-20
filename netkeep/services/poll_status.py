@@ -29,9 +29,10 @@ store, never by running one:
 - **LinkedIn**: each kind the scheduler serves, from its stored due time
   (:func:`~netkeep.services.scheduler.stored_due`), and its last completed run.
   The gates are the scheduler's own, in its order: disarmed, paused, the session
-  flag, heat, the connections breakers. Then active hours, which the scheduler does
-  not check at fire time (it snaps every due time into the window), so they come
-  last; the manual-run check words them
+  flag, heat, the connections breakers. Then active hours, last: the scheduler snaps
+  every due time into the window, and a fire it finds outside the window anyway (a
+  window narrowed since) moves to the next start rather than running (#696). The
+  manual-run check words them
   (:func:`~netkeep.services.runs.refuse_if_outside_active_hours`).
 - **LinkedIn inbox**: served like the other LinkedIn kinds since P4-01 (#380). A kind
   the scheduler does not serve would be ``not_wired``: never shown as running. Whatever
@@ -585,7 +586,8 @@ def _linkedin_gate(
 
 
 def _outside_hours(settings: Settings, *, now: datetime) -> tuple[CheckState, str] | None:
-    """Last: the scheduler never fires outside the window, since it snaps due times into it."""
+    """Last: the scheduler snaps due times into the window, and at fire time parks one
+    found outside it for the next start (#696), so it never fires outside the window."""
     try:
         runs.refuse_if_outside_active_hours(settings.linkedin, now=now)
     except (runs.OutsideActiveHours, runs.RunError) as exc:
