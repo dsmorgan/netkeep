@@ -47,7 +47,7 @@ The checksums are also in the release notes. Releases are immutable: once publis
 - A Gmail account and your own Google Cloud OAuth client for the email steps. [docs/gmail-setup.md](docs/gmail-setup.md) walks through the setup.
 - Optional, after 1.0: an Anthropic API key for the LLM features, which are deferred until after the 1.0 release. They will stay off unless you configure one.
 
-An installed netkeep needs no Xcode tools, Homebrew, Node or git. To remove it, turn off the login item (`netkeep login-item off`), then run `uv tool uninstall netkeep`. Your data directory and Keychain items stay.
+An installed netkeep needs no Xcode tools, Homebrew, Node or git. To remove it, turn off the login item (`netkeep setup --remove`), then run `uv tool uninstall netkeep`. Your data directory and Keychain items stay.
 
 ### From a checkout, for development
 

@@ -24,6 +24,16 @@ It installs uv if you don't have it, installs netkeep with the dependency versio
 
 If `netkeep` isn't found in a new terminal, the installer's last lines say what to do: run `~/.local/bin/uv tool update-shell` (by its full path, since `uv` may not be found either), or add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile (`~/.zshrc` for zsh), then open another terminal.
 
+### What netkeep setup does
+
+`netkeep setup` runs three steps and prints each one as it ends:
+
+1. It turns on the login item, the same one as the **Start netkeep when I log in** switch in Settings, pointing at the installed `netkeep` (`~/.local/bin/netkeep` for a uv tool install). From a checkout, it points at `.venv/bin/netkeep` and says so.
+2. It waits for `serve` to answer on 127.0.0.1, at `serve`'s port: 8000 by default, or the `--port` the login item was given.
+3. It opens the first-run page in netkeep's Chrome: the UI's window and LinkedIn's sign-in page.
+
+Run it again whenever you like: it says what's already done and changes nothing that's right. It uses the data directory every netkeep command uses, and never moves it. `netkeep setup --remove` turns the login item off and keeps your data. If a step fails, see [netkeep setup stops at a step](troubleshooting.md#netkeep-setup-stops-at-a-step).
+
 ### From a checkout
 
 To work on netkeep itself, install the checkout prerequisites in the README's [From a checkout, for development](../../README.md#from-a-checkout-for-development), then:
@@ -37,16 +47,6 @@ make build-ui
 ```
 
 From a checkout, run the commands below as `.venv/bin/netkeep`, or activate the environment first with `source .venv/bin/activate`. To start `serve` when you log in, see [Run at login](../../README.md#run-at-login-macos).
-
-### What netkeep setup does
-
-`netkeep setup` runs three steps and prints each one as it ends:
-
-1. It turns on the login item, the same one as the **Start netkeep when I log in** switch in Settings, pointing at the installed `netkeep` (`~/.local/bin/netkeep` for a uv tool install). From a checkout, it points at `.venv/bin/netkeep` and says so.
-2. It waits for `serve` to answer on 127.0.0.1, at `serve`'s port: 8000 by default, or the `--port` the login item was given.
-3. It opens the first-run page in netkeep's Chrome: the UI's window and LinkedIn's sign-in page.
-
-Run it again whenever you like: it says what's already done and changes nothing that's right. It uses the data directory every netkeep command uses, and never moves it. `netkeep setup --remove` turns the login item off and keeps your data. If a step fails, see [netkeep setup stops at a step](troubleshooting.md#netkeep-setup-stops-at-a-step).
 
 ## 2. Gmail
 

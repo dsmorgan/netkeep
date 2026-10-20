@@ -347,6 +347,16 @@ def test_an_unconfirmed_hand_off_counts_but_says_how_to_open_it(machine: Machine
     assert "If no netkeep window opened, run netkeep open." in output
 
 
+def test_a_window_brought_to_the_front_counts(machine: Machine) -> None:
+    """#678's ``shown``: the UI's window was already open and came forward."""
+    machine.launcher.result = LaunchResult(LaunchStatus.SHOWN, "brought it to the front")
+
+    code, output = machine.setup()
+
+    assert code == 0, output
+    assert "   done: brought it to the front." in output
+
+
 def test_every_refusal_has_a_fix() -> None:
     assert set(post_install.REFUSAL_FIXES) == set(Refusal)
 
@@ -602,7 +612,13 @@ def test_a_closed_port_doesnt_answer() -> None:
 
 
 @pytest.mark.parametrize(
-    "base", ["http://192.0.2.10:8123", "https://127.0.0.1:8123", "http://127.0.0.1:99999"]
+    "base",
+    [
+        "http://192.0.2.10:8123",
+        "https://127.0.0.1:8123",
+        "http://127.0.0.1:99999",
+        "http://127.0.0.1",  # no port: never a guess at port 80
+    ],
 )
 def test_only_a_loopback_http_origin_is_ever_asked(
     base: str, monkeypatch: pytest.MonkeyPatch
