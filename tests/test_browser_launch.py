@@ -50,6 +50,8 @@ def test_macos_command_uses_open(monkeypatch: pytest.MonkeyPatch) -> None:
     assert lines == [
         'open -na "Google Chrome" --args \\',
         "  --remote-debugging-port=9222 \\",
+        "  --no-first-run \\",
+        "  --no-default-browser-check \\",
         '  --user-data-dir="/profile"',
     ]
 
@@ -59,7 +61,10 @@ def test_linux_command_uses_the_binary_directly(monkeypatch: pytest.MonkeyPatch)
     lines = chrome_launch_command(9222, Path("/profile"))
     assert lines[0] == "google-chrome \\"
     assert lines[1] == "  --remote-debugging-port=9222 \\"
-    assert lines[2] == '  --user-data-dir="/profile"'
+    assert lines[2] == "  --no-first-run \\"
+    assert lines[3] == "  --no-default-browser-check \\"
+    assert lines[4] == '  --user-data-dir="/profile"'
+    assert len(lines) == 5
 
 
 def test_remote_host_note_is_none_for_loopback() -> None:

@@ -319,7 +319,7 @@ def _fingerprint_warnings(fingerprint: Fingerprint) -> Sequence[str]:
     if fingerprint.webdriver:
         warnings.append(
             "navigator.webdriver is true: Chrome was started with automation flags, "
-            "so start it with only --remote-debugging-port and --user-data-dir"
+            "so start it with only the flags `netkeep browser launch` prints"
         )
     if not fingerprint.chromium:
         warnings.append("the attached browser does not report itself as Chrome")

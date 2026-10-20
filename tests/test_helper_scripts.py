@@ -746,7 +746,13 @@ def test_chrome_script_launches_with_exactly_the_flags_the_cli_prints(tmp_path: 
     assert (
         chrome_flags(launch[0])
         == chrome_flags(printed)
-        == ["--remote-debugging-port", "--user-data-dir"]
+        # #733: the two first-run flags are the only additions.
+        == [
+            "--remote-debugging-port",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--user-data-dir",
+        ]
     )
     assert f"--remote-debugging-port={port}" in launch[0]
     assert f"--user-data-dir={profile}" in launch[0]

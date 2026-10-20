@@ -10,10 +10,11 @@ else, may start one.
 **The arguments.** Chrome's binary (``/Applications/Google Chrome.app/Contents/MacOS/
 Google Chrome`` on macOS; ``google-chrome`` on Linux, found on ``PATH``), then exactly
 the flags ``netkeep browser launch`` prints
-(:func:`netkeep.services.browser_launch.chrome_flags`: ``--remote-debugging-port=<port>``
-and ``--user-data-dir=<profile>``), then ``--app=<the UI's connect link>``, then, on the
-first-run path only, LinkedIn's sign-in page as a positional argument. Never a headless
-flag, a fresh profile, or any other flag or URL. The ``--app`` link must be exactly
+(:func:`netkeep.services.browser_launch.chrome_flags`: ``--remote-debugging-port=<port>``,
+``--no-first-run``, ``--no-default-browser-check`` and ``--user-data-dir=<profile>``),
+then ``--app=<the UI's connect link>``, then, on the first-run path only, LinkedIn's
+sign-in page as a positional argument. Never a headless flag, a fresh profile, or any
+other flag or URL. The ``--app`` link must be exactly
 ``http://127.0.0.1:<serve's port>/...`` or ``http://localhost:<serve's port>/...``
 (:func:`check_app_url`). The binary runs directly, not through ``open -na``, so the
 launcher sees that process's own exit status, with no LaunchServices step in between.
