@@ -15,6 +15,7 @@ No test here touches a browser, LinkedIn, or the network.
 
 from __future__ import annotations
 
+import logging
 import random
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
@@ -1584,28 +1585,64 @@ async def test_a_hold_set_after_the_claim_stops_the_run_before_it_opens_anything
     _given_back_unopened(a, "auto-send is held until the open message bubbles are closed")
 
 
-async def test_a_cancel_before_the_navigation_parks_the_step(lane: Lane) -> None:
-    """#708: a cancel caught before the navigation is ``not_typed`` and parks the step for
-    Try again, as a cancel after it does. It is never given back due, so a later fire
-    doesn't send the message the person stopped."""
-    a = Auto(lane)
-    lane.write(lambda s, u: runs.request_cancel(s, u, a.run_id, now=NOW))
-    await a.execute()
+def _parked_by_cancel(a: Auto, why: str) -> None:
+    """#708: a run a person cancelled before the navigation is ``not_typed`` and parks
+    the step for Try again, whichever refusal stopped it. It is never given back due, so
+    a later fire doesn't send the message the person stopped."""
     assert a.site.navigations == []
     _no_send(a)
     assert a.message() is None
-    enrollment = lane.enrollment(a.enrollment_id)
+    enrollment = a.lane.enrollment(a.enrollment_id)
     assert enrollment.next_action_at is None
-    assert (enrollment.not_sent_count, enrollment.not_sent_error) == (1, "not_typed: cancelled")
+    assert (enrollment.not_sent_count, enrollment.not_sent_error) == (1, f"not_typed: {why}")
     run = a.run()
-    assert (run.status, run.stop_reason) == (SyncRunStatus.ABORTED, "not_typed")
+    assert run.stop_reason == "not_typed"
     assert (run.counts_json or {}).get("li_prefills_spent") is False
-    assert a.enrollment_id in _try_again_ids(lane)
+    assert a.enrollment_id in _try_again_ids(a.lane)
     assert a.spent(ActionClass.LI_MESSAGES_AUTO) == 0
     assert a.spent(ActionClass.PROFILE_VISITS) == 0
     # Nothing navigated, so Try again needs no "no bubble open" confirm.
-    tried = lane.read(lambda s, u: linkedin_steps.last_try(s, u, enrollment, now=NOW))
+    tried = a.lane.read(lambda s, u: linkedin_steps.last_try(s, u, enrollment, now=NOW))
     assert not tried.needs_confirmation
+
+
+def _cancel(a: Auto) -> None:
+    a.lane.write(lambda s, u: runs.request_cancel(s, u, a.run_id, now=NOW))
+
+
+async def test_a_cancel_before_the_navigation_parks_the_step(lane: Lane) -> None:
+    a = Auto(lane)
+    _cancel(a)
+    await a.execute()
+    _parked_by_cancel(a, "cancelled")
+
+
+async def test_a_cancel_outside_active_hours_parks_the_step(lane: Lane) -> None:
+    """Gate 2 reads active hours before the cancel: the cancel still parks the step."""
+    closed = replace(
+        AUTO, linkedin=LinkedInSettings(timezone="UTC", active_hours=("01:00", "02:00"))
+    )
+    a = Auto(lane, worker_settings=closed)
+    _cancel(a)
+    await a.execute()
+    _parked_by_cancel(a, "outside LinkedIn's active hours")
+
+
+async def test_a_cancel_with_a_lapsed_claim_parks_the_step(lane: Lane) -> None:
+    a = Auto(lane, clock=Clock(NOW + timedelta(seconds=61)))
+    _cancel(a)
+    await a.execute()
+    _parked_by_cancel(a, "the claim lapsed")
+
+
+async def test_a_cancel_with_a_busy_browser_parks_the_step(lane: Lane) -> None:
+    from netkeep.linkedin.activity_lock import account_key
+
+    a = Auto(lane)
+    _cancel(a)
+    async with a.provider.locks.hold(account_key(a.run().linkedin_account_id)):
+        await a.execute()
+    _parked_by_cancel(a, "the browser was busy")
 
 
 async def test_the_handler_checks_the_hold_before_it_claims(
@@ -2143,6 +2180,18 @@ def test_a_hold_without_a_zone_reads_as_utc(lane: Lane) -> None:
     lane.write(lambda s, u: set_setting(s, u, linkedin_steps._hold_key(account), stored))
     hold = lane.read(lambda s, u: linkedin_steps.auto_send_hold(s, u, account))
     assert hold is not None and hold.since == datetime(2026, 5, 4, 9, tzinfo=UTC)
+
+
+def test_an_unreadable_hold_is_warned_about_once(
+    lane: Lane, caplog: pytest.LogCaptureFixture
+) -> None:
+    account = lane.read(lambda s, u: ensure_account(s, u).id)
+    lane.write(lambda s, u: set_setting(s, u, linkedin_steps._hold_key(account), "held-once"))
+    caplog.set_level(logging.DEBUG, logger="netkeep.services.linkedin_steps")
+    for _ in range(3):
+        assert lane.read(lambda s, u: linkedin_steps.auto_send_hold(s, u, account)) is not None
+    warned = [r for r in caplog.records if "unreadable" in r.getMessage()]
+    assert [r.levelno for r in warned] == [logging.WARNING, logging.DEBUG, logging.DEBUG]
 
 
 def test_the_hold_is_written_for_a_run_that_already_ended(lane: Lane) -> None:

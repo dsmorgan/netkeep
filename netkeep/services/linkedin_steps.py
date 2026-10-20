@@ -349,6 +349,11 @@ def _hold_key(account_id: int) -> str:
     return f"linkedin.auto_send.hold.{account_id}"
 
 
+_UNREADABLE_HOLDS_LOGGED: set[tuple[int, int, str]] = set()
+"""The unreadable hold values :func:`auto_send_hold` has warned about, so each is warned
+about once per process, not on every read."""
+
+
 def auto_send_hold(session: Session, user: User, account_id: int) -> AutoSendHold | None:
     """The account's auto-send hold, or ``None``. Read-only.
 
@@ -372,8 +377,14 @@ def auto_send_hold(session: Session, user: User, account_id: int) -> AutoSendHol
     except ValueError:
         since = None
     if not isinstance(raw, dict) or not isinstance(reason, str) or since is None:
-        log.warning(
-            "the auto-send hold for account %d is unreadable; treating it as held", account_id
+        # Read on every options GET, outlook, posture call and fire: warn once per value.
+        seen = (user.id, account_id, repr(raw))
+        level = logging.DEBUG if seen in _UNREADABLE_HOLDS_LOGGED else logging.WARNING
+        _UNREADABLE_HOLDS_LOGGED.add(seen)
+        log.log(
+            level,
+            "the auto-send hold for account %d is unreadable; treating it as held",
+            account_id,
         )
     if since is None:
         since = row.updated_at
