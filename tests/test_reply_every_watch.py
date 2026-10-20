@@ -16,7 +16,8 @@ Every address and message is invented, and Gmail is :class:`FakeGmail`.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+import hashlib
+from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
 
 import factories
@@ -49,13 +50,27 @@ EMAIL = TemplateChannel.EMAIL
 LINKEDIN = TemplateChannel.LINKEDIN
 
 
+def legacy_message_id(user_id: int, row: Message, domain: str) -> str:
+    """The Message-ID netkeep gave a row before the rename (#661), written out here."""
+    stamp = row.created_at.astimezone(UTC).isoformat(timespec="microseconds")
+    seed = f"netkeeper-message-id:v1:{user_id}:{row.id}:{stamp}"
+    return f"<{hashlib.sha256(seed.encode()).hexdigest()[:32]}@{domain}>"
+
+
 def send_email(
-    world: World, enrollment_id: int, subject: str, at: datetime, *, draft_id: str | None = None
+    world: World,
+    enrollment_id: int,
+    subject: str,
+    at: datetime,
+    *,
+    draft_id: str | None = None,
+    legacy: bool = False,
 ) -> MessageRef:
     """Step 1 of the enrollment went out by email at ``at``, in a thread of its own.
 
-    Sent as ``messages.send`` sends it, with the Message-ID netkeep derives for the row;
-    with ``draft_id``, as a draft the person sent, under a Message-ID of Gmail's making."""
+    Sent as ``messages.send`` sends it, with the Message-ID netkeep derives for the row
+    (with ``legacy``, as netkeep derived it before the rename); with ``draft_id``, as a
+    draft the person sent, under a Message-ID of Gmail's making."""
 
     def make(session: Session, user: User) -> MessageRef:
         enrollment = get_scoped(session, user, Enrollment, enrollment_id)
@@ -74,6 +89,8 @@ def send_email(
         out["Message-ID"] = (
             f"<gmail-own-{row.id}@mail.example>"
             if draft_id is not None
+            else legacy_message_id(user.id, row, mailbox.email.rpartition("@")[2].lower())
+            if legacy
             else message_id_for(
                 user_id=user.id,
                 message_id=row.id,
@@ -291,6 +308,20 @@ def test_a_bounce_is_matched_by_the_derived_message_id_with_one_read(world: Worl
         sent[1].id: MessageStatus.BOUNCED,
         sent[2].id: MessageStatus.SENT,
     }
+
+
+def test_a_bounce_of_a_message_sent_before_the_rename_is_matched(world: World) -> None:
+    """A message sent before #661 carries the Message-ID of the old seed: a notice citing
+    it from outside the thread still bounces it, with no read of every copy."""
+    campaign_id = world.campaign(EMAIL, own_mailbox=True)
+    enrollment_id = world.enroll(campaign_id=campaign_id, sent_at=None)
+    sent = send_email(world, enrollment_id, "Hello", FIRST_SEND, legacy=True)
+    baseline(world)
+    notice_citing(world, sent)
+
+    poll(world)
+
+    assert world.enrollment(enrollment_id).status is EnrollmentStatus.BOUNCED
 
 
 def test_a_bounce_of_a_sent_draft_is_matched_by_its_gmail_copy(world: World) -> None:
