@@ -567,6 +567,9 @@ def test_modify_labels_only_adds_and_only_from_its_reviewed_caller() -> None:
         problems += [str(f) for f in found]
     assert problems == []
     assert callers == MODIFY_LABELS_CALLERS
+    # #723 re-review: the reviewed ``add=(label_id,)`` is one call, not a pattern.
+    calls, _ = scan_modify_labels(dict(package_sources())[SENDER], SENDER)
+    assert len(calls) == 1
 
 
 def test_the_gmail_interface_has_no_delete_or_trash() -> None:
