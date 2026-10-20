@@ -30,6 +30,17 @@ export const AUTO_SENDING_WARNING =
 /** After an auto-send clicked Send (`send_clicked`). */
 export const AUTO_SENT = 'Auto-send typed the message and clicked Send. Nothing waits for you.'
 
+/** An auto-send typed the whole message but did not click Send: it waits for you. */
+export const AUTO_TYPED_NOT_SENT =
+  'Auto-send typed the message but did not click Send. It waits for you below: review it in Chrome and click Send yourself.'
+
+/** An auto-send tried to click Send and netkeep could not confirm it (`unknown`). */
+export const AUTO_UNKNOWN =
+  "Auto-send typed the whole message, but netkeep can't confirm whether Send was clicked. The message may already be sent. Check the conversation in Chrome and on LinkedIn before you clear, send or discard anything. netkeep never retries."
+
+/** The title of an auto-send that stopped before it sent. */
+export const AUTO_STOPPED = 'The auto-send stopped.'
+
 /** The first poll hasn't run: scheduled polls wait for one you run by hand. */
 export const FIRST_POLL_COMMAND = 'netkeep linkedin inbox'
 export const CHECK_INBOX_LABEL = 'Check inbox now'

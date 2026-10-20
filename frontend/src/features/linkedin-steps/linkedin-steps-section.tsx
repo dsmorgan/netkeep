@@ -79,6 +79,9 @@ import {
   PREFILL_NOTE,
   TRY_AGAIN_NOTE,
   AUTO_SENDING,
+  AUTO_STOPPED,
+  AUTO_TYPED_NOT_SENT,
+  AUTO_UNKNOWN,
   AUTO_SENDING_WARNING,
   AUTO_SENT,
   TYPED_WHOLE,
@@ -248,7 +251,7 @@ export function LinkedInQueueCard({ campaignId, run }: { campaignId?: number; ru
             )}
           </div>
         )}
-        {!typing && run.finishedId !== null && (
+        {!typing && !autoSending && run.finishedId !== null && (
           <FinishedPrefill runId={run.finishedId} onDismiss={run.dismiss} />
         )}
         {start.isError && <Refused error={start.error} onDismiss={() => start.reset()} />}
@@ -560,10 +563,22 @@ function FinishedPrefill({ runId, onDismiss }: { runId: number; onDismiss: () =>
       </p>
     )
   }
+  const auto = run.data.trigger === 'scheduled'
+  if (auto && run.data.stop_reason === 'unknown') {
+    // Send may have been clicked: never the prefill copy that says to clear the composer.
+    return (
+      <Callout tone="warning" role="alert" title="Check whether it was sent.">
+        <p>{AUTO_UNKNOWN}</p>
+        <Button size="sm" variant="outline" className="mt-2" onClick={onDismiss}>
+          Dismiss
+        </Button>
+      </Callout>
+    )
+  }
   if (run.data.status === 'completed') {
     return (
       <p role="status" className="text-muted-foreground">
-        {TYPED_WHOLE}{' '}
+        {auto ? AUTO_TYPED_NOT_SENT : TYPED_WHOLE}{' '}
         <Button size="sm" variant="ghost" onClick={onDismiss}>
           Dismiss
         </Button>
@@ -573,7 +588,7 @@ function FinishedPrefill({ runId, onDismiss }: { runId: number; onDismiss: () =>
   const ending = prefillEnding(run.data.stop_reason, run.data.error, run.data.counts)
   if (ending !== null) {
     return (
-      <Callout tone="warning" role="alert" title={ending.title}>
+      <Callout tone="warning" role="alert" title={auto ? AUTO_STOPPED : ending.title}>
         {ending.reason !== null && <p>{ending.reason}</p>}
         {ending.steps.map((step) => (
           <p key={step}>{step}</p>
@@ -586,7 +601,7 @@ function FinishedPrefill({ runId, onDismiss }: { runId: number; onDismiss: () =>
   }
   const reason = stopReasonLabel(run.data) ?? run.data.error ?? 'no reason recorded'
   return (
-    <Callout tone="warning" title="The prefill stopped.">
+    <Callout tone="warning" title={auto ? AUTO_STOPPED : 'The prefill stopped.'}>
       <p>{reason}.</p>
       <p>
         If anything was typed, clear the composer in Chrome yourself. netkeep never retries a

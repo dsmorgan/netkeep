@@ -50,6 +50,8 @@ import reasons from './prefill-reasons.json'
 import {
   AUTO_SENDING,
   AUTO_SENT,
+  AUTO_TYPED_NOT_SENT,
+  AUTO_UNKNOWN,
   CLOSE_BUBBLE,
   FIRST_POLL_NOTE,
   MAYBE_CLOSE_BUBBLE,
@@ -1731,6 +1733,70 @@ describe('an auto-send is not a prefill (#704)', () => {
     expect(await screen.findByText(AUTO_SENT)).toBeVisible()
     expect(screen.queryByText(TYPED_WHOLE)).toBeNull()
   })
+
+  async function endAutoSend(ended: NonNullable<Parameters<typeof run>[0]>) {
+    let state = { ...STATUS_CLEAR, running_run_id: 90 } as typeof STATUS_CLEAR
+    let current = autoSend()
+    const { source } = renderSection({
+      'GET /api/v1/linkedin/status': () => jsonResponse(state),
+      'GET /api/v1/linkedin/runs/90': () => jsonResponse(current),
+    })
+    await screen.findByText(AUTO_SENDING)
+    state = STATUS_CLEAR
+    current = autoSend(ended)
+    act(() => source.emit('run.finished', { run_id: 90, status: ended.status }))
+  }
+
+  it('says the message may already be sent when Send could not be confirmed (unknown)', async () => {
+    await endAutoSend({ status: 'failed', stop_reason: 'unknown' })
+
+    expect(await screen.findByText(AUTO_UNKNOWN)).toBeVisible()
+    expect(screen.getByText('Check whether it was sent.')).toBeVisible()
+    expect(screen.queryByText(PARTLY_TYPED)).toBeNull()
+    expect(screen.queryByText(/can't tell how much it typed/)).toBeNull()
+  })
+
+  it('says an auto-send that typed but did not click Send waits for you', async () => {
+    await endAutoSend({ status: 'completed', stop_reason: 'prefilled' })
+
+    expect(await screen.findByText(AUTO_TYPED_NOT_SENT)).toBeVisible()
+    expect(screen.queryByText(TYPED_WHOLE)).toBeNull()
+  })
+
+  it('calls an auto-send that typed nothing an auto-send, not a prefill', async () => {
+    await endAutoSend({ status: 'failed', stop_reason: 'not_typed' })
+
+    expect(await screen.findByText('The auto-send stopped.')).toBeVisible()
+    expect(screen.queryByText(/Not prefilled/)).toBeNull()
+  })
+
+  it('calls any other auto-send stop an auto-send', async () => {
+    await endAutoSend({ status: 'failed', stop_reason: 'session_flagged' })
+
+    expect(await screen.findByText('The auto-send stopped.')).toBeVisible()
+    expect(screen.queryByText('The prefill stopped.')).toBeNull()
+  })
+
+  it("hides the last run's note while a new auto-send runs", async () => {
+    let state = { ...STATUS_CLEAR, running_run_id: 90 } as typeof STATUS_CLEAR
+    let current = autoSend()
+    const { source } = renderSection({
+      'GET /api/v1/linkedin/status': () => jsonResponse(state),
+      'GET /api/v1/linkedin/runs/90': () => jsonResponse(current),
+      'GET /api/v1/linkedin/runs/91': () => jsonResponse(autoSend({ id: 91 })),
+    })
+    await screen.findByText(AUTO_SENDING)
+    state = STATUS_CLEAR
+    current = autoSend({ status: 'completed', stop_reason: 'send_clicked' })
+    act(() => source.emit('run.finished', { run_id: 90, status: 'completed' }))
+    await screen.findByText(AUTO_SENT)
+
+    state = { ...STATUS_CLEAR, running_run_id: 91 } as typeof STATUS_CLEAR
+    act(() => source.emit('run.started', { run_id: 91, kind: 'message_send' }))
+
+    await waitFor(() => expect(screen.getByText(AUTO_SENDING)).toBeVisible())
+    expect(screen.queryByText(AUTO_SENT)).toBeNull()
+  })
 })
 
 describe('the queue refreshes on its own (#704)', () => {
@@ -1742,7 +1808,7 @@ describe('the queue refreshes on its own (#704)', () => {
   it('turns Prefill on when a hold lapses, with no new data', async () => {
     vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] })
     try {
-      const held = new Date(Date.now() + 40_000).toISOString()
+      const held = new Date(Date.now() + 20_000).toISOString()
       renderSection({
         'GET /api/v1/campaigns/linkedin/ready': () =>
           jsonResponse(readyPage([readyItem({ held_until: held })])),
@@ -1751,10 +1817,36 @@ describe('the queue refreshes on its own (#704)', () => {
       expect(button).toBeDisabled()
 
       act(() => {
-        vi.advanceTimersByTime(60_000)
+        // Past the hold but short of the 60 s refetch: only the clock moves the card.
+        vi.advanceTimersByTime(30_000)
       })
       await waitFor(() =>
         expect(screen.getByRole('button', { name: 'Prefill Rosalind Quillfeather' })).toBeEnabled(),
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('marks a waiting message stale when the clock passes three days, with no new data', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] })
+    try {
+      const prefilledAt = new Date(Date.now() - 72 * HOUR + 20_000).toISOString()
+      renderSection({
+        'GET /api/v1/campaigns/linkedin/waiting': () =>
+          jsonResponse(waitingPage([waitingItem({ prefilled_at: prefilledAt })])),
+      })
+      const row = await screen.findByRole('listitem', { name: /^Tobias Marrowbone/ })
+      expect(row).not.toHaveAttribute('data-state', 'stale')
+
+      act(() => {
+        vi.advanceTimersByTime(30_000)
+      })
+      await waitFor(() =>
+        expect(screen.getByRole('listitem', { name: /^Tobias Marrowbone/ })).toHaveAttribute(
+          'data-state',
+          'stale',
+        ),
       )
     } finally {
       vi.useRealTimers()
