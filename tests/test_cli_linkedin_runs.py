@@ -10,6 +10,7 @@ attaches to a real one and nothing leaves this machine.
 from __future__ import annotations
 
 import functools
+import logging
 import random
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -684,6 +685,50 @@ def test_preflight_refuses_and_attaches_nothing_when_the_schema_is_unreadable(
     assert result.exit_code == 1, result.output
     assert "can't read the database to find which account's browser lock" in result.output
     assert "nothing attached" in result.output
+
+
+def test_posture_probe_refuses_and_attaches_nothing_when_the_schema_is_unreadable(
+    cli_db: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#710 review: ``posture --probe`` keys its probe like preflight, so it refuses the
+    same way, before the probe reaches the browser."""
+    from sqlalchemy import exc
+
+    def schema_too_old(*args: object) -> int:
+        raise exc.OperationalError("SELECT ...", {}, Exception("no such column"))
+
+    async def never(*args: object, **kwargs: object) -> None:
+        raise AssertionError("posture --probe attached without a lock key it can trust")
+
+    monkeypatch.setattr(cli_module, "account_id_for", schema_too_old)
+    monkeypatch.setattr(cli_module, "run_preflight", never)
+    result = CliRunner().invoke(cli, ["posture", "--probe"])
+    assert result.exit_code == 1, result.output
+    assert "can't read the database to find which account's browser lock" in result.output
+
+
+def test_the_refusal_marks_the_database_error_personal_in_the_log_file(
+    cli_db: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#710 re-review: the error text goes through ``personal_exc``. The terminal shows
+    it as it is (logging_setup's rule for personal values); the log file holds it only
+    between markers, so a support bundle redacts it."""
+    from sqlalchemy import exc
+
+    from netkeep.logging_setup import PERSONAL_PATTERN, log_file, setup_logging
+
+    def unreadable(*args: object) -> int:
+        raise exc.OperationalError("SELECT ...", {}, Exception("no such column Quorbelle"))
+
+    monkeypatch.setattr(cli_module, "account_id_for", unreadable)
+    setup_logging("INFO")
+    with pytest.raises(typer.Exit):
+        cli_module._browser_lock_key()
+    for handler in logging.getLogger().handlers:
+        handler.flush()
+    text = log_file().read_text()
+    assert "can't read the browser lock's account" in text
+    assert "Quorbelle" not in PERSONAL_PATTERN.sub("<personal>", text)
 
 
 def test_the_lock_key_is_the_local_users_account(cli_db: sessionmaker[Session]) -> None:

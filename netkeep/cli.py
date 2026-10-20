@@ -1711,7 +1711,8 @@ def _browser_lock_key() -> str:
         log.warning("can't read the browser lock's account: %s", personal_exc(exc))
         typer.echo(
             "netkeep: can't read the database to find which account's browser lock to take"
-            f" ({exc.orig or exc}), so nothing attached. Run netkeep db upgrade, or stop"
+            f" ({personal_exc(exc.orig or exc)}), so nothing attached. Run netkeep db"
+            " upgrade, or stop"
             " netkeep serve first",
             err=True,
         )

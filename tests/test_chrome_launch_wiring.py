@@ -371,6 +371,34 @@ def _config(tmp_path: Path) -> list[str]:
     return ["--config", str(config)]
 
 
+def test_netkeep_open_refuses_and_probes_nothing_when_the_schema_is_unreadable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """#710 review: the ``open`` probe keys its lock like preflight. A database it can't
+    read refuses the command before the probe connects to the running Chrome."""
+    from sqlalchemy import exc
+
+    database = tmp_path / "netkeep.db"
+    database.touch()
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", f"sqlite:///{database}")
+
+    def unreadable(*args: object) -> None:
+        raise exc.OperationalError("SELECT ...", {}, Exception("disk I/O error"))
+
+    async def never(url: str, **_: object) -> PortProbe:
+        raise AssertionError("the open probe ran without a lock key it can trust")
+
+    spawned = _Spawned()
+    monkeypatch.setattr(cli_module, "local_owner", unreadable)
+    monkeypatch.setattr(chrome_spawn, "spawn_chrome", spawned)
+    monkeypatch.setattr(chrome_spawn, "port_answers", lambda port: True)
+    monkeypatch.setattr(cli_module, "launcher_probe", never)
+    result = CliRunner().invoke(cli, [*_config(tmp_path), "open", "--port", "8125"])
+    assert result.exit_code == 1, result.output
+    assert "can't read the database to find which account's browser lock" in result.output
+    assert spawned.launches == []
+
+
 def test_netkeep_open_opens_the_ui_in_netkeeps_chrome(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
