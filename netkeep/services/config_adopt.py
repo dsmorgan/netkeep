@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from netkeep.config import Settings
+from netkeep.fsutil import sync_directory
 from netkeep.models import JsonValue
 from netkeep.services import ui_settings
 
@@ -228,19 +229,4 @@ def rewrite(path: Path, text: str, *, expected: str) -> None:
     except BaseException:
         Path(temporary).unlink(missing_ok=True)
         raise
-    _sync_directory(path.parent)
-
-
-def _sync_directory(directory: Path) -> None:
-    """Make the rename durable. Best effort: the file is already replaced, so a failure
-    here (a file system that cannot sync a directory) must not read as "not changed"."""
-    try:
-        handle = os.open(directory, os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(handle)
-    except OSError:
-        pass
-    finally:
-        os.close(handle)
+    sync_directory(path.parent)

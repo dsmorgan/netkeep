@@ -56,8 +56,8 @@ from typing import Final, NoReturn
 from urllib.parse import urljoin, urlsplit
 
 from netkeep import paths
+from netkeep.fsutil import sync_directory
 from netkeep.linkedin.activity_lock import Claim, LockState
-from netkeep.services.config_adopt import _sync_directory
 from netkeep.services.login_item import SERVE_ERR_LOG, LoginItem, LoginItemError
 
 REPOSITORY: Final = "dsmorgan/netkeep"
@@ -280,6 +280,13 @@ def read_state(data: Path | None = None) -> UpdateState | None:
         or state.phase not in PHASES
     ):
         raise UpdateError(unknown)
+    # Each constraints file is the one this update kept, never a path the file names.
+    for version, recorded in (
+        (state.from_version, state.from_constraints),
+        (state.to_version, state.to_constraints),
+    ):
+        if Path(recorded).resolve() != constraints_path(version, data).resolve():
+            raise UpdateError(unknown)
     return state
 
 
@@ -297,14 +304,14 @@ def _write_durably(path: Path, text: str) -> None:
     except BaseException:
         temporary.unlink(missing_ok=True)
         raise
-    _sync_directory(path.parent)
+    sync_directory(path.parent)
 
 
 def _update_dir_made(data: Path | None) -> Path:
     directory = update_dir(data)
     if not directory.is_dir():
         directory.mkdir(parents=True, exist_ok=True)
-        _sync_directory(directory.parent)
+        sync_directory(directory.parent)
     return directory
 
 
@@ -319,13 +326,13 @@ def clear_state(data: Path | None = None) -> None:
     directory = update_dir(data)
     (directory / STATE_FILE).unlink(missing_ok=True)
     (directory / SCHEDULER_MARKER).unlink(missing_ok=True)
-    _sync_directory(directory)
+    sync_directory(directory)
 
 
 def clear_marker(data: Path | None = None) -> None:
     directory = update_dir(data)
     (directory / SCHEDULER_MARKER).unlink(missing_ok=True)
-    _sync_directory(directory)
+    sync_directory(directory)
 
 
 def mark_scheduler_starting(version: str, data: Path | None = None) -> None:

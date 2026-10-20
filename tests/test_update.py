@@ -345,6 +345,28 @@ class World:
         return update.read_state(self.data)
 
 
+def _state(
+    from_version: str,
+    to_version: str,
+    data: Path,
+    backup: str | None,
+    was_on: bool,
+    phase: str,
+    **more: Any,
+) -> update.UpdateState:
+    """A state as ``netkeep update`` writes it, with the constraints paths it keeps."""
+    return update.UpdateState(
+        from_version,
+        to_version,
+        str(update.constraints_path(from_version, data)),
+        str(update.constraints_path(to_version, data)),
+        backup,
+        was_on,
+        phase,
+        **more,
+    )
+
+
 @pytest.fixture
 def world(tmp_path: Path) -> World:
     return World(tmp_path)
@@ -542,7 +564,7 @@ def test_a_checkout_is_refused(world: World) -> None:
 def test_an_unfinished_update_is_refused(world: World) -> None:
     world.install_login_item()
     update.write_state(
-        update.UpdateState(OLD, NEW, "a", "b", None, True, "stopped", reason="it broke."),
+        _state(OLD, NEW, world.data, None, True, "stopped", reason="it broke."),
         world.data,
     )
     assert world.run_update() == 1
@@ -733,7 +755,7 @@ def test_a_latest_tag_that_isnt_vxyz_is_refused(world: World, tag: str | None) -
 def test_serve_writes_the_marker_only_during_an_update(tmp_path: Path) -> None:
     update.mark_scheduler_starting(NEW, tmp_path)
     assert not update.update_dir(tmp_path).exists()
-    update.write_state(update.UpdateState(OLD, NEW, "a", "b", None, True, "finishing"), tmp_path)
+    update.write_state(_state(OLD, NEW, tmp_path, None, True, "finishing"), tmp_path)
     update.mark_scheduler_starting(NEW, tmp_path)
     assert update.scheduler_started(tmp_path)
 
@@ -741,7 +763,7 @@ def test_serve_writes_the_marker_only_during_an_update(tmp_path: Path) -> None:
 def test_a_marker_from_any_version_counts_as_started(tmp_path: Path) -> None:
     """Whichever netkeep wrote it (a checkout's serve, another install), a scheduler ran on
     this data directory during the update, and a restore would forget what it sent."""
-    update.write_state(update.UpdateState(OLD, NEW, "a", "b", None, True, "finishing"), tmp_path)
+    update.write_state(_state(OLD, NEW, tmp_path, None, True, "finishing"), tmp_path)
     update.mark_scheduler_starting("9.9.9", tmp_path)
     assert update.scheduler_started(tmp_path)
 
@@ -751,9 +773,7 @@ async def test_the_lifespan_marks_before_the_scheduler_starts(
 ) -> None:
     """``serve`` records the marker before anything that can send has started."""
     data = Path(os.environ["NETKEEP_DATA"])
-    update.write_state(
-        update.UpdateState(OLD, __version__, "a", "b", None, True, "finishing"), data
-    )
+    update.write_state(_state(OLD, __version__, data, None, True, "finishing"), data)
     seen: list[bool] = []
 
     class _Stopped:
@@ -1142,8 +1162,8 @@ def test_rollback_runs_only_on_the_old_version(world: World) -> None:
     world.install_login_item()
     world.installed = NEW
     update.write_state(
-        update.UpdateState(
-            OLD, NEW, "a", "b", str(world.backup()), True, "rolling-back", new_version_ran=True
+        _state(
+            OLD, NEW, world.data, str(world.backup()), True, "rolling-back", new_version_ran=True
         ),
         world.data,
     )
@@ -1170,7 +1190,7 @@ def test_the_lock_is_held_across_every_install(world: World) -> None:
 def test_finish_accepts_an_install_it_couldnt_record(world: World) -> None:
     """uv finished, but writing "finishing" failed: the new version still finishes."""
     world.install_login_item()
-    update.write_state(update.UpdateState(OLD, NEW, "a", "b", None, True, "installing"), world.data)
+    update.write_state(_state(OLD, NEW, world.data, None, True, "installing"), world.data)
     world.run(["bootout", f"gui/{UID}/{world.label}"])
     world.installed = NEW
     assert update.finish(world.item(), world.seams(), world.say) == 0
@@ -1211,7 +1231,7 @@ def test_state_and_marker_are_written_durably(
 
     monkeypatch.setattr("os.fsync", fsync)
     monkeypatch.setattr(Path, "replace", replace)
-    update.write_state(update.UpdateState(OLD, NEW, "a", "b", None, True, "finishing"), tmp_path)
+    update.write_state(_state(OLD, NEW, tmp_path, None, True, "finishing"), tmp_path)
     assert events[-3:] == ["fsync-file", f"rename {update.STATE_FILE}", "fsync-dir"]
     events.clear()
     update.mark_scheduler_starting(NEW, tmp_path)
@@ -1222,9 +1242,7 @@ async def test_a_marker_that_cant_be_written_stops_serve(
     app: FastAPI, bare_engine: Engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     data = Path(os.environ["NETKEEP_DATA"])
-    update.write_state(
-        update.UpdateState(OLD, __version__, "a", "b", None, True, "finishing"), data
-    )
+    update.write_state(_state(OLD, __version__, data, None, True, "finishing"), data)
     started: list[bool] = []
 
     def scheduler(*_args: Any, **_kwargs: Any) -> Any:
@@ -1254,7 +1272,7 @@ async def test_a_marker_that_cant_be_written_stops_serve(
     ],
 )
 def test_read_state_is_strict(tmp_path: Path, change: dict[str, object]) -> None:
-    update.write_state(update.UpdateState(OLD, NEW, "a", "b", None, True, "finishing"), tmp_path)
+    update.write_state(_state(OLD, NEW, tmp_path, None, True, "finishing"), tmp_path)
     path = update.update_dir(tmp_path) / update.STATE_FILE
     raw = json.loads(path.read_text())
     path.write_text(json.dumps(raw | change))
@@ -1289,3 +1307,99 @@ def test_a_slow_download_runs_out_of_time(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr("netkeep.services.update.http.client.HTTPSConnection", connections)
     with pytest.raises(update.UpdateError, match="longer than 120 s"):
         update.https_get("https://github.com/x", max_bytes=1000, clock=lambda: now[0])
+
+
+@pytest.mark.parametrize("field_name", ["from_constraints", "to_constraints"])
+def test_a_constraints_path_outside_the_update_folder_is_refused(
+    tmp_path: Path, field_name: str
+) -> None:
+    """The old version's reinstall uses the constraints file the update kept, never one
+    a changed state.json points at."""
+    update.write_state(_state(OLD, NEW, tmp_path, None, True, "rolling-back"), tmp_path)
+    path = update.update_dir(tmp_path) / update.STATE_FILE
+    raw = json.loads(path.read_text())
+    raw[field_name] = str(tmp_path / "elsewhere" / "constraints.txt")
+    path.write_text(json.dumps(raw))
+    with pytest.raises(update.UpdateError, match="isn't an update netkeep knows"):
+        update.read_state(tmp_path)
+
+
+# -- other commands while an update is in progress ---------------------------------------
+
+
+@pytest.fixture
+def in_progress() -> Path:
+    data = Path(os.environ["NETKEEP_DATA"])
+    update.write_state(_state(OLD, NEW, data, None, True, "finishing"), data)
+    return data
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["campaigns", "linkedin", "prefill", "1"],
+        ["serve"],
+        ["--config", "/nonexistent.toml", "serve"],
+        ["restore", "netkeep-20261010T000000Z.sqlite3"],
+        ["db", "upgrade"],
+        ["login-item", "on"],
+        ["backup", "create"],
+    ],
+)
+def test_other_commands_refuse_during_an_update(in_progress: Path, args: list[str]) -> None:
+    result = CliRunner().invoke(cli.app, args)
+    assert result.exit_code == 1
+    assert "an update is in progress: run `netkeep update --finish`" in result.output
+    assert str(update.update_dir(in_progress) / update.STATE_FILE) in result.output
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["version"],
+        ["login-item", "status"],
+        ["db", "current"],
+        ["backup", "list"],
+        ["config", "show"],
+        ["update", "--finish"],
+        ["update", "--rollback"],
+        ["campaigns", "linkedin", "prefill", "--help"],
+        ["serve", "--help"],
+    ],
+)
+def test_the_update_and_read_only_commands_still_run(in_progress: Path, args: list[str]) -> None:
+    result = CliRunner().invoke(cli.app, args)
+    assert "an update is in progress" not in result.output
+
+
+def test_update_check_runs_during_an_update(
+    in_progress: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        update,
+        "https_get",
+        lambda url, *, max_bytes, accept="*/*": json.dumps({"tag_name": "v999.0.0"}).encode(),
+    )
+    result = CliRunner().invoke(cli.app, ["update", "--check"])
+    assert result.exit_code == 0, result.output
+    assert "999.0.0 is available" in result.output
+
+
+def test_version_prints_during_an_update(in_progress: Path) -> None:
+    result = CliRunner().invoke(cli.app, ["version"])
+    assert result.exit_code == 0
+    assert result.output.strip() == __version__
+
+
+def test_no_refusal_without_an_update(tmp_path: Path) -> None:
+    result = CliRunner().invoke(cli.app, ["campaigns", "linkedin", "prefill", "1"])
+    assert "an update is in progress" not in result.output
+
+
+def test_command_words() -> None:
+    assert cli._command_words(["--config", "c.toml", "db", "current", "--x", "y"]) == [
+        "db",
+        "current",
+    ]
+    assert cli._command_words(["update", "--finish"]) == ["update"]
+    assert cli._command_words(["--config=c.toml", "serve"]) == ["serve"]

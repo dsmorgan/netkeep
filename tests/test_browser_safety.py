@@ -5043,7 +5043,7 @@ PAGE_ACTION_REACHES = {
         ("logging_setup.py", "remove_file_handler", "close", 1),
         ("services/backup.py", "_lock_exclusively", "close", 1),
         ("services/backup.py", "_vacuum_into", "close", 1),
-        ("services/config_adopt.py", "_sync_directory", "close", 1),
+        ("fsutil.py", "sync_directory", "close", 1),
         ("services/login_item.py", "LoginItem._write_plist", "close", 1),
         # #684: setup's health check closes its own loopback HTTP connection, not a tab.
         ("services/post_install.py", "health", "close", 1),

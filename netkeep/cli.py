@@ -25,6 +25,7 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import OperationalError, ProgrammingError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
+from typer.core import TyperGroup
 
 from netkeep import __version__, migrate_name, migrations
 from netkeep.campaigns import gmail_oauth
@@ -189,7 +190,23 @@ log = logging.getLogger(__name__)
 
 APP_FACTORY = "netkeep.worker:dev_app"
 
-app = typer.Typer(help="netkeep: keep your professional network warm.", no_args_is_help=True)
+_ARGS_KEY: Final = "netkeep.args"
+
+
+class _RootGroup(TyperGroup):
+    """The root command group. It keeps the command line it parses on the context, so
+    the pre-command hook can tell which subcommand (and which of a group's) runs."""
+
+    # Typer builds every context as a typer.Context; its click is vendored, so the
+    # supertype's annotation names a private class.
+    def parse_args(self, ctx: typer.Context, args: list[str]) -> list[str]:  # type: ignore[override]
+        ctx.meta[_ARGS_KEY] = list(args)
+        return super().parse_args(ctx, args)
+
+
+app = typer.Typer(
+    cls=_RootGroup, help="netkeep: keep your professional network warm.", no_args_is_help=True
+)
 config_app = typer.Typer(help="Inspect the resolved configuration.", no_args_is_help=True)
 db_app = typer.Typer(help="Create and migrate the database.", no_args_is_help=True)
 openapi_app = typer.Typer(help="Work with the API schema.", no_args_is_help=True)
@@ -299,11 +316,64 @@ def main(
 ) -> None:
     """netkeep command group."""
     ctx.obj = CliState(config=config)
+    _refuse_during_an_update(ctx.meta.get(_ARGS_KEY, []))
     # Before logging, which opens its file in the data directory the migration may move.
     done = _auto_migrate(ctx.invoked_subcommand)
     setup_logging(log_to_file=ctx.invoked_subcommand not in _NO_LOG_FILE)
     for line in done:
         log.info("migrate: %s", line)
+
+
+#: What runs while ``netkeep update`` is in progress (#685): the update's own steps,
+#: ``version``, and status commands that only read. Everything else could write to the
+#: data the update backed up, or start a ``serve`` whose scheduler sends.
+_DURING_AN_UPDATE: Final = frozenset(
+    {
+        ("update",),
+        ("version",),
+        ("login-item", "status"),
+        ("db", "current"),
+        ("backup", "list"),
+        ("config", "show"),
+    }
+)
+UPDATE_IN_PROGRESS: Final = (
+    "an update is in progress: run `netkeep update --finish` or see troubleshooting"
+    " (docs/guide/troubleshooting.md, Updating)"
+)
+
+
+def _command_words(args: Sequence[str]) -> list[str]:
+    """The subcommand names at the front of ``args``: the words after the root's options
+    and before the first option of the command itself."""
+    words: list[str] = []
+    skip = False
+    for arg in args:
+        if skip:
+            skip = False
+            continue
+        if arg.startswith("-"):
+            if words:
+                break
+            skip = arg == "--config"
+            continue
+        words.append(arg)
+    return words
+
+
+def _refuse_during_an_update(args: Sequence[str]) -> None:
+    """While ``<data>/update/state.json`` exists, refuse every command but the allowed ones
+    (:data:`_DURING_AN_UPDATE`) and ``--help``."""
+    if "--help" in args:
+        return
+    words = _command_words(args)
+    if tuple(words[:1]) in _DURING_AN_UPDATE or tuple(words[:2]) in _DURING_AN_UPDATE:
+        return
+    state_file = update_service.update_dir() / update_service.STATE_FILE
+    if not state_file.exists():
+        return
+    typer.echo(f"error: {UPDATE_IN_PROGRESS}. {state_file} records it.", err=True)
+    raise typer.Exit(code=1)
 
 
 def _auto_migrate(command: str | None) -> list[str]:
