@@ -241,11 +241,7 @@ def serve_answers(base: str, *, timeout_s: float = _HEALTH_TIMEOUT_S) -> bool:
         return False
     connection = http.client.HTTPConnection(host, port, timeout=timeout_s)
     try:
-        # putrequest, not .request: ADR 0006's scan reads any .request as a Playwright API
-        # request context. The HTTP client pin allows these two calls here by name.
-        connection.putrequest("GET", HEALTH_PATH)
-        connection.putheader("Accept", "application/json")
-        connection.endheaders()
+        connection.request("GET", HEALTH_PATH, headers={"Accept": "application/json"})
         response = connection.getresponse()
         if response.status != 200:
             return False
