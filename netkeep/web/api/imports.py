@@ -374,6 +374,7 @@ def archive_report_out(
         ),
         ignored_files=ignored_files,
         unfamiliar_message_files=list(report.unfamiliar_message_files),
+        foreign_message_files=list(report.foreign_message_files),
     )
 
 

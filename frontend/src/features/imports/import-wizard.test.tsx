@@ -995,6 +995,29 @@ describe('the archive shape: a zip, or a lone message/invitation file (P1-21)', 
     expect(note).toHaveTextContent(/assistant.s chat log/)
   })
 
+  it("names a messages file skipped as someone else's export (issue #702)", async () => {
+    mockFetch(
+      backend({
+        'GET /api/v1/imports/presets': () => jsonResponse(PRESETS),
+        'POST /api/v1/imports/archive': () =>
+          jsonResponse(
+            { ...ARCHIVE_RESULT, foreign_message_files: ['colleague/messages.csv'] },
+            201,
+          ),
+      }),
+    )
+    await renderApp('/imports')
+    await chooseArchive(zipFile())
+    await screen.findByText('Recognized: a LinkedIn data archive')
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }))
+    await screen.findByText(/^Imported/)
+
+    const note = screen.getByText(/^Skipped, because its messages name someone else/)
+    expect(note).toBeVisible()
+    expect(note).toHaveTextContent('colleague/messages.csv')
+    expect(note).toHaveTextContent('nothing in it was added')
+  })
+
   it('says nothing about unfamiliar message files when there are none', async () => {
     mockFetch(
       backend({

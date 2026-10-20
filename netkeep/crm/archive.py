@@ -110,6 +110,7 @@ from netkeep.db import is_writer
 from netkeep.linkedin.archive import (
     Archive,
     ArchiveKind,
+    ArchiveMember,
     ConnectionRow,
     InvitationDirection,
     InvitationRow,
@@ -359,6 +360,11 @@ class ArchiveImport:
     rows then show up in the message counts (``no_counterpart`` or
     ``no_owner``, since an assistant has no profile URL) and never as
     interactions.
+
+    ``foreign_message_files`` names every messages-shaped member skipped because
+    its traffic names another owner than the first table read (#702): another
+    person's export, whose conversations would otherwise land on your contacts'
+    timelines as yours.
     """
 
     observed_at: datetime
@@ -371,6 +377,7 @@ class ArchiveImport:
     positions: PositionCounts = field(default_factory=PositionCounts)
     tagging: RuleRun = field(default_factory=lambda: RuleRun(0, 0, 0, 0))
     unfamiliar_message_files: list[str] = field(default_factory=list)
+    foreign_message_files: list[str] = field(default_factory=list)
 
 
 def import_archive(
@@ -422,16 +429,15 @@ def import_archive(
             _import_positions(session, user, archive.positions(member), when, report)
     written = _Interactions(session, user)
     profile_name = archive.owner_name()
-    # The first table's owner is every later table's too (#702): a foreign
-    # messages-shaped member (#74) read on its own would detect its own owner and
-    # attribute its traffic as if that were the user.
-    owner: Owner | str | None = owner_public_id
-    for member in archive.members:
-        if member.kind is ArchiveKind.MESSAGES:
-            _note_unfamiliar_messages(member.name, report)
-            found = _import_messages(archive.messages(member), owner, profile_name, written, report)
-            if owner is None:
-                owner = found
+    for member in _messages_members(archive):
+        _import_messages(
+            member.name,
+            archive.messages(member),
+            owner_public_id,
+            profile_name,
+            written,
+            report,
+        )
     for member in archive.members:
         if member.kind is ArchiveKind.INVITATIONS:
             _import_invitations(archive.invitations(member), written, report)
@@ -502,6 +508,7 @@ def report_json(report: ArchiveImport, *, ignored_files: Iterable[str] = ()) -> 
         "positions": asdict(report.positions),
         "ignored_files": list(ignored_files),
         "unfamiliar_message_files": list(report.unfamiliar_message_files),
+        "foreign_message_files": list(report.foreign_message_files),
     }
 
 
@@ -642,16 +649,62 @@ def _incoming_contact(row: ConnectionRow, observed_at: datetime) -> IncomingCont
 # --- messages ---------------------------------------------------------------
 
 
+def _messages_members(archive: Archive) -> list[ArchiveMember]:
+    """The archive's messages tables, the familiar ``messages.csv`` first (#702).
+
+    The first table read with an owner decides whose archive this is, so it
+    must be the user's own: a ``messages.csv``, the shallowest one first, then
+    every other messages-shaped member in the archive's order. A foreign table
+    must never decide it because its name sorts first.
+    """
+    tables = [member for member in archive.members if member.kind is ArchiveKind.MESSAGES]
+    return sorted(
+        tables,
+        key=lambda member: (not _is_familiar(member.name), _depth(member.name)),
+    )
+
+
+def _base_name(name: str) -> str:
+    """A member's file name without its directories, with either separator (#222, M14)."""
+    return name.replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def _is_familiar(name: str) -> bool:
+    return _base_name(name).casefold() == MESSAGES_FILENAME
+
+
+def _depth(name: str) -> int:
+    return name.replace("\\", "/").count("/")
+
+
 def _import_messages(
+    name: str,
     rows: Iterable[MessageRow],
-    owner: Owner | str | None,
+    owner_public_id: str | None,
     profile_name: str | None,
     written: _Interactions,
     report: ArchiveImport,
-) -> Owner | None:
-    """Import one messages table; the owner it was read as, or ``None`` when none was found."""
+) -> None:
+    """Import one messages table, unless it is someone else's (#702).
+
+    Without ``owner_public_id``, each table's owner is read out of its own
+    traffic. Once one table has named the owner, a later table that names
+    somebody else is another person's export (#74): it is skipped whole, named
+    in ``foreign_message_files``, and adds nothing to the counts.
+    """
+    threads = group(rows, owner=owner_public_id, profile_name=profile_name)
+    if (
+        threads.owner is not None
+        and report.owner_public_id is not None
+        and threads.owner.public_id != report.owner_public_id
+    ):
+        report.foreign_message_files.append(name)
+        log.warning(
+            "archive: %s names another owner than the first messages table; skipped it", name
+        )
+        return
+    _note_unfamiliar_messages(name, report)
     counts = report.messages
-    threads = group(rows, owner=owner, profile_name=profile_name)
     counts.rows += threads.rows
     counts.undated += threads.undated_rows
     counts.conversations += threads.total_conversations
@@ -659,7 +712,7 @@ def _import_messages(
     counts.group_threads += threads.skipped_for("group")
     counts.no_owner += threads.skipped_for("no_owner")
     if threads.owner is None:
-        return None
+        return
     _note_owner(threads.owner, report)
     for conversation in threads.conversations:
         contact_id = written.contact_for(conversation.counterpart_public_id)
@@ -679,7 +732,6 @@ def _import_messages(
                     counts.inbound += 1
             else:
                 counts.already_present += 1
-    return threads.owner
 
 
 def _note_unfamiliar_messages(name: str, report: ArchiveImport) -> None:
@@ -689,8 +741,7 @@ def _note_unfamiliar_messages(name: str, report: ArchiveImport) -> None:
     the reader's own skip list is: ``export/Messages.csv`` is the familiar
     table in a subdirectory, ``interview_prep_messages.csv`` is not.
     """
-    base = name.replace("\\", "/").rsplit("/", 1)[-1]
-    if base.casefold() == MESSAGES_FILENAME:
+    if _is_familiar(name):
         return
     report.unfamiliar_message_files.append(name)
     log.warning(
@@ -703,7 +754,7 @@ def _note_unfamiliar_messages(name: str, report: ArchiveImport) -> None:
 
 def _note_owner(owner: Owner, report: ArchiveImport) -> None:
     if report.owner_public_id is not None:
-        return  # every table after the first is read as the first one's owner
+        return  # the same owner again: _import_messages skipped any other
     report.owner_public_id = owner.public_id
     report.owner_by = owner.by
 

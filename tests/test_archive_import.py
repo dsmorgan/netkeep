@@ -912,6 +912,11 @@ def test_an_adopted_message_on_a_contact_the_archive_created_counts_as_gained(
         import_runs.rollback(writer, user, report.run_id)
 
     assert raised.value.acquired.interactions == 1
+    assert raised.value.acquired.adopted == 1
+    assert (
+        "1 interaction (including 1 message this run wrote that the inbox poll has since adopted)"
+        in str(raised.value)
+    )
     assert import_runs.get_run(writer, user, report.run_id).status is ImportStatus.COMMITTED
     import_runs.rollback(writer, user, report.run_id, force=True)
     assert _all_contacts(writer, user) == []
@@ -1007,24 +1012,58 @@ FOREIGN_MESSAGES = (
 """Someone else's messages table: on its own its traffic names Quorbelle as the owner."""
 
 
-def test_a_second_messages_table_is_read_as_the_first_ones_owner(
-    writer: Session, user: User, tmp_path: Path
+@pytest.mark.parametrize(
+    "name",
+    ["aa_other_messages.csv", "zz_other_messages.csv", "colleague/messages.csv"],
+)
+def test_a_messages_table_naming_another_owner_is_skipped_and_named(
+    writer: Session, user: User, tmp_path: Path, name: str
 ) -> None:
-    """#702 B26: read under its own detected owner, the foreign table would put a
-    stranger's words on Cyd's and Gus's timelines as if they were the user's."""
+    """#702 B26: someone else's messages table never decides the owner and never lands.
+
+    The foreign table may sort before ``messages.csv`` or carry the familiar name
+    deeper down; either way the shallowest ``messages.csv`` is read first, and a
+    table whose own traffic names somebody else is skipped whole and named.
+    """
     root = tmp_path / "export"
     shutil.copytree(FIXTURES, root)
-    (root / "zz_other_messages.csv").write_text(FOREIGN_MESSAGES)
+    (root / name).parent.mkdir(parents=True, exist_ok=True)
+    (root / name).write_text(FOREIGN_MESSAGES)
     with open_archive(root) as opened:
         report = _run(writer, user, opened)
 
     assert report.owner_public_id == "nettie-keeperton"
-    assert report.messages.added == 8  # the sample's, and nothing of the stranger's
-    assert report.messages.group_threads == 1 + 2  # neither side of q1 or q2 is the owner
+    assert report.foreign_message_files == [name]
+    assert report_json(report)["foreign_message_files"] == [name]
+    assert report.unfamiliar_message_files == []  # it was not imported at all
+    # The sample's counts, exactly: nothing of the stranger's is counted or written.
+    assert report.messages.rows == 13
+    assert report.messages.added == 8
+    assert report.messages.group_threads == 1
     contacts = _contacts(writer, user)
     strangers = {contacts["cyd-invented"].id, contacts["gus-nobody"].id}
     july = [row for row in _interactions(writer, user) if (row.at.year, row.at.month) == (2023, 7)]
     assert not [row for row in july if row.contact_id in strangers]
+
+
+def test_a_second_table_with_the_same_owner_is_imported(
+    writer: Session, user: User, tmp_path: Path
+) -> None:
+    """Only a table naming *another* owner is skipped: a split export of the user's own lands."""
+    root = tmp_path / "export"
+    shutil.copytree(FIXTURES, root)
+    (root / "aa_more_messages.csv").write_text(
+        FOREIGN_MESSAGES.replace("quorbelle-fictionary", "nettie-keeperton").replace(
+            "Quorbelle Fictionary", "Nettie Keeperton"
+        )
+    )
+    with open_archive(root) as opened:
+        report = _run(writer, user, opened)
+
+    assert report.owner_public_id == "nettie-keeperton"
+    assert report.foreign_message_files == []
+    assert report.unfamiliar_message_files == ["aa_more_messages.csv"]
+    assert report.messages.added == 8 + 2
 
 
 def test_the_familiar_name_in_a_subdirectory_or_another_case_is_not_named(

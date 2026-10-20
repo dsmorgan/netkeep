@@ -360,13 +360,19 @@ function ConnectionsCard({ counts }: { counts: ArchiveConnectionCounts }) {
  * name (issue #74). It was imported, but LinkedIn exports its own assistants'
  * chat logs in the same shape, and one netkeep does not know by name reads
  * as conversations that add nothing. The note says which file to look at.
+ *
+ * `foreignFiles` names every messages-shaped file skipped because its
+ * messages name somebody else as the archive's owner (issue #702): another
+ * person's export, none of which was added.
  */
 export function MessagesCard({
   counts,
   unfamiliarFiles = [],
+  foreignFiles = [],
 }: {
   counts: ArchiveMessageCounts
   unfamiliarFiles?: readonly string[]
+  foreignFiles?: readonly string[]
 }) {
   if (counts.rows === 0) return null
   return (
@@ -407,6 +413,17 @@ export function MessagesCard({
               {unfamiliarFiles.join(', ')}. If {plural(unfamiliarFiles.length, 'it is', 'one is')} a
               LinkedIn assistant&rsquo;s chat log, its conversations are counted above but added
               nothing, since an assistant is not a contact.
+            </p>
+          </Note>
+        )}
+        {foreignFiles.length > 0 && (
+          <Note tone="warn" role="status">
+            <p>
+              Skipped, because {plural(foreignFiles.length, 'its', 'their')} messages name someone
+              else as the archive&rsquo;s owner: {foreignFiles.join(', ')}.{' '}
+              {plural(foreignFiles.length, 'It looks', 'They look')} like another person&rsquo;s
+              export, so nothing in {plural(foreignFiles.length, 'it', 'them')} was added and{' '}
+              {plural(foreignFiles.length, 'it is', 'they are')} not counted above.
             </p>
           </Note>
         )}
@@ -490,7 +507,11 @@ function ArchiveResult({
       </Card>
 
       <ConnectionsCard counts={result.connections} />
-      <MessagesCard counts={result.messages} unfamiliarFiles={result.unfamiliar_message_files} />
+      <MessagesCard
+        counts={result.messages}
+        unfamiliarFiles={result.unfamiliar_message_files}
+        foreignFiles={result.foreign_message_files}
+      />
       <InvitationsCard counts={result.invitations} />
 
       {ignored.length > 0 && (

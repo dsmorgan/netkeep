@@ -380,6 +380,7 @@ describe('one import run', () => {
       invitations: ARCHIVE_RESULT.invitations,
       ignored_files: ARCHIVE_RESULT.ignored_files,
       unfamiliar_message_files: ['interview_prep_messages.csv'],
+      foreign_message_files: [],
     }
     const archiveRun = {
       ...COMMITTED_RUN,

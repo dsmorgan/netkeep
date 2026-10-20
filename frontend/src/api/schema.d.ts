@@ -4151,6 +4151,8 @@ export interface components {
             connections: components["schemas"]["ArchiveConnectionCountsOut"];
             /** Filename */
             filename: string;
+            /** Foreign Message Files */
+            foreign_message_files: string[];
             /** Ignored Files */
             ignored_files: string[];
             invitations: components["schemas"]["ArchiveInvitationCountsOut"];
@@ -4254,6 +4256,11 @@ export interface components {
          */
         ArchiveReportOut: {
             connections: components["schemas"]["ArchiveConnectionCountsOut"];
+            /**
+             * Foreign Message Files
+             * @default []
+             */
+            foreign_message_files: string[];
             /** Ignored Files */
             ignored_files: string[];
             invitations: components["schemas"]["ArchiveInvitationCountsOut"];

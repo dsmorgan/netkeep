@@ -390,6 +390,13 @@
             "title": "Filename",
             "type": "string"
           },
+          "foreign_message_files": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Foreign Message Files",
+            "type": "array"
+          },
           "ignored_files": {
             "items": {
               "type": "string"
@@ -459,7 +466,8 @@
           "messages",
           "invitations",
           "ignored_files",
-          "unfamiliar_message_files"
+          "unfamiliar_message_files",
+          "foreign_message_files"
         ],
         "title": "ArchiveImportOut",
         "type": "object"
@@ -617,6 +625,14 @@
         "properties": {
           "connections": {
             "$ref": "#/components/schemas/ArchiveConnectionCountsOut"
+          },
+          "foreign_message_files": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Foreign Message Files",
+            "type": "array"
           },
           "ignored_files": {
             "items": {
