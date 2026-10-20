@@ -4,6 +4,7 @@ back under launchd and standalone, and the serve lock (#590) across it."""
 from __future__ import annotations
 
 import asyncio
+import logging
 import plistlib
 import time
 from collections.abc import Awaitable, Callable
@@ -875,57 +876,119 @@ def _held(release: asyncio.Event) -> Callable[[], Awaitable[None]]:
     return heartbeat
 
 
-async def test_an_error_that_persists_logs_one_traceback_then_a_line_a_minute(
+class _Logged:
+    """What a restart gate driven by :func:`_drive` logged."""
+
+    def __init__(self, records: list[logging.LogRecord]) -> None:
+        mine = [r for r in records if r.name == restart_gate.__name__]
+        self.tracebacks = [r.exc_info[0] for r in mine if r.exc_info is not None]
+        self.warnings = [r.getMessage() for r in mine if "still could not check" in r.getMessage()]
+        self.waits = [r.getMessage() for r in mine if r.getMessage().startswith("restart waits")]
+
+
+async def _drive(
     caplog: pytest.LogCaptureFixture,
-) -> None:
-    """#707 review: a look that keeps failing logs its traceback once, and again only for
-    another kind of error; in between, one line at most every ERROR_LOG_S. The reasons it
-    waits on are logged when they change, not at every look."""
+    look: Callable[[int], list[str]],
+    *,
+    looks: int,
+    step: Callable[[int], float] = lambda _n: 1.0,
+    quiesce: Callable[[], Awaitable[None]] | None = None,
+) -> _Logged:
+    """Run a restart gate for ``looks`` looks, then cancel it. Its ``n``-th look (from 1)
+    answers ``look(n)`` or raises, after a fake clock moves on ``step(n)`` seconds."""
     stops: list[None] = []
     hook = restart.Restarter(stop=lambda: stops.append(None), mode="exec")
     now = [0.0]
-    errors: list[BaseException] = (
-        [OSError("locked")] * 50  # 50 looks within a second
-        + [OSError("locked")]  # a minute later: one line
-        + [RuntimeError("other")] * 3  # another kind: its own traceback
-    )
-    looks = [0]
+    count = [0]
 
     async def busy() -> list[str]:
-        looks[0] += 1
-        if looks[0] == 51:
-            now[0] += restart_gate.ERROR_LOG_S
-        elif looks[0] <= 50:
-            now[0] += 0.01
-        if errors:
-            raise errors.pop(0)
-        return ["a LinkedIn run (#3) is going"]
+        if count[0] >= looks:
+            await asyncio.Event().wait()  # no more looks: held here until the cancel
+        count[0] += 1
+        now[0] += step(count[0])
+        return look(count[0])
 
-    async def quiesce() -> None:
+    async def calm() -> None:
         pass
 
     gate = restart_gate.RestartGate(
         hook,
         busy=busy,
-        quiesce=quiesce,
+        quiesce=quiesce if quiesce is not None else calm,
         resume=lambda: None,
         poll_s=0,
         monotonic=lambda: now[0],
     )
     with caplog.at_level("INFO", logger=restart_gate.__name__):
         gate.start()
-        await _until(lambda: looks[0] >= 60)
+        await _until(lambda: count[0] >= looks)
         assert await gate.cancel()
-    records = [r for r in caplog.records if r.name == restart_gate.__name__]
-    tracebacks = [r for r in records if r.exc_info is not None]
-    assert [r.exc_info[0] for r in tracebacks if r.exc_info] == [OSError, RuntimeError]
-    still = [r.getMessage() for r in records if "still could not check" in r.getMessage()]
-    assert still == [
-        "restart: still could not check what is running (OSError, 50 more times); trying again"
-    ]
-    waits = [r.getMessage() for r in records if r.getMessage().startswith("restart waits")]
-    assert waits == [
-        f"restart waits: {restart_gate.CHECK_FAILED}",
-        "restart waits: a LinkedIn run (#3) is going",
-    ]
     assert stops == []
+    return _Logged(caplog.records)
+
+
+def _warning(failed: int) -> str:
+    return (
+        f"restart: still could not check what is running (OSError; {failed} failed looks"
+        " since the last report); trying again"
+    )
+
+
+async def test_an_error_that_persists_logs_one_traceback_then_a_line_a_minute(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#707 review: a look that keeps failing logs its traceback once, and once more for
+    another kind of error; in between, one line at most every ERROR_LOG_S, each counting
+    the failed looks since the last. The reasons it waits on are logged when they change."""
+
+    def look(n: int) -> list[str]:
+        if n <= 81:
+            raise OSError("locked")
+        if n <= 84:
+            raise RuntimeError("other")
+        return ["a LinkedIn run (#3) is going"]
+
+    # 0.01 s a look, but a minute passes before looks 51 and 81: the count resets between
+    logged = await _drive(
+        caplog,
+        look,
+        looks=90,
+        step=lambda n: restart_gate.ERROR_LOG_S if n in (51, 81) else 0.01,
+    )
+    assert logged.tracebacks == [OSError, RuntimeError]
+    assert logged.warnings == [_warning(50), _warning(30)]
+    assert logged.waits == ["restart waits: a LinkedIn run (#3) is going"]
+
+
+async def test_a_quiesce_that_always_raises_logs_one_traceback_and_a_line_a_minute(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#707 re-review: each look is clean, then the quiesce raises. Before, the clean look
+    reset the error, so every pass logged a traceback."""
+
+    async def broken() -> None:
+        raise OSError("the engine would not stop")
+
+    logged = await _drive(caplog, lambda _n: [], looks=150, quiesce=broken)
+    # one look and one quiesce a second: 150 s, a traceback at 1 s, a line at 61 s and 121 s
+    assert logged.tracebacks == [OSError]
+    assert logged.warnings == [_warning(60), _warning(60)]
+    assert logged.waits == []
+
+
+async def test_a_look_that_fails_every_other_pass_logs_one_traceback_and_no_flapping(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#707 re-review: a look that fails every other time logged a traceback each time it
+    failed and a "restart waits" line at every look."""
+
+    def look(n: int) -> list[str]:
+        if n % 2:
+            raise OSError("locked")
+        return ["a LinkedIn run (#3) is going"]
+
+    logged = await _drive(caplog, look, looks=150)
+    # a failed look every 2 s: a traceback at 1 s, a line at 61 s and 121 s
+    assert logged.tracebacks == [OSError]
+    assert logged.warnings == [_warning(30), _warning(30)]
+    assert logged.waits == ["restart waits: a LinkedIn run (#3) is going"]

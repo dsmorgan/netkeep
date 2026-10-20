@@ -54,8 +54,8 @@ CHECK_FAILED: Final = "netkeep could not check what is running (see the log); it
 """What a restart waits on while its busy check or the quiesce raises (#707)."""
 
 ERROR_LOG_S: Final = 60.0
-"""While the same error repeats, a restart waiting for idle logs it at most this often:
-its traceback once, then one line (#707 review)."""
+"""While errors repeat, a restart waiting for idle logs at most one line this often,
+after each kind of error's one traceback (#707 review)."""
 
 
 @runtime_checkable
@@ -216,14 +216,13 @@ class RestartGate:
 
     async def _run(self) -> None:
         quiet = False  # the quiesce finished without an error
-        logged: list[str] | None = None  # the reasons last logged
-        failing: type[BaseException] | None = None  # the error the last look raised
-        failures = 0  # looks that raised it since its traceback or last warning
+        logged: list[str] | None = None  # the reasons a clean look last logged
+        traced: set[type[Exception]] = set()  # the errors whose traceback is logged
+        failures = 0  # looks that raised since the last traceback or warning
         warned_at = 0.0
         while True:
             try:
                 reasons = await self._busy()
-                failing = None
                 self.waiting_on = reasons
                 if not reasons:
                     if quiet:
@@ -235,29 +234,31 @@ class RestartGate:
                     await asyncio.shield(self._quiescing)
                     quiet = True
                     continue  # look once more: something may have started meanwhile
+                if reasons != logged:
+                    log.info("restart waits: %s", "; ".join(reasons))
+                    logged = reasons
             except Exception as exc:
                 # Never stop waiting on an error (#707): this task would end with the
                 # scheduler, the engine and backups paused, and Cancel could not undo it.
-                # Unknown is not idle, and a quiesce that failed is tried again. One
-                # traceback per kind of error, then a line at most every ERROR_LOG_S, so
-                # an error that persists never rotates the rest of the log away.
+                # Unknown is not idle, and a quiesce that failed is tried again. Each kind
+                # of error logs its traceback once while the gate waits; after that, one
+                # line at most every ERROR_LOG_S, so an error that persists or comes and
+                # goes never rotates the rest of the log away.
                 now = self._monotonic()
-                failures += 1
-                if type(exc) is not failing:
+                if type(exc) not in traced:
+                    traced.add(type(exc))
                     log.exception("restart: could not check what is running; trying again")
-                    failing, failures, warned_at = type(exc), 0, now
-                elif now - warned_at >= ERROR_LOG_S:
-                    log.warning(
-                        "restart: still could not check what is running (%s, %d more"
-                        " times); trying again",
-                        type(exc).__name__,
-                        failures,
-                    )
                     failures, warned_at = 0, now
-                reasons = [CHECK_FAILED]
-                self.waiting_on = reasons
-            if reasons != logged:
-                log.info("restart waits: %s", "; ".join(reasons))
-                logged = reasons
+                else:
+                    failures += 1
+                    if now - warned_at >= ERROR_LOG_S:
+                        log.warning(
+                            "restart: still could not check what is running (%s; %d failed"
+                            " looks since the last report); trying again",
+                            type(exc).__name__,
+                            failures,
+                        )
+                        failures, warned_at = 0, now
+                self.waiting_on = [CHECK_FAILED]
             await asyncio.sleep(self._poll_s)
         self._hook.trigger()
