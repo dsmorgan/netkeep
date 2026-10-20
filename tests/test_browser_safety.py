@@ -499,6 +499,12 @@ ALLOWED_SCRIPTS = frozenset({(LINKEDIN / "preflight.py", "_read_fingerprint", "e
 #: ``.request`` read, in this file or elsewhere, is still a finding.
 SUPER_REQUEST = "calls the request it overrides"
 ALLOWED_SUPER_REQUESTS = {PACKAGE / "campaigns" / "gmail.py": 3}
+#: ``.request`` reads that are an ``http.client`` connection's, not a Playwright API
+#: request context, by (file, function): count. `netkeep setup`'s health check (#684)
+#: sends one GET to loopback on a connection it builds itself, pinned by the HTTP client
+#: pin (``ALLOWED_HTTP_CLIENTS``).
+ALLOWED_CONNECTION_REQUESTS = {(PACKAGE / "services" / "post_install.py", "serve_answers"): 1}
+CONTEXT_REQUEST = "reads an API request context (ADR 0006)"
 
 # The attach point. Everything else goes through AttachBrowserProvider.
 CONNECT_CALL = "connect_over_cdp"
@@ -3202,6 +3208,11 @@ HTTP_CLIENT_MODULES = frozenset(
         "ftplib",
         "smtplib",
         "telnetlib",
+        "logging.handlers",
+        "urllib.robotparser",
+        "googleapiclient",
+        "google_auth_httplib2",
+        "google.auth.transport",
         "httpcore",
         "httpx",
         "requests",
@@ -3225,6 +3236,10 @@ ALLOWED_HTTP_CLIENTS = {
     (PACKAGE / "campaigns" / "gmail.py", "WriteOnceMixin.request", "http.client"): 1,
     (PACKAGE / "campaigns" / "gmail.py", "WriteOnceMixin.getresponse", "http.client"): 2,
     (PACKAGE / "campaigns" / "gmail.py", "GmailClient._run", "http.client"): 1,
+    # Gmail's API library and its httplib2 transport (#563): the client build, its error
+    # type, and the authorized transport the write-once connection plugs into.
+    (PACKAGE / "campaigns" / "gmail.py", "", "googleapiclient"): 2,
+    (PACKAGE / "campaigns" / "gmail.py", "", "google_auth_httplib2"): 1,
     # Gmail's OAuth: the token exchange's opener, and the errors its send and its error
     # reading catch.
     (PACKAGE / "campaigns" / "gmail_oauth.py", "", "http.client"): 1,
@@ -3232,15 +3247,13 @@ ALLOWED_HTTP_CLIENTS = {
     (PACKAGE / "campaigns" / "gmail_oauth.py", "_send", "http.client"): 1,
     (PACKAGE / "campaigns" / "gmail_oauth.py", "_error_code", "http.client"): 1,
     # `netkeep setup`'s health check (#684): one GET of /api/v1/health on a loopback
-    # name, no redirect followed, no proxy, the body capped. Its connection, its errors,
-    # and the two send calls.
+    # name, no redirect followed, no proxy, the body capped: its connection and its
+    # errors.
     (PACKAGE / "services" / "post_install.py", "", "http.client"): 1,
     (PACKAGE / "services" / "post_install.py", "serve_answers", "http.client"): 2,
-    (PACKAGE / "services" / "post_install.py", "serve_answers", "putrequest"): 1,
-    (PACKAGE / "services" / "post_install.py", "serve_answers", "endheaders"): 1,
+    # Not a network client: the log file's size-based rotation (#602).
+    (PACKAGE / "logging_setup.py", "", "logging.handlers"): 1,
 }
-
-_HTTP_PACKAGES = {"http": "client", "urllib": "request", "xmlrpc": "client"}
 
 
 def _http_module(name: str) -> str | None:
@@ -3251,9 +3264,48 @@ def _http_module(name: str) -> str | None:
     return None
 
 
+def _http_parent(name: str) -> bool:
+    """Whether ``name`` is a package above an :data:`HTTP_CLIENT_MODULES` entry
+    (``http``, ``urllib``, ``logging``, ``google``, ``google.auth``)."""
+    return any(module.startswith(f"{name}.") for module in HTTP_CLIENT_MODULES)
+
+
+def _http_parents(tree: ast.AST) -> dict[str, str]:
+    """Every local name bound to a parent package (:func:`_http_parent`), and which:
+    ``import http`` and ``import http.client`` bind ``http``, ``import http as h``
+    binds ``h``, and ``from google import auth as a`` binds ``a`` to ``google.auth``."""
+    bound: dict[str, str] = {}
+    for node in walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname is None:
+                    top = alias.name.split(".")[0]
+                    if _http_parent(top):
+                        bound[top] = top
+                elif _http_parent(alias.name):
+                    bound[alias.asname] = alias.name
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            for alias in node.names:
+                dotted = f"{node.module}.{alias.name}"
+                if alias.name != "*" and _http_parent(dotted):
+                    bound[alias.asname or alias.name] = dotted
+    return bound
+
+
+def _dotted(node: ast.AST, parents: dict[str, str]) -> str | None:
+    """``h.client`` as ``http.client`` when ``h`` is bound to ``http``."""
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name) or node.id not in parents:
+        return None
+    return ".".join([parents[node.id], *reversed(parts)])
+
+
 def http_clients(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int]:
     """Each reach of a :data:`HTTP_CLIENT_MODULES` module or a :data:`HTTP_SEND_NAMES`
-    name, by file and function."""
+    name, by file and function. A parent package is followed through any alias of it."""
     found: dict[tuple[Path, str, str], int] = {}
 
     def add(path: Path, where: str, name: str) -> None:
@@ -3265,6 +3317,7 @@ def http_clients(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int]:
                 add(path, item.function, name)
         tree = parse(source)
         scopes = _scoped(tree)
+        parents = _http_parents(tree)
         for node in walk(tree):
             where = scopes.get(id(node), "")
             if isinstance(node, ast.Import):
@@ -3274,27 +3327,31 @@ def http_clients(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int]:
             elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
                 if (module := _http_module(node.module)) is not None:
                     add(path, where, module)
-                elif node.module in _HTTP_PACKAGES:
+                elif _http_parent(node.module):
                     for alias in node.names:
-                        dotted = f"{node.module}.{alias.name}"
-                        if alias.name == "*" or _http_module(dotted) is not None:
-                            add(path, where, f"{node.module}.{_HTTP_PACKAGES[node.module]}")
-            elif (
-                isinstance(node, ast.Attribute)
-                and isinstance(node.value, ast.Name)
-                and _HTTP_PACKAGES.get(node.value.id) == node.attr
-            ):
-                add(path, where, f"{node.value.id}.{node.attr}")
+                        if alias.name == "*":
+                            under = [m for m in HTTP_CLIENT_MODULES if m.startswith(node.module)]
+                            for module in sorted(under):
+                                add(path, where, module)
+                        elif (module := _http_module(f"{node.module}.{alias.name}")) is not None:
+                            add(path, where, module)
+            elif isinstance(node, ast.Attribute):
+                dotted = _dotted(node, parents)
+                if dotted is not None and dotted in HTTP_CLIENT_MODULES:
+                    add(path, where, dotted)
             elif (
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Name)
                 and node.func.id == "getattr"
                 and len(node.args) >= 2
-                and isinstance(node.args[0], ast.Name)
                 and isinstance(node.args[1], ast.Constant)
-                and _HTTP_PACKAGES.get(node.args[0].id) == node.args[1].value
+                and isinstance(node.args[1].value, str)
             ):
-                add(path, where, f"{node.args[0].id}.{node.args[1].value}")
+                base = _dotted(node.args[0], parents)
+                if base is not None:
+                    module = _http_module(f"{base}.{node.args[1].value}")
+                    if module is not None:
+                        add(path, where, module)
     return found
 
 
@@ -3341,6 +3398,23 @@ def test_only_the_reviewed_sites_open_an_http_client() -> None:
         "import httplib2 as h\n",
         "def f(conn):\n    conn.putrequest('GET', '/')\n    conn.endheaders()\n",
         "def f(conn):\n    send = getattr(conn, 'putrequest')\n",
+        "import http as h\nc = h.client.HTTPConnection('127.0.0.1', 1)\n",
+        "import urllib as u\nu.request.urlopen('http://127.0.0.1:1/')\n",
+        "import http as h\nc = getattr(h, 'client')\n",
+        "import xmlrpc as x\nx.client.ServerProxy('http://127.0.0.1:1/')\n",
+        "import logging\nlogging.handlers.HTTPHandler('127.0.0.1:1', '/')\n",
+        "import logging as lg\nlg.handlers.SMTPHandler('127.0.0.1', 'a', ['b'], 'c')\n",
+        "from logging.handlers import SocketHandler\n",
+        "from urllib.robotparser import RobotFileParser\n",
+        "import urllib as u\nu.robotparser.RobotFileParser('http://127.0.0.1:1/').read()\n",
+        "from googleapiclient.http import HttpRequest\n",
+        "import googleapiclient.discovery\n",
+        "from google_auth_httplib2 import AuthorizedHttp\n",
+        "from google.auth.transport.requests import AuthorizedSession\n",
+        "import google.auth.transport.urllib3\n",
+        "import google\ngoogle.auth.transport.requests.Request()\n",
+        "from google import auth\nauth.transport.requests.Request()\n",
+        "import google as g\nt = getattr(g.auth, 'transport')\n",
     ],
 )
 def test_the_http_client_pin_catches_a_new_opener(line: str) -> None:
@@ -3384,7 +3458,74 @@ def test_no_code_path_sends_through_an_api_request_context() -> None:
     others = [
         f for f in findings if not (f.path in ALLOWED_SUPER_REQUESTS and f.detail == SUPER_REQUEST)
     ]
+    assert connection_requests(others) == ALLOWED_CONNECTION_REQUESTS
+    others = [
+        f
+        for f in others
+        if not (
+            f.detail == CONTEXT_REQUEST
+            and (f.path, _function_at(f.path, f.line)) in ALLOWED_CONNECTION_REQUESTS
+        )
+    ]
     assert not others, complain(others, "netkeep sends no requests of its own:")
+
+
+def _function_at(path: Path, line: int, source: str | None = None) -> str:
+    """The dotted name of the innermost function or class around ``line`` in ``path``."""
+    tree = parse(read_source(path) if source is None else source)
+    best = ""
+
+    def visit(node: ast.AST, where: str) -> None:
+        nonlocal best
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                inner = f"{where}.{child.name}".lstrip(".")
+                if child.lineno <= line <= (child.end_lineno or child.lineno):
+                    best = inner
+                    visit(child, inner)
+
+    visit(tree, "")
+    return best
+
+
+def connection_requests(
+    findings: list[Finding], sources: dict[Path, str] | None = None
+) -> dict[tuple[Path, str], int]:
+    """The ADR 0006 ``.request`` findings in the files of
+    :data:`ALLOWED_CONNECTION_REQUESTS`, by file and function."""
+    files = {path for path, _ in ALLOWED_CONNECTION_REQUESTS}
+    found: dict[tuple[Path, str], int] = {}
+    for f in findings:
+        if f.path in files and f.detail == CONTEXT_REQUEST:
+            source = None if sources is None else sources[f.path]
+            key = (f.path, _function_at(f.path, f.line, source))
+            found[key] = found.get(key, 0) + 1
+    return found
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "\n\ndef _sneaky(page):\n    return page.request.get('https://example.invalid/')\n",
+        "\n\ndef serve_answers_too(c):\n    c.request('GET', '/')\n",
+    ],
+)
+def test_the_connection_request_allowance_is_exact(line: str) -> None:
+    """A second ``.request`` in setup's module, in another function, isn't allowed."""
+    path = PACKAGE / "services" / "post_install.py"
+    source = read_source(path) + line
+    findings = list(api_request_sends(source, path))
+    assert connection_requests(findings, {path: source}) != ALLOWED_CONNECTION_REQUESTS
+
+
+def test_a_second_request_in_the_health_check_isnt_allowed() -> None:
+    path = PACKAGE / "services" / "post_install.py"
+    anchor = "        response = connection.getresponse()\n"
+    source = read_source(path)
+    assert source.count(anchor) == 1
+    source = source.replace(anchor, "        connection.request('GET', '/other')\n" + anchor)
+    findings = list(api_request_sends(source, path))
+    assert connection_requests(findings, {path: source}) != ALLOWED_CONNECTION_REQUESTS
 
 
 def test_the_observing_modules_only_listen_and_scroll() -> None:
