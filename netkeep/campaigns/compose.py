@@ -13,6 +13,13 @@ made again from nothing numbers its messages from 1 again, and without it a
 search could find a message a former database sent. The local part is a hash,
 so the header says nothing about netkeep, the row, or the contact.
 
+**The seed** that goes into the hash is :data:`MESSAGE_ID_SEED`, and it never
+changes again (#721). The rename to netkeep (#661) changed it from
+``netkeeper-message-id`` by mistake, so a row made before the rename went out
+under the old seed's id and a row made after under the new one, and nothing tells
+them apart. Every lookup searches for both: :func:`message_id_candidates`.
+:func:`message_id_for` gives the id a new message goes out with.
+
 **Threading** (spec 11.5). A ``same_thread`` follow-up cites every earlier
 message of the Gmail thread in ``References``, oldest first, and the latest in
 ``In-Reply-To``. Its subject is the thread's first subject with one ``Re:``
@@ -54,6 +61,13 @@ from netkeep.models.contacts import single_address
 #: Bumped only if the derivation changes: a new version gives every row a new id.
 MESSAGE_ID_VERSION: Final = "v1"
 
+#: The seed of every Message-ID made since the rename (#661). Never change it: a new
+#: seed loses every message made under the old one (#721).
+MESSAGE_ID_SEED: Final = "netkeep-message-id"
+
+#: Seeds of Message-IDs made before, searched for too: rows made before the rename.
+LEGACY_MESSAGE_ID_SEEDS: Final = ("netkeeper-message-id",)
+
 #: Hex characters of the hash in a Message-ID's local part (128 bits).
 MESSAGE_ID_HASH_LENGTH: Final = 32
 
@@ -70,8 +84,7 @@ class ComposeError(ValueError):
     """The message cannot be built as asked (no address, a header that is not one)."""
 
 
-def message_id_for(*, user_id: int, message_id: int, created_at: datetime, address: str) -> str:
-    """The RFC 822 Message-ID of the engine's message ``message_id`` (see the module)."""
+def _derive(seed: str, *, user_id: int, message_id: int, created_at: datetime, address: str) -> str:
     if created_at.tzinfo is None:
         raise ComposeError("created_at must be timezone-aware")
     _, at, domain = address.strip().rpartition("@")
@@ -79,9 +92,34 @@ def message_id_for(*, user_id: int, message_id: int, created_at: datetime, addre
     if not at or not domain or not re.fullmatch(r"[a-z0-9.-]+", domain):
         raise ComposeError("the mailbox address has no domain a Message-ID can use")
     stamp = created_at.astimezone(UTC).isoformat(timespec="microseconds")
-    seed = f"netkeep-message-id:{MESSAGE_ID_VERSION}:{user_id}:{message_id}:{stamp}"
-    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:MESSAGE_ID_HASH_LENGTH]
+    text = f"{seed}:{MESSAGE_ID_VERSION}:{user_id}:{message_id}:{stamp}"
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:MESSAGE_ID_HASH_LENGTH]
     return f"<{digest}@{domain}>"
+
+
+def message_id_for(*, user_id: int, message_id: int, created_at: datetime, address: str) -> str:
+    """The RFC 822 Message-ID a new message ``message_id`` goes out with (see the module)."""
+    return _derive(
+        MESSAGE_ID_SEED,
+        user_id=user_id,
+        message_id=message_id,
+        created_at=created_at,
+        address=address,
+    )
+
+
+def message_id_candidates(
+    *, user_id: int, message_id: int, created_at: datetime, address: str
+) -> tuple[str, ...]:
+    """Every Message-ID the engine's message ``message_id`` may carry, for a search:
+    :func:`message_id_for`'s first, then the legacy seeds' (#721). Raises
+    :class:`ComposeError` as :func:`message_id_for` does."""
+    return tuple(
+        _derive(
+            seed, user_id=user_id, message_id=message_id, created_at=created_at, address=address
+        )
+        for seed in (MESSAGE_ID_SEED, *LEGACY_MESSAGE_ID_SEEDS)
+    )
 
 
 def is_message_id(value: str) -> bool:

@@ -8,11 +8,13 @@ reaches Gmail or Google.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
+import hashlib
 import itertools
 import random
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 from email.message import EmailMessage
 from typing import Any
 
@@ -25,7 +27,7 @@ from inbox_fakes import message as inbox_message
 from sqlalchemy.orm import Session, sessionmaker
 
 from netkeep.campaigns import schedule
-from netkeep.campaigns.compose import message_id_for
+from netkeep.campaigns.compose import LEGACY_MESSAGE_ID_SEEDS, message_id_for
 from netkeep.campaigns.gmail import (
     Draft,
     GmailAuthError,
@@ -104,8 +106,10 @@ class Clock:
 
 class LostAnswers(FakeGmail):
     """A Gmail whose answer to the next ``lose`` writes never arrives, after it acted.
-    The next ``lag`` searches by Message-ID find nothing (Gmail's search lagging a send),
-    and the next ``unlisted`` draft listings leave every draft out."""
+    The next ``lag`` searches by Message-ID that would find something find nothing
+    (Gmail's search lagging a send), and the next ``unlisted`` draft listings leave
+    every draft out. A search that finds nothing anyway (the old seed's Message-ID of a
+    row made since the rename, #721) uses up no lag."""
 
     lose: int = 0
     lag: int = 0
@@ -113,7 +117,7 @@ class LostAnswers(FakeGmail):
 
     def search(self, query: str, *, max_results: int = 100, purpose: str) -> list[MessageRef]:
         found = super().search(query, max_results=max_results, purpose=purpose)
-        if self.lag and "rfc822msgid:" in query:
+        if found and self.lag and "rfc822msgid:" in query:
             self.lag -= 1
             return []
         return found
@@ -298,6 +302,10 @@ def drafts(session_factory: sessionmaker[Session]) -> Mail:
     return make_mail(session_factory, modes=(StepMode.DRAFT, StepMode.DRAFT, StepMode.DRAFT))
 
 
+#: Searches per lookup that misses: one per Message-ID a row may carry (#721).
+PER_LOOKUP = 1 + len(LEGACY_MESSAGE_ID_SEEDS)
+
+
 def expected_message_id(mail: Mail, message: Message) -> str:
     return message_id_for(
         user_id=mail.user.id,
@@ -305,6 +313,29 @@ def expected_message_id(mail: Mail, message: Message) -> str:
         created_at=message.created_at,
         address="me@example.com",
     )
+
+
+def pre_rename_message_id(mail: Mail, message_id: int) -> str:
+    """The Message-ID netkeeper gave message ``message_id`` before the rename (#661): the
+    old seed, written out here (#721)."""
+    [row] = [m for m in mail.messages() if m.id == message_id]
+    stamp = row.created_at.astimezone(UTC).isoformat(timespec="microseconds")
+    seed = f"netkeeper-message-id:v1:{mail.user.id}:{message_id}:{stamp}"
+    return f"<{hashlib.sha256(seed.encode()).hexdigest()[:32]}@example.com>"
+
+
+@dataclass
+class PreRename:
+    """A sender that sends as netkeeper did before the rename: under the old seed's
+    Message-ID (#721)."""
+
+    mail: Mail
+    inner: GmailSender
+
+    def send(self, firing: Firing) -> SendResult:
+        legacy = pre_rename_message_id(self.mail, firing.message_id)
+        assert legacy != firing.rfc822_message_id
+        return self.inner.send(dataclasses.replace(firing, rfc822_message_id=legacy))
 
 
 def search_until_given_up(mail: Mail, first: datetime) -> datetime:
@@ -711,7 +742,7 @@ def test_a_deleted_draft_is_searched_in_scheduled_then_discarded_after_two_polls
         EnrollmentStatus.REMOVED,
         DRAFT_DISCARDED_REASON,
     )
-    assert len(queries) == 2  # one per poll that found it gone
+    assert len(queries) == 2 * PER_LOOKUP  # per poll that found it gone, one per seed
 
 
 def test_a_draft_marked_missing_then_found_scheduled_is_no_longer_missing(drafts: Mail) -> None:
@@ -791,7 +822,7 @@ def test_a_leftover_found_scheduled_waits_and_is_sent_when_delivered(drafts: Mai
     every = engine_module.RECONCILE_SEARCH_EVERY
     first = NOW + LATER
     drafts.tick(first)
-    assert searches() == 1
+    assert searches() == PER_LOOKUP  # each seed's Message-ID (#721)
     for minutes in (1, 5, 19):  # within RECONCILE_SEARCH_EVERY: not searched, no slot taken
         drafts.tick(first + timedelta(minutes=minutes))
         with session_scope(drafts.factory) as session:
@@ -799,9 +830,9 @@ def test_a_leftover_found_scheduled_waits_and_is_sent_when_delivered(drafts: Mai
                 session, drafts.user, now=first + timedelta(minutes=minutes)
             )
         assert work.leftovers == ()
-    assert searches() == 1
+    assert searches() == PER_LOOKUP
     drafts.tick(first + every)
-    assert searches() == 2
+    assert searches() == 2 * PER_LOOKUP
     [message] = drafts.messages(enrollment_id)
     assert (message.status, message.reconcile_misses, message.error) == (
         MessageStatus.SCHEDULED,
@@ -1300,6 +1331,46 @@ def test_a_crash_after_the_send_is_reconciled_as_sent_never_sent_again(mail: Mai
     assert (message.status, message.gmail_message_id) == (MessageStatus.SENT, sent.id)
     assert mail.enrollment(enrollment_id).next_action_at == NOW + WEEK
     assert [m for m, _ in mail.gmail.calls].count("messages.send") == 1
+
+
+def test_a_leftover_sent_before_the_rename_is_reconciled_as_sent_never_sent_again(
+    mail: Mail,
+) -> None:
+    """#721, safety: a send in flight across the upgrade went out under the old seed's
+    Message-ID. Reconcile searches for it too, finds it sent, and never sends again, on
+    this tick or any later one before the next step."""
+    enrollment_id = mail.enroll()
+    with pytest.raises(Crash):
+        mail.tick(sender=CrashAfterSend(PreRename(mail, mail.sender)))  # type: ignore[arg-type]
+    [message] = mail.messages(enrollment_id)
+    assert message.status is MessageStatus.SCHEDULED
+    [sent] = mail.gmail.sent()
+    assert sent.header("Message-ID") == pre_rename_message_id(mail, message.id)
+
+    search_until_given_up(mail, NOW + LATER)
+    for days in (1, 3, 6):
+        mail.tick(NOW + timedelta(days=days))
+    assert [m for m, _ in mail.gmail.calls].count("messages.send") == 1
+    [message] = mail.messages(enrollment_id)
+    assert (message.status, message.gmail_message_id) == (MessageStatus.SENT, sent.id)
+    assert mail.enrollment(enrollment_id).next_action_at == NOW + WEEK
+
+
+def test_a_draft_made_before_the_rename_and_scheduled_stays_drafted(drafts: Mail) -> None:
+    """#721: a draft netkeeper made before the rename, then sent with Schedule send, is
+    found in Scheduled by its old seed's Message-ID: it stays ``drafted``, never marked
+    missing or discarded."""
+    enrollment_id = drafts.enroll()
+    drafts.tick(sender=PreRename(drafts, drafts.sender))
+    [draft_id] = drafts.gmail.drafts()
+    drafts.gmail.schedule_draft(draft_id, at=NOW + timedelta(days=2))
+    for hours in (1, 2, 3):
+        drafts.tick(NOW + timedelta(hours=hours))
+        [message] = drafts.messages(enrollment_id)
+        assert (message.status, message.error) == (
+            MessageStatus.DRAFTED,
+            engine_module.SCHEDULED_IN_GMAIL,
+        )
 
 
 @pytest.mark.parametrize("delivered", [True, False])
@@ -2454,6 +2525,27 @@ def test_a_draft_seen_sent_while_the_search_lagged_still_verifies_the_mailbox(
     assert _message_id_searches(drafts) == before  # verified: no more searches
 
 
+@pytest.mark.parametrize("sent", [False, True])
+def test_a_draft_made_before_the_rename_verifies_the_mailbox(drafts: Mail, sent: bool) -> None:
+    """#721: the Message-ID check searches for the old seed's Message-ID too, both for
+    the oldest draft still waiting and for one the person sent (strict: the found
+    message's own header must be it)."""
+    set_arm(drafts, MailboxArm.DRAFT, verified=False)
+    enrollment_id = drafts.enroll()
+    drafts.tick(sender=PreRename(drafts, drafts.sender))
+    assert _verified_at(drafts) is None
+    [message] = drafts.messages(enrollment_id)
+    assert message.gmail_draft_id is not None
+    if sent:
+        drafts.gmail.send_draft(message.gmail_draft_id, at=NOW + timedelta(minutes=1))
+        drafts.gmail.lag = 1
+        drafts.tick(NOW + timedelta(minutes=2))  # seen sent; the search lags
+        assert drafts.messages(enrollment_id)[0].status is MessageStatus.SENT
+        assert _verified_at(drafts) is None
+    drafts.tick(NOW + timedelta(minutes=3))
+    assert _verified_at(drafts) == NOW + timedelta(minutes=3)
+
+
 def test_a_sent_draft_counts_when_the_oldest_waiting_draft_is_never_found(drafts: Mail) -> None:
     """Before #510 only the oldest waiting draft was searched for, so one Gmail never
     finds held the check back for good. A draft seen sent is searched for too."""
@@ -2603,7 +2695,7 @@ def test_a_draft_sent_more_than_14_days_ago_is_never_searched_for(
     assert drafts.messages(enrollment_id)[0].status is MessageStatus.SENT
     inside = _message_id_searches(drafts)
     drafts.tick(NOW + timedelta(days=13))
-    assert _message_id_searches(drafts) == inside + 1  # still in the window
+    assert _message_id_searches(drafts) == inside + PER_LOOKUP  # still in the window
     outside = _message_id_searches(drafts)
     drafts.tick(NOW + timedelta(days=14, minutes=2))
     assert _message_id_searches(drafts) == outside  # its only candidate is too old
@@ -2633,7 +2725,7 @@ def test_one_check_searches_for_at_most_five_campaign_drafts(drafts: Mail) -> No
     before = _message_id_searches(drafts)
     drafts.tick(at + timedelta(minutes=3))
     assert sum(1 for r in drafts.messages() if r.status is MessageStatus.SENT) == 6
-    assert _message_id_searches(drafts) - before == 5
+    assert _message_id_searches(drafts) - before == 5 * PER_LOOKUP
 
 
 def test_a_gmail_error_mid_check_records_neither_checked_nor_verified(drafts: Mail) -> None:

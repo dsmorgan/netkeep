@@ -16,6 +16,7 @@ from netkeep.campaigns.compose import (
     build_message,
     campaign_label,
     is_message_id,
+    message_id_candidates,
     message_id_for,
     reply_subject,
 )
@@ -43,6 +44,9 @@ def _wire(message: EmailMessage) -> EmailMessage:
 
 def test_the_compose_constants_are_pinned() -> None:
     assert compose.MESSAGE_ID_VERSION == "v1"
+    # Never change either seed (#721): a new one loses every message made under the old.
+    assert compose.MESSAGE_ID_SEED == "netkeep-message-id"
+    assert compose.LEGACY_MESSAGE_ID_SEEDS == ("netkeeper-message-id",)
     assert compose.MESSAGE_ID_HASH_LENGTH == 32
     assert compose.REFERENCES_MAX == 20
 
@@ -63,6 +67,29 @@ def test_the_message_id_is_pinned_to_its_derivation() -> None:
     seed = "netkeep-message-id:v1:1:42:2026-09-29T14:00:00.123456+00:00"
     expected = hashlib.sha256(seed.encode()).hexdigest()[:32]
     assert _id() == f"<{expected}@example.test>"
+
+
+def test_a_lookup_searches_for_the_current_and_the_pre_rename_message_id() -> None:
+    """#721: the rename (#661) changed the seed, so a row made before it went out under
+    the old seed's id. Both are candidates, the current one first, and new messages go
+    out under the current one. Seeds written out here, pinned."""
+    stamp = "2026-09-29T14:00:00.123456+00:00"
+    current, legacy = (
+        "<" + hashlib.sha256(f"{seed}:v1:1:42:{stamp}".encode()).hexdigest()[:32] + "@example.test>"
+        for seed in ("netkeep-message-id", "netkeeper-message-id")
+    )
+    fields = {"user_id": 1, "message_id": 42, "created_at": CREATED, "address": "me@example.test"}
+    assert message_id_candidates(**fields) == (current, legacy)  # type: ignore[arg-type]
+    assert _id() == current
+
+
+def test_the_candidates_refuse_what_the_message_id_refuses() -> None:
+    with pytest.raises(ComposeError):
+        message_id_candidates(
+            user_id=1, message_id=42, created_at=CREATED.replace(tzinfo=None), address="a@b.test"
+        )
+    with pytest.raises(ComposeError):
+        message_id_candidates(user_id=1, message_id=42, created_at=CREATED, address="nobody")
 
 
 @pytest.mark.parametrize(

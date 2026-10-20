@@ -14,7 +14,9 @@ Sending
   becomes a Gmail draft (``drafts.create``) the person sends by hand.
 - **The Message-ID** is the firing's ``rfc822_message_id``, derived from the
   message row before the send (#269), so a search for it after a crash or an
-  unknown outcome says whether Gmail has the message.
+  unknown outcome says whether Gmail has the message. A later lookup searches
+  for the old seed's Message-ID as well: a row made before the rename went out
+  under it (#721).
 - **Follow-ups** (``same_thread``). The Gmail thread is read first, and the
   follow-up cites every sent message in it, oldest first, in ``References``,
   and the newest in ``In-Reply-To``, with the thread's first subject behind
@@ -132,7 +134,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Final
@@ -253,37 +255,52 @@ def _message_id_query(rfc822_message_id: str, folder: str) -> str:
     return f"rfc822msgid:{rfc822_message_id.strip('<>')} in:{folder}"
 
 
-def _carries(message: Message, rfc822_message_id: str) -> bool:
-    """Whether the message's own ``Message-ID`` header is ``rfc822_message_id``, compared
-    with the angle brackets stripped from both."""
+def _carries(message: Message, rfc822_message_ids: Sequence[str]) -> bool:
+    """Whether the message's own ``Message-ID`` header is one of ``rfc822_message_ids``,
+    compared with the angle brackets stripped from both."""
     header = (message.header("Message-ID") or "").strip().strip("<>")
-    return header == rfc822_message_id.strip().strip("<>")
+    return any(header == wanted.strip().strip("<>") for wanted in rfc822_message_ids)
+
+
+def _ids(rfc822_message_ids: str | Sequence[str]) -> tuple[str, ...]:
+    if isinstance(rfc822_message_ids, str):
+        return (rfc822_message_ids,)
+    return tuple(rfc822_message_ids)
 
 
 def find_by_message_id(
-    gmail: Gmail, rfc822_message_id: str, *, purpose: str, strict: bool = False
+    gmail: Gmail, rfc822_message_ids: str | Sequence[str], *, purpose: str, strict: bool = False
 ) -> Found | None:
     """The message Gmail holds with this Message-ID, in any folder, or None.
 
+    Given several (a row made before the rename may carry the old seed's id, #721),
+    one search for each, and what they found taken together.
+
     ``strict`` (the Message-ID check, #510) also keeps only a message whose own
-    ``Message-ID`` header is ``rfc822_message_id``, so a search that matched anything
-    else never verifies a mailbox.
+    ``Message-ID`` header is one of ``rfc822_message_ids``, so a search that matched
+    anything else never verifies a mailbox.
 
     A message that is neither a draft nor waiting in Scheduled counts as sent,
     whatever else its labels say (a sent message the person moved to Trash is still
     sent). A draft's id is read from ``drafts.list``. A scheduled message (Gmail's
     Schedule send, #278) is found unsent, with no draft id. Raises :class:`GmailError`.
     """
-    query = _message_id_query(rfc822_message_id, "anywhere")
+    wanted = _ids(rfc822_message_ids)
+    queries = [_message_id_query(one, "anywhere") for one in wanted]
     messages: list[Message] = []
-    for ref in gmail.search(query, max_results=FIND_MAX, purpose=purpose):
-        try:
-            message = gmail.get_message(ref.id, purpose=purpose)
-        except GmailNotFound:  # deleted between the search and the read
-            continue
-        if strict and not _carries(message, rfc822_message_id):
-            continue
-        messages.append(message)
+    seen: set[str] = set()
+    for query in queries:
+        for ref in gmail.search(query, max_results=FIND_MAX, purpose=purpose):
+            if ref.id in seen:
+                continue
+            seen.add(ref.id)
+            try:
+                message = gmail.get_message(ref.id, purpose=purpose)
+            except GmailNotFound:  # deleted between the search and the read
+                continue
+            if strict and not _carries(message, wanted):
+                continue
+            messages.append(message)
     sent = sorted(
         (m for m in messages if not m.label_ids & _UNSENT),
         key=lambda m: m.internal_date,
@@ -302,12 +319,13 @@ def find_by_message_id(
     return Found(draft, sent=False, draft_id=draft_id)
 
 
-def is_scheduled(gmail: Gmail, rfc822_message_id: str, *, purpose: str) -> bool:
-    """Whether a message with this Message-ID waits in Gmail's Scheduled: a draft the
-    person sent with Schedule send, not delivered yet (#278). Raises :class:`GmailError`
-    and, for a value that is not a Message-ID, :class:`ValueError`."""
-    query = _message_id_query(rfc822_message_id, "scheduled")
-    return bool(gmail.search(query, max_results=1, purpose=purpose))
+def is_scheduled(gmail: Gmail, rfc822_message_ids: str | Sequence[str], *, purpose: str) -> bool:
+    """Whether a message with this Message-ID (or one of these, #721) waits in Gmail's
+    Scheduled: a draft the person sent with Schedule send, not delivered yet (#278).
+    Raises :class:`GmailError` and, for a value that is not a Message-ID,
+    :class:`ValueError`."""
+    queries = [_message_id_query(one, "scheduled") for one in _ids(rfc822_message_ids)]
+    return any(gmail.search(query, max_results=1, purpose=purpose) for query in queries)
 
 
 class GmailSender:
@@ -962,15 +980,15 @@ class _Reconcile:
             return
         # The oldest draft still waiting, then the drafts this poll saw sent, then those
         # seen sent before (#510). Each keeps the Message-ID netkeep made it with.
-        wanted: dict[int, str] = {}
+        wanted: dict[int, tuple[str, ...]] = {}
         waiting = [t for t in drafts if t.status is MessageStatus.DRAFTED]
         if waiting:
             oldest = min(waiting, key=lambda t: t.message_id)
-            wanted[oldest.message_id] = oldest.rfc822_message_id
+            wanted[oldest.message_id] = oldest.rfc822_message_ids
         for tracked in sorted(seen_sent, key=lambda t: t.message_id):
-            wanted.setdefault(tracked.message_id, tracked.rfc822_message_id)
+            wanted.setdefault(tracked.message_id, tracked.rfc822_message_ids)
         for check in sent:
-            wanted.setdefault(check.message_id, check.rfc822_message_id)
+            wanted.setdefault(check.message_id, check.rfc822_message_ids)
         if wanted:
             self.verify(gmail, mailbox_id, list(wanted.items())[:MESSAGE_ID_CHECKS_MAX])
 
@@ -992,7 +1010,7 @@ class _Reconcile:
 
     def leftover(self, gmail: Gmail, tracked: Tracked) -> None:
         purpose = self.purpose(tracked, "reconcile")
-        found = find_by_message_id(gmail, tracked.rfc822_message_id, purpose=purpose)
+        found = find_by_message_id(gmail, tracked.rfc822_message_ids, purpose=purpose)
         settings, now = self.settings, self.now
         if found is None:
             self.write(
@@ -1042,13 +1060,16 @@ class _Reconcile:
         else:
             log.info("message %d is a Gmail draft not listed yet; it waits", tracked.message_id)
 
-    def verify(self, gmail: Gmail, mailbox_id: int, wanted: Collection[tuple[int, str]]) -> None:
+    def verify(
+        self, gmail: Gmail, mailbox_id: int, wanted: Collection[tuple[int, Sequence[str]]]
+    ) -> None:
         """Search for campaign drafts, waiting or sent, by the Message-ID netkeep set
-        (``(message id, Message-ID)`` pairs), in order, until one is found; found, the
-        mailbox is verified and a person can arm it for send (#277, #510). The search
-        must find netkeep's own Message-ID: a message Gmail sent under one of its own
-        making is not found. Not found is not a failure: Gmail's search can lag, and the
-        next poll tries again. A Gmail error stops the check and records nothing."""
+        (``(message id, the Message-IDs it may carry)`` pairs), in order, until one is
+        found; found, the mailbox is verified and a person can arm it for send (#277,
+        #510). The search must find netkeep's own Message-ID: a message Gmail sent
+        under one of its own making is not found. Not found is not a failure: Gmail's
+        search can lag, and the next poll tries again. A Gmail error stops the check and
+        records nothing."""
         found = False
         for message_id, rfc822 in wanted:
             purpose = f"Message-ID check of message {message_id}"
@@ -1177,15 +1198,20 @@ class _Reconcile:
         longer followed: it stays ``discarded`` (#544).
         """
         message_id, now = tracked.message_id, self.now
-        if is_scheduled(gmail, tracked.rfc822_message_id, purpose=purpose):
+        if is_scheduled(gmail, tracked.rfc822_message_ids, purpose=purpose):
             log.info(
                 "message %d: its draft waits in Gmail's Scheduled; it stays drafted", message_id
             )
             # Stamped every time: the last sighting dates the send (#278 review).
             self.write(lambda s, u: engine.settle_seen_scheduled(s, u, message_id, now=now))
             return
-        query = _message_id_query(tracked.rfc822_message_id, "drafts")
-        refs = gmail.search(query, max_results=FIND_MAX, purpose=purpose)
+        refs = [
+            ref
+            for one in tracked.rfc822_message_ids
+            for ref in gmail.search(
+                _message_id_query(one, "drafts"), max_results=FIND_MAX, purpose=purpose
+            )
+        ]
         moved = next((by_message[r.id] for r in refs if r.id in by_message), None)
         if moved is not None:
             self.write(

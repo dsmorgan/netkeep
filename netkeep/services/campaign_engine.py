@@ -159,7 +159,12 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from netkeep.campaigns import schedule
-from netkeep.campaigns.compose import ComposeError, campaign_label, message_id_for
+from netkeep.campaigns.compose import (
+    ComposeError,
+    campaign_label,
+    message_id_candidates,
+    message_id_for,
+)
 from netkeep.campaigns.render import MergeValues, TemplateRenderError, render
 from netkeep.campaigns.templates import activation_errors, block_reason, contact_fields
 from netkeep.config import Settings
@@ -2274,6 +2279,10 @@ class Tracked:
     thread already hold, and, for a draft, every one its thread held when the
     draft was made, so a sent draft is told apart from an earlier step or a note
     the person sent before (#273 review).
+
+    ``rfc822_message_ids`` is every Message-ID it may carry, the current seed's first
+    (:func:`netkeep.campaigns.compose.message_id_candidates`, #721): a search for one
+    alone misses a message made before the rename.
     """
 
     message_id: int
@@ -2282,7 +2291,7 @@ class Tracked:
     mailbox_id: int
     status: MessageStatus
     mode: StepMode | None
-    rfc822_message_id: str
+    rfc822_message_ids: tuple[str, ...]
     scheduled_at: datetime | None
     gmail_message_id: str | None
     gmail_thread_id: str | None
@@ -2347,7 +2356,7 @@ def _tracked(
     found: list[Tracked] = []
     for message, mailbox, campaign_name, mode in rows:
         try:
-            rfc822 = message_id_for(
+            rfc822 = message_id_candidates(
                 user_id=user.id,
                 message_id=message.id,
                 created_at=message.created_at,
@@ -2364,7 +2373,7 @@ def _tracked(
                 mailbox_id=mailbox.id,
                 status=message.status,
                 mode=mode,
-                rfc822_message_id=rfc822,
+                rfc822_message_ids=rfc822,
                 scheduled_at=message.scheduled_at,
                 gmail_message_id=message.gmail_message_id,
                 gmail_thread_id=message.gmail_thread_id,

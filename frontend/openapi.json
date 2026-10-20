@@ -6604,16 +6604,12 @@
             ],
             "title": "Message Id"
           },
-          "rfc822_message_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rfc822 Message Id"
+          "rfc822_message_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Rfc822 Message Ids",
+            "type": "array"
           },
           "step_position": {
             "anyOf": [
@@ -6662,7 +6658,7 @@
           "low_priority",
           "at",
           "mailbox_email",
-          "rfc822_message_id",
+          "rfc822_message_ids",
           "keep_for_check"
         ],
         "title": "GmailLeftoverDraftOut",

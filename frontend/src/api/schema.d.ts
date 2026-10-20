@@ -6158,8 +6158,8 @@ export interface components {
             mailbox_email: string | null;
             /** Message Id */
             message_id: number | null;
-            /** Rfc822 Message Id */
-            rfc822_message_id: string | null;
+            /** Rfc822 Message Ids */
+            rfc822_message_ids: string[];
             /** Step Position */
             step_position: number | null;
             /** Test Send Id */
