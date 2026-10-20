@@ -42,7 +42,7 @@ function Row({ row }: { row: LeftoverDraft }) {
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <span className="font-medium break-words">{who(row)}</span>
         <a
-          href={gmailDraftUrl(row.mailbox_email, row.rfc822_message_id)}
+          href={gmailDraftUrl(row.mailbox_email, row.rfc822_message_ids)}
           target="_blank"
           rel="noreferrer"
           className="inline-flex items-center gap-1 text-xs underline underline-offset-4"

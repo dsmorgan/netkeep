@@ -29,7 +29,7 @@ from typing import Final
 from sqlalchemy import Select
 from sqlalchemy.orm import Session
 
-from netkeep.campaigns.compose import ComposeError, message_id_for
+from netkeep.campaigns.compose import ComposeError, message_id_candidates
 from netkeep.models import (
     Campaign,
     CampaignStatus,
@@ -57,11 +57,13 @@ SENT_DRAFTS_WITHIN: Final = timedelta(days=14)
 
 @dataclass(frozen=True, slots=True)
 class SentDraftCheck:
-    """A campaign draft netkeep saw sent, to search for by its Message-ID."""
+    """A campaign draft netkeep saw sent, to search for by its Message-ID: each one it
+    may carry, the current seed's first (a row made before the rename carries the old
+    seed's, #721)."""
 
     mailbox_id: int
     message_id: int
-    rfc822_message_id: str
+    rfc822_message_ids: tuple[str, ...]
 
 
 def _on_mailbox(user: User, statement: Select[Message], mailbox_id: int) -> Select[Message]:
@@ -95,7 +97,7 @@ def _sent_drafts(
     out: list[SentDraftCheck] = []
     for row in rows:
         try:
-            rfc822 = message_id_for(
+            rfc822 = message_id_candidates(
                 user_id=user.id, message_id=row.id, created_at=row.created_at, address=mailbox.email
             )
         except ComposeError:

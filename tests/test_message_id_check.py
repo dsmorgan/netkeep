@@ -10,7 +10,7 @@ import factories
 from campaign_fakes import NOW, make_mailbox
 from sqlalchemy.orm import Session
 
-from netkeep.campaigns.compose import message_id_for
+from netkeep.campaigns.compose import message_id_candidates, message_id_for
 from netkeep.models import (
     Campaign,
     CampaignStatus,
@@ -63,6 +63,8 @@ def _steps(session: Session, user: User, mailbox: Mailbox) -> check.ArmSteps:
 
 
 def test_a_draft_seen_sent_is_searched_for_by_netkeeps_own_message_id(session: Session) -> None:
+    """Each Message-ID the row may carry, the current seed's first: a draft made before
+    the rename carries the old seed's (#721)."""
     user, mailbox, campaign = _setup(session)
     message_id = _message(
         session, user, campaign, sent_at=NOW - timedelta(hours=1), gmail_draft_id="d1"
@@ -70,16 +72,15 @@ def test_a_draft_seen_sent_is_searched_for_by_netkeeps_own_message_id(session: S
     [found] = check.sent_drafts_to_verify(session, user, now=NOW)
     stored = get_scoped(session, user, Message, message_id)
     assert stored is not None
-    assert found == check.SentDraftCheck(
-        mailbox.id,
-        message_id,
-        message_id_for(
-            user_id=user.id,
-            message_id=message_id,
-            created_at=stored.created_at,
-            address=mailbox.email,
-        ),
-    )
+    fields: dict[str, Any] = {
+        "user_id": user.id,
+        "message_id": message_id,
+        "created_at": stored.created_at,
+        "address": mailbox.email,
+    }
+    assert found == check.SentDraftCheck(mailbox.id, message_id, message_id_candidates(**fields))
+    assert len(found.rfc822_message_ids) == 2
+    assert found.rfc822_message_ids[0] == message_id_for(**fields)
 
 
 def test_only_recent_sent_drafts_on_an_armed_unverified_mailbox_count(session: Session) -> None:

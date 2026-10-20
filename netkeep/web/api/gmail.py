@@ -136,8 +136,10 @@ class GmailLeftoverDraftOut(BaseModel):
     at: datetime
     """When the draft was made."""
     mailbox_email: str | None
-    rfc822_message_id: str | None
-    """The Message-ID the draft carries, to find it in Gmail."""
+    rfc822_message_ids: list[str]
+    """The Message-IDs the draft may carry, to find it in Gmail: one, or for a draft
+    made before the rename, the current seed's and the old seed's (#721). Empty when
+    not known."""
     keep_for_check: bool
     """A test draft the mailbox's Message-ID check still needs."""
 
@@ -171,7 +173,7 @@ def get_leftover_drafts(user: CurrentUser, session: SessionDep) -> GmailLeftover
                 low_priority=row.low_priority,
                 at=row.at,
                 mailbox_email=row.mailbox_email,
-                rfc822_message_id=row.rfc822_message_id,
+                rfc822_message_ids=list(row.rfc822_message_ids),
                 keep_for_check=row.keep_for_check,
             )
             for row in found.items

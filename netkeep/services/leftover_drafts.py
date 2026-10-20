@@ -33,7 +33,7 @@ from typing import Final
 from sqlalchemy import ColumnElement, and_, case, exists, or_, select
 from sqlalchemy.orm import Session
 
-from netkeep.campaigns.compose import ComposeError, message_id_for
+from netkeep.campaigns.compose import ComposeError, message_id_candidates
 from netkeep.models import (
     Campaign,
     CampaignStep,
@@ -100,8 +100,10 @@ class LeftoverDraft:
     at: datetime
     """When the draft was made."""
     mailbox_email: str | None
-    rfc822_message_id: str | None
-    """The Message-ID the draft carries, to search Gmail for; None when not known."""
+    rfc822_message_ids: tuple[str, ...]
+    """The Message-IDs the draft may carry, to search Gmail for, the current seed's
+    first (a draft made before the rename carries the old seed's, #721); empty when
+    not known."""
     keep_for_check: bool
     """A test draft on a mailbox whose Message-ID check has not passed: the check
     searches for it (#304)."""
@@ -189,11 +191,11 @@ def _warning(status: EnrollmentStatus, do_not_contact: bool, on_list: bool) -> D
     return DraftWarning.DO_NOT_SEND if on_list else None
 
 
-def _rfc822(user: User, message: Message, mailbox: Mailbox | None) -> str | None:
+def _rfc822(user: User, message: Message, mailbox: Mailbox | None) -> tuple[str, ...]:
     if mailbox is None:
-        return None
+        return ()
     try:
-        return message_id_for(
+        return message_id_candidates(
             user_id=user.id,
             message_id=message.id,
             created_at=message.created_at,
@@ -201,7 +203,7 @@ def _rfc822(user: User, message: Message, mailbox: Mailbox | None) -> str | None
         )
     except ComposeError:
         log.warning("message %d has no Message-ID to search Gmail for", message.id)
-        return None
+        return ()
 
 
 def _messages(session: Session, user: User) -> tuple[list[LeftoverDraft], bool]:
@@ -273,7 +275,7 @@ def _messages(session: Session, user: User) -> tuple[list[LeftoverDraft], bool]:
                 ),
                 at=message.created_at,
                 mailbox_email=None if mailbox is None else mailbox.email,
-                rfc822_message_id=_rfc822(user, message, mailbox),
+                rfc822_message_ids=_rfc822(user, message, mailbox),
                 keep_for_check=False,
             )
         )
@@ -309,7 +311,7 @@ def _tests(session: Session, user: User) -> tuple[list[LeftoverDraft], bool]:
             low_priority=False,
             at=test.sent_at,
             mailbox_email=None if mailbox is None else mailbox.email,
-            rfc822_message_id=test.rfc822_message_id,
+            rfc822_message_ids=() if test.rfc822_message_id is None else (test.rfc822_message_id,),
             keep_for_check=mailbox is not None and mailbox.message_id_verified_at is None,
         )
         for test, campaign_name, position, mailbox in rows[:TESTS_MAX]

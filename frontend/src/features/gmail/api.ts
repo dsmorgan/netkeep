@@ -59,14 +59,16 @@ export const gmailLeftoverDraftsQuery = queryOptions({
 
 /**
  * Gmail's search for one message by its Message-ID, in the mailbox's own account. A
- * link, never a request: the app never talks to Gmail from the browser. Without a
- * Message-ID it opens the account's Drafts.
+ * link, never a request: the app never talks to Gmail from the browser. A draft made
+ * before the rename may carry either of two Message-IDs (#721), so the search asks for
+ * any of them. Without a Message-ID it opens the account's Drafts.
  */
-export function gmailDraftUrl(mailbox: string | null, messageId: string | null): string {
+export function gmailDraftUrl(mailbox: string | null, messageIds: readonly string[]): string {
   const account = mailbox ? encodeURIComponent(mailbox).replace('%40', '@') : '0'
   const base = `https://mail.google.com/mail/u/${account}/`
-  const id = messageId?.trim().replace(/^<|>$/g, '')
-  return id ? `${base}#search/${encodeURIComponent(`rfc822msgid:${id}`)}` : `${base}#drafts`
+  const ids = messageIds.map((id) => id.trim().replace(/^<|>$/g, '')).filter(Boolean)
+  const query = ids.map((id) => `rfc822msgid:${id}`).join(' OR ')
+  return query ? `${base}#search/${encodeURIComponent(query)}` : `${base}#drafts`
 }
 
 /**

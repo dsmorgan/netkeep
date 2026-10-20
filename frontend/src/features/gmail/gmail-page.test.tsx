@@ -123,7 +123,7 @@ function leftover(overrides: Partial<LeftoverDraft> = {}): LeftoverDraft {
     low_priority: false,
     at: NOW,
     mailbox_email: 'sender@example.com',
-    rfc822_message_id: '<abc123@example.com>',
+    rfc822_message_ids: ['<abc123@example.com>'],
     keep_for_check: false,
     ...overrides,
   }
@@ -422,7 +422,7 @@ describe('Gmail page', () => {
             contact_id: null,
             contact_name: null,
             enrollment_status: null,
-            rfc822_message_id: '<test5@example.com>',
+            rfc822_message_ids: ['<test5@example.com>'],
             keep_for_check: true,
           }),
           leftover({
@@ -461,9 +461,16 @@ describe('Gmail page', () => {
   })
 
   it('builds a Gmail link from the Message-ID, or opens Drafts without one', () => {
-    expect(gmailDraftUrl('me+nk@example.com', '<id.1@example.com>')).toBe(
+    expect(gmailDraftUrl('me+nk@example.com', ['<id.1@example.com>'])).toBe(
       'https://mail.google.com/mail/u/me%2Bnk@example.com/#search/rfc822msgid%3Aid.1%40example.com',
     )
-    expect(gmailDraftUrl(null, null)).toBe('https://mail.google.com/mail/u/0/#drafts')
+    expect(gmailDraftUrl(null, [])).toBe('https://mail.google.com/mail/u/0/#drafts')
+  })
+
+  it('searches for any of the Message-IDs a draft made before the rename may carry', () => {
+    expect(gmailDraftUrl('me@example.com', ['<new.1@example.com>', '<old.1@example.com>'])).toBe(
+      'https://mail.google.com/mail/u/me@example.com/#search/' +
+        'rfc822msgid%3Anew.1%40example.com%20OR%20rfc822msgid%3Aold.1%40example.com',
+    )
   })
 })

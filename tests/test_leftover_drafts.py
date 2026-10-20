@@ -19,7 +19,7 @@ from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from netkeep.campaigns.compose import message_id_for
+from netkeep.campaigns.compose import message_id_candidates, message_id_for
 from netkeep.db import session_scope
 from netkeep.models import (
     Campaign,
@@ -139,9 +139,17 @@ def test_a_discarded_message_with_a_draft_is_listed(session: Session) -> None:
     )
     assert row.contact_name == "Fictional Person"
     assert row.mailbox_email == box.email
-    assert row.rfc822_message_id == message_id_for(
-        user_id=user.id, message_id=message.id, created_at=message.created_at, address=box.email
-    )
+    # Each Message-ID it may carry, the current seed's first: a draft made before the
+    # rename carries the old seed's (#721).
+    fields: dict[str, Any] = {
+        "user_id": user.id,
+        "message_id": message.id,
+        "created_at": message.created_at,
+        "address": box.email,
+    }
+    assert row.rfc822_message_ids == message_id_candidates(**fields)
+    assert len(row.rfc822_message_ids) == 2
+    assert row.rfc822_message_ids[0] == message_id_for(**fields)
 
 
 def test_a_discarded_draft_the_person_sent_drops_off(session: Session) -> None:
@@ -228,7 +236,7 @@ def test_a_test_draft_is_listed_and_kept_until_the_mailbox_is_verified(session: 
 
     assert row.kind is K.TEST
     assert (row.test_send_id, row.message_id, row.contact_id) == (test.id, None, None)
-    assert row.rfc822_message_id == "<test-543@example.test>"
+    assert row.rfc822_message_ids == ("<test-543@example.test>",)  # stored, one
     assert row.mailbox_email == box.email
     assert row.keep_for_check is True
 
@@ -367,7 +375,9 @@ async def test_get_leftover_drafts(
     first = body["items"][0]
     assert first["warning"] == "opted_out"
     assert first["enrollment_status"] == "opted_out"
-    assert first["rfc822_message_id"].startswith("<")
+    assert len(first["rfc822_message_ids"]) == 2
+    assert all(one.startswith("<") for one in first["rfc822_message_ids"])
+    assert body["items"][1]["rfc822_message_ids"] == ["<test-543@example.test>"]
     assert SUBJECT not in response.text and "Body-marker-543" not in response.text
     assert SUBJECT not in caplog.text and "Body-marker-543" not in caplog.text
 
