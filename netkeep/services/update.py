@@ -26,8 +26,10 @@ Three processes, each running code nothing has replaced under it:
    never restores again.
 
 The principle: a restore never happens after any scheduler may have run on the data.
-:data:`STATE_FILE` and the marker are written durably (file and folder fsynced), and
-``serve`` starts its scheduler only once the marker is on disk.
+:data:`STATE_FILE`, the marker and the constraints files are written atomically and
+durably (file and folder fsynced), and ``serve`` starts its scheduler only once the marker
+is on disk. Each version reads a :data:`STATE_FILE` another wrote, so its fields and
+phases are frozen and keys a version doesn't know are kept (#705).
 
 When ``uv tool install`` fails, the new version has never run, so the old process
 reinstalls the old version and executes its ``--rollback``, which has no database to
@@ -56,7 +58,7 @@ from typing import Final, NoReturn
 from urllib.parse import urljoin, urlsplit
 
 from netkeep import paths
-from netkeep.fsutil import sync_directory
+from netkeep.fsutil import sync_directory, write_atomic
 from netkeep.linkedin.activity_lock import Claim, LockState
 from netkeep.services.login_item import SERVE_ERR_LOG, LoginItem, LoginItemError
 
@@ -237,8 +239,20 @@ class UpdateState:
     reason: str = ""
     """Why it is rolling back or stopped."""
     started_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    carried: dict[str, object] = field(default_factory=dict, compare=False, repr=False)
+    """Keys in :data:`STATE_FILE` this version doesn't know, written back unchanged: a
+    newer version wrote them, and the old version's ``--rollback`` hands the file on."""
 
 
+# The compatibility rule across versions (#705). An update runs two versions on one
+# STATE_FILE: the new version's --finish writes it and the old version's --rollback reads
+# it. So the fields below and PHASES are frozen: no version renames, removes, retypes or
+# changes the meaning of one, and tests/test_update.py pins them. A later version may add a
+# field, with a default, that an older version can safely ignore; anything a rollback must
+# honor to stay safe (the scheduler marker, restored) is already here. A key this version
+# doesn't know is kept and written back (UpdateState.carried); a known key of the wrong
+# type, or a phase this version doesn't know, is still refused, and a refusal never
+# restores.
 _STATE_TYPES: Final[dict[str, tuple[type, ...]]] = {
     "from_version": (str,),
     "to_version": (str,),
@@ -256,8 +270,9 @@ _STATE_TYPES: Final[dict[str, tuple[type, ...]]] = {
 
 def read_state(data: Path | None = None) -> UpdateState | None:
     """The update in progress, or ``None``. :class:`UpdateError` for a file that isn't
-    one this netkeep wrote: a field of the wrong type, a version that isn't ``X.Y.Z`` (it
-    goes to ``uv``), or a phase it doesn't know."""
+    one a netkeep wrote: a field of the wrong type or missing, a version that isn't
+    ``X.Y.Z`` (it goes to ``uv``), or a phase it doesn't know. Keys it doesn't know are
+    kept in :attr:`UpdateState.carried` (the rule above :data:`_STATE_TYPES`)."""
     path = update_dir(data) / STATE_FILE
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -266,12 +281,14 @@ def read_state(data: Path | None = None) -> UpdateState | None:
     except (OSError, ValueError) as exc:
         raise UpdateError(f"{path} can't be read ({exc}); look at it, then delete it") from exc
     unknown = f"{path} isn't an update netkeep knows; look at it, then delete it"
-    if not isinstance(raw, dict) or not set(raw) <= set(_STATE_TYPES):
+    if not isinstance(raw, dict):
         raise UpdateError(unknown)
-    if any(not isinstance(value, _STATE_TYPES[name]) for name, value in raw.items()):
+    known = {name: value for name, value in raw.items() if name in _STATE_TYPES}
+    carried = {name: value for name, value in raw.items() if name not in _STATE_TYPES}
+    if any(not isinstance(value, _STATE_TYPES[name]) for name, value in known.items()):
         raise UpdateError(unknown)
     try:
-        state = UpdateState(**raw)
+        state = UpdateState(**known, carried=carried)
     except TypeError as exc:
         raise UpdateError(unknown) from exc
     if (
@@ -291,20 +308,8 @@ def read_state(data: Path | None = None) -> UpdateState | None:
 
 
 def _write_durably(path: Path, text: str) -> None:
-    """Write ``path`` so that it is on disk when this returns: the file is written and
-    fsynced under a temporary name, renamed into place, and the folder fsynced."""
-    temporary = path.with_name(f".{path.name}.tmp")
-    descriptor = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        temporary.replace(path)
-    except BaseException:
-        temporary.unlink(missing_ok=True)
-        raise
-    sync_directory(path.parent)
+    """Write ``path`` so that it is on disk when this returns (:func:`write_atomic`)."""
+    write_atomic(path, text)
 
 
 def _update_dir_made(data: Path | None) -> Path:
@@ -319,7 +324,8 @@ def write_state(state: UpdateState, data: Path | None = None) -> None:
     """Record ``state``, durably: a later process (or ``serve``, which writes the
     scheduler marker only while it exists) must find it after a power loss."""
     path = _update_dir_made(data) / STATE_FILE
-    _write_durably(path, json.dumps(asdict(state), indent=2) + "\n")
+    known = {name: value for name, value in asdict(state).items() if name in _STATE_TYPES}
+    _write_durably(path, json.dumps(state.carried | known, indent=2) + "\n")
 
 
 def clear_state(data: Path | None = None) -> None:
@@ -423,10 +429,8 @@ def download_constraints(seams: Seams, version: str, data: Path) -> Path:
             f" {expected}. Nothing was changed."
         )
     target = constraints_path(version, data)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_name(f".{target.name}.tmp")
-    temporary.write_bytes(constraints)
-    temporary.replace(target)
+    # Durably, and never half-written: a rollback reinstalls the old version from it.
+    write_atomic(_update_dir_made(data) / target.name, constraints, mode=0o644)
     return target
 
 
