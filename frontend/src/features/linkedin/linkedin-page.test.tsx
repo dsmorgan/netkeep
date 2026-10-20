@@ -224,6 +224,22 @@ describe('the inbox poll and the prefill on the LinkedIn page (#383)', () => {
     ).toBeVisible()
   })
 
+  it('names a scheduled message_send run an auto-send in the runs list and its detail (#704)', async () => {
+    const auto = run({ id: 3, kind: 'message_send', trigger: 'scheduled', status: 'completed' })
+    renderLinkedInPage({
+      'GET /api/v1/linkedin/runs': () =>
+        jsonResponse(runPage([auto, run({ id: 2, kind: 'message_send', status: 'completed' })])),
+      'GET /api/v1/linkedin/runs/3': () => jsonResponse(auto),
+    })
+
+    expect(await screen.findByRole('button', { name: 'LinkedIn auto-send' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'LinkedIn prefill' })).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'LinkedIn auto-send' }))
+    expect(await screen.findByRole('region', { name: 'Run 3' })).toHaveTextContent(
+      'LinkedIn auto-send',
+    )
+  })
+
   it('names the inbox and prefill runs, and their stop reasons, in plain words', async () => {
     renderLinkedInPage({
       'GET /api/v1/linkedin/runs': () =>

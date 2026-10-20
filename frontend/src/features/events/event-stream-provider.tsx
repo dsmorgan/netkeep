@@ -23,7 +23,11 @@ export function EventStreamProvider({ children }: { children: ReactNode }) {
       previousStatus.current === 'disconnected' &&
       everConnected.current
     ) {
-      void queryClient.invalidateQueries()
+      // Skip a query that opted out of focus refetches on purpose (a POST preview, say).
+      void queryClient.invalidateQueries({
+        predicate: (query) =>
+          !query.observers.some((observer) => observer.options.refetchOnWindowFocus === false),
+      })
     }
     if (stream.status === 'connected') everConnected.current = true
     previousStatus.current = stream.status
