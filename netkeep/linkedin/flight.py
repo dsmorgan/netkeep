@@ -149,10 +149,10 @@ def is_whole(payload: FlightPayload, *, endpoint: str) -> bool:
     reference reachable from it (:data:`_ROW_MARKER`) must name a model row, an ``I``
     import, a ``T`` text row, or a stream the copy holds; and every model row must be
     reachable from the root, since a whole answer sends none that nothing uses (#207
-    review). A stream's chunks are walked like a row once something reaches the
-    stream. A stream (``R``, ``r``) or async iterable (``X``, ``x``) that started and
-    never closed (no ``C`` row of its id) is a copy cut mid-stream, however whole its
-    rows look (#196 item 10).
+    review). A stream counts as a row here: it must be reached, and its chunks are
+    walked like a row's value once it is (#698 review). A stream (``R``, ``r``) or
+    async iterable (``X``, ``x``) that started and never closed (no ``C`` row of its
+    id) is a copy cut mid-stream, however whole its rows look (#196 item 10).
     """
     if ROOT_ROW not in payload.rows:
         return False
@@ -177,7 +177,7 @@ def is_whole(payload: FlightPayload, *, endpoint: str) -> bool:
                         stack.append(row)
                 elif row not in payload.modules and row not in payload.texts:
                     return False
-    return reached - payload.streams == set(payload.rows)
+    return reached == set(payload.rows) | payload.streams
 
 
 def is_element(node: object) -> bool:
@@ -208,7 +208,8 @@ def parse_flight(body: bytes | str, *, endpoint: str) -> FlightPayload:
     no ``:``, a JSON row that does not parse, a text row whose length runs past the
     body, an ``E`` row, and a row id seen twice are all :class:`RouteChanged`. A model
     row whose id names a stream already started is that stream's next chunk, not a
-    second row of that id.
+    second row of that id; one after the stream's ``C`` row, or a stream start with no
+    id, is :class:`RouteChanged` too.
     """
     data = body.encode("utf-8") if isinstance(body, str) else body
     if not data.strip():
@@ -256,6 +257,8 @@ def parse_flight(body: bytes | str, *, endpoint: str) -> FlightPayload:
             if not value or value[0] not in _JSON_START:
                 raise RouteChanged(endpoint, f"row {line}: a model row that is not JSON")
             if row_id in streams:
+                if row_id in closed:
+                    raise RouteChanged(endpoint, f"row {line}: a stream's chunk after its close")
                 chunks[row_id].append(_json(value, endpoint, line))
                 continue
             _mark(seen, row_id, endpoint, line)
@@ -266,6 +269,8 @@ def parse_flight(body: bytes | str, *, endpoint: str) -> FlightPayload:
         elif tag == "E":
             raise RouteChanged(endpoint, f"row {line}: the server sent an error row")
         elif tag in ("R", "X"):
+            if not row_id:
+                raise RouteChanged(endpoint, f"row {line}: a stream start with no row id")
             # A start is marked like a row: a second start, or a model row of that id
             # sent before it, is a row id seen twice.
             _mark(seen, row_id, endpoint, line)

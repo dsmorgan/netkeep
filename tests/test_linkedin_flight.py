@@ -228,6 +228,34 @@ def test_a_stream_started_twice_or_after_its_row_is_route_changed(body: bytes) -
     assert "a row id appears twice" in caught.value.detail
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        b'0:{"a":1}\n5:R\n5:{"x":"y"}\n5:C\n',
+        b'0:{"a":1}\n5:R\n5:{"s":"$9"}\n5:C\n',
+    ],
+)
+def test_a_stream_nothing_reaches_is_not_whole(body: bytes) -> None:
+    """#698 review: a stream is held to the reachability rule like a row, so neither an
+    unreferenced stream nor a dangling reference inside its chunk passes."""
+    assert not _whole(body)
+
+
+@pytest.mark.parametrize(
+    ("body", "detail"),
+    [
+        (b'9:R\n9:{"a":1}\n9:C\n9:{"late":1}\n0:{"x":"$R9"}\n', "a stream's chunk after its close"),
+        (b':R\n0:{"x":1}\n', "a stream start with no row id"),
+        (b':r\n0:{"x":1}\n', "a stream start with no row id"),
+        (b':x\n0:{"x":1}\n', "a stream start with no row id"),
+    ],
+)
+def test_a_late_chunk_or_an_idless_stream_is_route_changed(body: bytes, detail: str) -> None:
+    with pytest.raises(RouteChanged) as caught:
+        parse_flight(body, endpoint=E)
+    assert detail in caught.value.detail
+
+
 def test_a_close_for_another_stream_does_not_close_this_one() -> None:
     root = b'0:["$","div",null,{"children":"$R9"}]\n'
     assert not _whole(b'9:R\n9:{"chunk":1}\n8:C\n' + root)
