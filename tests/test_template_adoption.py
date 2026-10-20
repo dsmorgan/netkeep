@@ -46,7 +46,7 @@ from netkeep.models import (
 )
 from netkeep.models.base import UserOwned
 from netkeep.scoping import get_scoped, install_scope_guard, scoped
-from netkeep.services import campaign_review
+from netkeep.services import campaign_engine, campaign_review
 from netkeep.services import campaigns as campaign_service
 from netkeep.services import template_adoption as service
 from netkeep.services.campaign_engine import run_tick
@@ -488,6 +488,7 @@ def test_a_parked_enrollment_with_a_message_of_the_step_is_not_released(
 
 
 def test_only_enrollments_parked_on_this_step_are_released(writer: Session) -> None:
+    """A paused one is released and stays paused (#699): its resume keeps the due time."""
     user = factories.make_user(writer)
     campaign = _campaign(writer, user, channels=(EMAIL, EMAIL))
     parked = _enroll(
@@ -510,17 +511,22 @@ def test_only_enrollments_parked_on_this_step_are_released(writer: Session) -> N
     )
     _new_version(writer, user, campaign.steps[0], "Hello {{ first_name }}")
     untouched = {
-        e.id: _row(_fresh(writer, user, Enrollment, e.id))
-        for e in (on_step_2, other_reason, paused)
+        e.id: _row(_fresh(writer, user, Enrollment, e.id)) for e in (on_step_2, other_reason)
     }
 
     shown = service.preview(writer, user, campaign.id, campaign.steps[0].id, now=NOW)
-    assert shown.released == 1
+    assert shown.released == 2
     result = _adopt(writer, user, campaign)
 
-    assert result.released == 1
+    assert result.released == 2
     row = _fresh(writer, user, Enrollment, parked.id)
     assert (row.next_action_at, row.not_sent_error, row.not_sent_count) == (NOW, None, 0)
+    row = _fresh(writer, user, Enrollment, paused.id)
+    assert (row.status, row.next_action_at, row.not_sent_error) == (
+        EnrollmentStatus.PAUSED,
+        NOW,
+        None,
+    )
     for enrollment_id, before in untouched.items():
         assert _row(_fresh(writer, user, Enrollment, enrollment_id)) == before
 
@@ -596,6 +602,38 @@ def test_a_parked_step_fires_in_the_new_version_only_after_adoption_and_never_tw
         user = _user(s, user_id)
         mine = list(s.scalars(scoped(user, Message).where(Message.enrollment_id == fired_id)))
         assert [m.body_rendered for m in mine] == [OLD_TEXT]
+
+
+def test_a_paused_parked_enrollment_fires_in_the_new_version_once_resumed(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """#699: parked, then paused, then adopted, then resumed: it fires, in the new version,
+    and not before its resume."""
+    sender = FakeSender()
+    with session_scope(session_factory, write=True) as s:
+        user = factories.make_user(s)
+        campaign = _campaign(s, user)
+        enrollment = _enroll(s, campaign, next_action_at=None, not_sent_error=REMOVED_FIELD_BLOCK)
+        campaign_id, step_id, user_id, enrollment_id = (
+            campaign.id,
+            campaign.steps[0].id,
+            user.id,
+            enrollment.id,
+        )
+    with session_scope(session_factory, write=True) as s:
+        user = _user(s, user_id)
+        campaign_engine.pause_enrollment(s, user, enrollment_id)
+        _new_version(s, user, _fresh(s, user, CampaignStep, step_id), "Hello {{ first_name }}")
+        shown = service.preview(s, user, campaign_id, step_id, now=NOW)
+        assert shown.released == 1
+        service.adopt(s, user, campaign_id, step_id, fingerprint_seen=shown.fingerprint, now=NOW)
+
+    assert _tick(session_factory, user, sender, NOW + timedelta(minutes=1)).fired == []
+    with session_scope(session_factory, write=True) as s:
+        campaign_engine.resume_enrollment(s, _user(s, user_id), enrollment_id)
+    [(firing, _)] = _tick(session_factory, user, sender, NOW + timedelta(minutes=2)).fired
+    assert firing.enrollment_id == enrollment_id
+    assert firing.body.startswith("Hello First")
 
 
 # --- the API ---------------------------------------------------------------------------------
