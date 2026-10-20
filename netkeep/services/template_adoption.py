@@ -54,8 +54,10 @@ prefill refused before any key as too long to type (#445), and no due time. Adop
 clears the reason and makes it due at once, so the next tick, or the next prefill,
 tries the step again with every check, in the new version. A released enrollment keeps
 its ``last_prefill_run_id``: only Try again reads it, and only for a ``not_typed:``
-reason, which adoption never releases. A ``paused`` campaign still fires
-nothing until it is resumed.
+reason, which adoption never releases. A ``paused`` enrollment is released too and
+stays ``paused`` (#699): its resume keeps the due time, so it would otherwise wait
+forever on the old version's reason. Neither a ``paused`` enrollment nor a step of a
+``paused`` campaign fires until it is resumed.
 
 Every function that writes needs a writer session (CLAUDE.md).
 """
@@ -304,9 +306,12 @@ def _affected(session: Session, user: User, step: CampaignStep) -> list[Enrollme
 
 
 def _parked(enrollment: Enrollment, step: CampaignStep) -> bool:
-    """Waiting on ``step``'s template: parked with a :data:`PARKED_PREFIXES` reason."""
+    """Waiting on ``step``'s template: parked with a :data:`PARKED_PREFIXES` reason.
+
+    ``paused`` counts (#699): releasing one sets its due time and leaves it ``paused``.
+    """
     return (
-        enrollment.status is EnrollmentStatus.ACTIVE
+        enrollment.status in (EnrollmentStatus.ACTIVE, EnrollmentStatus.PAUSED)
         and (enrollment.current_step or 0) + 1 == step.position
         and enrollment.next_action_at is None
         and (enrollment.not_sent_error or "").startswith(PARKED_PREFIXES)
