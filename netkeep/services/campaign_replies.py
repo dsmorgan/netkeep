@@ -54,16 +54,20 @@ is skipped.
 - **Bounce**: a hard-failure notice (:func:`is_hard_bounce`; a delay notice is
   nothing) from a mailer daemon (``mailer-daemon@`` or ``postmaster@``), in a
   watched thread or citing one of its sent messages' Message-IDs in
-  ``In-Reply-To`` or ``References``. The cited message (or the newest sent one in
-  the thread) is ``bounced``, so is the address it went to (read from Gmail's
+  ``In-Reply-To`` or ``References``. A message ``messages.send`` sent is cited by the
+  Message-ID netkeep gave it, derived without a read; one sent from a draft by the
+  Message-ID on Gmail's copy, which may be Gmail's own. The cited message (or the newest
+  sent one in the thread) is ``bounced``, so is the address it went to (read from Gmail's
   copy's ``To``), and a live enrollment becomes ``bounced``. The notice is not
   stored.
 - **Reply**: from one of the contact's addresses, after the enrollment's first
-  send, in its thread or not. Stored as an inbound message (subject, snippet,
-  thread; never the body) with an ``email_in`` interaction, labelled with the
-  campaign's label (not for a LinkedIn-only watch), and a live enrollment becomes
-  ``replied``. The engine's claim reads that inbound message in its writer session, so
-  no later step fires.
+  send, in its thread or not. It counts for **every** watch holding that address, so a
+  contact in two campaigns who answers one stops both (#695). Stored as an inbound
+  message (subject, snippet, thread; never the body) with an ``email_in`` interaction,
+  labelled with the campaign's label (in a watched thread, only that thread's campaign's;
+  never for a LinkedIn-only watch), and a live enrollment becomes ``replied``. The
+  engine's claim reads that inbound message in its writer session, so no later step
+  fires.
 - **Unsubscribe**: a reply whose subject or snippet holds one of
   :data:`UNSUBSCRIBE_PHRASES`. The contact is set ``do_not_contact`` with a reason
   (undone from the contact page), and a live enrollment becomes ``opted_out``.
@@ -109,10 +113,10 @@ from datetime import datetime, timedelta
 from email.utils import parseaddr
 from typing import Final, cast
 
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeep.campaigns.compose import campaign_label
+from netkeep.campaigns.compose import ComposeError, campaign_label, message_id_for
 from netkeep.campaigns.gmail import Gmail, GmailError, GmailNotFound, History, Message
 from netkeep.config import Settings
 from netkeep.crm import do_not_send
@@ -289,6 +293,10 @@ class Sent:
     gmail_message_id: str
     thread_id: str
     sent_at: datetime
+    rfc822_message_id: str | None = None
+    """The Message-ID netkeep gave it (:func:`~netkeep.campaigns.compose.message_id_for`),
+    for a message ``messages.send`` sent; None for one sent from a draft, which may carry
+    a Message-ID of Gmail's making, so a bounce poll reads Gmail's copy for it."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -342,10 +350,25 @@ def reply_work(session: Session, user: User, *, now: datetime) -> list[MailboxWa
     mailboxes = armed_mailboxes(session, user)
     if not mailboxes:
         return []
+    # A completed enrollment only while a send of it is in the window: the rest are
+    # never watched again, so they are not loaded (#695).
+    recent = (
+        scoped(user, MessageRow)
+        .with_only_columns(MessageRow.id)
+        .where(
+            MessageRow.enrollment_id == Enrollment.id,
+            MessageRow.direction == MessageDirection.OUT,
+            MessageRow.sent_at >= now - WATCH_AFTER_COMPLETED,
+        )
+        .exists()
+    )
     enrollments = list(
         session.scalars(
             scoped(user, Enrollment).where(
-                Enrollment.status.in_((*LIVE, EnrollmentStatus.COMPLETED))
+                or_(
+                    Enrollment.status.in_(LIVE),
+                    and_(Enrollment.status == EnrollmentStatus.COMPLETED, recent),
+                )
             )
         )
     )
@@ -356,6 +379,7 @@ def reply_work(session: Session, user: User, *, now: datetime) -> list[MailboxWa
         )
     }
     sent: dict[int, list[Sent]] = {}
+    mailbox_of = {e.id: watching_mailbox(campaigns[e.campaign_id], mailboxes) for e in enrollments}
     for row in session.scalars(
         scoped(user, MessageRow)
         .where(
@@ -371,7 +395,13 @@ def reply_work(session: Session, user: User, *, now: datetime) -> list[MailboxWa
     ):
         assert row.gmail_message_id and row.gmail_thread_id and row.sent_at
         sent.setdefault(row.enrollment_id, []).append(
-            Sent(row.id, row.gmail_message_id, row.gmail_thread_id, row.sent_at)
+            Sent(
+                row.id,
+                row.gmail_message_id,
+                row.gmail_thread_id,
+                row.sent_at,
+                _own_message_id(user, row, mailbox_of[row.enrollment_id]),
+            )
         )
     # The first and latest send on any channel (#571): a watch counts from the first, so
     # an email reply to a LinkedIn step read only after the first email went out counts.
@@ -399,7 +429,7 @@ def reply_work(session: Session, user: User, *, now: datetime) -> list[MailboxWa
     by_mailbox: dict[int, list[Watch]] = {mailbox_id: [] for mailbox_id in mailboxes}
     for enrollment in enrollments:
         campaign = campaigns[enrollment.campaign_id]
-        mailbox = watching_mailbox(campaign, mailboxes)
+        mailbox = mailbox_of[enrollment.id]
         messages = sent.get(enrollment.id, [])
         watched = frozenset(addresses.get(enrollment.contact_id, ()))
         if enrollment.id not in any_sent or not (messages or watched):
@@ -427,6 +457,20 @@ def reply_work(session: Session, user: User, *, now: datetime) -> list[MailboxWa
         MailboxWatch(mailbox_id, mailboxes[mailbox_id].history_id, tuple(watches))
         for mailbox_id, watches in sorted(by_mailbox.items())
     ]
+
+
+def _own_message_id(user: User, row: MessageRow, mailbox: Mailbox | None) -> str | None:
+    """The Message-ID ``messages.send`` sent ``row`` with, derived as the engine did; None
+    for a message sent from a draft (its Message-ID may be Gmail's), or with no mailbox
+    address to derive it from."""
+    if row.gmail_draft_id is not None or mailbox is None:
+        return None
+    try:
+        return message_id_for(
+            user_id=user.id, message_id=row.id, created_at=row.created_at, address=mailbox.email
+        )
+    except ComposeError:
+        return None
 
 
 # --- reading Gmail -----------------------------------------------------------------------
@@ -467,7 +511,8 @@ class _Poll:
     work: MailboxWatch
     purpose: str
     seen: set[str] = field(default_factory=set)
-    _cited: dict[str, tuple[Watch, Sent, str | None]] | None = None
+    _cited: dict[str, tuple[Watch, Sent]] | None = None
+    _copies: dict[str, Message | None] = field(default_factory=dict)
 
     def run(self) -> PollResult:
         """Read what the mailbox received since its ``history_id`` (the module)."""
@@ -575,16 +620,22 @@ class _Poll:
             if is_auto_reply(message):  # out of office, not an answer (#296 review)
                 continue
             sender = sender_of(message)
-            in_thread = [w for w in self.work.watches if message.thread_id in w.threads]
-            candidates = in_thread or list(self.work.watches)
-            for watch in candidates:
+            # A reply counts for every watch of the sender, in whatever thread it is
+            # (#695): the contact may be in another campaign too, or one that sent only
+            # on LinkedIn. The thread only picks the label: in a watched thread, that
+            # thread's campaign's; elsewhere, each watching campaign's.
+            in_thread = {
+                w.enrollment_id for w in self.work.watches if message.thread_id in w.threads
+            }
+            for watch in self.work.watches:
                 if sender in watch.addresses and message.internal_date > watch.first_sent_at:
+                    labelled = not in_thread or watch.enrollment_id in in_thread
                     found.append(
                         Reply(
                             watch.enrollment_id,
                             message,
                             asks_to_unsubscribe(email_text(message)),
-                            watch.label,
+                            watch.label if labelled else None,
                         )
                     )
         return found
@@ -604,31 +655,47 @@ class _Poll:
                     if s.thread_id == notice.thread_id and s.sent_at <= notice.internal_date
                 ]
                 if before:
-                    sent = before[-1]
-                    to = next((v[2] for v in ours.values() if v[1] == sent), None)
-                    match = (watch, sent, to)
+                    match = (watch, before[-1])
                     break
         if match is None:
             return None
-        watch, sent, to = match
-        return Bounce(watch.enrollment_id, notice.id, sent.row_id, to, notice.internal_date)
+        watch, sent = match
+        return Bounce(
+            watch.enrollment_id, notice.id, sent.row_id, self.to(sent), notice.internal_date
+        )
 
-    def cited(self) -> dict[str, tuple[Watch, Sent, str | None]]:
-        """Each sent message's Message-ID, with its watch and ``To``, from Gmail's copy.
-        Read once per poll, and only when a notice needs it."""
+    def cited(self) -> dict[str, tuple[Watch, Sent]]:
+        """Each sent message's Message-ID, with its watch. Built once per poll, and only
+        when a notice needs it: derived for a message ``messages.send`` sent (#695),
+        read from Gmail's copy for one sent from a draft."""
         if self._cited is None:
             self._cited = {}
             for watch in self.work.watches:
                 for sent in watch.sent:
-                    try:
-                        copy = self.gmail.get_message(sent.gmail_message_id, purpose=self.purpose)
-                    except GmailNotFound:
-                        continue
-                    rfc822 = (copy.header("Message-ID") or "").strip()
-                    to = parseaddr(copy.header("To") or "")[1].lower() or None
+                    rfc822 = sent.rfc822_message_id
+                    if rfc822 is None:
+                        copy = self.copy(sent)
+                        rfc822 = None if copy is None else (copy.header("Message-ID") or "").strip()
                     if rfc822:
-                        self._cited[rfc822] = (watch, sent, to)
+                        self._cited[rfc822] = (watch, sent)
         return self._cited
+
+    def to(self, sent: Sent) -> str | None:
+        """The address ``sent`` went to, from Gmail's copy's ``To``; None when it is gone."""
+        copy = self.copy(sent)
+        return None if copy is None else parseaddr(copy.header("To") or "")[1].lower() or None
+
+    def copy(self, sent: Sent) -> Message | None:
+        """Gmail's copy of ``sent``, read at most once per poll; None when it is gone."""
+        if sent.gmail_message_id not in self._copies:
+            try:
+                copy: Message | None = self.gmail.get_message(
+                    sent.gmail_message_id, purpose=self.purpose
+                )
+            except GmailNotFound:
+                copy = None
+            self._copies[sent.gmail_message_id] = copy
+        return self._copies[sent.gmail_message_id]
 
 
 # --- recording ---------------------------------------------------------------------------
@@ -708,12 +775,15 @@ def _after_reply(
     do_not_contact: bool = True,
 ) -> None:
     """What a recorded reply does, on either channel and from outside netkeep
-    (:mod:`netkeep.services.outside_responses`, #512): ``replied_at``; for one asking
-    to unsubscribe, the contact ``do_not_contact`` and every address of theirs on the
-    do-not-send list (unless ``do_not_contact`` is False: a person recording an opt-out
-    may decline it); and a live enrollment ends ``replied`` or ``opted_out``. A
-    completed enrollment stays ``completed``."""
-    enrollment.replied_at = enrollment.replied_at or at
+    (:mod:`netkeep.services.outside_responses`, #512): ``replied_at``, the earliest
+    response's time; for one asking to unsubscribe, the contact ``do_not_contact`` and
+    every address of theirs on the do-not-send list (unless ``do_not_contact`` is False:
+    a person recording an opt-out may decline it); and a live enrollment ends
+    ``replied`` or ``opted_out``. A completed enrollment stays ``completed``."""
+    # The earliest response on record, whatever order they were recorded in (#695): a
+    # response recorded by hand may predate one a poll found, and results credit the
+    # step this time answers.
+    enrollment.replied_at = at if enrollment.replied_at is None else min(enrollment.replied_at, at)
     if row.asks_unsubscribe and do_not_contact:
         contact = get_scoped_contact(session, user, enrollment.contact_id)
         if contact is not None and not contact.do_not_contact:
