@@ -692,7 +692,10 @@ class BrowserWorker:
                     runs.refuse_if_outside_active_hours(settings.linkedin, now=self._clock())
                 except (runs.OutsideActiveHours, runs.RunError) as exc:
                     # The scheduled handler reads this reason back (#696): the fire
-                    # did not run, so the scheduler moves it to the window's start.
+                    # did not run, so the scheduler moves it to the window's start. A
+                    # window that doesn't parse (RunError) lands here too, on purpose:
+                    # nothing runs unguarded, and the scheduler parks the fire by its own
+                    # window, which is always a future start, so the refusal can't loop.
                     return REFUSED_OUTSIDE_HOURS, str(exc)
             try:
                 runs.refuse_if_flagged_or_hot(
