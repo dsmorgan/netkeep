@@ -369,6 +369,7 @@ def test_a_draft_waiting_for_an_opted_out_contact_raises_the_gmail_flag(world: W
         message = get_scoped(session, user, Message, draft)
         assert message is not None
         message.status = MessageStatus.SENT
+        message.sent_at = NOW
     assert world.read().flags.gmail is None
 
 

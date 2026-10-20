@@ -32,7 +32,6 @@ from netkeep.models import (
     Message,
     MessageDirection,
     MessageStatus,
-    ReviewPreview,
     StepApproval,
     Template,
     TemplateChannel,
@@ -89,7 +88,6 @@ def _status(campaign: Campaign) -> CampaignStatus:
 _BY_CAMPAIGN: tuple[tuple[type[UserOwned], InstrumentedAttribute[int]], ...] = (
     (CampaignStep, CampaignStep.campaign_id),
     (Enrollment, Enrollment.campaign_id),
-    (ReviewPreview, ReviewPreview.campaign_id),
     (StepApproval, StepApproval.campaign_id),
     (TestSend, TestSend.campaign_id),
 )
@@ -249,17 +247,11 @@ def test_archive_refuses_a_campaign_never_activated(
 
 
 def _review_records(session: Session, user: User, campaign: Campaign) -> None:
-    """A preview, a step approval and two test sends: one a Gmail draft, one sent."""
-    enrollment = _enroll(session, user, campaign, EnrollmentStatus.PENDING)
+    """A step approval and two test sends: one a Gmail draft, one sent."""
+    _enroll(session, user, campaign, EnrollmentStatus.PENDING)
     step = campaign.steps[0]
     session.add_all(
         [
-            ReviewPreview(
-                user_id=user.id,
-                campaign_id=campaign.id,
-                enrollment_id=enrollment.id,
-                viewed_at=NOW,
-            ),
             StepApproval(
                 user_id=user.id,
                 campaign_id=campaign.id,
@@ -339,8 +331,9 @@ def test_delete_refuses_a_campaign_with_any_message(
     campaign = _campaign(writer, user, CampaignStatus.DRAFT)
     enrollment = _enroll(writer, user, campaign, EnrollmentStatus.PENDING)
     direction = MessageDirection.IN if status is MessageStatus.RECEIVED else MessageDirection.OUT
+    sent_at = NOW if status in (MessageStatus.SENT, MessageStatus.RECEIVED) else None
     message = factories.make_message(
-        writer, enrollment, status=status, direction=direction, sent_at=None
+        writer, enrollment, status=status, direction=direction, sent_at=sent_at
     )
     if not with_step:
         message.step_id = None

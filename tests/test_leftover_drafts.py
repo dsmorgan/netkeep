@@ -74,7 +74,7 @@ def _draft(
         session,
         row,
         status=status,
-        sent_at=None,
+        sent_at=AT if status is MessageStatus.SENT else None,
         gmail_draft_id=draft_id,
         subject=SUBJECT,
         body_rendered=BODY,
@@ -152,6 +152,7 @@ def test_a_discarded_draft_the_person_sent_drops_off(session: Session) -> None:
     assert len(_list(session, user)) == 1
 
     message.status = MessageStatus.SENT
+    message.sent_at = AT
     session.flush()
 
     assert _list(session, user) == []

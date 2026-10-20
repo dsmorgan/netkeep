@@ -27,7 +27,7 @@ import enum
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, TypedDict
 
-from sqlalchemy import JSON, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, ForeignKey, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from netkeep.models.base import Base, TimestampMixin, UserOwned, UTCDateTime, string_enum
@@ -154,9 +154,15 @@ class ImportRun(UserOwned, TimestampMixin, Base):
     # What the auto-tag rules did to the contacts this run touched, inside the
     # same transaction as the import itself (spec 10.3, #64). Zero on a draft
     # run: the rules run at commit, over the contacts the commit wrote.
-    tagged_contacts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    tags_added: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    tags_removed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tagged_contacts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    tags_added: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    tags_removed: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
     committed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     rolled_back_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     # An archive run's per-table counts, as its import reported them (#132): the
@@ -206,7 +212,3 @@ class ImportRow(UserOwned, TimestampMixin, Base):
     error: Mapped[str | None] = mapped_column(Text)
 
     run: Mapped[ImportRun] = relationship(back_populates="rows")
-
-
-IMPORT_TABLES: tuple[type[UserOwned], ...] = (ImportRun, ImportRow)
-"""Every table this module adds, in creation order, for tests and tooling."""

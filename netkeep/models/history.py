@@ -140,7 +140,3 @@ class HistoryRecipient(UserOwned, TimestampMixin, Base):
     @validates("email")
     def _normalize_email(self, key: str, value: str) -> str:
         return normalize_email(value)
-
-
-HISTORY_TABLES: tuple[type[UserOwned], ...] = (HistoryCampaign, HistoryRecipient)
-"""Both history tables, for tests that walk them."""

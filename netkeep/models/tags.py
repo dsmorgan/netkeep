@@ -184,7 +184,3 @@ class AutotagRule(UserOwned, TimestampMixin, Base):
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     tag: Mapped[Tag] = relationship(back_populates="rules")
-
-
-TAG_TABLES: tuple[type[UserOwned], ...] = (Tag, AutotagRule, ContactTag, ContactTagSuppression)
-"""Every table this module adds, in creation order, for tests and tooling that iterate them."""

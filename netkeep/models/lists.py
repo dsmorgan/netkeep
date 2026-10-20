@@ -123,7 +123,3 @@ class SavedView(UserOwned, TimestampMixin, Base):
     filter_json: Mapped[dict[str, Any] | None] = mapped_column(
         JSON(none_as_null=True), nullable=True
     )
-
-
-LIST_TABLES: tuple[type[UserOwned], ...] = (ContactList, ListMember, SavedView)
-"""Every table this module adds, in creation order, for tests and tooling that iterate them."""

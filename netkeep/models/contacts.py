@@ -274,7 +274,10 @@ class Contact(UserOwned, TimestampMixin, Base):
     # the person accepted decided it and it is waiting to be reviewed; the
     # decision log says which batch and when.
     met_source: Mapped[MetSource] = mapped_column(
-        string_enum(MetSource, "contact_met_source"), nullable=False, default=MetSource.MANUAL
+        string_enum(MetSource, "contact_met_source"),
+        nullable=False,
+        default=MetSource.MANUAL,
+        server_default=MetSource.MANUAL.value,
     )
     triaged_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     do_not_contact: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
