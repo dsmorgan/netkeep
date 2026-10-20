@@ -12,7 +12,7 @@ import {
   createRouter,
 } from '@tanstack/react-router'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { EventStreamContext } from '@/features/events/event-stream-context'
 import {
@@ -28,6 +28,7 @@ import { FakeEventSource, resetFakeEventSource } from '@/test/fake-event-source'
 import { jsonResponse, mockFetch } from '@/test/fetch'
 import { formatWhen } from '@/features/campaigns/format'
 
+import { readyQuery, waitingQuery } from './api'
 import type { ReadyItem, ReadyPage, TryAgainItem, WaitingItem, WaitingPage } from './api'
 import {
   AUTO_SEND_ON_NOTE,
@@ -47,6 +48,8 @@ import {
 import { LinkedInStepsSection } from './linkedin-steps-section'
 import reasons from './prefill-reasons.json'
 import {
+  AUTO_SENDING,
+  AUTO_SENT,
   CLOSE_BUBBLE,
   FIRST_POLL_NOTE,
   MAYBE_CLOSE_BUBBLE,
@@ -1681,5 +1684,80 @@ describe('when the page lists only part of a queue (#508)', () => {
     await screen.findByRole('list', { name: 'Try again' })
     expect(screen.queryByText(/oldest try first/)).toBeNull()
     expect(calls.some((call) => call.path === '/api/v1/attention')).toBe(false)
+  })
+})
+
+describe('an auto-send is not a prefill (#704)', () => {
+  const autoSend = (over: Parameters<typeof run>[0] = {}) =>
+    run({ id: 90, kind: 'message_send', trigger: 'scheduled', status: 'running', ...over })
+
+  it('says netkeep is sending, not that a message waits for you, while an auto-send runs', async () => {
+    renderSection({
+      'GET /api/v1/linkedin/status': () => jsonResponse({ ...STATUS_CLEAR, running_run_id: 90 }),
+      'GET /api/v1/linkedin/runs/90': () => jsonResponse(autoSend()),
+    })
+
+    expect(await screen.findByText(AUTO_SENDING)).toBeVisible()
+    expect(screen.queryByText(TYPING)).toBeNull()
+    expect(screen.queryByText(PREFILL_NOTE)).toBeNull()
+    for (const button of screen.getAllByRole('button', { name: /^Prefill/ })) {
+      expect(button).toBeDisabled()
+    }
+  })
+
+  it('still calls a manual prefill a prefill', async () => {
+    renderSection({
+      'GET /api/v1/linkedin/status': () => jsonResponse({ ...STATUS_CLEAR, running_run_id: 90 }),
+      'GET /api/v1/linkedin/runs/90': () => jsonResponse(autoSend({ trigger: 'manual' })),
+    })
+
+    expect(await screen.findByText(TYPING)).toBeVisible()
+    expect(screen.queryByText(AUTO_SENDING)).toBeNull()
+  })
+
+  it('says an auto-send clicked Send when it ends, never that it waits for you', async () => {
+    let state: typeof STATUS_CLEAR = { ...STATUS_CLEAR, running_run_id: 90 } as never
+    let current = autoSend()
+    const { source } = renderSection({
+      'GET /api/v1/linkedin/status': () => jsonResponse(state),
+      'GET /api/v1/linkedin/runs/90': () => jsonResponse(current),
+    })
+    await screen.findByText(AUTO_SENDING)
+
+    state = STATUS_CLEAR
+    current = autoSend({ status: 'completed', stop_reason: 'send_clicked' })
+    act(() => source.emit('run.finished', { run_id: 90, status: 'completed' }))
+
+    expect(await screen.findByText(AUTO_SENT)).toBeVisible()
+    expect(screen.queryByText(TYPED_WHOLE)).toBeNull()
+  })
+})
+
+describe('the queue refreshes on its own (#704)', () => {
+  it('reloads the ready and waiting lists every minute', () => {
+    expect(readyQuery().refetchInterval).toBe(60_000)
+    expect(waitingQuery().refetchInterval).toBe(60_000)
+  })
+
+  it('turns Prefill on when a hold lapses, with no new data', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] })
+    try {
+      const held = new Date(Date.now() + 40_000).toISOString()
+      renderSection({
+        'GET /api/v1/campaigns/linkedin/ready': () =>
+          jsonResponse(readyPage([readyItem({ held_until: held })])),
+      })
+      const button = await screen.findByRole('button', { name: 'Prefill Rosalind Quillfeather' })
+      expect(button).toBeDisabled()
+
+      act(() => {
+        vi.advanceTimersByTime(60_000)
+      })
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: 'Prefill Rosalind Quillfeather' })).toBeEnabled(),
+      )
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

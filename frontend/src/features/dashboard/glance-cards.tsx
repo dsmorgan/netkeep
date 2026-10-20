@@ -18,6 +18,7 @@ import { StartChrome } from '@/features/linkedin/start-chrome'
 import { RUN_STATUS_CLASSES, formatWhen, stopReasonLabel } from '@/features/linkedin/fields'
 import {
   RUN_KIND_LABELS,
+  runKindLabel,
   RUN_STATUS_LABELS,
   type BudgetStatus,
   type Run,
@@ -343,7 +344,7 @@ function LastRun({ run }: { run: Run }) {
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-2">
-        <span>Last run: {kindLabel(run.kind)}</span>
+        <span>Last run: {runKindLabel(run)}</span>
         <Badge className={cn(RUN_STATUS_CLASSES[run.status])}>
           {RUN_STATUS_LABELS[run.status]}
         </Badge>

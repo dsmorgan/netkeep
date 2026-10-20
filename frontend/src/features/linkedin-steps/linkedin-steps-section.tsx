@@ -36,6 +36,7 @@ import { formatWhen } from '@/features/campaigns/format'
 import { Callout, ErrorNote, LoadingNote } from '@/features/crm/controls'
 import { linkedinKeys, runQuery, scheduleQuery } from '@/features/linkedin/api'
 import { stopReasonLabel, summarizeFields } from '@/features/linkedin/fields'
+import { useNow } from '@/features/poll-status/use-now'
 import { cn } from '@/lib/utils'
 
 import {
@@ -77,6 +78,9 @@ import {
   PARTLY_TYPED_SENT_ANYWAY,
   PREFILL_NOTE,
   TRY_AGAIN_NOTE,
+  AUTO_SENDING,
+  AUTO_SENDING_WARNING,
+  AUTO_SENT,
   TYPED_WHOLE,
   TYPING,
   TYPING_WARNING,
@@ -201,10 +205,12 @@ export function LinkedInQueueCard({ campaignId, run }: { campaignId?: number; ru
     },
   })
 
-  const now = new Date()
+  // Ticks with the clock, so a hold that lapses frees Prefill without a refetch (#704).
+  const now = new Date(useNow(30_000))
   const open = waiting.isSuccess ? openPrefill(waiting.data.items, now) : null
   const typing = run.runningId !== null || start.isPending
-  const blocked = typing || open !== null || !waiting.isSuccess
+  const autoSending = run.autoSendId !== null
+  const blocked = typing || autoSending || open !== null || !waiting.isSuccess
   const items = ready.data?.items ?? []
   const retries = ready.data?.try_again ?? []
   // The ready page lists at most 50 of them; the dashboard's count says how many wait
@@ -226,7 +232,13 @@ export function LinkedInQueueCard({ campaignId, run }: { campaignId?: number; ru
         <AutoSendBadge />
         <AutoSendHold />
         <FirstPollNote />
-        {!typing && <p className="text-muted-foreground">{PREFILL_NOTE}</p>}
+        {autoSending && (
+          <div role="status" className="rounded-lg border border-primary/40 bg-accent-soft p-3">
+            <p className="font-medium">{AUTO_SENDING}</p>
+            <p>{AUTO_SENDING_WARNING}</p>
+          </div>
+        )}
+        {!typing && !autoSending && <p className="text-muted-foreground">{PREFILL_NOTE}</p>}
         {typing && (
           <div role="status" className="rounded-lg border border-primary/40 bg-accent-soft p-3">
             <p className="font-medium">{TYPING}</p>
@@ -538,6 +550,16 @@ function Refused({ error, onDismiss }: { error: unknown; onDismiss: () => void }
 function FinishedPrefill({ runId, onDismiss }: { runId: number; onDismiss: () => void }) {
   const run = useQuery(runQuery(runId))
   if (!run.isSuccess || run.data.status === 'running') return null
+  if (run.data.stop_reason === 'send_clicked') {
+    return (
+      <p role="status" className="text-muted-foreground">
+        {AUTO_SENT}{' '}
+        <Button size="sm" variant="ghost" onClick={onDismiss}>
+          Dismiss
+        </Button>
+      </p>
+    )
+  }
   if (run.data.status === 'completed') {
     return (
       <p role="status" className="text-muted-foreground">
@@ -588,7 +610,7 @@ const STATE_TEXT: Record<WaitingState, string> = {
 
 export function WaitingForYouCard({ campaignId }: { campaignId?: number }) {
   const waiting = useQuery(waitingQuery(campaignId ?? null))
-  const now = new Date()
+  const now = new Date(useNow(30_000))
   const items = waiting.data?.items ?? []
   return (
     // The send tray: tinted while messages wait for you to send them.

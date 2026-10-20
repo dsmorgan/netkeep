@@ -16,11 +16,16 @@ interface RunEvent {
 type RunProgress = { run_id: number } & Record<string, unknown>
 
 export interface PrefillRun {
-  /** The `message_send` run going now, if any: a prefill typing in Chrome. */
+  /** The manual `message_send` run going now, if any: a prefill typing in Chrome. */
   runningId: number | null
+  /**
+   * The scheduled `message_send` run going now, if any: an auto-send (ADR 0008).
+   * netkeep types and clicks Send itself, so nothing waits for you.
+   */
+  autoSendId: number | null
   /** Its latest progress, as `run.progress` sent it. Never message text (spec 11.6). */
   progress: Record<string, unknown> | null
-  /** The last prefill run that ended while this page was open, to say how it ended. */
+  /** The last prefill or auto-send run that ended while this page was open. */
   finishedId: number | null
   /** Starts watching a run the page just submitted, before the status says so. */
   watch: (runId: number) => void
@@ -30,7 +35,7 @@ export interface PrefillRun {
 
 /**
  * The prefill going now, from the LinkedIn status (`running_run_id`, whose run is a
- * `message_send`), and its live progress over the app's one SSE stream. A run's start
+ * manual `message_send`; a scheduled one is an auto-send, `autoSendId`), and its live progress over the app's one SSE stream. A run's start
  * or end refreshes the queue, what waits for you, and the campaigns, since any of them
  * may have moved.
  */
@@ -52,9 +57,18 @@ export function usePrefillRun(): PrefillRun {
           candidate === submitted
           ? candidate
           : null
-        : run.data.kind === 'message_send' && run.data.status === 'running'
+        : run.data.kind === 'message_send' &&
+            run.data.trigger === 'manual' &&
+            run.data.status === 'running'
           ? candidate
           : null
+  const autoSendId =
+    candidate !== null &&
+    run.data?.kind === 'message_send' &&
+    run.data.trigger === 'scheduled' &&
+    run.data.status === 'running'
+      ? candidate
+      : null
   // Ended before any event reached this page (a missed event, a fast refusal).
   const submittedEnded =
     submitted !== null && run.data?.id === submitted && run.data.status !== 'running'
@@ -73,7 +87,7 @@ export function usePrefillRun(): PrefillRun {
     if (run_id === candidate) setProgress(fields)
   })
   useServerEvent<RunEvent>('run.finished', ({ run_id }) => {
-    if (run_id === submitted || run_id === runningId) {
+    if (run_id === submitted || run_id === runningId || run_id === autoSendId) {
       setFinishedId(run_id)
       setSubmitted(null)
       setProgress(null)
@@ -83,6 +97,7 @@ export function usePrefillRun(): PrefillRun {
 
   return {
     runningId,
+    autoSendId,
     progress,
     finishedId: finishedId ?? (submittedEnded ? submitted : null),
     watch: (runId) => {

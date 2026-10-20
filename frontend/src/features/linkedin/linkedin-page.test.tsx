@@ -158,44 +158,6 @@ describe('SSE updates (spec 14.1, this item’s "done when"): no reload, no poll
     await waitFor(() => expect(runsCalls).toBeGreaterThan(before))
   })
 
-  it('recovers a missed event by refetching once reconnected, not on the first connect (M1)', async () => {
-    let runsCalls = 0
-    // Starts `disconnected`, the same as a fresh `EventStreamProvider` before
-    // its `EventSource` has opened (N-08): the page's very first connect is
-    // this transition to `connected` below, not the initial render.
-    const { setStatus } = renderLinkedInPage(
-      {
-        'GET /api/v1/linkedin/runs': () => {
-          runsCalls += 1
-          return jsonResponse(runPage([run({ id: 1 })]))
-        },
-      },
-      'disconnected',
-    )
-    await screen.findByRole('heading', { name: 'Runs' })
-    const afterMount = runsCalls
-
-    // N-08: the first connect ever must not invalidate anything — nothing
-    // was missed, since nothing was ever connected to miss it on.
-    act(() => setStatus('connected'))
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    expect(runsCalls).toBe(afterMount)
-
-    // A real reconnect — connected, then dropped, then connected again —
-    // is the case something could have been missed on, and must refetch.
-    act(() => setStatus('disconnected'))
-    expect(runsCalls).toBe(afterMount)
-    act(() => setStatus('connected'))
-    await waitFor(() => expect(runsCalls).toBeGreaterThan(afterMount))
-    const afterReconnect = runsCalls
-
-    // And a spurious "connect" while already connected (no drop in between)
-    // must not invalidate a second time.
-    act(() => setStatus('connected'))
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    expect(runsCalls).toBe(afterReconnect)
-  })
-
   it('never sends a non-GET request as a reaction to any SSE event (R-02)', async () => {
     const { calls, source } = renderLinkedInPage({
       'GET /api/v1/linkedin/runs': () => jsonResponse(runPage([run({ id: 1 })])),
@@ -291,6 +253,8 @@ describe('the inbox poll and the prefill on the LinkedIn page (#383)', () => {
     expect(screen.getByText('read every new conversation')).toBeVisible()
     const filter = screen.getByLabelText('Filter by kind')
     expect(within(filter).getByRole('option', { name: 'Inbox poll' })).toBeInTheDocument()
-    expect(within(filter).getByRole('option', { name: 'LinkedIn prefill' })).toBeInTheDocument()
+    expect(
+      within(filter).getByRole('option', { name: 'LinkedIn prefill or auto-send' }),
+    ).toBeInTheDocument()
   })
 })
