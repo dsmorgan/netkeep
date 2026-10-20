@@ -14,7 +14,7 @@ import logging
 import random
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final
 
@@ -1305,6 +1305,46 @@ def test_step_two_never_gets_the_start_day_exemption(
     _sent_step_one(lane, enrollment_id, at=NOW - timedelta(days=8))
     _sent_hours(lane, start="09:00", end="12:00")
     assert lane.claim(enrollment_id).reasons == (Skip.OUTSIDE_SENDING_HOURS,)
+
+
+@pytest.mark.parametrize(
+    ("timezone", "sent_at"),
+    [
+        # Mon 16 Nov, 16:10 PST: 00:10 UTC on the 17th, so the UTC day said "today".
+        ("America/Los_Angeles", datetime(2026, 11, 17, 0, 10, tzinfo=UTC)),
+        # Mon 16 Nov, 09:30 AEST: 23:30 UTC on the 15th, so the UTC day said "2 days ago".
+        ("Australia/Brisbane", datetime(2026, 11, 15, 23, 30, tzinfo=UTC)),
+    ],
+    ids=["us-pacific-winter-evening", "aest-morning"],
+)
+def test_ago_in_a_prefill_counts_the_users_local_days(
+    session_factory: sessionmaker[Session], timezone: str, sent_at: datetime
+) -> None:
+    """#709: a prefill a day after step 1, inside the default sending hours, says
+    "yesterday": ``ago`` counts the previous send's local day, not its UTC day."""
+    local = Settings(campaigns=SETTINGS.campaigns, linkedin=LinkedInSettings(timezone=timezone))
+    lane = make_lane(session_factory, channels=(EMAIL, LINKEDIN), settings=local)
+    fires_at = sent_at + timedelta(days=1)
+
+    def setup(session: Session, user: User) -> None:
+        user.timezone = timezone
+        campaign = get_scoped(session, user, Campaign, lane.campaign_id)
+        assert campaign is not None
+        step = campaign.steps[1]
+        step.delay_days = 1
+        step.template.body = "Hi {{ first_name }}, we spoke {{ previous_send_date | ago }}"
+        record_session_evidence(
+            session, user, logged_in=True, source="preflight", now=fires_at - timedelta(hours=1)
+        )
+
+    lane.write(setup)
+    enrollment_id = lane.enroll(current_step=1, next_action_at=fires_at)
+    _sent_step_one(lane, enrollment_id, at=sent_at)
+    claim = lane.claim(enrollment_id, now=fires_at)
+    assert claim.claimed, claim.reasons
+    message = lane.message(claim.message_id or 0)
+    assert message is not None and message.body_rendered is not None
+    assert message.body_rendered.endswith(", we spoke yesterday")
 
 
 def test_an_earlier_waiting_message_parks_it(session_factory: sessionmaker[Session]) -> None:

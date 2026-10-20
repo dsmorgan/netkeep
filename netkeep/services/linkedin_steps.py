@@ -1131,7 +1131,8 @@ class _Claimer:
             contact=contact_fields(contact, today),
             campaign_name=campaign.name,
             step_number=step.position,
-            previous_send_date=latest,
+            # The local day, as ``today`` is, so ``ago`` counts calendar days (#709).
+            previous_send_date=None if latest is None else slots.local_date(latest),
         )
         try:
             rendered = render(template.channel, None, template.body, values, today=today)

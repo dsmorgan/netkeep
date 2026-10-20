@@ -1842,7 +1842,9 @@ class _Chooser:
             contact=contact_fields(contact, today),
             campaign_name=campaign.name,
             step_number=step.position,
-            previous_send_date=latest,
+            # The local day, as ``today`` is: the UTC day says "today" for yesterday's
+            # evening send in US Pacific time (#709).
+            previous_send_date=None if latest is None else slots.local_date(latest),
         )
         try:
             rendered = render(

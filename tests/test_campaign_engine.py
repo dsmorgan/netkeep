@@ -1181,6 +1181,58 @@ def test_the_next_step_counts_from_the_latest_outbound_message(world: World) -> 
     assert world.tick(due).fired != []
 
 
+# One send at 16:10 Pacific standard time (00:10 UTC the next day) and one at 09:30 in
+# Brisbane (23:30 UTC the day before), each followed a day later by step 2. Both are
+# inside the default sending hours. By UTC days the first says "today" and the second
+# "2 days ago"; by the user's own days both are "yesterday" (#709).
+_LOCAL_DAY_CASES = {
+    "us-pacific-winter-evening": (
+        "America/Los_Angeles",
+        datetime(2026, 11, 17, 0, 10, tzinfo=UTC),  # Mon 16 Nov, 16:10 PST
+    ),
+    "aest-morning": (
+        "Australia/Brisbane",
+        datetime(2026, 11, 15, 23, 30, tzinfo=UTC),  # Mon 16 Nov, 09:30 AEST
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    ("timezone", "sent_at"), list(_LOCAL_DAY_CASES.values()), ids=list(_LOCAL_DAY_CASES)
+)
+def test_ago_counts_the_users_local_days(
+    session_factory: sessionmaker[Session], timezone: str, sent_at: datetime
+) -> None:
+    """#709: ``previous_send_date | ago`` in a sent body counts from the previous send's
+    local day to the local today, not from its UTC day."""
+    world = make_world(session_factory, channels=(EMAIL, EMAIL))
+    fires_at = sent_at + timedelta(days=1)
+
+    def setup(session: Session) -> None:
+        user = session.get(User, world.user.id)
+        assert user is not None
+        user.timezone = timezone
+        campaign = get_scoped(session, world.user, Campaign, world.campaign.id)
+        assert campaign is not None
+        step = campaign.steps[1]
+        step.delay_days = 1
+        step.template.body = "Hi {{ first_name }}, we spoke {{ previous_send_date | ago }}."
+        record_poll(session, user, fires_at - timedelta(minutes=1))  # #417
+
+    world.write(setup)
+    enrollment_id = world.enroll_new(current_step=1, next_action_at=fires_at)
+
+    def sent_step_one(session: Session) -> None:
+        enrollment = get_scoped(session, world.user, Enrollment, enrollment_id)
+        assert enrollment is not None
+        factories.make_message(session, enrollment, position=1, sent_at=sent_at)
+
+    world.write(sent_step_one)
+    [(firing, outcome)] = world.tick(fires_at).fired
+    assert (firing.step_position, outcome.outcome) == (2, SendOutcome.SENT)
+    assert firing.body.endswith(", we spoke yesterday.")
+
+
 # --- #261 requirement 5: mailbox health ---------------------------------------------------
 
 
