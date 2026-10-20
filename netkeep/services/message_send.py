@@ -40,7 +40,10 @@ flag, active hours, the session flag, heat and a cancel again just before the cl
 
 A prefill is never retried or resumed: ``partially_typed`` and ``unknown`` are failures
 a person clears. Every refusal before the first key is ``not_typed``, which gives the
-claim back (P4-09). The body is read from the database here and goes nowhere but the
+claim back and parks the step for Try again (P4-09), except an auto-send's refusal
+before the navigation: its step stays due (:func:`record`). A cancel is ``not_typed``
+wherever it lands, so a step a person cancelled is never auto-sent by a later fire
+(#708). The body is read from the database here and goes nowhere but the
 source: never on the run row, in ``progress_json``, in a log, or in an error.
 """
 
@@ -121,6 +124,9 @@ CLAIM_LAPSE: Final = timedelta(seconds=60)
 
 #: How often, at most, a running prefill asks the database whether it was cancelled.
 CANCEL_POLL_S: Final = 1.0
+
+#: A gate's refusal when a person cancelled the run (:func:`run_prefill`).
+CANCELLED: Final = "cancelled"
 
 _ENDINGS: Final[dict[MessageOutcomeKind, SyncRunStatus]] = {
     MessageOutcomeKind.PREFILLED: SyncRunStatus.COMPLETED,
@@ -210,6 +216,7 @@ def record(
     send_unconfirmed: str | None = None,
     opened: bool | None = None,
     pre_click_hold: PreClickHold | None = None,
+    cancelled: bool = False,
 ) -> PrefillReport:
     """Record ``outcome`` on run ``run_id``'s claimed message, and end the run, in one
     writer transaction. A run with no claimed message only ends ``failed``.
@@ -232,7 +239,10 @@ def record(
     navigation: a lapse, a gate, a busy browser). An auto-send stopped there is not
     ``not_typed``: its step is given back with its due time
     (:func:`~netkeep.services.linkedin_steps.give_back_unopened`), so a later fire tries
-    it again by itself, and it is never listed for Try again (#458 final review)."""
+    it again by itself, and it is never listed for Try again (#458 final review). The
+    exception is ``cancelled``, a person's cancel caught there (#708): it records
+    ``not_typed`` and parks the step for Try again, as a cancel after the navigation
+    does, so the message a person stopped is never sent by a later fire."""
     with session_scope(factory, write=True) as session:
         user = _load_user(session, user_id)
         run = runs.get_run(session, user, run_id)
@@ -279,7 +289,12 @@ def record(
                 error="the run has no claimed LinkedIn message",
             )
             return PrefillReport(run_id, None)
-        if auto and opened is False and outcome.kind is MessageOutcomeKind.NOT_TYPED:
+        if (
+            auto
+            and opened is False
+            and not cancelled
+            and outcome.kind is MessageOutcomeKind.NOT_TYPED
+        ):
             give_back_unopened(session, user, message.id, now=now)
             runs.finish_run(
                 session,
@@ -677,7 +692,7 @@ async def run_prefill(
         except runs.HeatSkipped:
             return "heat is too high"
         if runs.cancel_requested(session, user, run_id):
-            return "cancelled"
+            return CANCELLED
         return None
 
     spent_at: datetime | None = None
@@ -736,6 +751,9 @@ async def run_prefill(
             clicked=False,
             budget_spent=False,
             opened=False,
+            # #708: a cancel parks the step, as one after the navigation does; it is
+            # never given back to be auto-sent again by a later fire.
+            cancelled=refused == CANCELLED,
         )
 
     asked_at = 0.0

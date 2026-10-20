@@ -246,7 +246,6 @@ def test_the_prefill_constants_are_pinned() -> None:
     assert BudgetSettings().li_prefills_per_day == 15
     assert budgets.ActionClass.LI_PREFILLS.value == "li_prefills"
     assert engine.LINKEDIN_ENRICH_PRIORITY == 1
-    assert {s.value for s in linkedin_steps.OPEN_STATUSES} == {"scheduled", "prefilled"}
     assert {s.value for s in linkedin_steps.WAITING_STATUSES} == {"prefilled", "stale"}
 
 

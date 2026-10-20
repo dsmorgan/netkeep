@@ -1584,6 +1584,30 @@ async def test_a_hold_set_after_the_claim_stops_the_run_before_it_opens_anything
     _given_back_unopened(a, "auto-send is held until the open message bubbles are closed")
 
 
+async def test_a_cancel_before_the_navigation_parks_the_step(lane: Lane) -> None:
+    """#708: a cancel caught before the navigation is ``not_typed`` and parks the step for
+    Try again, as a cancel after it does. It is never given back due, so a later fire
+    doesn't send the message the person stopped."""
+    a = Auto(lane)
+    lane.write(lambda s, u: runs.request_cancel(s, u, a.run_id, now=NOW))
+    await a.execute()
+    assert a.site.navigations == []
+    _no_send(a)
+    assert a.message() is None
+    enrollment = lane.enrollment(a.enrollment_id)
+    assert enrollment.next_action_at is None
+    assert (enrollment.not_sent_count, enrollment.not_sent_error) == (1, "not_typed: cancelled")
+    run = a.run()
+    assert (run.status, run.stop_reason) == (SyncRunStatus.ABORTED, "not_typed")
+    assert (run.counts_json or {}).get("li_prefills_spent") is False
+    assert a.enrollment_id in _try_again_ids(lane)
+    assert a.spent(ActionClass.LI_MESSAGES_AUTO) == 0
+    assert a.spent(ActionClass.PROFILE_VISITS) == 0
+    # Nothing navigated, so Try again needs no "no bubble open" confirm.
+    tried = lane.read(lambda s, u: linkedin_steps.last_try(s, u, enrollment, now=NOW))
+    assert not tried.needs_confirmation
+
+
 async def test_the_handler_checks_the_hold_before_it_claims(
     lane: Lane, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2071,6 +2095,54 @@ def test_the_close_constants_are_pinned() -> None:
 
 
 # --- #458 re-review: the hold is written whatever happens to the record --------------------
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        "held",
+        ["a", "list"],
+        None,
+        {"reason": linkedin_steps.AUTO_SEND_HOLD_TAB, "run_id": 7},
+        {"reason": linkedin_steps.AUTO_SEND_HOLD_TAB, "since": "not a time", "run_id": 7},
+        {"reason": 5, "since": "2026-05-04T09:00:00+00:00"},
+    ],
+    ids=["text", "list", "null", "no-since", "bad-since", "reason-not-text"],
+)
+def test_an_unreadable_hold_still_holds(lane: Lane, stored: Any) -> None:
+    """#708: a stored hold this cannot read holds (fail closed, as the schedule pause
+    does), and never raises: only a resume lifts it."""
+    account = lane.read(lambda s, u: ensure_account(s, u).id)
+    lane.write(lambda s, u: set_setting(s, u, linkedin_steps._hold_key(account), stored))
+    hold = lane.read(lambda s, u: linkedin_steps.auto_send_hold(s, u, account))
+    assert hold is not None
+    assert hold.since.tzinfo is not None
+    expected = stored.get("reason") if isinstance(stored, dict) else None
+    assert hold.reason == (
+        expected if isinstance(expected, str) else linkedin_steps.AUTO_SEND_HOLD_BUBBLE
+    )
+    assert hold.run_id == (stored.get("run_id") if isinstance(stored, dict) else None)
+    assert lane.write(lambda s, u: linkedin_steps.resume_auto_send(s, u, account))
+    assert lane.read(lambda s, u: linkedin_steps.auto_send_hold(s, u, account)) is None
+
+
+async def test_an_unreadable_hold_stops_the_run_before_it_opens_anything(lane: Lane) -> None:
+    """#708: the run's gate reads an unreadable hold as a hold."""
+    a = Auto(lane)
+    account = lane.read(lambda s, u: ensure_account(s, u).id)
+    lane.write(lambda s, u: set_setting(s, u, linkedin_steps._hold_key(account), "held"))
+    await a.execute()
+    assert a.site.navigations == []
+    _no_send(a)
+    _given_back_unopened(a, "auto-send is held until the open message bubbles are closed")
+
+
+def test_a_hold_without_a_zone_reads_as_utc(lane: Lane) -> None:
+    account = lane.read(lambda s, u: ensure_account(s, u).id)
+    stored = {"reason": linkedin_steps.AUTO_SEND_HOLD_BUBBLE, "since": "2026-05-04T09:00:00"}
+    lane.write(lambda s, u: set_setting(s, u, linkedin_steps._hold_key(account), stored))
+    hold = lane.read(lambda s, u: linkedin_steps.auto_send_hold(s, u, account))
+    assert hold is not None and hold.since == datetime(2026, 5, 4, 9, tzinfo=UTC)
 
 
 def test_the_hold_is_written_for_a_run_that_already_ended(lane: Lane) -> None:

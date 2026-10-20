@@ -117,7 +117,7 @@ import enum
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Final
 
 from sqlalchemy import ColumnElement, Select, and_, func, or_
@@ -140,6 +140,7 @@ from netkeep.models import (
     Message,
     MessageDirection,
     MessageStatus,
+    SettingKV,
     StepMode,
     SyncRun,
     SyncRunKind,
@@ -162,7 +163,7 @@ from netkeep.services.campaign_guards import (
 )
 from netkeep.services.linkedin_accounts import account_id_for, ensure_account
 from netkeep.services.linkedin_session import last_session_evidence, session_flag
-from netkeep.services.settings_kv import delete_setting, get_setting, set_setting
+from netkeep.services.settings_kv import delete_setting, set_setting
 
 log = logging.getLogger(__name__)
 
@@ -187,12 +188,6 @@ a person to try it again (:func:`needs_try_again`, #445)."""
 
 READY_PAGE_MAX: Final = 50
 """The most rows one :func:`ready_to_prefill` or :func:`waiting_for_you` call answers."""
-
-OPEN_STATUSES: Final[frozenset[MessageStatus]] = frozenset(
-    {MessageStatus.SCHEDULED, MessageStatus.PREFILLED}
-)
-"""A LinkedIn message in one of these is an open prefill: claimed and not recorded yet, or
-typed and not seen sent. A user has at most one (spec 11.6)."""
 
 WAITING_STATUSES: Final[frozenset[MessageStatus]] = frozenset(
     {MessageStatus.PREFILLED, MessageStatus.STALE}
@@ -355,15 +350,39 @@ def _hold_key(account_id: int) -> str:
 
 
 def auto_send_hold(session: Session, user: User, account_id: int) -> AutoSendHold | None:
-    """The account's auto-send hold, or ``None``. Read-only."""
-    raw = get_setting(session, user, _hold_key(account_id))
-    if not isinstance(raw, dict):
+    """The account's auto-send hold, or ``None``. Read-only.
+
+    Any stored hold holds, read or not (fail closed, as
+    :func:`~netkeep.services.linkedin_accounts.schedule_pause_state` does): only
+    :func:`resume_auto_send` lifts one. A value this cannot read (not an object, a
+    reason that isn't text, a ``since`` missing or not a time) is logged and read as a
+    bubble left open, since when the value was written."""
+    row = session.scalars(
+        scoped(user, SettingKV).where(SettingKV.key == _hold_key(account_id))
+    ).one_or_none()
+    if row is None:
         return None
-    run_id = raw.get("run_id")
+    raw = row.value
+    fields = raw if isinstance(raw, dict) else {}
+    reason = fields.get("reason")
+    run_id = fields.get("run_id")
+    stamp = fields.get("since")
+    try:
+        since = None if stamp is None else datetime.fromisoformat(str(stamp))
+    except ValueError:
+        since = None
+    if not isinstance(raw, dict) or not isinstance(reason, str) or since is None:
+        log.warning(
+            "the auto-send hold for account %d is unreadable; treating it as held", account_id
+        )
+    if since is None:
+        since = row.updated_at
+    elif since.tzinfo is None:
+        since = since.replace(tzinfo=UTC)
     return AutoSendHold(
-        reason=str(raw.get("reason", AUTO_SEND_HOLD_BUBBLE)),
-        since=datetime.fromisoformat(str(raw["since"])),
-        run_id=run_id if isinstance(run_id, int) else None,
+        reason=reason if isinstance(reason, str) else AUTO_SEND_HOLD_BUBBLE,
+        since=since,
+        run_id=run_id if isinstance(run_id, int) and not isinstance(run_id, bool) else None,
     )
 
 
@@ -780,9 +799,12 @@ def _no_retry_detail(enrollment: Enrollment) -> str:
 
 
 def _open_prefill(session: Session, user: User, now: datetime) -> Message | None:
-    """The user's open prefill, if there is one. A ``prefilled`` message
-    :data:`PREFILL_STALE_AFTER` old no longer holds the slot, even before the tick
-    marks it ``stale``."""
+    """The user's open prefill, if there is one; a user has at most one (spec 11.6).
+    It is a LinkedIn message claimed and not recorded yet (``scheduled``), one typed and
+    not seen sent (``prefilled``), or one that stopped part way through typing
+    (:func:`_is_partly_typed`). A ``prefilled`` message :data:`PREFILL_STALE_AFTER` old
+    no longer holds the slot, even before the tick marks it ``stale``, and neither does
+    an auto-sent one (``send_clicked_at``), which waits on the inbox poll."""
     return session.scalars(
         scoped(user, Message)
         .where(
