@@ -3305,13 +3305,13 @@ export interface paths {
          * Restart Serve
          * @description Restart ``netkeep serve`` so settings it reads at startup apply, never in the
          *     middle of work: ``409`` names what is running, unless ``when_idle`` asks to wait for
-         *     it. ``user`` is unused; every route resolves the current user.
+         *     it. The local owner only: ``owner`` is otherwise unused.
          */
         post: operations["restart_serve"];
         /**
          * Cancel Restart
-         * @description Cancel a restart that waits for idle (**Cancel** on the banner). ``user`` is
-         *     unused; every route resolves the current user.
+         * @description Cancel a restart that waits for idle (**Cancel** on the banner). The local owner
+         *     only: ``owner`` is otherwise unused.
          */
         delete: operations["cancel_restart"];
         options?: never;
@@ -16767,6 +16767,13 @@ export interface operations {
                     "application/json": components["schemas"]["RestartOut"];
                 };
             };
+            /** @description Anyone but the local owner account */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description This process cannot restart, config.toml does not load, or something is running (a LinkedIn run, the browser, a task, a campaign send) */
             409: {
                 headers: {
@@ -16802,6 +16809,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["RestartCancelOut"];
                 };
+            };
+            /** @description Anyone but the local owner account */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description The restart has already begun */
             409: {

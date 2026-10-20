@@ -2,11 +2,12 @@
 
 A restart stops ``serve`` the way Ctrl-C does, and that cancels what is running: a
 LinkedIn run (a prefill or an auto-send can be mid-typing), a background task, a
-campaign tick that may be mid-send. So :func:`busy_reasons` names anything in flight,
+campaign tick that may be mid-send, a scheduler heartbeat between claiming a fire and
+recording it. So :func:`stored_busy` and :func:`live_busy` name anything in flight,
 and the endpoint refuses (``409``) while there is any, or, when asked to restart when
 idle, :class:`RestartGate` waits for it:
 
-1. every :data:`POLL_S`, it asks :func:`busy_reasons` until nothing is running;
+1. every :data:`POLL_S`, it asks them until nothing is running;
 2. then it quiesces: the scheduler and the nightly backup pause, and the campaign
    engine stops and waits for a tick in flight, so no new scheduled work can start;
 3. it asks again, waiting on anything started in between (a run a person started by
@@ -14,7 +15,8 @@ idle, :class:`RestartGate` waits for it:
    then triggers the restart.
 
 :meth:`RestartGate.cancel` (**Cancel** on the banner) stops the wait and resumes the
-scheduler and the engine if it had paused them.
+scheduler and the engine if it had paused them. An error while it looks never ends the
+wait: it counts as busy, and it looks again (#707).
 
 This module never imports :mod:`netkeep.services.restart`, the one module that
 execs: ``serve`` puts its restarter on ``app.state`` as a :class:`RestartHook`, and
@@ -33,6 +35,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from netkeep.db import session_scope
 from netkeep.linkedin import activity_lock
+from netkeep.logging_setup import personal_exc
 from netkeep.models import SyncRun, SyncRunStatus
 from netkeep.models.base import utcnow
 from netkeep.scoping import scoped
@@ -45,6 +48,9 @@ log = logging.getLogger(__name__)
 
 POLL_S: Final = 2.0
 """How often a restart waiting for idle looks again."""
+
+CHECK_FAILED: Final = "netkeep could not check what is running (see the log); it looks again"
+"""What a restart waits on while its busy check or the quiesce raises (#707)."""
 
 
 @runtime_checkable
@@ -64,7 +70,8 @@ def stored_busy(factory: sessionmaker[Session]) -> list[str]:
     """What the database and the lock files say is running: a run row still
     ``running`` for a local user, or the local account's browser lock held. A row a
     crashed process left ``running`` (``runs.is_stale``) does not count, so it can
-    never hold a restart off for good."""
+    never hold a restart off for good. A lock that cannot be read (``OSError``)
+    counts as busy."""
     reasons: list[str] = []
     now = utcnow()
     with session_scope(factory) as session:
@@ -84,7 +91,13 @@ def stored_busy(factory: sessionmaker[Session]) -> list[str]:
     key = (
         activity_lock.SINGLE_ACCOUNT_KEY if account is None else activity_lock.account_key(account)
     )
-    state = activity_lock.inspect(key)
+    try:
+        state = activity_lock.inspect(key)
+    except OSError as exc:
+        # Unreadable is not idle (#707): the browser may be in use.
+        log.warning("restart: could not read the browser lock: %s", personal_exc(exc))
+        reasons.append("netkeep could not tell whether the browser is in use; it looks again")
+        return reasons
     if state.held:
         who = state.holder.describe() if state.holder is not None else "another process"
         reasons.append(f"the browser is in use by {who}")
@@ -97,14 +110,21 @@ class Busy(Protocol):
 
 
 def live_busy(
-    tasks: TaskRunner | None, engine: Busy | None, backups: Busy | None = None
+    tasks: TaskRunner | None,
+    engine: Busy | None,
+    backups: Busy | None = None,
+    scheduler: Busy | None = None,
 ) -> list[str]:
-    """What this process has in flight: a background task, a campaign tick, or the
-    nightly backup (an exec would kill its ``VACUUM INTO`` part way)."""
+    """What this process has in flight: a background task, a campaign tick, the nightly
+    backup (an exec would kill its ``VACUUM INTO`` part way), or a scheduler heartbeat
+    (#707: between claiming a fire and submitting its run, neither the task runner nor
+    the run rows show it)."""
     reasons = [
         f"a background task ({info.name}) is running"
         for info in ([] if tasks is None else tasks.active())
     ]
+    if scheduler is not None and scheduler.busy:
+        reasons.append("the scheduler is starting or finishing a scheduled run")
     if engine is not None and engine.busy:
         reasons.append("a campaign send is in progress")
     if backups is not None and backups.busy:
@@ -188,19 +208,28 @@ class RestartGate:
         return True
 
     async def _run(self) -> None:
+        quiet = False  # the quiesce finished without an error
         while True:
-            reasons = await self._busy()
-            self.waiting_on = reasons
-            if reasons:
-                log.info("restart waits: %s", "; ".join(reasons))
-                await asyncio.sleep(self._poll_s)
-                continue
-            if self._quiesced:
-                break
-            # Marked before the wait, so a Cancel during it still resumes what was paused;
-            # shielded, so that Cancel does not cut the quiesce off part way.
-            self._quiesced = True
-            self._quiescing = asyncio.ensure_future(self._quiesce())
-            await asyncio.shield(self._quiescing)
-            # then look once more: something may have started meanwhile
+            try:
+                reasons = await self._busy()
+                self.waiting_on = reasons
+                if not reasons:
+                    if quiet:
+                        break
+                    # Marked before the wait, so a Cancel during it still resumes what was
+                    # paused; shielded, so that Cancel does not cut the quiesce off part way.
+                    self._quiesced = True
+                    self._quiescing = asyncio.ensure_future(self._quiesce())
+                    await asyncio.shield(self._quiescing)
+                    quiet = True
+                    continue  # look once more: something may have started meanwhile
+            except Exception:
+                # Never stop waiting on an error (#707): this task would end with the
+                # scheduler, the engine and backups paused, and Cancel could not undo it.
+                # Unknown is not idle, and a quiesce that failed is tried again.
+                log.exception("restart: could not check what is running; trying again")
+                reasons = [CHECK_FAILED]
+                self.waiting_on = reasons
+            log.info("restart waits: %s", "; ".join(reasons))
+            await asyncio.sleep(self._poll_s)
         self._hook.trigger()

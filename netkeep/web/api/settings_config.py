@@ -16,15 +16,16 @@ is optional and wins for any key it sets; each field says where its value comes 
   stops cleanly and comes back. ``409`` when this process cannot restart itself, when
   config.toml no longer loads (serve would not start again), or while work is running
   (:mod:`netkeep.services.restart_gate`), unless ``when_idle`` asks to wait for it.
-  The UI waits for ``/health`` to answer a new ``boot_id``.
+  The UI waits for ``/health`` to answer a new ``boot_id``. ``POST`` and ``DELETE
+  /settings/restart`` are the local owner's alone (``403`` for anyone else, #707).
 """
 
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from netkeep.config import ConfigError, Settings, load_settings
@@ -33,7 +34,14 @@ from netkeep.models import User
 from netkeep.services import restart_gate, ui_settings
 from netkeep.services.restart_gate import RestartHook
 from netkeep.web.api.health import BOOT_ID
-from netkeep.web.deps import CurrentUser, SessionDep, file_settings, is_owner, read_only
+from netkeep.web.deps import (
+    CurrentUser,
+    SessionDep,
+    file_settings,
+    is_owner,
+    read_only,
+    require_owner,
+)
 
 router = APIRouter(tags=["settings"])
 
@@ -232,6 +240,15 @@ def set_config_settings(
     return _out(request, session, user)
 
 
+def _owner(session: SessionDep, user: CurrentUser) -> User:
+    """The requester, when they are the local owner; 403 for anyone else (#707): a
+    restart stops ``serve`` for every user, and its Cancel resumes their sends."""
+    return require_owner(session, user, "only the local owner account restarts netkeep")
+
+
+Owner = Annotated[User, Depends(_owner)]
+
+
 class RestartIn(BaseModel):
     when_idle: bool = False
     """Wait for what is running to finish, then restart, instead of refusing (#597)."""
@@ -248,6 +265,7 @@ def _live_busy(app: FastAPI) -> list[str]:
         getattr(state, "tasks", None),
         getattr(state, "campaign_engine", None),
         getattr(state, "nightly_backups", None),
+        getattr(state, "scheduler", None),
     )
 
 
@@ -310,16 +328,17 @@ def _gate(request: Request, hook: RestartHook) -> restart_gate.RestartGate:
                 "This process cannot restart, config.toml does not load, or something is"
                 " running (a LinkedIn run, the browser, a task, a campaign send)"
             )
-        }
+        },
+        403: {"description": "Anyone but the local owner account"},
     },
 )
 @read_only  # nothing here writes; the gate's wait must never hold the write lock
 async def restart_serve(
-    request: Request, user: CurrentUser, body: RestartIn | None = None
+    request: Request, owner: Owner, body: RestartIn | None = None
 ) -> RestartOut:
     """Restart ``netkeep serve`` so settings it reads at startup apply, never in the
     middle of work: ``409`` names what is running, unless ``when_idle`` asks to wait for
-    it. ``user`` is unused; every route resolves the current user."""
+    it. The local owner only: ``owner`` is otherwise unused."""
     hook = _hook(request)
     if hook is None:
         raise HTTPException(
@@ -359,12 +378,15 @@ class RestartCancelOut(BaseModel):
 @router.delete(
     "/settings/restart",
     operation_id="cancel_restart",
-    responses={409: {"description": "The restart has already begun"}},
+    responses={
+        403: {"description": "Anyone but the local owner account"},
+        409: {"description": "The restart has already begun"},
+    },
 )
 @read_only  # waits out the quiesce, which a send records in: never hold the write lock
-async def cancel_restart(request: Request, user: CurrentUser) -> RestartCancelOut:
-    """Cancel a restart that waits for idle (**Cancel** on the banner). ``user`` is
-    unused; every route resolves the current user."""
+async def cancel_restart(request: Request, owner: Owner) -> RestartCancelOut:
+    """Cancel a restart that waits for idle (**Cancel** on the banner). The local owner
+    only: ``owner`` is otherwise unused."""
     gate: restart_gate.RestartGate | None = getattr(request.app.state, "restart_gate", None)
     hook = _hook(request)
     if hook is not None and hook.requested:
