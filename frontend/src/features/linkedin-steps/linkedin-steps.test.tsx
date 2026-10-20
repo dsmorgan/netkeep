@@ -1772,13 +1772,16 @@ describe('an auto-send is not a prefill (#704)', () => {
 
     expect(await screen.findByText('The auto-send stopped.')).toBeVisible()
     expect(screen.queryByText(/Not prefilled/)).toBeNull()
+    // It opened the page, so the step is parked for a person, not given back.
+    expect(await screen.findByText(TRY_AGAIN_STEP)).toBeVisible()
+    expect(screen.queryByText(AUTO_STAYS_DUE)).toBeNull()
   })
 
-  it('says an auto-send that opened nothing stays due and tries again by itself', async () => {
+  it('says an auto-send that opened nothing is back in the queue', async () => {
     await endAutoSend({
       status: 'aborted',
       stop_reason: 'not_typed',
-      error: 'the Message control could not be clicked',
+      error: 'auto-send is off',
       counts: { opened: false, typed_chars: 0 },
     })
 
@@ -1786,11 +1789,24 @@ describe('an auto-send is not a prefill (#704)', () => {
     expect(screen.queryByText(TRY_AGAIN_STEP)).toBeNull()
   })
 
+  it('treats a manual prefill that opened nothing as a prefill, not an auto-send', async () => {
+    await endAutoSend({
+      status: 'aborted',
+      stop_reason: 'not_typed',
+      trigger: 'manual',
+      error: 'auto-send is off',
+      counts: { opened: false, typed_chars: 0 },
+    })
+
+    expect(await screen.findByText(TRY_AGAIN_STEP)).toBeVisible()
+    expect(screen.queryByText(AUTO_STAYS_DUE)).toBeNull()
+    expect(screen.queryByText('The auto-send stopped.')).toBeNull()
+  })
+
   it('sends a person-cancelled auto-send that opened nothing to Try again', async () => {
     await endAutoSend({
       status: 'aborted',
       stop_reason: 'not_typed',
-      counts: { opened: false, typed_chars: 0 },
       cancel_requested_at: '2026-09-23T10:01:00Z',
     })
 
