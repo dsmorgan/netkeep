@@ -156,6 +156,24 @@ async def test_browser_instructions_come_from_config_and_touch_no_browser(
     assert browser["check_command"] == "netkeep preflight"
 
 
+@pytest.mark.parametrize("cdp_url", ["http://127.0.0.1", "http://[::1"])
+async def test_browser_instructions_without_a_port_are_a_409_not_a_9222_command(
+    client: httpx.AsyncClient, running_app: FastAPI, cdp_url: str
+) -> None:
+    """#701: the unparseable one was a 500; the portless one printed Chrome's usual 9222,
+    a port netkeep would never attach to. config.toml and the Settings page refuse both,
+    so the app's settings are set directly."""
+    settings: Settings = running_app.state.settings
+    running_app.state.settings = replace(
+        settings, linkedin=replace(settings.linkedin, cdp_url=cdp_url)
+    )
+
+    response = await client.get("/api/v1/linkedin/browser")
+
+    assert response.status_code == 409
+    assert "names no valid port" in response.json()["detail"]
+
+
 async def test_a_resume_takes_the_rest_of_the_plan_and_runs_it(
     bare_engine: Engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:

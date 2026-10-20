@@ -47,6 +47,7 @@ from starlette.requests import cookie_parser
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from netkeep.loopback import LOOPBACK_HOSTS
 from netkeep.services.local_api_key import LocalApiKey, cookie_name, legacy_cookie_name
 
 CLIENT_HEADER = "x-netkeep-client"
@@ -87,8 +88,9 @@ OPEN_API_PATHS = frozenset(
     }
 )
 
-#: The names this server answers to (see the module docstring). Pinned by a test.
-LOOPBACK_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "::1"})
+#: The names this server answers to (see the module docstring): the one loopback set.
+#: Pinned by a test.
+LOOPBACK_HOSTNAMES = LOOPBACK_HOSTS
 
 _MESSAGES = {
     RULE_CLIENT_HEADER: "state-changing requests to the API need the header X-Netkeep-Client: 1",

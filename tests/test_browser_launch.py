@@ -20,29 +20,28 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from netkeep import cli as cli_module
 from netkeep.cli import app as cli
-from netkeep.config import Settings
+from netkeep.config import LinkedInSettings, Settings
 from netkeep.linkedin.browser import CHROME_PROFILE_DIRNAME as EXTRACTOR_PROFILE_DIRNAME
+from netkeep.loopback import configured_port
 from netkeep.paths import data_dir
 from netkeep.services.browser_launch import (
     CHROME_PROFILE_DIRNAME,
-    DEFAULT_CDP_PORT,
-    cdp_port,
     chrome_launch_command,
+    no_port_note,
     remote_host_note,
 )
 
 
-def test_cdp_port_reads_the_configured_port() -> None:
-    assert cdp_port("http://127.0.0.1:9333") == 9333
+def test_the_launch_port_is_the_configured_port() -> None:
+    assert configured_port("http://127.0.0.1:9333") == 9333
 
 
-def test_cdp_port_falls_back_to_chromes_default() -> None:
-    assert cdp_port("http://127.0.0.1") == DEFAULT_CDP_PORT
-
-
-def test_cdp_port_falls_back_on_an_unparseable_url() -> None:
-    assert cdp_port("not a url at all") == DEFAULT_CDP_PORT
+@pytest.mark.parametrize("url", ["http://127.0.0.1", "not a url at all", "http://[::1"])
+def test_a_url_with_no_port_gets_no_guessed_9222(url: str) -> None:
+    """#701: no port is no port, never Chrome's usual 9222."""
+    assert configured_port(url) is None
 
 
 def test_macos_command_uses_open(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -68,6 +67,13 @@ def test_remote_host_note_is_none_for_loopback() -> None:
         assert remote_host_note(url) is None
 
 
+@pytest.mark.parametrize("url", ["http://[::1", "http://[nope]:9222", "http://:9222", ""])
+def test_remote_host_note_is_none_for_a_url_that_does_not_parse(url: str) -> None:
+    """#701: ``urlsplit``'s ValueError was a 500 on GET /linkedin/browser and a CLI
+    crash. No host is no remote host; config load and the port check refuse the url."""
+    assert remote_host_note(url) is None
+
+
 def test_remote_host_note_warns_off_loopback() -> None:
     note = remote_host_note("http://10.0.0.5:9222")
     assert note is not None
@@ -86,12 +92,14 @@ def test_the_duplicated_profile_dirname_matches_the_extractors() -> None:
 
 
 def test_cli_browser_launch_prints_exactly_this_modules_command() -> None:
-    """`netkeep browser launch` calls `chrome_launch_command`/`cdp_port` (M3);
+    """`netkeep browser launch` calls `chrome_launch_command`/`configured_port` (M3);
     its printed lines must be exactly what those functions return, not a
     hand-kept copy that could say something different."""
     settings = Settings()
     profile = data_dir() / CHROME_PROFILE_DIRNAME
-    expected = chrome_launch_command(cdp_port(settings.linkedin.cdp_url), profile)
+    port = configured_port(settings.linkedin.cdp_url)
+    assert port is not None
+    expected = chrome_launch_command(port, profile)
 
     result = CliRunner().invoke(cli, ["browser", "launch"])
 
@@ -156,3 +164,32 @@ def test_cli_browser_launch_uses_the_chrome_address_the_settings_page_set() -> N
     assert json.loads(result.output)["port"] == 9444
     plain = CliRunner().invoke(cli, ["browser", "launch"])
     assert "--remote-debugging-port=9444" in plain.output
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+def test_cli_browser_launch_prints_no_command_without_a_port(
+    monkeypatch: pytest.MonkeyPatch, as_json: bool
+) -> None:
+    """#701: an address with no port is refused with the reason, and no 9222 command.
+    config.toml and the Settings page both refuse one now, so the settings are stubbed."""
+    settings = Settings(linkedin=LinkedInSettings(cdp_url="http://127.0.0.1"))
+    monkeypatch.setattr(cli_module, "_load_settings_or_exit", lambda _state: settings)
+
+    result = CliRunner().invoke(cli, ["browser", "launch", *(["--json"] if as_json else [])])
+
+    assert result.exit_code == 1
+    assert no_port_note("http://127.0.0.1") in result.output
+    assert "9222" not in result.output.replace("http://127.0.0.1:9222", "")
+    assert "--remote-debugging-port" not in result.output
+
+
+def test_cli_browser_launch_refuses_a_config_cdp_url_that_does_not_parse(tmp_path: Path) -> None:
+    """#701: a malformed config.toml cdp_url stops at load with the key named."""
+    config = tmp_path / "config.toml"
+    config.write_text('[linkedin]\ncdp_url = "http://[::1"\n')
+
+    result = CliRunner().invoke(cli, ["--config", str(config), "browser", "launch", "--json"])
+
+    assert result.exit_code != 0
+    assert "linkedin.cdp_url" in result.output
+    assert "--remote-debugging-port" not in result.output

@@ -84,6 +84,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from netkeep.chrome_profile import check_dedicated_profile, profile_lock_pid
 from netkeep.logging_setup import personal_exc
+from netkeep.loopback import configured_port as configured_port
 from netkeep.services.browser_launch import chrome_flags, remote_host_note
 from netkeep.services.chrome_launch import (
     LaunchResult,
@@ -219,19 +220,6 @@ def port_answers(port: int) -> bool:
             return True
     except OSError:
         return False
-
-
-def configured_port(cdp_url: str) -> int | None:
-    """The port ``cdp_url`` names, or ``None`` when it names none or an invalid one.
-
-    Unlike :func:`netkeep.services.browser_launch.cdp_port`, never Chrome's default:
-    the launcher starts Chrome only on a port you configured.
-    """
-    try:
-        port = urlsplit(cdp_url).port
-    except ValueError:
-        return None
-    return port if port is not None and 0 < port < 65536 else None
 
 
 Spawn = Callable[[ChromeLaunch], Process]

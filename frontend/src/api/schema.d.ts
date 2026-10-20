@@ -14774,6 +14774,13 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description linkedin.cdp_url names no valid port, so there is no command */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     check_linkedin_browser: {
