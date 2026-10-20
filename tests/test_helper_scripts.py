@@ -198,7 +198,12 @@ def _run_sh_in_tmp_path(tmp_path: Path) -> Iterator[None]:
 
 
 def _real_path_snapshot() -> dict[str, frozenset[tuple[str, int]]]:
-    """Each directory on this process's own PATH: its entries and their mtimes."""
+    """Each directory on this process's own PATH: its entries and their mtimes.
+
+    Only run_sh's own runs are checked; the two tests that drive a script through Popen
+    (to answer its prompt, or to interrupt it) are not. A ``brew`` or ``uv tool`` run
+    elsewhere during a test changes a PATH directory too, and fails that test falsely:
+    re-run it alone."""
     snapshot: dict[str, frozenset[tuple[str, int]]] = {}
     for directory in os.environ.get("PATH", "").split(os.pathsep):
         if not directory or directory in snapshot:
@@ -266,8 +271,10 @@ def run_sh(
             "XDG_CONFIG_HOME",
             "XDG_DATA_HOME",
             "XDG_STATE_HOME",
+            "TMPDIR",
         )
     }
+    Path(confined["TMPDIR"]).mkdir(exist_ok=True)
     full_env = {"PATH": path, "HOME": str(_run_sh_tmp / "home"), **confined, **env}
     if allow_no_curl:
         assert shutil.which("curl", path=full_env.get("PATH", "")) is None, (
@@ -1780,6 +1787,86 @@ def test_restore_dry_run_names_netkeep_restore_and_changes_nothing(data: Path) -
     assert " restore " in result.stdout
     assert not (data / "netkeeper.sqlite3").exists()
     assert [p.name for p in (data / "archives").iterdir()] == [archive.name]
+
+
+def _isolated_reset_script(tmp_path: Path, *, netkeep: str | None) -> Path:
+    """A copy of reset-data.sh under a fake repo root, whose ``.venv/bin/netkeep`` is
+    ``netkeep`` (a sh script body), or missing when that is None."""
+    repo = tmp_path / "isolated-repo"
+    (repo / "scripts").mkdir(parents=True)
+    copy = repo / "scripts" / "reset-data.sh"
+    copy.write_text(RESET.read_text())
+    copy.chmod(0o755)
+    if netkeep is not None:
+        bin_dir = repo / ".venv" / "bin"
+        bin_dir.mkdir(parents=True)
+        fake = bin_dir / "netkeep"
+        fake.write_text(netkeep)
+        fake.chmod(0o755)
+    return copy
+
+
+#: A netkeep whose restore is a plain copy: an old install, before #598's clear.
+_COPYING_NETKEEP = (
+    '#!/bin/sh\n[ "$1" = restore ] && exec cp -- "$2" "$NETKEEP_DATA/netkeeper.sqlite3"\n'
+)
+
+
+@needs_sqlite3_cli
+def test_restore_never_falls_back_to_a_netkeep_on_path(data: Path, tmp_path: Path) -> None:
+    """#700 review: with no netkeep in the checkout's venv, --restore stops; it never
+    runs whatever netkeep PATH has, which may not clear auto-send."""
+    make_db(data, value=1)
+    run_sh(RESET, "--data-dir", str(data), "--yes", env={})
+    (archive,) = (data / "archives").iterdir()
+    db = make_db(data, value=2)
+    script = _isolated_reset_script(tmp_path, netkeep=None)
+    on_path = tmp_path / "path-bin"
+    on_path.mkdir()
+    (on_path / "netkeep").write_text(_COPYING_NETKEEP)
+    (on_path / "netkeep").chmod(0o755)
+    env = {"PATH": f"{on_path}:{SYSTEM_PATH}"}
+    result = run_sh(script, "--data-dir", str(data), "--restore", str(archive), "--yes", env=env)
+    assert result.returncode == 1
+    assert "netkeep is needed to restore" in result.stderr
+    assert "make install" in result.stderr
+    assert marker(db) == 2
+    assert [p.name for p in (data / "archives").iterdir()] == [archive.name]
+
+
+@needs_sqlite3_cli
+def test_restore_fails_closed_when_auto_send_survives(data: Path, tmp_path: Path) -> None:
+    """#700 review: whatever netkeep ran, the script checks the restored database itself
+    and stops loudly when the Settings-page auto-send row is still there."""
+    db = make_db(data, value=5)
+    with closing(sqlite3.connect(db)) as conn, conn:
+        (user_id,) = conn.execute("SELECT id FROM users").fetchone()
+        conn.execute(
+            "INSERT INTO settings_kv (user_id, key, value, created_at, updated_at)"
+            " VALUES (?, ?, 'true', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+            (user_id, AUTO_SEND_ROW_KEY),
+        )
+    run_sh(RESET, "--data-dir", str(data), "--yes", env={})
+    (archive,) = (data / "archives").iterdir()
+    script = _isolated_reset_script(tmp_path, netkeep=_COPYING_NETKEEP)
+    result = run_sh(script, "--data-dir", str(data), "--restore", str(archive), "--yes", env={})
+    assert result.returncode == 1
+    assert "still has the Settings-page LinkedIn auto-send" in result.stderr
+    assert "Don't start netkeep serve" in result.stderr
+
+
+@needs_sqlite3_cli
+def test_restore_failure_says_the_database_was_left_as_it_was(data: Path, tmp_path: Path) -> None:
+    make_db(data, value=1)
+    run_sh(RESET, "--data-dir", str(data), "--yes", env={})
+    (archive,) = (data / "archives").iterdir()
+    db = make_db(data, value=2)
+    script = _isolated_reset_script(tmp_path, netkeep="#!/bin/sh\nexit 1\n")
+    result = run_sh(script, "--data-dir", str(data), "--restore", str(archive), "--yes", env={})
+    assert result.returncode == 1
+    assert "was left as it was" in result.stderr
+    assert str(data / "archives") in result.stderr
+    assert marker(db) == 2
 
 
 @needs_sqlite3_cli
