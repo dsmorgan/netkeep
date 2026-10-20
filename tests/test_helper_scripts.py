@@ -29,12 +29,26 @@ from urllib.parse import urlparse
 import pytest
 from time_limit import Stopwatch
 
-from netkeep.services import browser_launch
+from netkeep import migrations
+from netkeep.db import make_engine, make_session_factory
+from netkeep.linkedin import activity_lock
+from netkeep.models import SettingKV
+from netkeep.services import browser_launch, serve_lock
+from netkeep.services.backup import AUTO_SEND_ROW_KEY
+from netkeep.services.users import ensure_local_user
 
 ROOT = Path(__file__).resolve().parent.parent
 CHROME = ROOT / "scripts" / "chrome.sh"
 RESET = ROOT / "scripts" / "reset-data.sh"
 SH = shutil.which("sh")
+
+#: The system tools a script under test may use, and nothing anyone installed: no
+#: Homebrew, no ~/.local/bin, no directory a script under test could write into or that
+#: could hand it a real tool where a test meant a shim (#700). /usr/sbin is for lsof.
+SYSTEM_PATH = "/usr/bin:/bin:/usr/sbin"
+
+#: The ports a test must never reach: the maintainer's live Chrome and live netkeep.
+LIVE_PORTS = (9222, 8000)
 
 pytestmark = pytest.mark.skipif(SH is None or sys.platform == "win32", reason="needs a POSIX sh")
 
@@ -125,7 +139,7 @@ def _require_pinned_port(
 
 
 def _curl_shim(shim_dir: Path) -> Path:
-    """A `curl` on PATH that refuses any invocation naming port 9222, as a
+    """A `curl` on PATH that refuses any invocation naming port 9222 or 8000, as a
     backstop that does not depend on a test author remembering to pin one
     (#183 re-review gap): `_require_pinned_port` only catches what a test
     *says* it will do; this catches what chrome.sh actually tries to connect
@@ -146,17 +160,18 @@ def _curl_shim(shim_dir: Path) -> Path:
     it as "nothing answered", so nothing else would surface this (#183
     re-review gap 3b).
     """
-    real = shutil.which("curl")
-    assert real is not None, "curl must be on PATH for the shim to fall back to"
-    marker = shim_dir / "REFUSED_9222"
+    real = shutil.which("curl", path=SYSTEM_PATH)
+    assert real is not None, "curl must be on the system PATH for the shim to fall back to"
+    marker = shim_dir / "REFUSED_LIVE_PORT"
     shim = shim_dir / "curl"
+    refused = " || ".join(f'[ "$port" -eq {port} ]' for port in LIVE_PORTS)
     shim.write_text(
         "#!/bin/sh\n"
         'for arg in "$@"; do\n'
         "  port=$(printf '%s' \"$arg\" | sed -n 's/.*:0*\\([0-9][0-9]*\\).*/\\1/p')\n"
-        '  if [ -n "$port" ] && [ "$port" -eq 9222 ] 2>/dev/null; then\n'
+        f'  if [ -n "$port" ] && {{ {refused}; }} 2>/dev/null; then\n'
         f"    : > {str(marker)!r}\n"
-        "    echo 'refused: 9222' >&2\n"
+        '    echo "refused: $port" >&2\n'
         "    exit 1\n"
         "  fi\n"
         "done\n"
@@ -164,6 +179,52 @@ def _curl_shim(shim_dir: Path) -> Path:
     )
     shim.chmod(0o755)
     return marker
+
+
+_run_sh_tmp: Path | None = None
+
+
+@pytest.fixture(autouse=True)
+def _run_sh_in_tmp_path(tmp_path: Path) -> Iterator[None]:
+    """Give run_sh this test's tmp_path, for its curl shim and every install location
+    it points the script at (#700): nothing a script under test writes lands outside."""
+    global _run_sh_tmp
+    _run_sh_tmp = tmp_path / "run-sh"
+    _run_sh_tmp.mkdir()
+    try:
+        yield
+    finally:
+        _run_sh_tmp = None
+
+
+def _real_path_snapshot() -> dict[str, frozenset[tuple[str, int]]]:
+    """Each directory on this process's own PATH: its entries and their mtimes."""
+    snapshot: dict[str, frozenset[tuple[str, int]]] = {}
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        if not directory or directory in snapshot:
+            continue
+        try:
+            with os.scandir(directory) as entries:
+                snapshot[directory] = frozenset(
+                    (entry.name, entry.stat(follow_symlinks=False).st_mtime_ns) for entry in entries
+                )
+        except OSError:
+            snapshot[directory] = frozenset()
+    return snapshot
+
+
+def _run_confined(
+    command: list[str], env: dict[str, str], stdin: str | None
+) -> subprocess.CompletedProcess[str]:
+    """Run ``command``, then fail if anything on the real PATH changed meanwhile."""
+    before = _real_path_snapshot()
+    result = subprocess.run(
+        command, capture_output=True, text=True, env=env, input=stdin, timeout=60
+    )
+    after = _real_path_snapshot()
+    changed = sorted(d for d in before.keys() | after.keys() if before.get(d) != after.get(d))
+    assert not changed, f"a script under test changed a directory on the real PATH: {changed}"
+    return result
 
 
 def run_sh(
@@ -184,54 +245,53 @@ def run_sh(
     without allow_no_curl's own point (a test with no curl on PATH on
     purpose) actually requiring it to be absent."""
     assert SH is not None
+    assert _run_sh_tmp is not None, "run_sh runs only inside a test (it needs tmp_path)"
     if script.name == "chrome.sh":
         _require_pinned_port(args, env, pinned_port)
-    # The interpreter's own bin first: chrome.sh finds netkeep as <repo>/.venv/bin or on
-    # PATH, and a sibling worktree has no .venv of its own (#210).
-    path = os.pathsep.join(
-        (str(Path(sys.executable).parent), os.environ.get("PATH", "/usr/bin:/bin"))
-    )
-    full_env = {"PATH": path, "HOME": "/nonexistent", **env}
+    # The interpreter's own bin first: chrome.sh and reset-data.sh find netkeep as
+    # <repo>/.venv/bin or on PATH, and a sibling worktree has no .venv of its own (#210).
+    # Then the system's tools and nothing else (#700).
+    path = os.pathsep.join((str(Path(sys.executable).parent), SYSTEM_PATH))
+    # Every install location points into tmp_path, and HOME at a folder there that
+    # does not exist (as /nonexistent did): a test that needs a home makes its own.
+    confined = {
+        name: str(_run_sh_tmp / name.lower())
+        for name in (
+            "UV_INSTALL_DIR",
+            "UV_TOOL_BIN_DIR",
+            "UV_TOOL_DIR",
+            "CARGO_HOME",
+            "XDG_BIN_HOME",
+            "XDG_CACHE_HOME",
+            "XDG_CONFIG_HOME",
+            "XDG_DATA_HOME",
+            "XDG_STATE_HOME",
+        )
+    }
+    full_env = {"PATH": path, "HOME": str(_run_sh_tmp / "home"), **confined, **env}
     if allow_no_curl:
         assert shutil.which("curl", path=full_env.get("PATH", "")) is None, (
             "allow_no_curl=True but curl is still reachable on this PATH -- either "
             "make it genuinely absent, or drop the flag and let the shim run"
         )
-        return subprocess.run(
-            [SH, str(script), *args],
-            capture_output=True,
-            text=True,
-            env=full_env,
-            input=stdin,
-            timeout=60,
-        )
+        return _run_confined([SH, str(script), *args], full_env, stdin)
     # A curl shim ahead of whatever PATH was just built -- even a test's own
     # custom one, which otherwise would have replaced the line above entirely:
     # the backstop for #183's guard above, so a port 9222 that reached curl
     # despite it is refused too, whether or not a test caller remembered to
     # pin one. lsof and ps are read-only (they report on an existing
     # listener; they never open a connection to it themselves), so they need
-    # no shim.
-    shim_dir = Path(tempfile.mkdtemp(prefix="chrome-sh-curl-shim-"))
-    try:
-        marker = _curl_shim(shim_dir)
-        full_env["PATH"] = os.pathsep.join((str(shim_dir), full_env.get("PATH", "")))
-        result = subprocess.run(
-            [SH, str(script), *args],
-            capture_output=True,
-            text=True,
-            env=full_env,
-            input=stdin,
-            timeout=60,
+    # no shim. The shim lives in tmp_path (#700), one per call.
+    shim_dir = Path(tempfile.mkdtemp(prefix="curl-shim-", dir=_run_sh_tmp))
+    marker = _curl_shim(shim_dir)
+    full_env["PATH"] = os.pathsep.join((str(shim_dir), full_env.get("PATH", "")))
+    result = _run_confined([SH, str(script), *args], full_env, stdin)
+    if marker.exists():
+        raise AssertionError(
+            f"{script.name} tried to reach port 9222 or 8000 despite the pinned-port guard"
+            " -- the curl shim refused it; see stderr for 'refused: <port>'"
         )
-        if marker.exists():
-            raise AssertionError(
-                "chrome.sh tried to reach port 9222 despite the pinned-port guard -- "
-                "the curl shim refused it; see stderr for 'refused: 9222'"
-            )
-        return result
-    finally:
-        shutil.rmtree(shim_dir, ignore_errors=True)
+    return result
 
 
 def chrome_flags(line: str) -> list[str]:
@@ -582,6 +642,66 @@ def test_run_sh_raises_if_chrome_sh_still_reaches_9222_via_curl(tmp_path: Path) 
         run_sh(fake_chrome, "--port", "1234", env={})
 
 
+def test_curl_shim_refuses_port_8000_too(tmp_path: Path) -> None:
+    """I19 (#700): the maintainer's live netkeep listens on 8000; the shim refuses it
+    as it does Chrome's 9222, from the arguments alone (RFC 5737 address)."""
+    shim_dir = tmp_path / "shim"
+    shim_dir.mkdir()
+    _curl_shim(shim_dir)
+    result = subprocess.run(
+        [str(shim_dir / "curl"), "-fsS", "--max-time", "2", "http://192.0.2.1:8000/api/v1/me"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert result.returncode != 0
+    assert "refused: 8000" in result.stderr
+
+
+def test_run_sh_raises_if_a_script_reaches_8000_via_curl(tmp_path: Path) -> None:
+    fake = tmp_path / "fake.sh"
+    fake.write_text("#!/bin/sh\ncurl -fsS http://192.0.2.1:8000/api/v1/me\nexit 0\n")
+    fake.chmod(0o755)
+    with pytest.raises(AssertionError, match="8000"):
+        run_sh(fake, env={})
+
+
+def test_run_sh_confines_path_and_install_locations(tmp_path: Path) -> None:
+    """I19 (#700): the script sees its curl shim (in tmp_path), the interpreter's bin and
+    the system's tools, nothing else on PATH, and every install location in tmp_path."""
+    names = ("HOME", "UV_INSTALL_DIR", "UV_TOOL_BIN_DIR", "CARGO_HOME", "XDG_DATA_HOME")
+    fake = tmp_path / "env.sh"
+    fake.write_text(
+        "#!/bin/sh\nprintf '%s\\n' \"$PATH\"\n"
+        + "".join(f"printf '%s\\n' \"${name}\"\n" for name in names)
+    )
+    fake.chmod(0o755)
+    result = run_sh(fake, env={})
+    assert result.returncode == 0, result.stderr
+    path, *locations = result.stdout.splitlines()
+    shim, interpreter_bin, *system = path.split(os.pathsep)
+    assert Path(shim).is_relative_to(tmp_path)
+    assert interpreter_bin == str(Path(sys.executable).parent)
+    assert os.pathsep.join(system) == SYSTEM_PATH
+    assert len(locations) == len(names)
+    assert all(Path(location).is_relative_to(tmp_path) for location in locations)
+
+
+def test_run_sh_fails_when_a_script_writes_onto_the_real_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """I19 (#700): what the 2026-10-19 fake uv in /usr/local/bin would have tripped. The
+    "real" PATH here starts with a folder in tmp_path, so the write lands nowhere real."""
+    real_bin = tmp_path / "real-bin"
+    real_bin.mkdir()
+    monkeypatch.setenv("PATH", f"{real_bin}{os.pathsep}{os.environ.get('PATH', '')}")
+    fake = tmp_path / "installer.sh"
+    fake.write_text(f"#!/bin/sh\n: > {str(real_bin / 'uv')!r}\n")
+    fake.chmod(0o755)
+    with pytest.raises(AssertionError, match="changed a directory on the real PATH"):
+        run_sh(fake, env={})
+
+
 def test_run_sh_allow_no_curl_asserts_curl_is_actually_absent(tmp_path: Path) -> None:
     """#183 re-review gap 3d: allow_no_curl must not be trusted blindly -- if
     curl is still reachable on the given PATH, that silently drops the
@@ -673,7 +793,7 @@ def test_chrome_script_finds_port_and_profile_through_a_symlinked_netkeep(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (bin_dir / "netkeep").symlink_to(real_dir / "netkeep")  # no python beside the symlink
-    path = f"{bin_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
+    path = f"{bin_dir}:{SYSTEM_PATH}"
     result = run_sh(script, "--status", env={"PATH": path}, pinned_port=port)
     assert result.returncode == 0, result.stderr
     assert "warning" not in result.stderr
@@ -701,7 +821,7 @@ def test_chrome_script_resolves_an_env_shebang_entry_point(tmp_path: Path) -> No
     # this suite runs under always has one beside `python` (uv/pip's doing).
     python_dir = Path(sys.executable).parent
     assert (python_dir / "python3").exists()
-    path = f"{bin_dir}:{python_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
+    path = f"{bin_dir}:{python_dir}:{SYSTEM_PATH}"
     result = run_sh(script, "--status", env={"PATH": path}, pinned_port=port)
     assert result.returncode == 0, result.stderr
     assert "warning" not in result.stderr
@@ -777,7 +897,7 @@ def test_chrome_script_falls_back_to_python3_for_a_sh_shim_entry_point(tmp_path:
     bin_dir.mkdir()
     (bin_dir / "netkeep").symlink_to(real_dir / "netkeep")
     python_dir = Path(sys.executable).parent
-    path = f"{bin_dir}:{python_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
+    path = f"{bin_dir}:{python_dir}:{SYSTEM_PATH}"
     result = run_sh(script, "--status", env={"PATH": path}, pinned_port=port)
     assert result.returncode == 0, result.stderr
     assert "warning" not in result.stderr
@@ -845,7 +965,7 @@ def test_chrome_script_never_uses_the_new_default_before_the_move(tmp_path: Path
     fake_netkeep_cli(
         bin_dir / "netkeep", port=free_port(), profile=support / "netkeep" / "chrome-profile"
     )
-    path = f"{bin_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
+    path = f"{bin_dir}:{SYSTEM_PATH}"
     result = run_sh(
         script,
         "--dry-run",
@@ -886,7 +1006,7 @@ def test_chrome_script_stops_with_netkeeps_message_and_creates_no_folder(tmp_pat
     fake.chmod(0o755)
     home = tmp_path / "home"
     home.mkdir()
-    path = f"{bin_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
+    path = f"{bin_dir}:{SYSTEM_PATH}"
     result = run_sh(script, "--port", str(free_port()), env={"PATH": path, "HOME": str(home)})
     assert result.returncode == 1
     assert "can't move netkeeper's data yet: both exist" in result.stderr
@@ -924,7 +1044,7 @@ def test_chrome_script_refuses_a_non_numeric_port_from_json(tmp_path: Path) -> N
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (bin_dir / "netkeep").symlink_to(real_dir / "netkeep")
-    path = f"{bin_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
+    path = f"{bin_dir}:{SYSTEM_PATH}"
     result = run_sh(script, "--dry-run", env={"PATH": path}, pinned_port="not-a-port")
     assert result.returncode == 1
     assert "must be a number" in result.stderr
@@ -1045,7 +1165,7 @@ def test_chrome_script_treats_lock_holder_as_present_when_lsof_answers_nothing(
         # -iTCP check, so the rest of the script still runs normally.
         shim.write_text(f'#!/bin/sh\ncase "$*" in *-Fn*) exit 0 ;; esac\nexec "{real}" "$@"\n')
         shim.chmod(0o755)
-        path = f"{bin_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
+        path = f"{bin_dir}:{SYSTEM_PATH}"
         result = run_sh(
             CHROME,
             "--dry-run",
@@ -1088,7 +1208,7 @@ def test_chrome_script_fails_closed_when_flag_is_mismatched_and_lsof_is_empty(
         # must still trigger despite the mismatched flag.
         shim.write_text(f'#!/bin/sh\ncase "$*" in *-Fn*) exit 0 ;; esac\nexec "{real}" "$@"\n')
         shim.chmod(0o755)
-        path = f"{bin_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
+        path = f"{bin_dir}:{SYSTEM_PATH}"
         result = run_sh(
             CHROME,
             "--dry-run",
@@ -1340,17 +1460,54 @@ needs_sqlite3_cli = pytest.mark.skipif(
 )
 
 
+_db_template: Path | None = None
+
+#: A --restore that reaches netkeep restore starts the netkeep CLI: about 2 s of CPU,
+#: and more than 10 s on a loaded machine. ``slow`` gives it the longer limit.
+slow_netkeep_restore = pytest.mark.slow
+
+
+@pytest.fixture(scope="session")
+def netkeep_db_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A migrated netkeep database with the local user, made once: --restore hands the
+    write to netkeep restore, which takes only a netkeep database (#700)."""
+    work = tmp_path_factory.mktemp("netkeep-db-template")
+    engine = make_engine(f"sqlite:///{work / 'migrated.sqlite3'}")
+    try:
+        migrations.upgrade(engine)
+        with make_session_factory(engine)() as session:
+            ensure_local_user(session)
+            session.commit()
+    finally:
+        engine.dispose()
+    template = work / "template.sqlite3"
+    # One self-contained file in rollback-journal mode, with no sidecars to copy.
+    with closing(sqlite3.connect(work / "migrated.sqlite3")) as conn:
+        conn.execute("VACUUM INTO ?", (str(template),))
+    with closing(sqlite3.connect(template)) as conn:
+        conn.execute("PRAGMA journal_mode=DELETE")
+    return template
+
+
 @pytest.fixture
-def data(tmp_path: Path) -> Path:
+def data(tmp_path: Path, netkeep_db_template: Path) -> Iterator[Path]:
     """A data directory with a space in it, like the macOS default."""
+    global _db_template
     path = tmp_path / "Application Support"
     path.mkdir()
-    return path
+    _db_template = netkeep_db_template
+    try:
+        yield path
+    finally:
+        _db_template = None
 
 
 def make_db(data: Path, value: int = 42) -> Path:
+    """A netkeep database in ``data`` with a ``marker`` table holding ``value``."""
+    assert _db_template is not None, "make_db needs the data fixture"
     db = data / "netkeeper.sqlite3"
     db.unlink(missing_ok=True)
+    shutil.copyfile(_db_template, db)
     # `with sqlite3.connect(...)` commits but never closes, and an open handle is
     # exactly what reset-data.sh refuses to run under.
     with closing(sqlite3.connect(db)) as conn, conn:
@@ -1403,6 +1560,7 @@ def test_reset_never_works_on_the_new_default_before_the_move(tmp_path: Path) ->
     assert not (support / "netkeeper").exists()
 
 
+@slow_netkeep_restore
 def test_reset_archives_then_removes_and_restore_puts_it_back(data: Path) -> None:
     db = make_db(data)
     result = run_sh(RESET, "--data-dir", str(data), "--yes", env={})
@@ -1487,7 +1645,7 @@ def test_reset_keeps_the_database_when_the_archive_does_not_verify(
     # A VACUUM INTO that claims success and writes nothing.
     shim.write_text(f'#!/bin/sh\ncase "$2" in VACUUM*) exit 0 ;; esac\nexec "{real}" "$@"\n')
     shim.chmod(0o755)
-    path = f"{shim_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
+    path = f"{shim_dir}:{SYSTEM_PATH}"
     result = run_sh(RESET, "--data-dir", str(data), "--yes", env={"PATH": path})
     assert result.returncode == 1
     assert "quick_check" in result.stderr
@@ -1504,6 +1662,7 @@ def test_reset_answering_no_changes_nothing(data: Path) -> None:
     assert not (data / "archives").exists()
 
 
+@slow_netkeep_restore
 @needs_sqlite3_cli
 def test_restore_archives_the_database_in_place_first(data: Path) -> None:
     db = make_db(data, value=1)
@@ -1517,19 +1676,110 @@ def test_restore_archives_the_database_in_place_first(data: Path) -> None:
     assert [marker(p) for p in archived] == [2]
 
 
+@slow_netkeep_restore
 @needs_sqlite3_cli
-def test_two_archives_in_one_second_never_share_a_name(data: Path) -> None:
-    """The #182 review's reproduction: the second restore overwrote the first archive."""
+def test_two_archives_in_one_second_never_share_a_name(data: Path, tmp_path: Path) -> None:
+    """The #182 review's reproduction: the second restore overwrote the first archive.
+
+    The stamp is pinned, so all three archives land in one second however long netkeep
+    restore takes. Its own pre-restore backups (backups/) are removed between runs:
+    netkeep restore refuses a second one in the same second, which is not this test's."""
+    shim_dir = tmp_path / "shim"
+    shim_dir.mkdir()
+    _date_shim(shim_dir, "20260101T000000Z")
+    env = {"PATH": f"{shim_dir}:{Path(sys.executable).parent}:{SYSTEM_PATH}"}
     db = make_db(data, value=1)
-    run_sh(RESET, "--data-dir", str(data), "--yes", env={})
+    run_sh(RESET, "--data-dir", str(data), "--yes", env=env)
     (source,) = (data / "archives").iterdir()
     for value in (2, 3):
         make_db(data, value=value)
-        result = run_sh(RESET, "--data-dir", str(data), "--restore", source.name, "--yes", env={})
+        shutil.rmtree(data / "backups", ignore_errors=True)
+        result = run_sh(RESET, "--data-dir", str(data), "--restore", source.name, "--yes", env=env)
         assert result.returncode == 0, result.stderr
     kept = sorted(marker(p) for p in (data / "archives").iterdir())
     assert kept == [1, 2, 3]
     assert marker(db) == 1
+
+
+def _auto_send_rows(db: Path) -> list[tuple[str, str]]:
+    with closing(sqlite3.connect(db)) as conn:
+        return conn.execute(
+            "SELECT key, value FROM settings_kv WHERE key = ?", (AUTO_SEND_ROW_KEY,)
+        ).fetchall()
+
+
+@slow_netkeep_restore
+@needs_sqlite3_cli
+def test_restore_turns_settings_page_auto_send_off(data: Path) -> None:
+    """B12 (#700): an archive taken while Settings-page auto-send was on must come back
+    with it off, as netkeep restore leaves it (#598). A plain cp brought it back on."""
+    db = make_db(data, value=7)
+    engine = make_engine(f"sqlite:///{db}")
+    try:
+        with make_session_factory(engine)() as session:
+            user = ensure_local_user(session)
+            session.add(SettingKV(user_id=user.id, key=AUTO_SEND_ROW_KEY, value=True))
+            session.commit()
+    finally:
+        engine.dispose()
+    assert _auto_send_rows(db) == [(AUTO_SEND_ROW_KEY, "true")]
+    archived = run_sh(RESET, "--data-dir", str(data), "--yes", env={})
+    assert archived.returncode == 0, archived.stderr
+    (archive,) = (data / "archives").iterdir()
+
+    restored = run_sh(RESET, "--data-dir", str(data), "--restore", archive.name, "--yes", env={})
+    assert restored.returncode == 0, restored.stderr
+    assert marker(db) == 7
+    assert _auto_send_rows(db) == []
+    assert "it is off now" in restored.stdout
+    # The archive keeps what it held: only the restored copy was cleared.
+    assert _auto_send_rows(archive) == [(AUTO_SEND_ROW_KEY, "true")]
+
+
+@slow_netkeep_restore
+@needs_sqlite3_cli
+def test_restore_refuses_while_serve_holds_its_lock(data: Path) -> None:
+    """B12 (#700): netkeep restore's serve lock, which the plain cp never checked."""
+    make_db(data, value=1)
+    run_sh(RESET, "--data-dir", str(data), "--yes", env={})
+    (archive,) = (data / "archives").iterdir()
+    db = make_db(data, value=2)
+    held = activity_lock.try_claim_at(data / "locks" / serve_lock.SERVE_LOCK_FILENAME, "serve")
+    assert held is not None
+    try:
+        result = run_sh(RESET, "--data-dir", str(data), "--restore", archive.name, "--yes", env={})
+    finally:
+        held.release()
+    assert result.returncode == 1
+    assert "netkeep serve is running" in result.stderr
+    assert marker(db) == 2
+
+
+@slow_netkeep_restore
+@needs_sqlite3_cli
+def test_restore_refuses_a_migration_this_netkeep_does_not_know(data: Path, tmp_path: Path) -> None:
+    """B12 (#700): netkeep restore's revision check, which the plain cp never made."""
+    newer = tmp_path / "newer.sqlite3"
+    shutil.copyfile(make_db(data, value=9), newer)
+    with closing(sqlite3.connect(newer)) as conn, conn:
+        conn.execute("UPDATE alembic_version SET version_num = 'ffffffffffff'")
+    db = make_db(data, value=3)
+    result = run_sh(RESET, "--data-dir", str(data), "--restore", str(newer), "--yes", env={})
+    assert result.returncode == 1
+    assert "this netkeep does not know" in result.stderr
+    assert marker(db) == 3
+
+
+@needs_sqlite3_cli
+def test_restore_dry_run_names_netkeep_restore_and_changes_nothing(data: Path) -> None:
+    make_db(data, value=1)
+    run_sh(RESET, "--data-dir", str(data), "--yes", env={})
+    (archive,) = (data / "archives").iterdir()
+    result = run_sh(RESET, "--data-dir", str(data), "--restore", archive.name, "--dry-run", env={})
+    assert result.returncode == 0, result.stderr
+    assert " restore " in result.stdout
+    assert not (data / "netkeeper.sqlite3").exists()
+    assert [p.name for p in (data / "archives").iterdir()] == [archive.name]
 
 
 @needs_sqlite3_cli
@@ -1573,7 +1823,7 @@ def _lsof_shim(tmp_path: Path, script: str) -> str:
     shim = shim_dir / "lsof"
     shim.write_text(script)
     shim.chmod(0o755)
-    return f"{shim_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
+    return f"{shim_dir}:{SYSTEM_PATH}"
 
 
 def _date_shim(shim_dir: Path, stamp: str) -> None:
@@ -1656,7 +1906,7 @@ def test_reset_rechecks_after_the_confirmation_prompt(data: Path) -> None:
     made before the prompt was shown."""
     assert SH is not None
     db = make_db(data)
-    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": "/nonexistent"}
+    env = {"PATH": SYSTEM_PATH, "HOME": str(data.parent / "no-home")}
     proc = subprocess.Popen(
         [SH, str(RESET), "--data-dir", str(data)],
         stdin=subprocess.PIPE,
@@ -1716,7 +1966,7 @@ def test_reset_renames_a_failed_archive_instead_of_leaving_it_behind(
         f'exec "{real}" "$@"\n'
     )
     shim.chmod(0o755)
-    path = f"{shim_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
+    path = f"{shim_dir}:{SYSTEM_PATH}"
     result = run_sh(RESET, "--data-dir", str(data), "--yes", env={"PATH": path})
     assert result.returncode == 1
     assert "quick_check" in result.stderr
@@ -1750,7 +2000,7 @@ def test_reset_quarantines_a_partial_archive_when_the_raw_copy_fails(
         shim = shim_dir / "sqlite3"
         shim.write_text(f'#!/bin/sh\ncase "$2" in VACUUM*) exit 1 ;; esac\nexec "{real}" "$@"\n')
         shim.chmod(0o755)
-        path = f"{shim_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
+        path = f"{shim_dir}:{SYSTEM_PATH}"
         result = run_sh(RESET, "--data-dir", str(data), "--yes", env={"PATH": path})
         assert result.returncode == 1
         assert "could not copy" in result.stderr
@@ -1804,7 +2054,7 @@ def test_reset_does_not_clobber_a_concurrent_runs_archive(data: Path, tmp_path: 
         f'exec "{real}" "$@"\n'
     )
     shim.chmod(0o755)
-    path = f"{shim_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
+    path = f"{shim_dir}:{SYSTEM_PATH}"
     result = run_sh(RESET, "--data-dir", str(data), "--yes", env={"PATH": path})
     assert result.returncode == 0, result.stderr
 
@@ -1840,7 +2090,7 @@ def test_reset_refuses_when_the_candidate_name_is_a_directory_symlink(
     shim_dir = tmp_path / "shim"
     shim_dir.mkdir()
     _date_shim(shim_dir, stamp)
-    path = f"{shim_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
+    path = f"{shim_dir}:{SYSTEM_PATH}"
 
     result = run_sh(RESET, "--data-dir", str(data), "--yes", env={"PATH": path})
     assert result.returncode == 1
@@ -1874,7 +2124,7 @@ def test_reset_treats_a_dangling_symlink_at_the_candidate_name_as_taken(
     shim_dir = tmp_path / "shim"
     shim_dir.mkdir()
     _date_shim(shim_dir, stamp)
-    path = f"{shim_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
+    path = f"{shim_dir}:{SYSTEM_PATH}"
 
     result = run_sh(RESET, "--data-dir", str(data), "--yes", env={"PATH": path})
     assert result.returncode == 0, result.stderr
@@ -1929,7 +2179,7 @@ def test_reset_dies_clearly_when_quarantine_mv_itself_fails(data: Path, tmp_path
     )
     mv_shim.chmod(0o755)
 
-    path = f"{shim_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
+    path = f"{shim_dir}:{SYSTEM_PATH}"
     result = run_sh(RESET, "--data-dir", str(data), "--yes", env={"PATH": path})
     assert result.returncode == 1
     assert "could not move the partial archive" in result.stderr
@@ -1963,12 +2213,12 @@ def test_reset_cleans_up_its_temp_dir_when_interrupted(data: Path, tmp_path: Pat
         f'#!/bin/sh\ncase "$2" in VACUUM*) : > "{ready}"; sleep 60 ;; esac\nexec "{real}" "$@"\n'
     )
     shim.chmod(0o755)
-    path = f"{shim_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
+    path = f"{shim_dir}:{SYSTEM_PATH}"
     assert SH is not None
     archives = data / "archives"
     proc = subprocess.Popen(
         [SH, str(RESET), "--data-dir", str(data), "--yes"],
-        env={"PATH": path, "HOME": "/nonexistent"},
+        env={"PATH": path, "HOME": str(tmp_path / "no-home")},
         start_new_session=True,
     )
     try:
@@ -2031,7 +2281,7 @@ def test_reset_folds_the_wal_when_vacuum_into_is_refused(data: Path, tmp_path: P
     shim = shim_dir / "sqlite3"
     shim.write_text(f'#!/bin/sh\ncase "$2" in VACUUM*) exit 1 ;; esac\nexec "{real}" "$@"\n')
     shim.chmod(0o755)
-    path = f"{shim_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
+    path = f"{shim_dir}:{SYSTEM_PATH}"
 
     result = run_sh(RESET, "--data-dir", str(data), "--yes", env={"PATH": path})
     assert result.returncode == 0, result.stderr
@@ -2116,7 +2366,7 @@ def test_reset_dies_when_the_wal_fold_pragma_fails(data: Path, tmp_path: Path) -
         f'exec "{real}" "$@"\n'
     )
     shim.chmod(0o755)
-    path = f"{shim_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
+    path = f"{shim_dir}:{SYSTEM_PATH}"
 
     result = run_sh(RESET, "--data-dir", str(data), "--yes", env={"PATH": path})
     assert result.returncode == 1
