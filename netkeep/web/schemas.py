@@ -1413,6 +1413,9 @@ class ArchiveReportOut(BaseModel):
     unfamiliar_message_files: list[str] = []
     """Members read as message history although not named ``messages.csv`` (#74).
     Empty for a run recorded before this was kept."""
+    foreign_message_files: list[str] = []
+    """Messages-shaped members skipped because their traffic names another owner
+    than the first table read (#702). Empty for a run recorded before this was kept."""
 
 
 class ArchiveImportOut(BaseModel):
@@ -1444,6 +1447,10 @@ class ArchiveImportOut(BaseModel):
     was imported, but may be an assistant chat log LinkedIn exports in the
     same shape, whose conversations are then counted in ``messages`` but
     produce no interactions (#74)."""
+    foreign_message_files: list[str]
+    """Messages-shaped members skipped whole because their traffic names another
+    owner than the first table read: another person's export, whose
+    conversations are not yours to record (#702). Not counted in ``messages``."""
 
 
 class ArchiveRefusalOut(BaseModel):

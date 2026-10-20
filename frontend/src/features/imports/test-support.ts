@@ -435,6 +435,7 @@ export const ARCHIVE_RESULT: ArchiveImportResult = {
   },
   ignored_files: [],
   unfamiliar_message_files: [],
+  foreign_message_files: [],
 }
 
 /**

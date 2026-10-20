@@ -284,6 +284,9 @@ class Acquired:
     headline (#217); ``later_imports`` counts other committed runs that changed
     one of them; ``enrollments`` counts their places in campaigns, which a
     forced rollback deletes with them while nothing has been sent (#242).
+    ``adopted`` is how many of ``interactions`` are the run's own archive
+    messages that the inbox poll has adopted since (#702); the refusal says so,
+    since they read as the run's own.
     """
 
     contact_ids: tuple[int, ...]
@@ -296,6 +299,7 @@ class Acquired:
     enriched_contacts: int = 0
     later_imports: int = 0
     enrollments: int = 0
+    adopted: int = 0
 
     def __bool__(self) -> bool:
         return any(count for count, _, _ in self._parts())
@@ -323,9 +327,17 @@ class Acquired:
 
     def describe(self) -> str:
         """``"3 interactions, 1 tag added by hand"``: the non-zero parts, in words."""
-        return ", ".join(
+        parts = [
             f"{count} {one if count == 1 else many}" for count, one, many in self._parts() if count
-        )
+        ]
+        if self.adopted:
+            # Always the first part: ``interactions`` leads _parts() and counts these.
+            noun = "message" if self.adopted == 1 else "messages"
+            parts[0] += (
+                f" (including {self.adopted} {noun} this run wrote that the inbox poll "
+                "has since adopted)"
+            )
+        return ", ".join(parts)
 
 
 class CreatedContactsMessaged(ImportRunError, ValueError):
@@ -1862,15 +1874,18 @@ def _acquired_since(
     # statement may bind parameters.
     own_interactions = set((run.created_json or {}).get(Interaction.__tablename__, []))
     interactions: set[int] = set()
+    adopted = 0
     for interaction_id, external_id, message_id in session.execute(
         scoped(user, Interaction)
         .where(Interaction.contact_id.in_(ids))
         .with_only_columns(Interaction.id, Interaction.external_id, Interaction.message_id)
     ):
         interactions.add(interaction_id)
-        if external_id is not None or message_id is not None:
+        claimed = external_id is not None or message_id is not None
+        if claimed and interaction_id in own_interactions:
             # The inbox poll adopted it since (#702): no longer only the run's.
             own_interactions.discard(interaction_id)
+            adopted += 1
 
     def count(statement: Any) -> int:
         return int(session.scalar(statement) or 0)
@@ -1921,6 +1936,7 @@ def _acquired_since(
         edited_contacts=edited,
         enriched_contacts=enriched,
         later_imports=len(later_imports),
+        adopted=adopted,
     )
 
 
