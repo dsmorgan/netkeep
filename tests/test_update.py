@@ -1241,6 +1241,47 @@ def test_state_and_marker_are_written_durably(
     assert events == ["fsync-file", f"rename {update.SCHEDULER_MARKER}", "fsync-dir"]
 
 
+def test_constraints_are_written_durably_and_never_half_written(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rollback reinstalls the old version from its constraints file (#705): the
+    download is fsynced before its rename and the folder after it, and a failed write
+    leaves the file that was there, with no temporary file behind."""
+    target = update.constraints_path(OLD, world.data)
+    target.parent.mkdir(parents=True)
+    target.write_text("kept\n")
+    events: list[str] = []
+    real_fsync, real_replace = os.fsync, Path.replace
+
+    def fsync(fd: int) -> None:
+        events.append("fsync-dir" if os.path.isdir(f"/dev/fd/{fd}") else "fsync-file")
+        real_fsync(fd)
+
+    def failing_replace(self: Path, _target: Path) -> Path:
+        events.append("rename")
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr("os.fsync", fsync)
+    monkeypatch.setattr(Path, "replace", failing_replace)
+    with pytest.raises(OSError, match="No space left"):
+        update.download_constraints(world.seams(), OLD, world.data)
+    assert target.read_text() == "kept\n"
+    assert sorted(p.name for p in target.parent.iterdir()) == [target.name]
+    assert events == ["fsync-file", "rename"]
+
+    events.clear()
+
+    def replace(self: Path, target_path: Path) -> Path:
+        events.append(f"rename {Path(target_path).name}")
+        return real_replace(self, target_path)
+
+    monkeypatch.setattr(Path, "replace", replace)
+    assert update.download_constraints(world.seams(), OLD, world.data) == target
+    assert events == ["fsync-file", f"rename {target.name}", "fsync-dir"]
+    assert target.read_bytes() != b"kept\n"
+    assert sorted(p.name for p in target.parent.iterdir()) == [target.name]
+
+
 async def test_a_marker_that_cant_be_written_stops_serve(
     app: FastAPI, bare_engine: Engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1271,7 +1312,7 @@ async def test_a_marker_that_cant_be_written_stops_serve(
         {"to_version": "latest"},
         {"phase": "anything"},
         {"login_item_was_on": "yes"},
-        {"surprise": 1},
+        {"restored": None},
     ],
 )
 def test_read_state_is_strict(tmp_path: Path, change: dict[str, object]) -> None:
@@ -1281,6 +1322,147 @@ def test_read_state_is_strict(tmp_path: Path, change: dict[str, object]) -> None
     path.write_text(json.dumps(raw | change))
     with pytest.raises(update.UpdateError, match="isn't an update netkeep knows"):
         update.read_state(tmp_path)
+
+
+@pytest.mark.parametrize("missing", ["from_version", "phase", "login_item_was_on"])
+def test_a_state_missing_a_required_field_is_refused(tmp_path: Path, missing: str) -> None:
+    update.write_state(_state(OLD, NEW, tmp_path, None, True, "finishing"), tmp_path)
+    path = update.update_dir(tmp_path) / update.STATE_FILE
+    raw = json.loads(path.read_text())
+    del raw[missing]
+    path.write_text(json.dumps(raw))
+    with pytest.raises(update.UpdateError, match="isn't an update netkeep knows"):
+        update.read_state(tmp_path)
+
+
+def test_the_state_fields_and_phases_are_frozen() -> None:
+    """The compatibility rule (#705): every version reads every other's state.json, so no
+    release renames, removes or retypes a field or a phase. Only additions with a default
+    are allowed, and adding one updates this pin."""
+    assert {
+        "from_version": (str,),
+        "to_version": (str,),
+        "from_constraints": (str,),
+        "to_constraints": (str,),
+        "backup": (str, type(None)),
+        "login_item_was_on": (bool,),
+        "phase": (str,),
+        "new_version_ran": (bool,),
+        "restored": (bool,),
+        "reason": (str,),
+        "started_at": (str,),
+    } == update._STATE_TYPES
+    assert {"installing", "finishing", "rolling-back", "stopped"} == update.PHASES
+    names = {f.name for f in dataclasses.fields(update.UpdateState)}
+    assert names == set(update._STATE_TYPES) | {"carried"}
+
+
+def _add_unknown_keys(data: Path, keys: dict[str, object]) -> None:
+    """Make the state file look like a newer netkeep wrote it, with fields this one
+    doesn't know."""
+    path = update.update_dir(data) / update.STATE_FILE
+    path.write_text(json.dumps(json.loads(path.read_text()) | keys))
+
+
+NEWER_KEYS: dict[str, object] = {"added_later": {"note": "from a newer netkeep"}, "count": 3}
+
+
+def test_unknown_keys_are_kept_and_written_back(tmp_path: Path) -> None:
+    update.write_state(_state(OLD, NEW, tmp_path, None, True, "finishing"), tmp_path)
+    _add_unknown_keys(tmp_path, NEWER_KEYS)
+    state = update.read_state(tmp_path)
+    assert state is not None and state.carried == NEWER_KEYS
+    update.write_state(dataclasses.replace(state, phase="rolling-back"), tmp_path)
+    raw = json.loads((update.update_dir(tmp_path) / update.STATE_FILE).read_text())
+    assert raw["phase"] == "rolling-back"
+    assert {name: raw[name] for name in NEWER_KEYS} == NEWER_KEYS
+
+
+def test_a_rollback_reads_a_state_a_newer_version_wrote(world: World) -> None:
+    """The new version's --finish wrote fields the old version doesn't know: the old
+    version's --rollback still restores (no scheduler ran) and records the restore first,
+    keeping those fields."""
+    world.install_login_item(running=False)
+    backup = world.backup()
+    update.write_state(
+        _state(OLD, NEW, world.data, str(backup), True, "rolling-back", new_version_ran=True),
+        world.data,
+    )
+    _add_unknown_keys(world.data, NEWER_KEYS)
+    path = update.update_dir(world.data) / update.STATE_FILE
+    recorded: list[dict[str, object]] = []
+    restore = world.restore
+
+    def recording(source: Path) -> list[str]:
+        recorded.append(json.loads(path.read_text()))
+        return restore(source)
+
+    world.restore = recording  # type: ignore[method-assign]
+    assert update.rollback(world.item(), world.seams(), world.say) == 1
+    assert "isn't an update netkeep knows" not in world.text
+    assert world.restored == [backup]
+    assert recorded[0]["restored"] is True
+    assert {name: recorded[0][name] for name in NEWER_KEYS} == NEWER_KEYS
+    assert f"Rolled back: netkeep {OLD} is running again" in world.text
+
+
+def test_unknown_keys_never_let_a_rollback_restore_after_a_scheduler_ran(
+    world: World,
+) -> None:
+    """PR #692's rule holds whatever a newer version wrote: once any scheduler may have
+    run, nothing restores."""
+    world.install_login_item(running=False)
+    update.write_state(
+        _state(
+            OLD, NEW, world.data, str(world.backup()), True, "rolling-back", new_version_ran=True
+        ),
+        world.data,
+    )
+    update.mark_scheduler_starting(NEW, world.data)
+    _add_unknown_keys(world.data, NEWER_KEYS | {"scheduler_ran": False})
+    assert update.rollback(world.item(), world.seams(), world.say) == 1
+    assert world.restored == []
+    assert "started its scheduler" in world.text
+    state = world.state()
+    assert state is not None and state.phase == "stopped"
+    assert state.carried["scheduler_ran"] is False
+
+
+def test_unknown_keys_never_let_a_second_rollback_restore(world: World) -> None:
+    world.install_login_item(running=False)
+    update.write_state(
+        _state(
+            OLD,
+            NEW,
+            world.data,
+            str(world.backup()),
+            True,
+            "rolling-back",
+            new_version_ran=True,
+            restored=True,
+        ),
+        world.data,
+    )
+    _add_unknown_keys(world.data, NEWER_KEYS)
+    assert update.rollback(world.item(), world.seams(), world.say) == 1
+    assert world.restored == []
+    assert "already restored the backup" in world.text
+
+
+def test_a_phase_a_newer_version_added_is_refused(world: World) -> None:
+    """A phase this version doesn't know is never guessed at: the rollback refuses and
+    restores nothing."""
+    world.install_login_item(running=False)
+    update.write_state(
+        _state(
+            OLD, NEW, world.data, str(world.backup()), True, "rolling-back", new_version_ran=True
+        ),
+        world.data,
+    )
+    _add_unknown_keys(world.data, {"phase": "verifying"})
+    assert update.rollback(world.item(), world.seams(), world.say) == 1
+    assert "isn't an update netkeep knows" in world.text
+    assert world.restored == []
 
 
 def test_check_validates_its_version(world: World) -> None:
