@@ -6,7 +6,10 @@ The OAuth scope does not enforce this: ``gmail.modify`` allows ``drafts.delete``
 - **Statically**, over ``netkeep/``: no call to a delete, trash, or untrash method of
   the Gmail API (or a batch or thread modify, which could trash in bulk), no string naming
   one, and every ``modify_labels`` call adds only, never ``TRASH`` or ``SPAM``, from the one
-  call site reviewed for it.
+  call site reviewed for it. Every Gmail API request the client builds is pinned by
+  resource and method (so a resource held in a variable, or a method read by
+  ``getattr``, fails), its one ``messages().modify`` call is pinned word for word, and a
+  ``TRASH`` or ``SPAM`` string appears only where it is reviewed (#703).
 - **At run time**, through :class:`~netkeep.campaigns.gmail_fake.FakeGmail`: a draft
   campaign's life (drafted, sent by hand, replied to, a draft discarded by hand) makes no
   such call, and each label change only adds.
@@ -28,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 import factories
+import pytest
 from campaign_fakes import ARMED_FOR_SEND, NOW, SETTINGS, make_mailbox
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -71,6 +75,54 @@ FAKE_PERSON_HELPERS = frozenset(
 MODIFY_LABELS_CALLERS = frozenset({"services/campaign_sender.py"})
 """Where ``modify_labels`` is called. A new caller is reviewed against ADR 0009 first."""
 
+GMAIL = PACKAGE / "campaigns" / "gmail.py"
+
+#: #703: the ``users`` collection's sub-resources, each read as ``users.<name>()``.
+RESOURCES = frozenset({"drafts", "history", "labels", "messages", "settings", "threads"})
+
+#: #703: each Gmail API request the package builds, by (file, resource, method): count.
+#: ``users`` is a method read on the collection itself (``users.getProfile``).
+#: ``<held>`` would be a resource (or the collection) kept, passed, or read by anything
+#: but a method call; ``<bound>`` is the collection's one assignment; ``<getattr>`` a
+#: resource or method read by name. Each change here is reviewed against ADR 0009.
+ALLOWED_API_CALLS = {
+    (GMAIL, "service", "users"): 1,
+    (GMAIL, "users", "<bound>"): 1,
+    (GMAIL, "users", "getProfile"): 1,
+    (GMAIL, "messages", "send"): 1,
+    (GMAIL, "drafts", "create"): 1,
+    (GMAIL, "drafts", "get"): 1,
+    (GMAIL, "drafts", "list"): 1,
+    (GMAIL, "messages", "get"): 1,
+    (GMAIL, "threads", "get"): 1,
+    (GMAIL, "messages", "list"): 1,
+    (GMAIL, "labels", "list"): 1,
+    (GMAIL, "labels", "create"): 1,
+    (GMAIL, "messages", "modify"): 1,
+    (GMAIL, "history", "list"): 1,
+}
+
+#: #703: the one label change, word for word: only ``modify_labels``'s own arguments,
+#: so nothing (``TRASH`` included) is added to its body here.
+MODIFY_CALL = (
+    "self._users.messages().modify(userId='me', id=message_id,"
+    " body={'addLabelIds': list(add), 'removeLabelIds': list(remove)})"
+)
+
+#: #703: where a ``TRASH`` or ``SPAM`` string (any case) may appear, by (file, value):
+#: count. Only the fake's: its system labels, its search leaving both out, and its
+#: refusal of ``label:spam`` and ``label:trash``.
+ALLOWED_FORBIDDEN_LABEL_STRINGS = {
+    (FAKE, "SPAM"): 2,
+    (FAKE, "TRASH"): 2,
+    (FAKE, "spam"): 1,
+    (FAKE, "trash"): 1,
+}
+
+#: #703: methods of the API with no other meaning: read at all (held, or by ``getattr``),
+#: each is a finding.
+FORBIDDEN_ONLY_NAMES = frozenset({"trash", "untrash", "batchDelete", "batchModify"})
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -98,8 +150,24 @@ def _skipped(tree: ast.Module, path: Path) -> set[ast.AST]:
     return skipped
 
 
+def _getattr_name(node: ast.AST) -> str | None:
+    """The literal name ``getattr(x, "name")`` reads, if ``node`` is such a call."""
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "getattr"
+        and len(node.args) >= 2
+        and isinstance(node.args[1], ast.Constant)
+        and isinstance(node.args[1].value, str)
+    ):
+        return node.args[1].value
+    return None
+
+
 def scan_deletes(source: str, path: Path = MEMORY) -> list[Finding]:
-    """Calls such as ``users.drafts().delete(...)``, and strings such as ``"messages.trash"``."""
+    """Calls such as ``users.drafts().delete(...)``, strings such as ``"messages.trash"``,
+    and (#703) any read of a trash-only method (``m.trash``, even held) or a ``getattr``
+    of any forbidden method by name."""
     tree = ast.parse(source)
     skipped = _skipped(tree, path)
     found: list[Finding] = []
@@ -117,6 +185,105 @@ def scan_deletes(source: str, path: Path = MEMORY) -> list[Finding]:
             found.append(Finding(path, node.lineno, what))
         elif isinstance(node, ast.Constant) and node.value in FORBIDDEN_NAMES:
             found.append(Finding(path, node.lineno, f"names {node.value}"))
+        elif isinstance(node, ast.Attribute) and node.attr in FORBIDDEN_ONLY_NAMES:
+            found.append(Finding(path, node.lineno, f"reads .{node.attr}"))
+        elif (name := _getattr_name(node)) is not None and any(
+            name in methods for methods in FORBIDDEN.values()
+        ):
+            found.append(Finding(path, getattr(node, "lineno", 0), f"getattr {name!r}"))
+    return found
+
+
+def api_calls(source: str, path: Path = MEMORY) -> dict[tuple[Path, str, str], int]:
+    """#703: each Gmail API request built in ``source``, as :data:`ALLOWED_API_CALLS`
+    keys it: a no-argument ``.<resource>()`` call and the method called on it, the
+    ``_users`` collection's reads, ``.users()``, and a ``getattr`` of either by name."""
+    tree = ast.parse(source)
+    parents: dict[int, ast.AST] = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[id(child)] = node
+    found: dict[tuple[Path, str, str], int] = {}
+
+    def add(resource: str, method: str) -> None:
+        found[(path, resource, method)] = found.get((path, resource, method), 0) + 1
+
+    def method_called_on(node: ast.AST) -> str | None:
+        """``m`` when ``node`` is the receiver of a call ``node.m(...)``."""
+        attribute = parents.get(id(node))
+        if not isinstance(attribute, ast.Attribute) or attribute.value is not node:
+            return None
+        call = parents.get(id(attribute))
+        if isinstance(call, ast.Call) and call.func is attribute:
+            return attribute.attr
+        return None
+
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and not node.args
+            and not node.keywords
+            and node.func.attr in RESOURCES | {"users"}
+        ):
+            resource = node.func.attr
+            if resource == "users":
+                add("service", "users")
+                continue
+            add(resource, method_called_on(node) or "<held>")
+        elif isinstance(node, ast.Attribute) and node.attr == "_users":
+            if isinstance(node.ctx, ast.Store):
+                add("users", "<bound>")
+                continue
+            outer = parents.get(id(node))
+            if (
+                isinstance(outer, ast.Attribute)
+                and outer.attr in RESOURCES
+                and isinstance(parents.get(id(outer)), ast.Call)
+            ):
+                continue  # ``_users.<resource>()``, read above
+            add("users", method_called_on(node) or "<held>")
+        elif (name := _getattr_name(node)) in RESOURCES | {"users", "_users", "_service"}:
+            add("<getattr>", str(name))
+    return found
+
+
+@cache
+def _all_api_calls() -> tuple[tuple[tuple[Path, str, str], int], ...]:
+    found: dict[tuple[Path, str, str], int] = {}
+    for path, source in package_sources():
+        found.update(api_calls(source, path))
+    return tuple(found.items())
+
+
+def all_api_calls() -> dict[tuple[Path, str, str], int]:
+    return dict(_all_api_calls())
+
+
+def modify_calls(source: str) -> list[str]:
+    """#703: each ``<resource>().modify(...)`` call in ``source``, as written."""
+    return [
+        ast.unparse(node)
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "modify"
+        and isinstance(node.func.value, ast.Call)
+        and isinstance(node.func.value.func, ast.Attribute)
+        and node.func.value.func.attr in RESOURCES
+    ]
+
+
+def forbidden_label_strings(source: str, path: Path = MEMORY) -> dict[tuple[Path, str], int]:
+    """#703: each string that is ``TRASH`` or ``SPAM`` in any case, by (file, value)."""
+    found: dict[tuple[Path, str], int] = {}
+    for node in ast.walk(ast.parse(source)):
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and node.value.upper() in FORBIDDEN_LABELS
+        ):
+            found[(path, node.value)] = found.get((path, node.value), 0) + 1
     return found
 
 
@@ -126,10 +293,27 @@ def _is_empty(node: ast.expr) -> bool:
 
 def scan_modify_labels(source: str, path: Path = MEMORY) -> tuple[list[Finding], list[Finding]]:
     """``(calls, problems)``: every ``modify_labels`` call, and each that may remove a
-    label or adds ``TRASH`` or ``SPAM``."""
+    label or adds ``TRASH`` or ``SPAM``. Since #703 ``add=`` must be a literal tuple or
+    list of names and other strings, and a ``modify_labels`` read any other way (held,
+    or by ``getattr``) is a call whose labels can't be read, so a problem too."""
     calls: list[Finding] = []
     problems: list[Finding] = []
-    for node in ast.walk(ast.parse(source)):
+    tree = ast.parse(source)
+    called = {
+        id(node.func)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    }
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Attribute)
+            and node.attr == "modify_labels"
+            and id(node) not in called
+        ) or _getattr_name(node) == "modify_labels":
+            line = getattr(node, "lineno", 0)
+            calls.append(Finding(path, line, "modify_labels"))
+            problems.append(Finding(path, line, "modify_labels read, not called"))
+            continue
         if not (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
@@ -142,11 +326,22 @@ def scan_modify_labels(source: str, path: Path = MEMORY) -> tuple[list[Finding],
                 problems.append(Finding(path, node.lineno, "modify_labels(**...)"))
             elif keyword.arg == "remove" and not _is_empty(keyword.value):
                 problems.append(Finding(path, node.lineno, "modify_labels removes a label"))
+            elif keyword.arg == "add" and not (
+                isinstance(keyword.value, ast.Tuple | ast.List)
+                and all(
+                    isinstance(n, ast.Name)
+                    or (isinstance(n, ast.Constant) and isinstance(n.value, str))
+                    for n in keyword.value.elts
+                )
+            ):
+                problems.append(Finding(path, node.lineno, "modify_labels adds unread labels"))
             elif keyword.arg == "add":
                 labels = {
                     n.value
                     for n in ast.walk(keyword.value)
-                    if isinstance(n, ast.Constant) and n.value in FORBIDDEN_LABELS
+                    if isinstance(n, ast.Constant)
+                    and isinstance(n.value, str)
+                    and n.value.upper() in FORBIDDEN_LABELS
                 }
                 if labels:
                     what = f"modify_labels adds {', '.join(sorted(labels))}"
@@ -179,6 +374,78 @@ def test_the_delete_scanner_catches_each_forbidden_call() -> None:
     assert scan_deletes('users.messages().modify(userId="me", id=x, body=b)\n') == []
 
 
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        # #703: a held resource, and a method read by name.
+        "m = users.messages()\nm.trash(userId='me', id=x).execute()\n",
+        "m = users.messages()\nm.batchDelete(userId='me', body=b).execute()\n",
+        "t = users.threads()\nt.untrash(userId='me', id=x).execute()\n",
+        "send = users.messages().batchModify\n",
+        "getattr(users.messages(), 'trash')(userId='me', id=x)\n",
+        "getattr(users.drafts(), 'delete')(userId='me', id=x)\n",
+        "getattr(users.threads(), 'modify')(userId='me', id=x, body=b)\n",
+    ],
+)
+def test_the_delete_scanner_catches_a_held_or_named_method(snippet: str) -> None:
+    assert scan_deletes(snippet), snippet
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # #703: a held resource, whatever is called on it later.
+        "    def _held(self):\n        d = self._users.drafts()\n        return d\n",
+        "    def _held(self):\n        return self._users.drafts\n",
+        "    def _held(self):\n        return self._users\n",
+        # A method read by name, on a resource or on the collection.
+        "    def _held(self):\n        return getattr(self._users, 'messages')()\n",
+        "    def _held(self):\n        return getattr(self, '_users')\n",
+        "    def _held(self):\n        return getattr(self._service, 'users')()\n",
+        # A new method, a second call, or a new resource.
+        "    def _held(self, i):\n        return self._users.drafts().delete(userId='me', id=i)\n",
+        "    def _held(self, b):\n        return self._users.drafts().send(userId='me', body=b)\n",
+        "    def _held(self):\n        return self._users.settings().filters()\n",
+        "    def _held(self):\n        return self._users.stop(userId='me')\n",
+        "    def _held(self):\n        return self._service.users().messages().get(id=1)\n",
+    ],
+)
+def test_the_api_call_pin_catches_a_new_request(line: str) -> None:
+    source = GMAIL.read_text(encoding="utf-8")
+    anchor = "    # --- plumbing"
+    assert anchor in source
+    mutated = source.replace(anchor, line + "\n" + anchor, 1)
+    found = {k: v for k, v in all_api_calls().items() if k[0] != GMAIL}
+    found |= api_calls(mutated, GMAIL)
+    assert found != ALLOWED_API_CALLS
+
+
+def test_the_api_call_pin_catches_one_elsewhere() -> None:
+    found = all_api_calls() | api_calls("def f(gmail):\n    return gmail._users\n")
+    assert found != ALLOWED_API_CALLS
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ('"addLabelIds": list(add)', '"addLabelIds": [*add, "TRASH"]'),
+        ('"addLabelIds": list(add)', '"addLabelIds": list(add) + [TRASH]'),
+        ('"removeLabelIds": list(remove)', '"removeLabelIds": ["INBOX"]'),
+        ('body={"addLabelIds"', '**extra, body={"addLabelIds"'),
+    ],
+)
+def test_the_modify_pin_catches_a_changed_body(old: str, new: str) -> None:
+    source = GMAIL.read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    assert modify_calls(source.replace(old, new)) != [MODIFY_CALL]
+
+
+def test_the_label_string_scan_catches_a_new_one() -> None:
+    for snippet in ('TRASH = "TRASH"\n', 'x = ("Spam",)\n', 'q = "trash"\n'):
+        assert forbidden_label_strings(snippet), snippet
+    assert forbidden_label_strings('q = "in:trash"\n') == {}
+
+
 def test_the_label_scanner_catches_a_remove_and_a_trash() -> None:
     _, problems = scan_modify_labels('g.modify_labels(m, remove=("INBOX",), purpose=p)\n')
     assert problems
@@ -190,6 +457,25 @@ def test_the_label_scanner_catches_a_remove_and_a_trash() -> None:
     assert problems
     calls, problems = scan_modify_labels("g.modify_labels(m, add=(label_id,), purpose=p)\n")
     assert (len(calls), problems) == (1, [])
+
+
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        # #703: labels the scan can't read, a lowercase trash, and a held method.
+        "g.modify_labels(m, add=labels, purpose=p)\n",
+        "g.modify_labels(m, add=(*labels,), purpose=p)\n",
+        "g.modify_labels(m, add=[label for label in labels], purpose=p)\n",
+        "g.modify_labels(m, add=(pick(),), purpose=p)\n",
+        'g.modify_labels(m, add=("trash",), purpose=p)\n',
+        "change = g.modify_labels\n",
+        "change = functools.partial(g.modify_labels, m)\n",
+        "getattr(g, 'modify_labels')(m, add=('TRASH',), purpose=p)\n",
+    ],
+)
+def test_the_label_scanner_catches_what_it_cant_read(snippet: str) -> None:
+    calls, problems = scan_modify_labels(snippet)
+    assert calls and problems, snippet
 
 
 def test_the_fake_still_has_each_excluded_helper() -> None:
@@ -211,6 +497,24 @@ def test_the_fake_scan_is_not_vacuous() -> None:
 def test_nothing_in_netkeep_deletes_or_trashes_in_gmail() -> None:
     findings = [str(f) for f in all_findings()]
     assert findings == [], "netkeep deletes nothing in Gmail (ADR 0009):\n" + "\n".join(findings)
+
+
+def test_only_the_reviewed_gmail_api_requests_are_built() -> None:
+    """#703: every request, by resource and method, from the one client."""
+    assert all_api_calls() == ALLOWED_API_CALLS
+
+
+def test_the_one_label_change_is_the_reviewed_one() -> None:
+    """#703: ``messages().modify`` sends exactly ``modify_labels``'s labels."""
+    calls = [call for path, source in package_sources() for call in modify_calls(source)]
+    assert calls == [MODIFY_CALL]
+
+
+def test_trash_and_spam_are_named_only_where_reviewed() -> None:
+    found: dict[tuple[Path, str], int] = {}
+    for path, source in package_sources():
+        found |= forbidden_label_strings(source, path)
+    assert found == ALLOWED_FORBIDDEN_LABEL_STRINGS
 
 
 def test_modify_labels_only_adds_and_only_from_its_reviewed_caller() -> None:

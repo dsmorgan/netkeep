@@ -65,6 +65,10 @@ def _clean_netkeep_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     home = tmp_path.parent / f"{tmp_path.name}.home"  # beside tmp_path, not in it
     home.mkdir(exist_ok=True)
     monkeypatch.setenv("HOME", str(home))
+    # The working directory too (#703): the config search reads ``./config.toml`` first,
+    # so a test run from a checkout holding one would load the developer's settings. A
+    # script a test runs inherits it.
+    monkeypatch.chdir(tmp_path)
 
 
 REAL_HOME = Path.home().resolve()
