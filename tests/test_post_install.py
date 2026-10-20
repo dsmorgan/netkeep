@@ -271,13 +271,27 @@ def test_remove_turns_the_login_item_off_and_keeps_the_data(machine: Machine) ->
     assert machine.launchctl.changes() == []
 
 
-def test_setup_never_chooses_or_moves_the_data_directory(machine: Machine) -> None:
-    """Rule 7: the plist names the data directory in use, and the default one under the
-    (scratch) home is never made."""
+def test_setup_never_chooses_or_moves_the_data_directory(
+    machine: Machine, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Rule 7: the plist names the data directory in use, and setup doesn't make, move or
+    touch the default one. The default is under a scratch folder this test controls:
+    ``./data`` off macOS, so the working directory moves into ``tmp_path``, and under
+    conftest's scratch ``HOME`` on macOS."""
+    scratch_home = Path(os.environ["HOME"]).resolve()
+    work = tmp_path / "cwd"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    default = paths.default_data_dir().resolve()
+    assert work in default.parents or scratch_home in default.parents, default
+    before = sorted(default.rglob("*")) if default.exists() else None
+
     assert machine.setup()[0] == 0
+
     document = plistlib.loads(machine.plist.read_bytes())
     assert document["EnvironmentVariables"][paths.DATA_ENV] == str(machine.data)
-    assert not paths.default_data_dir().exists()
+    after = sorted(default.rglob("*")) if default.exists() else None
+    assert after == before  # not made, and nothing in it changed
 
 
 # --- each step failing -----------------------------------------------------------------------
