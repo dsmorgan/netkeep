@@ -75,6 +75,14 @@ FAKE_PERSON_HELPERS = frozenset(
 MODIFY_LABELS_CALLERS = frozenset({"services/campaign_sender.py"})
 """Where ``modify_labels`` is called. A new caller is reviewed against ADR 0009 first."""
 
+SENDER = PACKAGE / "services" / "campaign_sender.py"
+
+REVIEWED_ADDS = frozenset({(SENDER, "(label_id,)")})
+"""#723 review: an ``add=`` that names a label by a variable, by (file, expression as
+written). The scan can't read a variable's value, so each is reviewed: the sender's
+``label_id`` is the id Gmail gave the campaign's own label (``ensure_label``). Any
+other ``add=`` may hold only string literals."""
+
 GMAIL = PACKAGE / "campaigns" / "gmail.py"
 
 #: #703: the ``users`` collection's sub-resources, each read as ``users.<name>()``.
@@ -218,19 +226,31 @@ def api_calls(source: str, path: Path = MEMORY) -> dict[tuple[Path, str, str], i
             return attribute.attr
         return None
 
+    def on_the_api(receiver: ast.expr) -> bool:
+        """Whether ``receiver`` is the collection (``_users``) or the service."""
+        return (
+            isinstance(receiver, ast.Attribute) and receiver.attr in ("_users", "_service")
+        ) or (
+            isinstance(receiver, ast.Call)
+            and isinstance(receiver.func, ast.Attribute)
+            and receiver.func.attr == "users"
+        )
+
     for node in ast.walk(tree):
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
-            and not node.args
-            and not node.keywords
             and node.func.attr in RESOURCES | {"users"}
+            and (not (node.args or node.keywords) or on_the_api(node.func.value))
         ):
+            # #723 review: a resource called with arguments (``messages(*())``) on the
+            # collection is keyed apart, so it never stands in for a reviewed request.
+            argued = "<arguments>" if node.args or node.keywords else ""
             resource = node.func.attr
             if resource == "users":
-                add("service", "users")
+                add("service", f"users{argued}")
                 continue
-            add(resource, method_called_on(node) or "<held>")
+            add(resource, f"{method_called_on(node) or '<held>'}{argued}")
         elif isinstance(node, ast.Attribute) and node.attr == "_users":
             if isinstance(node.ctx, ast.Store):
                 add("users", "<bound>")
@@ -294,8 +314,9 @@ def _is_empty(node: ast.expr) -> bool:
 def scan_modify_labels(source: str, path: Path = MEMORY) -> tuple[list[Finding], list[Finding]]:
     """``(calls, problems)``: every ``modify_labels`` call, and each that may remove a
     label or adds ``TRASH`` or ``SPAM``. Since #703 ``add=`` must be a literal tuple or
-    list of names and other strings, and a ``modify_labels`` read any other way (held,
-    or by ``getattr``) is a call whose labels can't be read, so a problem too."""
+    list of strings (or one of :data:`REVIEWED_ADDS`), and a ``modify_labels`` read any
+    other way (held, or by ``getattr``) is a call whose labels can't be read, so a
+    problem too."""
     calls: list[Finding] = []
     problems: list[Finding] = []
     tree = ast.parse(source)
@@ -329,8 +350,11 @@ def scan_modify_labels(source: str, path: Path = MEMORY) -> tuple[list[Finding],
             elif keyword.arg == "add" and not (
                 isinstance(keyword.value, ast.Tuple | ast.List)
                 and all(
-                    isinstance(n, ast.Name)
-                    or (isinstance(n, ast.Constant) and isinstance(n.value, str))
+                    (isinstance(n, ast.Constant) and isinstance(n.value, str))
+                    or (
+                        isinstance(n, ast.Name)
+                        and (path, ast.unparse(keyword.value)) in REVIEWED_ADDS
+                    )
                     for n in keyword.value.elts
                 )
             ):
@@ -408,6 +432,10 @@ def test_the_delete_scanner_catches_a_held_or_named_method(snippet: str) -> None
         "    def _held(self):\n        return self._users.settings().filters()\n",
         "    def _held(self):\n        return self._users.stop(userId='me')\n",
         "    def _held(self):\n        return self._service.users().messages().get(id=1)\n",
+        # #723 review: a resource or the collection called with arguments.
+        "    def _held(self, b):\n        return self._users.messages(*()).insert(body=b)\n",
+        "    def _held(self, b):\n        return self._users.drafts(**{}).send(body=b)\n",
+        "    def _held(self):\n        return self._service.users(**{})\n",
     ],
 )
 def test_the_api_call_pin_catches_a_new_request(line: str) -> None:
@@ -455,8 +483,20 @@ def test_the_label_scanner_catches_a_remove_and_a_trash() -> None:
     assert problems
     _, problems = scan_modify_labels("g.modify_labels(m, **changes)\n")
     assert problems
-    calls, problems = scan_modify_labels("g.modify_labels(m, add=(label_id,), purpose=p)\n")
+    reviewed = "g.modify_labels(m, add=(label_id,), purpose=p)\n"
+    calls, problems = scan_modify_labels(reviewed, SENDER)
     assert (len(calls), problems) == (1, [])
+    calls, problems = scan_modify_labels('g.modify_labels(m, add=("Label_1",), purpose=p)\n')
+    assert (len(calls), problems) == (1, [])
+    # #723 review: the reviewed expression only in its own file, and only as written.
+    for snippet, path in (
+        (reviewed, MEMORY),
+        (reviewed, PACKAGE / "services" / "campaign_replies.py"),
+        ("g.modify_labels(m, add=(trash_id,), purpose=p)\n", SENDER),
+        ("g.modify_labels(m, add=(label_id, other), purpose=p)\n", SENDER),
+    ):
+        _, problems = scan_modify_labels(snippet, path)
+        assert problems, (snippet, path)
 
 
 @pytest.mark.parametrize(
