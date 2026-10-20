@@ -219,35 +219,54 @@ def _first_run(seams: Seams, say: Say, base: str) -> None:
 
 
 def serve_answers(base: str, *, timeout_s: float = _HEALTH_TIMEOUT_S) -> bool:
-    """Whether a netkeep ``serve`` answers ``GET /api/v1/health`` at ``base``.
+    """Whether a netkeep ``serve`` answers ``GET /api/v1/health`` at ``base``
+    (:func:`health`).
+
+    It can't tell this data directory's ``serve`` from another netkeep's on the same
+    port: ``/health`` names no data directory, so any netkeep answering ``ok`` counts.
+    """
+    return health(base, timeout_s=timeout_s) is not None
+
+
+def serve_version(base: str, *, timeout_s: float = _HEALTH_TIMEOUT_S) -> str | None:
+    """The version the ``serve`` answering ``GET /api/v1/health`` at ``base`` reports, or
+    ``None`` when none answers ``ok``. ``netkeep update`` (#685) checks it is the version it
+    just installed, so an old ``serve`` still answering never passes for the new one."""
+    body = health(base, timeout_s=timeout_s)
+    version = body.get("version") if body is not None else None
+    return version if isinstance(version, str) else None
+
+
+def health(base: str, *, timeout_s: float = _HEALTH_TIMEOUT_S) -> dict[str, object] | None:
+    """``serve``'s answer to ``GET /api/v1/health`` at ``base`` when its status is ``ok``,
+    else ``None``.
 
     One ``http.client`` GET to a loopback name and an explicit port, and nothing else:
     an origin that isn't ``http`` on loopback is never connected to, a redirect is an
     answer that isn't ``serve``'s and is never followed, no proxy is consulted, and at
     most :data:`_HEALTH_MAX_BYTES` of the body is read.
-
-    It can't tell this data directory's ``serve`` from another netkeep's on the same
-    port: ``/health`` names no data directory, so any netkeep answering ``ok`` counts.
     """
     parts = urlsplit(base)
     host = parts.hostname
     if parts.scheme != "http" or host not in _LOOPBACK:
-        return False
+        return None
     try:
         port = parts.port
     except ValueError:
-        return False
+        return None
     if port is None:
-        return False
+        return None
     connection = http.client.HTTPConnection(host, port, timeout=timeout_s)
     try:
         connection.request("GET", HEALTH_PATH, headers={"Accept": "application/json"})
         response = connection.getresponse()
         if response.status != 200:
-            return False
+            return None
         body = json.loads(response.read(_HEALTH_MAX_BYTES))
     except (OSError, http.client.HTTPException, ValueError):
-        return False
+        return None
     finally:
         connection.close()
-    return isinstance(body, dict) and body.get("status") == "ok"
+    if not isinstance(body, dict) or body.get("status") != "ok":
+        return None
+    return {str(key): value for key, value in body.items()}

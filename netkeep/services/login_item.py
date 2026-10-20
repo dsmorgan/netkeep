@@ -631,6 +631,25 @@ class LoginItem:
         self._wait_until(lambda: self._runner(["print", service]).returncode != 0, _STOP_WAIT_S)
         return True
 
+    def agent_pid(self) -> int | None:
+        """The pid of the agent's running ``serve``, from ``launchctl print``; ``None`` when
+        launchd has no job loaded or the job has no process (waiting to restart)."""
+        done = self._runner(["print", self._service])
+        if done.returncode != 0:
+            return None
+        for line in done.stdout.splitlines():
+            name, _, value = line.partition("=")
+            if name.strip() == "pid" and value.strip().isdigit():
+                return int(value.strip())
+        return None
+
+    def stop(self) -> bool:
+        """Stop the agent's ``serve`` now and leave the plist, so it still starts at login
+        and :meth:`enable` starts it again (``netkeep update``, #685). Whether it was
+        loaded."""
+        self._require_macos()
+        return self._stop(self._service)
+
     def disable(self, *, serving_here: bool = False) -> Outcome:
         """Stop the agent and remove its plist, and an old script's for this data
         directory. Data and logs stay.

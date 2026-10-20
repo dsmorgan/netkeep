@@ -471,6 +471,9 @@ ALLOWED_INPUTS = frozenset(
         # "Close your conversation with " and holds the header link's name (#499), and
         # is that name alone or with one other name either side of " and " (#516).
         (LINKEDIN / "browser.py", "BrowserRun.close_sent_bubble", "click"),
+        # Not a page input at all: `netkeep update --check` (#685) calls
+        # `services.update.check`, which only reports whether a newer release exists.
+        (PACKAGE / "cli.py", "update_command", "check"),
     }
 )
 
@@ -502,8 +505,12 @@ ALLOWED_SUPER_REQUESTS = {PACKAGE / "campaigns" / "gmail.py": 3}
 #: ``.request`` reads that are an ``http.client`` connection's, not a Playwright API
 #: request context, by (file, function): count. `netkeep setup`'s health check (#684)
 #: sends one GET to loopback on a connection it builds itself, pinned by the HTTP client
-#: pin (``ALLOWED_HTTP_CLIENTS``).
-ALLOWED_CONNECTION_REQUESTS = {(PACKAGE / "services" / "post_install.py", "serve_answers"): 1}
+#: pin (``ALLOWED_HTTP_CLIENTS``). `netkeep update` (#685) sends one GET per release
+#: download, over HTTPS to GitHub only, on the connection it builds itself.
+ALLOWED_CONNECTION_REQUESTS = {
+    (PACKAGE / "services" / "post_install.py", "health"): 1,
+    (PACKAGE / "services" / "update.py", "https_get"): 1,
+}
 CONTEXT_REQUEST = "reads an API request context (ADR 0006)"
 
 # The attach point. Everything else goes through AttachBrowserProvider.
@@ -1303,12 +1310,20 @@ def test_no_code_path_launches_a_browser() -> None:
 
 # The one exception (#597): **Restart netkeep** re-execs serve in place, the same
 # interpreter and arguments, replacing this process rather than starting another.
-ALLOWED_PROCESS_STARTS = {PACKAGE / "services" / "restart.py": 1}
+#: The second (#685): `netkeep update` replaces itself with the `netkeep` uv just
+#: installed, running `update --finish` or `--rollback` only, so no step of an update
+#: runs on code it replaced. `uv_tool.exec_netkeep` refuses any other program or step.
+ALLOWED_PROCESS_STARTS = {
+    PACKAGE / "services" / "restart.py": 1,
+    PACKAGE / "services" / "uv_tool.py": 1,
+}
+UV_TOOL = PACKAGE / "services" / "uv_tool.py"
 
 
 def is_launchctl_import(finding: Finding) -> bool:
-    """The login item's ``import subprocess``, pinned by the launchctl test below."""
-    return finding.path == LOGIN_ITEM and finding.detail.startswith("imports subprocess")
+    """The login item's ``import subprocess``, pinned by the launchctl test below, and
+    ``uv_tool``'s (#685), pinned by the uv test below."""
+    return finding.path in (LOGIN_ITEM, UV_TOOL) and finding.detail.startswith("imports subprocess")
 
 
 def test_no_code_path_starts_a_process() -> None:
@@ -1494,6 +1509,149 @@ def test_the_launchctl_pin_rejects_every_other_way_to_start_a_process(old: str, 
     source = LOGIN_ITEM.read_text()
     assert old in source, old
     assert launchctl_pin_problems(source.replace(old, new, 1))
+
+
+# --- netkeep update's uv (#685) ------------------------------------------------------
+
+
+def uv_pin_problems(source: str) -> list[str]:
+    """What is wrong with ``uv_tool.py``'s process starts, from its syntax tree.
+
+    ``subprocess`` only as the import and exactly one ``subprocess.run([str(uv),
+    *arguments], ...)`` with no ``shell``, ``executable``, ``env`` or ``cwd``; ``os.execv``
+    read exactly once; no other process module, alias, ``getattr`` or banned name.
+    """
+    tree = ast.parse(source)
+    problems: list[str] = []
+    runs: list[ast.Call] = []
+    allowed: set[int] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "subprocess"
+            and node.func.attr == "run"
+        ):
+            runs.append(node)
+            allowed.add(id(node.func.value))
+    execs = 0
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == "subprocess" and id(node) not in allowed:
+            problems.append(f"line {node.lineno}: subprocess used other than subprocess.run(...)")
+        if isinstance(node, ast.Constant) and node.value in ("subprocess", "execv", "Popen"):
+            problems.append(f"line {node.lineno}: {node.value!r} as a string (getattr?)")
+        if isinstance(node, ast.Name) and node.id in _SPAWN_BANNED_NAMES:
+            problems.append(f"line {node.lineno}: {node.id}")
+        if isinstance(node, ast.Attribute):
+            if node.attr == "execv":
+                execs += 1
+            elif node.attr in _SPAWN_BANNED_NAMES | {"modules", "__dict__", "getattr_static"}:
+                problems.append(f"line {node.lineno}: .{node.attr}")
+            elif (
+                isinstance(node.value, ast.Name)
+                and node.value.id == "os"
+                and node.attr.startswith(("exec", "spawn", "posix_spawn", "system", "popen"))
+            ):
+                problems.append(f"line {node.lineno}: os.{node.attr}")
+    if execs != 1:
+        problems.append(f"os.execv read {execs} times, not exactly 1")
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.module
+            and node.module.split(".")[0] in (PROCESS_MODULES | {"os", "asyncio"})
+        ):
+            problems.append(f"line {node.lineno}: from {node.module} import ...")
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] in PROCESS_MODULES - {"subprocess"}:
+                    problems.append(f"line {node.lineno}: import {alias.name}")
+                if alias.name in ("subprocess", "os") and alias.asname:
+                    problems.append(f"line {node.lineno}: {alias.name} imported under an alias")
+    if len(runs) != 1:
+        problems.append(f"{len(runs)} subprocess.run calls, not exactly 1")
+    for call in runs:
+        first = call.args[0] if call.args else None
+        argv_ok = (
+            isinstance(first, ast.List)
+            and len(first.elts) == 2
+            and isinstance(first.elts[0], ast.Call)
+            and isinstance(first.elts[0].func, ast.Name)
+            and first.elts[0].func.id == "str"
+            and len(first.elts[0].args) == 1
+            and isinstance(first.elts[0].args[0], ast.Name)
+            and first.elts[0].args[0].id == "uv"
+            and isinstance(first.elts[1], ast.Starred)
+            and isinstance(first.elts[1].value, ast.Name)
+            and first.elts[1].value.id == "arguments"
+        )
+        if not argv_ok:
+            problems.append(f"line {call.lineno}: the program is not [str(uv), *arguments]")
+        if len(call.args) != 1:
+            problems.append(f"line {call.lineno}: extra positional arguments")
+        for keyword in call.keywords:
+            if keyword.arg is None or keyword.arg in ("shell", "executable", "env", "cwd"):
+                problems.append(f"line {call.lineno}: keyword {keyword.arg}")
+    return problems
+
+
+def test_netkeep_update_runs_only_uv_and_its_own_next_step() -> None:
+    """``uv_tool.py`` (#685) runs ``uv`` once, with ``[str(uv), *arguments]``, and execs
+    once; nothing else in it can start a process."""
+    source = UV_TOOL.read_text()
+    assert uv_pin_problems(source) == []
+    findings = [
+        f
+        for f in process_starts(source, UV_TOOL)
+        if not is_launchctl_import(f) and f.detail != "execv() starts a process"
+    ]
+    assert not findings, complain(findings, "uv_tool.py may only run uv and exec netkeep:")
+
+
+def test_only_the_cli_reaches_uv_tool() -> None:
+    """Only ``netkeep update`` (in ``cli.py``) hands ``uv_tool`` to an update."""
+    importers = {
+        path
+        for path, source in package_sources().items()
+        if path != UV_TOOL
+        and any(
+            name.startswith("netkeep.services.uv_tool") for _, name in imported_names(source, path)
+        )
+    }
+    assert importers == {PACKAGE / "cli.py"}
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("[str(uv), *arguments]", "['/bin/sh', '-c', *arguments]"),
+        ("[str(uv), *arguments]", "[str(uv), 'pip', *arguments]"),
+        ("capture_output=capture,", "capture_output=capture, shell=True,"),
+        ("capture_output=capture,", "capture_output=capture, env={},"),
+        ("    replace_process = os.execv\n", "    replace_process = os.execvp\n"),
+        ("    replace_process = os.execv\n", "    replace_process = os.execv\n    os.execv\n"),
+        (
+            "def find_uv()",
+            "_r = subprocess.Popen\n\n\ndef find_uv()",
+        ),
+        (
+            "def find_uv()",
+            "_g = getattr(subprocess, 'Popen')\n\n\ndef find_uv()",
+        ),
+        ("def find_uv()", "import subprocess as sp\n\n\ndef find_uv()"),
+        ("def find_uv()", "_s = os.system\n\n\ndef find_uv()"),
+        (
+            '    return UvResult(done.returncode, done.stdout if capture else "")\n',
+            "    subprocess.run(['/usr/bin/open', 'x'])\n"
+            '    return UvResult(done.returncode, done.stdout if capture else "")\n',
+        ),
+    ],
+)
+def test_the_uv_pin_rejects_every_other_way_to_start_a_process(old: str, new: str) -> None:
+    source = UV_TOOL.read_text()
+    assert old in source, old
+    assert uv_pin_problems(source.replace(old, new, 1))
 
 
 # --- the Chrome launcher's one spawn (#636, ADR 0012) ---------------------------------
@@ -1943,6 +2101,8 @@ LAUNCHER_STARTS = {
     (PACKAGE / "services" / "chrome_launch.py", "submit_launch.run_launch"): 1,
     (PACKAGE / "cli.py", "open_command"): 1,
     (PACKAGE / "cli.py", "setup_command.open_first_run"): 1,
+    # Not a launcher: `netkeep update`'s first step, `services.update.start` (#685).
+    (PACKAGE / "cli.py", "update_command"): 1,
     # Not a launcher: a lost answer's ``start`` field, ``message_check.start()`` (a run
     # record), and the sending window's start time.
     (PACKAGE / "cli.py", "_run_lines"): 1,
@@ -3250,9 +3410,15 @@ ALLOWED_HTTP_CLIENTS = {
     # name, no redirect followed, no proxy, the body capped: its connection and its
     # errors.
     (PACKAGE / "services" / "post_install.py", "", "http.client"): 1,
-    (PACKAGE / "services" / "post_install.py", "serve_answers", "http.client"): 2,
+    (PACKAGE / "services" / "post_install.py", "health", "http.client"): 2,
     # Not a network client: the log file's size-based rotation (#602).
     (PACKAGE / "logging_setup.py", "", "logging.handlers"): 1,
+    # `netkeep update`'s release downloads (#685): HTTPS with certificate checks, only to
+    # GitHub's API, release pages and release-asset hosts (a redirect anywhere else is
+    # refused), no proxy, the body capped: its connection and its errors. Each file it
+    # fetches is checked against the release's SHA256SUMS before it is used.
+    (PACKAGE / "services" / "update.py", "", "http.client"): 1,
+    (PACKAGE / "services" / "update.py", "https_get", "http.client"): 2,
 }
 
 
@@ -4880,7 +5046,9 @@ PAGE_ACTION_REACHES = {
         ("services/config_adopt.py", "_sync_directory", "close", 1),
         ("services/login_item.py", "LoginItem._write_plist", "close", 1),
         # #684: setup's health check closes its own loopback HTTP connection, not a tab.
-        ("services/post_install.py", "serve_answers", "close", 1),
+        ("services/post_install.py", "health", "close", 1),
+        # #685: update closes its own HTTPS connection to GitHub, not a tab.
+        ("services/update.py", "https_get", "close", 1),
     ]
 }
 #: What each of ``browser.py``'s reaches is on, called or held: the run's own

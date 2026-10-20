@@ -116,12 +116,14 @@ from netkeep.services import (
     template_adoption,
     ui_settings,
     user_dictionary,
+    uv_tool,
 )
 from netkeep.services import campaigns as campaign_service
 from netkeep.services import config_adopt as config_adopt_service
 from netkeep.services import mailboxes as mailbox_service
 from netkeep.services import posture as posture_service
 from netkeep.services import sending_hours as sending_hours_service
+from netkeep.services import update as update_service
 from netkeep.services.backup import (
     BACKUPS_DIRNAME,
     BackupError,
@@ -592,6 +594,107 @@ def setup_command(
         wait_s=wait,
     )
     raise typer.Exit(code=code)
+
+
+@app.command("update")
+def update_command(
+    ctx: typer.Context,
+    check: Annotated[
+        bool,
+        typer.Option("--check", help="Only say whether a newer release exists. Changes nothing."),
+    ] = False,
+    version: Annotated[
+        str | None,
+        typer.Option(
+            "--version",
+            help="Update to this release (X.Y.Z) instead of the latest.",
+            show_default=False,
+        ),
+    ] = None,
+    finish: Annotated[
+        bool,
+        typer.Option("--finish", hidden=True, help="The new version's step (run by update)."),
+    ] = False,
+    rollback: Annotated[
+        bool,
+        typer.Option("--rollback", hidden=True, help="The old version's step (run by update)."),
+    ] = False,
+) -> None:
+    """Update netkeep in place to the latest release, or to --version.
+
+    It refuses while you run netkeep serve yourself. It stops the login item, backs up
+    the database, installs the release with uv and its pinned constraints, then starts
+    the login item and checks that netkeep serve answers with the new version. If the
+    install or that check fails before the new version's scheduler started, it
+    reinstalls the old version and restores the backup. If the scheduler had started, it
+    stops and explains instead. A checkout updates with git pull and make install."""
+    state = ctx.ensure_object(CliState)
+    if state.config is not None:  # the next version's process reads the same config
+        os.environ[CONFIG_ENV] = str(state.config.expanduser().resolve())
+
+    def base_url(host: str | None, port: int | None) -> str:
+        settings = _file_settings_or_exit(state)
+        return local_api_key.base_url(
+            host or settings.web.host, settings.web.port if port is None else port
+        )
+
+    def backup() -> Path | None:
+        url = database_url()
+        if url.startswith("sqlite") and not _sqlite_database_exists(url):
+            return None
+        return create_backup(url, data_dir() / BACKUPS_DIRNAME)
+
+    def restore(source: Path) -> list[str]:
+        result = restore_backup(source, database_url(), data_dir() / BACKUPS_DIRNAME)
+        lines = [f"restored {result.source.name}: the database is at migration {result.revision}"]
+        if result.auto_send_cleared:
+            lines.append(
+                "LinkedIn auto-send was on in the Settings page; it is off now. Turn it on"
+                " again in Settings, with its confirmation, if you mean it."
+            )
+        return lines
+
+    seams = update_service.Seams(
+        fetch=lambda url, limit: update_service.https_get(url, max_bytes=limit),
+        uv=uv_tool.install,
+        tool_bin=uv_tool.tool_bin_dir,
+        exec_netkeep=uv_tool.exec_netkeep,
+        serve_version=post_install.serve_version,
+        base_url=base_url,
+        lock_state=serve_lock.state,
+        claim_lock=serve_lock.claim,
+        backup=backup,
+        restore=restore,
+        tool_install=update_service.running_from_tool_install(),
+        current_version=__version__,
+    )
+    if check:
+        try:
+            code = update_service.check(seams, typer.echo, version=version)
+        except update_service.UpdateError as exc:
+            typer.echo(f"error: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        raise typer.Exit(code=code)
+    if not seams.tool_install:
+        typer.echo(f"error: {update_service.CHECKOUT_REFUSAL}", err=True)
+        raise typer.Exit(code=1)
+    item = login_item.LoginItem()
+    try:
+        if finish:
+            code = update_service.finish(item, seams, typer.echo)
+        elif rollback:
+            code = update_service.rollback(item, seams, typer.echo)
+        else:
+            code = update_service.start(item, seams, typer.echo, version=version)
+    except update_service.UpdateError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    raise typer.Exit(code=code)
+
+
+def _sqlite_database_exists(url: str) -> bool:
+    database = make_url(url).database
+    return database is not None and bool(database) and Path(database).expanduser().exists()
 
 
 #: What `netkeep open` says when the Keychain refuses (#618 review): no link can be
