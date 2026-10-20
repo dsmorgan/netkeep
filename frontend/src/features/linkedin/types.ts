@@ -62,6 +62,13 @@ export const RUN_KIND_LABELS: Record<RunKind, string> = {
   session_check: 'Connection check',
 }
 
+/** What a run is called: a scheduled `message_send` is an auto-send (ADR 0008), not a prefill. */
+export function runKindLabel(run: { kind: RunKind; trigger: RunTrigger }): string {
+  return run.kind === 'message_send' && run.trigger === 'scheduled'
+    ? 'LinkedIn auto-send'
+    : RUN_KIND_LABELS[run.kind]
+}
+
 export const RUN_TRIGGER_LABELS: Record<RunTrigger, string> = {
   manual: 'Manual',
   scheduled: 'Scheduled',

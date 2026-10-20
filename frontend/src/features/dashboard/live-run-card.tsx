@@ -21,7 +21,7 @@ import {
   formatWhen,
   stopReasonLabel,
 } from '@/features/linkedin/fields'
-import { RUN_KIND_LABELS, RUN_STATUS_LABELS, type Run } from '@/features/linkedin/types'
+import { RUN_STATUS_LABELS, runKindLabel, type Run } from '@/features/linkedin/types'
 import { cn } from '@/lib/utils'
 
 import { lastRunQuery } from './api'
@@ -143,7 +143,7 @@ function LiveRun({ runId }: { runId: number }) {
   return (
     <>
       <p className="flex flex-wrap items-center gap-2">
-        <span className="font-medium">{RUN_KIND_LABELS[data.kind]}</span>
+        <span className="font-medium">{runKindLabel(data)}</span>
         <span
           className={cn(
             'inline-flex h-5 shrink-0 items-center rounded-4xl px-2 text-xs font-medium',

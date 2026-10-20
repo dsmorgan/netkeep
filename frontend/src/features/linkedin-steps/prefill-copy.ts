@@ -22,6 +22,14 @@ export const TYPING = 'Typing in Chrome… watch the netkeep Chrome window.'
 export const TYPING_WARNING =
   'The person you are writing to may see "typing…" while netkeep types. Don\'t type or click in Chrome until the prefill finishes.'
 
+/** While an auto-send (a scheduled `message_send`, ADR 0008) runs: netkeep clicks Send itself. */
+export const AUTO_SENDING = 'Auto-send is running in Chrome… watch the netkeep Chrome window.'
+export const AUTO_SENDING_WARNING =
+  "netkeep types the message and clicks Send itself, so nothing waits for you. Don't type or click in Chrome until it finishes."
+
+/** After an auto-send clicked Send (`send_clicked`). */
+export const AUTO_SENT = 'Auto-send typed the message and clicked Send. Nothing waits for you.'
+
 /** The first poll hasn't run: scheduled polls wait for one you run by hand. */
 export const FIRST_POLL_COMMAND = 'netkeep linkedin inbox'
 export const CHECK_INBOX_LABEL = 'Check inbox now'

@@ -74,6 +74,9 @@ export const linkedinStepKeys = {
   options: () => [...linkedinStepKeys.all, 'options'] as const,
 }
 
+/** How often the queue and what waits for you reload on their own. */
+const QUEUE_REFRESH_MS = 60_000
+
 /** The most rows one list answers (`READY_PAGE_MAX`). */
 export const QUEUE_PAGE = 50
 
@@ -91,6 +94,8 @@ export function readyQuery(campaignId: number | null = null) {
       if (data === undefined) fail(response.status, error, 'could not load the LinkedIn queue')
       return data
     },
+    // Steps come due and holds lapse with no event; a minute is the schedule's grain (#704).
+    refetchInterval: QUEUE_REFRESH_MS,
   })
 }
 
@@ -111,6 +116,8 @@ export function waitingQuery(campaignId: number | null = null) {
       if (data === undefined) fail(response.status, error, 'could not load what waits for you')
       return data
     },
+    // A message goes stale with the clock, not with an event (#704).
+    refetchInterval: QUEUE_REFRESH_MS,
   })
 }
 

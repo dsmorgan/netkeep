@@ -10,7 +10,7 @@ import { budgetQuery, cancelRun, linkedinKeys, resumeRun, runQuery } from './api
 import { formatFields, formatWhen, RUN_STATUS_CLASSES, stopReasonLabel, type Field } from './fields'
 import { ProfileViewNotice } from './profile-view-notice'
 import { RunReasons } from './run-reasons'
-import { RUN_KIND_LABELS, RUN_STATUS_LABELS, RUN_TRIGGER_LABELS } from './types'
+import { RUN_STATUS_LABELS, RUN_TRIGGER_LABELS, runKindLabel } from './types'
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -81,7 +81,7 @@ export function RunDetail({
     <Card size="sm" role="region" aria-label={`Run ${data.id}`}>
       <CardHeader>
         <CardTitle level={2} className="flex items-center gap-2">
-          {RUN_KIND_LABELS[data.kind]}
+          {runKindLabel(data)}
           <span className="text-sm font-normal text-muted-foreground tabular-nums">
             Run {data.id}
           </span>

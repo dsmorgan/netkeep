@@ -11,6 +11,7 @@ import { formatWhen, RUN_STATUS_CLASSES, stopReasonLabel, summarizeFields } from
 import {
   RUN_KINDS,
   RUN_KIND_LABELS,
+  runKindLabel,
   RUN_STATUS_LABELS,
   type RunKind,
   type RunStatus,
@@ -72,7 +73,9 @@ export function RunsPanel({
             <option value="">Every kind</option>
             {RUN_KINDS.map((value) => (
               <option key={value} value={value}>
-                {RUN_KIND_LABELS[value]}
+                {value === 'message_send'
+                  ? 'LinkedIn prefill or auto-send'
+                  : RUN_KIND_LABELS[value]}
               </option>
             ))}
           </select>
@@ -149,7 +152,7 @@ export function RunsPanel({
                           onSelect(item.id)
                         }}
                       >
-                        {RUN_KIND_LABELS[item.kind]}
+                        {runKindLabel(item)}
                       </button>
                     </th>
                     <td className="py-2 pr-3 text-muted-foreground tabular-nums">{item.id}</td>
