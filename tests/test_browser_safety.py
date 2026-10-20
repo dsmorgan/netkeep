@@ -3187,67 +3187,126 @@ def test_the_raw_connection_pin_catches_a_new_opener(line: str) -> None:
     assert raw_connections(sources) != ALLOWED_RAW_CONNECTIONS
 
 
-#: #684 review: the names that open an HTTP client connection or opener, and the client
-#: libraries netkeep could import instead. A reach of one (an attribute, a ``from``
-#: import, a ``getattr`` literal, an import of the library) outside
-#: :data:`HTTP_CLIENT_PIN_SKIPS` must be one of :data:`ALLOWED_HTTP_CLIENTS`.
-HTTP_CLIENT_NAMES = frozenset(
+#: #684 re-review: the modules that make an HTTP (or other network) client. Reaching
+#: one (``import``, ``import ... as``, ``from ... import``, a star import, ``from http
+#: import client``, an attribute read such as ``http.client``, or ``getattr(http,
+#: 'client')``) is a finding, keyed by the module, outside :data:`ALLOWED_HTTP_CLIENTS`.
+#: Pinned by module, not by the names in it, so no alias or other opener in the same
+#: module gets past it. A dotted stdlib name is matched with what's under it; a library
+#: by its top-level name.
+HTTP_CLIENT_MODULES = frozenset(
     {
-        "HTTPConnection",
-        "HTTPSConnection",
-        "urlopen",
-        "build_opener",
-        "OpenerDirector",
-        "HTTPHandler",
-        "HTTPSHandler",
+        "urllib.request",
+        "http.client",
+        "xmlrpc.client",
+        "ftplib",
+        "smtplib",
+        "telnetlib",
+        "httpcore",
+        "httpx",
+        "requests",
+        "aiohttp",
+        "urllib3",
+        "httplib2",
     }
 )
-HTTP_CLIENT_LIBRARIES = frozenset({"httpx", "requests", "aiohttp", "urllib3", "httplib2"})
-#: Gmail's own clients (the API's write-once connection and the OAuth token exchange)
-#: are left to #677, which pins the outbound sites to Google.
-HTTP_CLIENT_PIN_SKIPS = frozenset(
-    {PACKAGE / "campaigns" / "gmail.py", PACKAGE / "campaigns" / "gmail_oauth.py"}
-)
-#: Every HTTP client the rest of the package opens, by (file, function, name): count.
+#: A connection's own send methods: read on a connection made anywhere (Gmail's, say),
+#: each is a request of netkeep's own.
+HTTP_SEND_NAMES = frozenset({"putrequest", "endheaders"})
+#: Every reach of one, by (file, function, module or name): count. Tightening Gmail's
+#: entries to the hosts they reach is #677's.
 ALLOWED_HTTP_CLIENTS = {
+    # Gmail's API client: httplib2 under googleapiclient, and the write-once connection
+    # (#563), which subclasses http.client's connection and catches its errors in its
+    # send and its read; the client's retry reads one of them too.
+    (PACKAGE / "campaigns" / "gmail.py", "", "http.client"): 1,
+    (PACKAGE / "campaigns" / "gmail.py", "", "httplib2"): 1,
+    (PACKAGE / "campaigns" / "gmail.py", "WriteOnceMixin", "http.client"): 1,
+    (PACKAGE / "campaigns" / "gmail.py", "WriteOnceMixin.request", "http.client"): 1,
+    (PACKAGE / "campaigns" / "gmail.py", "WriteOnceMixin.getresponse", "http.client"): 2,
+    (PACKAGE / "campaigns" / "gmail.py", "GmailClient._run", "http.client"): 1,
+    # Gmail's OAuth: the token exchange's opener, and the errors its send and its error
+    # reading catch.
+    (PACKAGE / "campaigns" / "gmail_oauth.py", "", "http.client"): 1,
+    (PACKAGE / "campaigns" / "gmail_oauth.py", "", "urllib.request"): 1,
+    (PACKAGE / "campaigns" / "gmail_oauth.py", "_send", "http.client"): 1,
+    (PACKAGE / "campaigns" / "gmail_oauth.py", "_error_code", "http.client"): 1,
     # `netkeep setup`'s health check (#684): one GET of /api/v1/health on a loopback
-    # name only, no redirect followed, no proxy, the body capped.
-    (PACKAGE / "services" / "post_install.py", "serve_answers", "HTTPConnection"): 1,
+    # name, no redirect followed, no proxy, the body capped. Its connection, its errors,
+    # and the two send calls.
+    (PACKAGE / "services" / "post_install.py", "", "http.client"): 1,
+    (PACKAGE / "services" / "post_install.py", "serve_answers", "http.client"): 2,
+    (PACKAGE / "services" / "post_install.py", "serve_answers", "putrequest"): 1,
+    (PACKAGE / "services" / "post_install.py", "serve_answers", "endheaders"): 1,
 }
+
+_HTTP_PACKAGES = {"http": "client", "urllib": "request", "xmlrpc": "client"}
+
+
+def _http_module(name: str) -> str | None:
+    """The :data:`HTTP_CLIENT_MODULES` entry ``name`` is, or is under."""
+    for module in HTTP_CLIENT_MODULES:
+        if name == module or name.startswith(f"{module}."):
+            return module
+    return None
 
 
 def http_clients(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int]:
-    """Each reach of a :data:`HTTP_CLIENT_NAMES` name or an import of a
-    :data:`HTTP_CLIENT_LIBRARIES` library, by file and function."""
+    """Each reach of a :data:`HTTP_CLIENT_MODULES` module or a :data:`HTTP_SEND_NAMES`
+    name, by file and function."""
     found: dict[tuple[Path, str, str], int] = {}
+
+    def add(path: Path, where: str, name: str) -> None:
+        found[(path, where, name)] = found.get((path, where, name), 0) + 1
+
     for path, source in sources.items():
-        if path in HTTP_CLIENT_PIN_SKIPS:
-            continue
-        for name in HTTP_CLIENT_NAMES:
+        for name in HTTP_SEND_NAMES:
             for item, _ in name_reaches(source, name, path):
-                key = (path, item.function, name)
-                found[key] = found.get(key, 0) + 1
+                add(path, item.function, name)
         tree = parse(source)
         scopes = _scoped(tree)
         for node in walk(tree):
+            where = scopes.get(id(node), "")
             if isinstance(node, ast.Import):
-                modules = [alias.name for alias in node.names]
-            elif isinstance(node, ast.ImportFrom):
-                modules = [node.module or ""]
-            else:
-                continue
-            for module in modules:
-                root = module.split(".")[0]
-                if root in HTTP_CLIENT_LIBRARIES:
-                    key = (path, scopes.get(id(node), ""), root)
-                    found[key] = found.get(key, 0) + 1
+                for alias in node.names:
+                    if (module := _http_module(alias.name)) is not None:
+                        add(path, where, module)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                if (module := _http_module(node.module)) is not None:
+                    add(path, where, module)
+                elif node.module in _HTTP_PACKAGES:
+                    for alias in node.names:
+                        dotted = f"{node.module}.{alias.name}"
+                        if alias.name == "*" or _http_module(dotted) is not None:
+                            add(path, where, f"{node.module}.{_HTTP_PACKAGES[node.module]}")
+            elif (
+                isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+                and _HTTP_PACKAGES.get(node.value.id) == node.attr
+            ):
+                add(path, where, f"{node.value.id}.{node.attr}")
+            elif (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "getattr"
+                and len(node.args) >= 2
+                and isinstance(node.args[0], ast.Name)
+                and isinstance(node.args[1], ast.Constant)
+                and _HTTP_PACKAGES.get(node.args[0].id) == node.args[1].value
+            ):
+                add(path, where, f"{node.args[0].id}.{node.args[1].value}")
     return found
 
 
 def test_only_the_reviewed_sites_open_an_http_client() -> None:
     """#684 review: an HTTP client is a request of netkeep's own that no other rule here
-    reads. Outside Gmail's (#677), only setup's loopback health check opens one."""
-    assert http_clients(package_sources()) == ALLOWED_HTTP_CLIENTS
+    reads. Only Gmail's (#677) and setup's loopback health check reach one."""
+    found = http_clients(package_sources())
+    assert found == ALLOWED_HTTP_CLIENTS, sorted(
+        (str(p.relative_to(PACKAGE)), f, n, c)
+        for (p, f, n), c in found.items()
+        if ALLOWED_HTTP_CLIENTS.get((p, f, n)) != c
+    )
 
 
 @pytest.mark.parametrize(
@@ -3256,12 +3315,32 @@ def test_only_the_reviewed_sites_open_an_http_client() -> None:
         "import urllib.request\nurllib.request.urlopen('http://127.0.0.1:1/')\n",
         "from urllib.request import urlopen\n",
         "from urllib.request import build_opener as b\n",
+        "from urllib.request import *\n",
+        "from http.client import *\n",
+        "import urllib.request\nurllib.request.urlretrieve('http://127.0.0.1:1/')\n",
+        "from urllib.request import URLopener\nURLopener().open('http://127.0.0.1:1/')\n",
+        "from urllib.request import FancyURLopener\n",
         "import http.client\nc = http.client.HTTPSConnection('example.invalid')\n",
+        "import http.client as hc\nc = hc.HTTPConnection('127.0.0.1', 1)\n",
         "from http import client\nc = client.HTTPConnection('127.0.0.1', 1)\n",
-        "import http.client\nc = getattr(http.client, 'HTTPConnection')\n",
+        "from http import client as c\n",
+        "from http import *\n",
+        "from urllib import request\n",
+        "import http\nc = http.client.HTTPConnection('127.0.0.1', 1)\n",
+        "import http\nc = getattr(http, 'client')\n",
+        "import xmlrpc.client\nxmlrpc.client.ServerProxy('http://127.0.0.1:1/')\n",
+        "from xmlrpc import client\n",
+        "import ftplib\n",
+        "from smtplib import SMTP\n",
+        "import telnetlib\n",
+        "import httpcore\n",
         "import httpx\n",
         "from requests import get\n",
+        "import aiohttp\n",
         "import urllib3.poolmanager\n",
+        "import httplib2 as h\n",
+        "def f(conn):\n    conn.putrequest('GET', '/')\n    conn.endheaders()\n",
+        "def f(conn):\n    send = getattr(conn, 'putrequest')\n",
     ],
 )
 def test_the_http_client_pin_catches_a_new_opener(line: str) -> None:
@@ -3277,6 +3356,13 @@ def test_the_http_client_pin_catches_a_second_opener_in_setup() -> None:
         "\n\ndef _sneaky():\n    from urllib.request import urlopen\n"
         "    return urlopen('http://127.0.0.1:1/')\n"
     )
+    assert http_clients(sources) != ALLOWED_HTTP_CLIENTS
+
+
+def test_the_http_client_pin_catches_a_send_on_gmails_connection() -> None:
+    sources = package_sources()
+    planted = PACKAGE / "campaigns" / "gmail.py"
+    sources[planted] += "\n\ndef _sneaky(conn):\n    conn.putrequest('GET', '/')\n"
     assert http_clients(sources) != ALLOWED_HTTP_CLIENTS
 
 
