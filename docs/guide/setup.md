@@ -66,7 +66,7 @@ netkeep never updates itself: only `netkeep update` installs anything, and `--ch
 4. It installs the release with `uv tool install`, with that release's constraints and uv's own Python 3.12.
 5. It hands over to the new version, which starts the login item and checks that `serve` answers with the new version number.
 
-If the install or that check fails, and the new version's `serve` hadn't started its scheduler yet, netkeep goes back by itself: it reinstalls the version you had, restores the backup with the login item off (when the new version had opened the database), starts the login item and checks again. If the scheduler had started, the new version may have sent messages, and restoring the backup would forget them and could send them twice. Then netkeep stops, turns the login item off, and tells you what to do; see [Updating](troubleshooting.md#updating).
+If the install or that check fails, and the new version's `serve` hadn't started its scheduler yet, netkeep goes back by itself: it reinstalls the version you had, restores the backup with the login item off (when the new version had opened the database), starts the login item and checks again. If any `serve` had started its scheduler on this data directory during the update, it may have sent messages, and restoring the backup would forget them and could send them twice: netkeep never restores then, and never restores twice. Then netkeep stops, turns the login item off, and tells you what to do; see [Updating](troubleshooting.md#updating).
 
 If the login item was off, `netkeep update` installs the new version and leaves it off; start netkeep with `netkeep serve`.
 

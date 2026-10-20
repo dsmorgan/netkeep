@@ -12,15 +12,22 @@ Three processes, each running code nothing has replaced under it:
    executes the new ``netkeep update --finish``.
 2. **``netkeep update --finish``**, on the new version. It starts the login item and
    waits for ``serve`` to answer its health check with the new version. Then the update
-   is done. If it fails, and the new ``serve`` never got as far as starting its
-   scheduler (:data:`SCHEDULER_MARKER`), it reinstalls the old version with its
-   constraints and executes the old ``netkeep update --rollback``. If the scheduler had
-   started, it stops the login item and explains instead: the new version may have
-   sent messages, and restoring the backup would forget them and risk sending them
-   twice.
-3. **``netkeep update --rollback``**, on the old version again. It restores the backup
-   with the login item off (when the new version ran on the database), starts the login
-   item, and checks ``serve`` answers with the old version.
+   is done. If it fails, it stops the login item and takes the serve lock. If no
+   ``serve`` started a scheduler during the update (:data:`SCHEDULER_MARKER`, any
+   version's), it reinstalls the old version with its constraints, still holding the
+   lock, and executes the old ``netkeep update --rollback``. Otherwise it turns the
+   login item off and explains: a scheduler may have sent messages, and restoring the
+   backup would forget them and risk sending them twice.
+3. **``netkeep update --rollback``**, on the old version again. Holding the serve lock,
+   it checks the marker itself (a ``serve`` may have run since ``--finish``) and stops
+   and explains if one exists. Otherwise it records the restore in :data:`STATE_FILE`,
+   restores the backup (when the new version ran on the database), starts the login
+   item, and checks ``serve`` answers with the old version. A second ``--rollback``
+   never restores again.
+
+The principle: a restore never happens after any scheduler may have run on the data.
+:data:`STATE_FILE` and the marker are written durably (file and folder fsynced), and
+``serve`` starts its scheduler only once the marker is on disk.
 
 When ``uv tool install`` fails, the new version has never run, so the old process
 reinstalls the old version and executes its ``--rollback``, which has no database to
@@ -50,6 +57,7 @@ from urllib.parse import urljoin, urlsplit
 
 from netkeep import paths
 from netkeep.linkedin.activity_lock import Claim, LockState
+from netkeep.services.config_adopt import _sync_directory
 from netkeep.services.login_item import SERVE_ERR_LOG, LoginItem, LoginItemError
 
 REPOSITORY: Final = "dsmorgan/netkeep"
@@ -69,6 +77,9 @@ _MAX_REDIRECTS: Final = 5
 _DOWNLOAD_TIMEOUT_S: Final = 30.0
 _MAX_RELEASE_BYTES: Final = 1 << 20
 _MAX_ASSET_BYTES: Final = 1 << 20
+_DOWNLOAD_DEADLINE_S: Final = 120.0
+"""The whole download, redirects included: a server that drips the body can't hold it."""
+_CHUNK_BYTES: Final = 64 * 1024
 
 UPDATE_DIRNAME: Final = "update"
 STATE_FILE: Final = "state.json"
@@ -116,15 +127,27 @@ def constraints_path(version: str, data: Path | None = None) -> Path:
 # -- downloads -------------------------------------------------------------------------
 
 
-def https_get(url: str, *, max_bytes: int, accept: str = "*/*") -> bytes:
+def https_get(
+    url: str,
+    *,
+    max_bytes: int,
+    accept: str = "*/*",
+    clock: Callable[[], float] = time.monotonic,
+) -> bytes:
     """GET ``url`` over HTTPS with certificate checks, following redirects only to HTTPS
-    on :data:`ALLOWED_HOSTS`, with no proxy, and at most ``max_bytes`` of the body.
-    :class:`UpdateError` on anything else."""
+    on :data:`ALLOWED_HOSTS` at port 443, with no proxy, at most ``max_bytes`` of the
+    body, and within :data:`_DOWNLOAD_DEADLINE_S` for the whole download, redirects
+    included. :class:`UpdateError` on anything else."""
     context = ssl.create_default_context()
+    deadline = clock() + _DOWNLOAD_DEADLINE_S
     for _ in range(_MAX_REDIRECTS + 1):
         parts = urlsplit(url)
         host = parts.hostname
-        if parts.scheme != "https" or host not in ALLOWED_HOSTS or parts.port not in (None, 443):
+        try:
+            port = parts.port
+        except ValueError:
+            port = -1
+        if parts.scheme != "https" or host not in ALLOWED_HOSTS or port not in (None, 443):
             raise UpdateError(f"refused to download {url}: only HTTPS from GitHub is allowed")
         connection = http.client.HTTPSConnection(
             host, 443, timeout=_DOWNLOAD_TIMEOUT_S, context=context
@@ -142,10 +165,20 @@ def https_get(url: str, *, max_bytes: int, accept: str = "*/*") -> bytes:
                 if not location:
                     raise UpdateError(f"{url} redirected nowhere")
                 url = urljoin(url, location)
+                _check_deadline(url, deadline, clock)
                 continue
             if response.status != 200:
                 raise UpdateError(f"could not download {url}: HTTP {response.status}")
-            body = response.read(max_bytes + 1)
+            chunks: list[bytes] = []
+            size = 0
+            while size <= max_bytes:
+                _check_deadline(url, deadline, clock)
+                chunk = response.read(min(_CHUNK_BYTES, max_bytes + 1 - size))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                size += len(chunk)
+            body = b"".join(chunks)
         except (OSError, http.client.HTTPException) as exc:
             raise UpdateError(f"could not download {url}: {exc}") from exc
         finally:
@@ -154,6 +187,13 @@ def https_get(url: str, *, max_bytes: int, accept: str = "*/*") -> bytes:
             raise UpdateError(f"{url} is larger than {max_bytes} bytes")
         return body
     raise UpdateError(f"{url} redirected more than {_MAX_REDIRECTS} times")
+
+
+def _check_deadline(url: str, deadline: float, clock: Callable[[], float]) -> None:
+    if clock() > deadline:
+        raise UpdateError(
+            f"could not download {url}: it took longer than {_DOWNLOAD_DEADLINE_S:g} s"
+        )
 
 
 def sha256_for(sums: str, name: str) -> str:
@@ -172,6 +212,9 @@ def sha256_for(sums: str, name: str) -> str:
 # -- the state the three processes share -----------------------------------------------
 
 
+PHASES: Final = frozenset({"installing", "finishing", "rolling-back", "stopped"})
+
+
 @dataclass(frozen=True, slots=True)
 class UpdateState:
     """:data:`STATE_FILE`. ``phase`` is the step under way: ``installing`` (the old
@@ -187,12 +230,34 @@ class UpdateState:
     phase: str
     new_version_ran: bool = False
     """The new version's ``serve`` was started, so it may have migrated the database."""
+    restored: bool = False
+    """``--rollback`` began restoring the backup. Recorded before the restore and before
+    ``serve`` starts again, so a second ``--rollback`` never restores over what the
+    restored version did."""
     reason: str = ""
     """Why it is rolling back or stopped."""
     started_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
+_STATE_TYPES: Final[dict[str, tuple[type, ...]]] = {
+    "from_version": (str,),
+    "to_version": (str,),
+    "from_constraints": (str,),
+    "to_constraints": (str,),
+    "backup": (str, type(None)),
+    "login_item_was_on": (bool,),
+    "phase": (str,),
+    "new_version_ran": (bool,),
+    "restored": (bool,),
+    "reason": (str,),
+    "started_at": (str,),
+}
+
+
 def read_state(data: Path | None = None) -> UpdateState | None:
+    """The update in progress, or ``None``. :class:`UpdateError` for a file that isn't
+    one this netkeep wrote: a field of the wrong type, a version that isn't ``X.Y.Z`` (it
+    goes to ``uv``), or a phase it doesn't know."""
     path = update_dir(data) / STATE_FILE
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -200,53 +265,87 @@ def read_state(data: Path | None = None) -> UpdateState | None:
         return None
     except (OSError, ValueError) as exc:
         raise UpdateError(f"{path} can't be read ({exc}); look at it, then delete it") from exc
+    unknown = f"{path} isn't an update netkeep knows; look at it, then delete it"
+    if not isinstance(raw, dict) or not set(raw) <= set(_STATE_TYPES):
+        raise UpdateError(unknown)
+    if any(not isinstance(value, _STATE_TYPES[name]) for name, value in raw.items()):
+        raise UpdateError(unknown)
     try:
-        return UpdateState(**raw)
+        state = UpdateState(**raw)
     except TypeError as exc:
-        raise UpdateError(f"{path} isn't an update netkeep knows; delete it") from exc
+        raise UpdateError(unknown) from exc
+    if (
+        parse_version(state.from_version) is None
+        or parse_version(state.to_version) is None
+        or state.phase not in PHASES
+    ):
+        raise UpdateError(unknown)
+    return state
+
+
+def _write_durably(path: Path, text: str) -> None:
+    """Write ``path`` so that it is on disk when this returns: the file is written and
+    fsynced under a temporary name, renamed into place, and the folder fsynced."""
+    temporary = path.with_name(f".{path.name}.tmp")
+    descriptor = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.replace(path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+    _sync_directory(path.parent)
+
+
+def _update_dir_made(data: Path | None) -> Path:
+    directory = update_dir(data)
+    if not directory.is_dir():
+        directory.mkdir(parents=True, exist_ok=True)
+        _sync_directory(directory.parent)
+    return directory
 
 
 def write_state(state: UpdateState, data: Path | None = None) -> None:
-    directory = update_dir(data)
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / STATE_FILE
-    temporary = path.with_name(f".{STATE_FILE}.tmp")
-    temporary.write_text(json.dumps(asdict(state), indent=2) + "\n", encoding="utf-8")
-    temporary.replace(path)
+    """Record ``state``, durably: a later process (or ``serve``, which writes the
+    scheduler marker only while it exists) must find it after a power loss."""
+    path = _update_dir_made(data) / STATE_FILE
+    _write_durably(path, json.dumps(asdict(state), indent=2) + "\n")
 
 
 def clear_state(data: Path | None = None) -> None:
     directory = update_dir(data)
     (directory / STATE_FILE).unlink(missing_ok=True)
     (directory / SCHEDULER_MARKER).unlink(missing_ok=True)
+    _sync_directory(directory)
+
+
+def clear_marker(data: Path | None = None) -> None:
+    directory = update_dir(data)
+    (directory / SCHEDULER_MARKER).unlink(missing_ok=True)
+    _sync_directory(directory)
 
 
 def mark_scheduler_starting(version: str, data: Path | None = None) -> None:
     """``serve`` calls this before it starts its scheduler. While an update is in progress
-    it records that this version's scheduler may now run, so a failed health check
-    never restores a backup over what it sent. Otherwise it writes nothing. An error
-    writing the marker is raised, so ``serve`` doesn't start the scheduler unrecorded."""
+    it records, durably, that a scheduler may now run on this data directory, so no
+    rollback restores a backup over what it sent. Otherwise it writes nothing. It
+    returns only once the marker is on disk; an error writing it is raised, so ``serve``
+    doesn't start the scheduler unrecorded."""
     directory = update_dir(data)
     if not (directory / STATE_FILE).exists():
         return
     marker = {"version": version, "pid": os.getpid(), "at": datetime.now(UTC).isoformat()}
-    path = directory / SCHEDULER_MARKER
-    temporary = path.with_name(f".{SCHEDULER_MARKER}.tmp")
-    temporary.write_text(json.dumps(marker) + "\n", encoding="utf-8")
-    temporary.replace(path)
+    _write_durably(directory / SCHEDULER_MARKER, json.dumps(marker) + "\n")
 
 
-def scheduler_started(version: str, data: Path | None = None) -> bool:
-    """Whether ``version``'s ``serve`` recorded that it was starting its scheduler. A
-    marker that can't be read counts as started: the safe answer is not to restore."""
-    path = update_dir(data) / SCHEDULER_MARKER
-    try:
-        marker = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return False
-    except (OSError, ValueError):
-        return True
-    return not isinstance(marker, dict) or marker.get("version") in (version, None)
+def scheduler_started(data: Path | None = None) -> bool:
+    """Whether a ``serve`` recorded that it was starting its scheduler during this update.
+    Any marker counts, whatever version it names and whatever it holds: a scheduler that
+    ran on this data directory may have sent, and a restore would forget it."""
+    return (update_dir(data) / SCHEDULER_MARKER).exists()
 
 
 # -- the seams -------------------------------------------------------------------------
@@ -345,6 +444,9 @@ def install_command(version: str, constraints: Path) -> list[str]:
 
 def check(seams: Seams, say: Say, *, version: str | None = None) -> int:
     """Say whether a newer release exists. Changes nothing."""
+    if version is not None and parse_version(version) is None:
+        say(f"error: --version takes X.Y.Z, not {version!r}.")
+        return 1
     try:
         target = version or latest_version(seams)
     except UpdateError as exc:
@@ -437,8 +539,12 @@ def start(item: LoginItem, seams: Seams, say: Say, *, version: str | None = None
             login_item_was_on=was_on,
             phase="installing",
         )
-        write_state(state, data)
-        (update_dir(data) / SCHEDULER_MARKER).unlink(missing_ok=True)
+        try:
+            write_state(state, data)
+            clear_marker(data)
+        except OSError as exc:
+            (update_dir(data) / STATE_FILE).unlink(missing_ok=True)
+            raise _Abort(f"could not record the update in {update_dir(data)}: {exc}") from exc
     except _Abort as exc:
         held.release()
         say(f"   failed: {exc}")
@@ -447,12 +553,16 @@ def start(item: LoginItem, seams: Seams, say: Say, *, version: str | None = None
 
     say(f"4. Install netkeep {target}")
     status = seams.uv(install_command(target, new_constraints))
-    held.release()
     if status != 0:
         reason = f"uv tool install of {target} failed (exit status {status})."
         say(f"   failed: {reason}")
-        return _reinstall_old_and_rollback(item, seams, say, replace(state, reason=reason))
-    write_state(replace(state, phase="finishing"), data)
+        return _reinstall_old_and_rollback(item, seams, say, replace(state, reason=reason), held)
+    held.release()
+    try:
+        write_state(replace(state, phase="finishing"), data)
+    except OSError as exc:
+        # The state still says installing, which --finish accepts on the new version.
+        say(f"   could not record that the install finished ({exc}); going on")
     say("5. Hand over to the new version")
     _exec(seams, "--finish")
 
@@ -527,13 +637,19 @@ def _exec(seams: Seams, flag: str) -> NoReturn:
     seams.exec_netkeep(executable, ["update", flag])
 
 
-def _reinstall_old_and_rollback(item: LoginItem, seams: Seams, say: Say, state: UpdateState) -> int:
-    """Reinstall the old version with its constraints and execute its ``--rollback``."""
+def _reinstall_old_and_rollback(
+    item: LoginItem, seams: Seams, say: Say, state: UpdateState, held: Claim
+) -> int:
+    """Reinstall the old version with its constraints, holding the serve lock so no
+    ``serve`` starts in between, and execute its ``--rollback``."""
     data = item.data
     state = replace(state, phase="rolling-back")
-    write_state(state, data)
-    say(f"Rolling back: reinstall netkeep {state.from_version}")
-    status = seams.uv(install_command(state.from_version, Path(state.from_constraints)))
+    try:
+        write_state(state, data)
+        say(f"Rolling back: reinstall netkeep {state.from_version}")
+        status = seams.uv(install_command(state.from_version, Path(state.from_constraints)))
+    finally:
+        held.release()
     if status != 0:
         # The phase stays rolling-back, so the --rollback this asks for still runs.
         write_state(
@@ -558,7 +674,8 @@ def finish(item: LoginItem, seams: Seams, say: Say) -> int:
     except UpdateError as exc:
         say(f"error: {exc}")
         return 1
-    if state is None or state.phase != "finishing":
+    # "installing" too: the install went through, but recording it didn't.
+    if state is None or state.phase not in ("installing", "finishing"):
         say("error: no update is waiting to finish. Run netkeep update.")
         return 1
     if state.to_version != seams.current_version:
@@ -581,13 +698,16 @@ def finish(item: LoginItem, seams: Seams, say: Say) -> int:
         say(f"Done: netkeep {state.to_version} is running from the login item.")
         return 0
     say(f"   failed: {failure}")
-    stopped = _stop_quietly(item, seams, say)
-    if scheduler_started(state.to_version, data):
-        return _stop_and_explain(item, say, replace(state, reason=failure), SCHEDULER_RAN)
-    if not stopped:
-        return _stop_and_explain(item, say, replace(state, reason=failure), SERVE_WOULDNT_STOP)
+    state = replace(state, reason=failure)
+    held = _stop_quietly(item, seams, say)
+    if scheduler_started(data):
+        if held is not None:
+            held.release()
+        return _stop_and_explain(item, say, state, SCHEDULER_RAN)
+    if held is None:
+        return _stop_and_explain(item, say, state, SERVE_WOULDNT_STOP)
     say(f"netkeep {state.to_version} failed before its scheduler started, so it sent nothing.")
-    return _reinstall_old_and_rollback(item, seams, say, replace(state, reason=failure))
+    return _reinstall_old_and_rollback(item, seams, say, state, held)
 
 
 def _start_and_check(item: LoginItem, seams: Seams, say: Say, version: str) -> str | None:
@@ -617,25 +737,30 @@ def _start_and_check(item: LoginItem, seams: Seams, say: Say, version: str) -> s
     return f"a netkeep serve answers, but with version {answered}, not {version} (see {errors})"
 
 
-def _stop_quietly(item: LoginItem, seams: Seams, say: Say) -> bool:
-    """Stop the login item and wait for the serve lock to be free; whether it is."""
+def _stop_quietly(item: LoginItem, seams: Seams, say: Say) -> Claim | None:
+    """Stop the login item, wait for the serve lock to be free, and take it; the held
+    lock, or ``None`` when ``serve`` wouldn't let go."""
     try:
         item.stop()
     except LoginItemError as exc:
         say(f"   could not stop the login item: {exc}")
-        return False
+        return None
     deadline = seams.clock() + _LOCK_WAIT_S
     while seams.lock_state().held:
         if seams.clock() >= deadline:
             say(f"   netkeep serve still holds the serve lock after {_LOCK_WAIT_S:g} s")
-            return False
+            return None
         seams.sleep(_POLL_S)
-    return True
+    try:
+        return seams.claim_lock()
+    except Exception as exc:  # a serve started in between
+        say(f"   another netkeep took the serve lock: {exc}")
+        return None
 
 
 SCHEDULER_RAN: Final = (
-    "its serve started its scheduler before it failed, so it may have sent messages."
-    " Restoring the backup would forget them and could send them twice"
+    "a serve started its scheduler on this data directory during the update, so it may"
+    " have sent messages. Restoring the backup would forget them and could send them twice"
 )
 SERVE_WOULDNT_STOP: Final = (
     "its serve wouldn't stop, and a backup can't be restored under a running serve"
@@ -646,7 +771,10 @@ def _stop_and_explain(item: LoginItem, say: Say, state: UpdateState, why: str) -
     """The new version's scheduler ran: no automatic restore, which would forget its sends.
     The login item is turned off, so the version that failed doesn't start again at the
     next login before you've decided."""
-    write_state(replace(state, phase="stopped"), item.data)
+    try:
+        write_state(replace(state, phase="stopped"), item.data)
+    except OSError as exc:
+        say(f"   could not record that the update stopped: {exc}")
     try:
         item.disable()
         off = "is off"
@@ -696,6 +824,17 @@ def rollback(item: LoginItem, seams: Seams, say: Say) -> int:
             f" {state.from_version}."
         )
         return 1
+    if state.restored:
+        say(
+            "error: this rollback already restored the backup, and netkeep"
+            f" {state.from_version} may have run on it since. Restoring it again would forget"
+            " that, so netkeep won't."
+        )
+        say(
+            f"Run netkeep login-item on, check netkeep works, then delete"
+            f" {update_dir(data) / STATE_FILE}."
+        )
+        return 1
     say(f"netkeep update --rollback: netkeep {state.from_version} is installed again")
     say(f"Why: {state.reason}")
     if state.new_version_ran:
@@ -703,15 +842,28 @@ def rollback(item: LoginItem, seams: Seams, say: Say) -> int:
             return _stop_and_explain_rollback(
                 item, say, state, "there was no database before the update, so no backup"
             )
-        say(f"Restore the backup {state.backup}, with the login item off")
+        backup = Path(state.backup)
         try:
             held = seams.claim_lock()
         except Exception as exc:  # the login item is off; something else serves
             return _stop_and_explain_rollback(item, say, state, f"the serve lock is held: {exc}")
         try:
-            lines = seams.restore(Path(state.backup))
-        except Exception as exc:  # explain whatever stopped the restore
-            return _stop_and_explain_rollback(item, say, state, f"the restore failed: {exc}")
+            # Under the lock, so no serve can start its scheduler after this check.
+            if scheduler_started(data):
+                return _stop_and_explain(item, say, state, SCHEDULER_RAN)
+            # Recorded before the restore and before any serve starts again, so a second
+            # --rollback never restores over what the restored version did.
+            state = replace(state, restored=True)
+            try:
+                write_state(state, data)
+            except OSError as exc:
+                why = f"could not record the restore before making it ({exc})"
+                return _stop_and_explain_rollback(item, say, state, why)
+            say(f"Restore the backup {backup}, with the login item off")
+            try:
+                lines = seams.restore(backup)
+            except Exception as exc:  # explain whatever stopped the restore
+                return _stop_and_explain_rollback(item, say, state, f"the restore failed: {exc}")
         finally:
             held.release()
         for line in lines:
@@ -727,9 +879,12 @@ def rollback(item: LoginItem, seams: Seams, say: Say) -> int:
 
 
 def _stop_and_explain_rollback(item: LoginItem, say: Say, state: UpdateState, why: str) -> int:
-    write_state(
-        replace(state, phase="stopped", reason=f"{state.reason} Rollback: {why}."), item.data
-    )
+    try:
+        write_state(
+            replace(state, phase="stopped", reason=f"{state.reason} Rollback: {why}."), item.data
+        )
+    except OSError as exc:
+        say(f"   could not record that the rollback stopped: {exc}")
     say(f"   failed: {why}")
     say(
         f"netkeep {state.from_version} is installed again, but the rollback didn't finish."
