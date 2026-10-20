@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -127,7 +128,90 @@ async def test_the_probe_passes_the_front_ask_to_the_read_and_its_answer_back(
         front=UiFront(ui_port=8123, dedicated=dedicated),
     )
     assert probe == PortProbe(busy=False, browser_pid=4242, fronted=True)
-    assert reader.asks == [{"ui_port": 8123, "dedicated": dedicated}]
+    [ask] = reader.asks
+    assert ask["ui_port"] == 8123 and callable(ask["dedicated"])
+
+
+@dataclass
+class _CheckingReader:
+    """A read that, like the real one, fronts only when ``dedicated(pid)`` says so."""
+
+    pid: int = 4242
+    checked: list[bool] = field(default_factory=list)
+
+    async def read(
+        self,
+        cdp_url: str,
+        *,
+        ui_port: int | None = None,
+        dedicated: Callable[[int], bool] | None = None,
+    ) -> IdentityRead:
+        assert dedicated is not None
+        self.checked.append(dedicated(self.pid))
+        return IdentityRead(self.pid, fronted=self.checked[-1])
+
+
+async def test_the_front_check_skips_the_probes_own_locks(tmp_path: Path) -> None:
+    """The probe holds the account's lock and the legacy one; neither is a run."""
+    calls: list[int] = []
+
+    def dedicated(pid: int) -> bool:
+        calls.append(pid)
+        return True
+
+    reader = _CheckingReader()
+    probe = await launcher_probe(
+        CDP_URL,
+        locks=ActivityLocks(tmp_path),
+        account=activity_lock.SINGLE_ACCOUNT_KEY,
+        reader=reader,
+        front=UiFront(ui_port=8123, dedicated=dedicated),
+    )
+    assert probe.fronted and reader.checked == [True] and calls == [4242]
+
+
+async def test_a_run_of_another_account_at_the_front_check_fronts_nothing(
+    tmp_path: Path,
+) -> None:
+    """#678 review: a run that took another account's lock after the launcher's first
+    look still stops the front, just before the target list."""
+    calls: list[int] = []
+
+    def dedicated(pid: int) -> bool:
+        calls.append(pid)
+        return True
+
+    other = activity_lock.try_claim("account-7", tmp_path)
+    assert other is not None
+    try:
+        reader = _CheckingReader()
+        probe = await launcher_probe(
+            CDP_URL,
+            locks=ActivityLocks(tmp_path),
+            account=activity_lock.SINGLE_ACCOUNT_KEY,
+            reader=reader,
+            front=UiFront(ui_port=8123, dedicated=dedicated),
+        )
+    finally:
+        other.release()
+    assert probe == PortProbe(busy=False, browser_pid=4242, fronted=False)
+    assert reader.checked == [False] and calls == []
+
+
+def test_the_lock_check_skips_only_the_files_it_is_told_to(tmp_path: Path) -> None:
+    mine = activity_lock.try_claim(activity_lock.SINGLE_ACCOUNT_KEY, tmp_path)
+    assert mine is not None
+    try:
+        assert runs.any_browser_lock_held(tmp_path)
+        assert not runs.any_browser_lock_held(tmp_path, ignoring={mine.path})
+        other = activity_lock.try_claim("account-7", tmp_path)
+        assert other is not None
+        try:
+            assert runs.any_browser_lock_held(tmp_path, ignoring={mine.path})
+        finally:
+            other.release()
+    finally:
+        mine.release()
 
 
 async def test_without_the_ask_the_probe_asks_the_read_for_no_front(tmp_path: Path) -> None:

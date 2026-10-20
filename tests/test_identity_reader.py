@@ -597,8 +597,8 @@ def _mutant_reader(monkeypatch: pytest.MonkeyPatch, old: str, new: str) -> CdpId
 #: fronts (or loses the pid) where the real reader doesn't.
 FRONT_GUARDS = {
     "the dedicated check": (
-        "                if not dedicated(pid):\n",
-        "                if False:\n",
+        "            if not dedicated(pid):\n",
+        "            if False:\n",
         lambda: _FakeChrome(targets=[UI_WINDOW]),
         lambda pid: False,
     ),
@@ -653,12 +653,77 @@ async def test_without_the_catch_a_failed_front_loses_the_pid(
     real_reader: CdpIdentityReader, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The mutation half of the failure test above: the catch is what keeps the pid."""
-    catch = '            except Exception as exc:\n                log.info("could not bring'
+    catch = '        except Exception as exc:\n            log.info("could not bring'
     mutant = _mutant_reader(monkeypatch, catch, catch.replace("Exception", "ValueError"))
     monkeypatch.setattr(sys.modules["netkeep_browser_mutant"], "FRONT_STEP_TIMEOUT_S", 0.05)
     chrome = _FakeChrome(targets=[UI_WINDOW], silent=frozenset({"Target.activateTarget"}))
     found = await _read(mutant, chrome)
     assert (found.pid, found.fronted) == (None, False)
+
+
+@pytest.mark.parametrize("not_one", [True, 1.0], ids=["true", "1.0"])
+async def test_only_the_exact_int_id_is_the_answer(
+    real_reader: CdpIdentityReader, monkeypatch: pytest.MonkeyPatch, not_one: object
+) -> None:
+    """#678 review: JSON's ``true`` and ``1.0`` equal 1 in Python, but they aren't id 1."""
+    impostor = {"id": not_one, "result": _process_info(OTHER_PID)}
+    async with _running(_FakeChrome(before=[impostor])) as url:
+        assert await real_reader.read_pid(url) == CHROME_PID
+    mutant = _mutant_reader(monkeypatch, '                and type(message.get("id")) is int\n', "")
+    async with _running(_FakeChrome(before=[impostor])) as url:
+        assert (await mutant.read(url)).pid == OTHER_PID
+
+
+def _hang_the_close(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The websocket's close never finishes, until the read's deadline cancels it."""
+    from websockets.asyncio.client import ClientConnection
+
+    async def hang(self: ClientConnection, code: int = 1000, reason: str = "") -> None:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            self.transport.abort()
+
+    monkeypatch.setattr(ClientConnection, "close", hang)
+
+
+@pytest.mark.wall_clock  # the close's asyncio deadline is what runs out (#472)
+async def test_a_slow_close_after_a_front_keeps_the_pid_and_the_front(
+    real_reader: CdpIdentityReader, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#678 review: the window already came forward, so the launch must say ``shown``,
+    not refuse a Chrome that "named no pid"."""
+    monkeypatch.setattr(browser, "FRONT_STEP_TIMEOUT_S", 0.05)
+    _hang_the_close(monkeypatch)
+    chrome = _FakeChrome(targets=[UI_WINDOW])
+    assert await _read(real_reader, chrome) == IdentityRead(CHROME_PID, fronted=True)
+    assert chrome.received[-1] == _front_frame(UI_ID)
+    catch = "    except TimeoutError:\n        if not answered:\n"
+    mutant = _mutant_reader(monkeypatch, catch, catch.replace("TimeoutError", "ZeroDivisionError"))
+    monkeypatch.setattr(sys.modules["netkeep_browser_mutant"], "FRONT_STEP_TIMEOUT_S", 0.05)
+    found = await _read(mutant, _FakeChrome(targets=[UI_WINDOW]))
+    assert (found.pid, found.fronted) == (None, False)
+
+
+@pytest.mark.wall_clock  # the step's asyncio deadline is what runs out (#472)
+async def test_a_slow_close_after_the_pid_keeps_the_pid(
+    real_reader: CdpIdentityReader, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(browser, "PROBE_STEP_TIMEOUT_S", 0.5)
+    _hang_the_close(monkeypatch)
+    async with _running(_FakeChrome()) as url:
+        assert await real_reader.read_pid(url) == CHROME_PID
+
+
+@pytest.mark.wall_clock  # the step's asyncio deadline is what runs out (#472)
+async def test_an_answer_that_never_comes_is_still_no_pid(
+    real_reader: CdpIdentityReader, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The keep-the-answers catch covers only the close: a missing answer still fails."""
+    monkeypatch.setattr(browser, "PROBE_STEP_TIMEOUT_S", 0.2)
+    chrome = _FakeChrome(silent=frozenset({"SystemInfo.getProcessInfo"}))
+    async with _running(chrome) as url:
+        assert await real_reader.read_pid(url) is None
 
 
 # --- the launcher, end to end with fakes ------------------------------------------------------

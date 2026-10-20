@@ -252,8 +252,9 @@ CDP_SENDERS = {
     (LINKEDIN / "preflight.py", "_read_session_cookies"): 1,
     (LINKEDIN / "browser.py", "read_browser_pid"): 1,
     # #675: the launcher probe's pid read, on the browser target's own websocket, and
-    # #678's target list and front of the UI's window on that same websocket.
-    (LINKEDIN / "browser.py", "_read_process_info"): 3,
+    # #678's target list and front of the UI's window on that same websocket. They're
+    # in its inner ``talk``, which the whole-function pin holds with it.
+    (LINKEDIN / "browser.py", "_read_process_info.talk"): 3,
 }
 #: Which of those methods each function may send: neither borrows the other's.
 CDP_SENDER_METHODS = {
@@ -285,7 +286,7 @@ CDP_SENDER_METHODS = {
     (LINKEDIN / "browser.py", "BrowserRun._target_id"): frozenset({"Target.getTargetInfo"}),
     (LINKEDIN / "preflight.py", "_read_session_cookies"): frozenset({"Network.getCookies"}),
     (LINKEDIN / "browser.py", "read_browser_pid"): frozenset({"SystemInfo.getProcessInfo"}),
-    (LINKEDIN / "browser.py", "_read_process_info"): frozenset(
+    (LINKEDIN / "browser.py", "_read_process_info.talk"): frozenset(
         {"SystemInfo.getProcessInfo", "Target.getTargets", "Target.activateTarget"}
     ),
 }
@@ -2718,7 +2719,7 @@ IDENTITY_READ_REACHES = {
     "_read_process_info": {(LINKEDIN / "browser.py", "CdpIdentityReader.read"): 1},
     "_browser_websocket_url": {(LINKEDIN / "browser.py", "CdpIdentityReader.read"): 1},
     # #678: which target is the UI's window, picked only inside the identity read.
-    "ui_window_target": {(LINKEDIN / "browser.py", "_read_process_info"): 1},
+    "ui_window_target": {(LINKEDIN / "browser.py", "_read_process_info.talk"): 1},
     "CdpIdentityReader": {
         (PACKAGE / "worker.py", ""): 1,
         (PACKAGE / "worker.py", "launcher_probe"): 1,
@@ -2816,12 +2817,14 @@ IDENTITY_TRANSPORT_REACHES = {
         sorted(["_ok_content_length", "isinstance", "isinstance"]),
     ),
     # #678: the pid's frame, then the target list's and the front's, each answered by
-    # id before the next; the deadline moved for the front step; its failure logged.
+    # its exact int id before the next; the deadline moved for the front step; its
+    # failure logged, and a close that runs out of time after the answers logged too.
     "_read_process_info": (
         sorted(
             [
                 "(await answer(ws, 1)).get",
                 "(await answer(ws, 2)).get",
+                "asyncio.Timeout",
                 "asyncio.get_running_loop",
                 "asyncio.get_running_loop().time",
                 "asyncio.timeout",
@@ -2833,6 +2836,7 @@ IDENTITY_TRANSPORT_REACHES = {
                 "json.dumps",
                 "json.dumps",
                 "json.loads",
+                "log.info",
                 "log.info",
                 "message.get",
                 "ws.recv",
@@ -2853,6 +2857,8 @@ IDENTITY_TRANSPORT_REACHES = {
                 "isinstance",
                 "isinstance",
                 "personal_exc",
+                "talk",
+                "type",
                 "ui_window_target",
             ]
         ),
@@ -2948,26 +2954,26 @@ def test_the_identity_transport_functions_are_exactly_the_reviewed_ones() -> Non
     )
 
 
-_WS_SEND = '            await ws.send(json.dumps({"id": 1,'
-_FRONT_SEND = '                    await ws.send(json.dumps({"id": 2,'
+_WS_SEND = '        await ws.send(json.dumps({"id": 1,'
+_FRONT_SEND = '                await ws.send(json.dumps({"id": 2,'
 _STREAM_WRITE = "            writer.write(VERSION_REQUEST"
 
 
 @pytest.mark.parametrize(
     ("anchor", "line"),
     [
-        (_WS_SEND, "            ws.protocol.send_text(b'{}')\n            ws.send_data()\n"),
-        (_WS_SEND, "            ws.transport.write(b'{}')\n"),
-        (_WS_SEND, "            await ws.send('{}')\n"),
-        (_WS_SEND, "            _raw(ws)\n"),
+        (_WS_SEND, "        ws.protocol.send_text(b'{}')\n        ws.send_data()\n"),
+        (_WS_SEND, "        ws.transport.write(b'{}')\n"),
+        (_WS_SEND, "        await ws.send('{}')\n"),
+        (_WS_SEND, "        _raw(ws)\n"),
         # #678: another frame in the front step, or the front's frame sent twice.
         (
             _FRONT_SEND,
-            "                    await ws.send(json.dumps({'id': 4, 'method':"
+            "                await ws.send(json.dumps({'id': 4, 'method':"
             " 'Target.closeTarget', 'params': {'targetId': 'x'}}))\n",
         ),
-        (_FRONT_SEND, "                    await ws.send(json.dumps({'id': 2}))\n"),
-        (_FRONT_SEND, "                    ws.protocol.send_text(b'{}')\n"),
+        (_FRONT_SEND, "                await ws.send(json.dumps({'id': 2}))\n"),
+        (_FRONT_SEND, "                ws.protocol.send_text(b'{}')\n"),
         (_STREAM_WRITE, "            writer.transport.write(b'PUT /json/new HTTP/1.1')\n"),
         (_STREAM_WRITE, "            writer.get_extra_info('socket').sendall(b'x')\n"),
         (_STREAM_WRITE, "            writer.write(b'PUT /json/new?about:blank HTTP/1.1')\n"),
@@ -2999,7 +3005,8 @@ def test_the_identity_transport_pin_catches_another_send(anchor: str, line: str)
         ),
         ("proxy=None, compression=None", "proxy=True, compression=None"),
         ("            return exc  #", "            return super().process_redirect(exc)  #"),
-        ('message.get("id") == number', 'message.get("id") is not None'),
+        ('message["id"] == number', 'message["id"] is not None'),
+        ('and type(message.get("id")) is int', 'and message.get("id") is not None'),
         # #678: the front step's frames, and the guards before it.
         ('"method": "Target.getTargets"}', '"method": "Target.getTargets", "params": {}}'),
         ('"params": {"targetId": target_id}', '"params": {"targetId": "x"}'),
@@ -3008,7 +3015,7 @@ def test_the_identity_transport_pin_catches_another_send(anchor: str, line: str)
             "if pid is None or ui_port is None or dedicated is None:",
             "if pid is None or ui_port is None:",
         ),
-        ("                if not dedicated(pid):\n", "                if False:\n"),
+        ("            if not dedicated(pid):\n", "            if False:\n"),
         ("async with asyncio.timeout(FRONT_STEP_TIMEOUT_S):", "if True:"),
         ('return pid, "error" not in done and', "return pid, True or"),
     ],

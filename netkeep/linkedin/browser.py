@@ -2954,8 +2954,10 @@ async def _read_process_info(
     connection closes. No proxy, no compression, no redirect (a handshake answered with
     one fails), and an answer over :data:`IDENTITY_READ_MAX_BYTES` is refused. Events
     (none are subscribed to) and any other id are skipped until the answer arrives or
-    the step times out. The front step has its own deadline,
-    :data:`FRONT_STEP_TIMEOUT_S`, and anything that fails in it is no window fronted.
+    the step times out; only an answer whose ``id`` is that exact int counts. The front
+    step has its own deadline, :data:`FRONT_STEP_TIMEOUT_S`, and anything that fails in
+    it is no window fronted. A close that runs out of time after every answer arrived
+    keeps those answers.
     """
     from websockets.asyncio.client import connect
 
@@ -2966,45 +2968,64 @@ async def _read_process_info(
     async def answer(ws: Any, number: int) -> Mapping[str, Any]:
         while True:
             message = json.loads(await ws.recv())
-            if isinstance(message, dict) and message.get("id") == number:
+            # Exactly that int id: JSON's ``true`` and ``1.0`` are not id 1 (#678 review).
+            if (
+                isinstance(message, dict)
+                and type(message.get("id")) is int
+                and message["id"] == number
+            ):
                 return message
 
-    async with asyncio.timeout(PROBE_STEP_TIMEOUT_S) as deadline:
-        async with NoRedirect(
-            ws_url, proxy=None, compression=None, max_size=IDENTITY_READ_MAX_BYTES
-        ) as ws:
-            await ws.send(json.dumps({"id": 1, "method": "SystemInfo.getProcessInfo"}))
-            info = (await answer(ws, 1)).get("result")
-            pid = browser_pid_from_process_info(info) if isinstance(info, Mapping) else None
-            if pid is None or ui_port is None or dedicated is None:
+    async def talk(ws: Any, deadline: asyncio.Timeout) -> tuple[int | None, bool]:
+        await ws.send(json.dumps({"id": 1, "method": "SystemInfo.getProcessInfo"}))
+        info = (await answer(ws, 1)).get("result")
+        pid = browser_pid_from_process_info(info) if isinstance(info, Mapping) else None
+        if pid is None or ui_port is None or dedicated is None:
+            return pid, False
+        # The front step's own deadline, then the close's: a slow front is no window
+        # fronted, never a lost pid.
+        deadline.reschedule(None)
+        try:
+            if not dedicated(pid):
                 return pid, False
-            # The front step's own deadline, then the close's: a slow front is no
-            # window fronted, never a lost pid.
-            deadline.reschedule(None)
-            try:
-                if not dedicated(pid):
+            async with asyncio.timeout(FRONT_STEP_TIMEOUT_S):
+                await ws.send(json.dumps({"id": 2, "method": "Target.getTargets"}))
+                target_id = ui_window_target((await answer(ws, 2)).get("result"), ui_port)
+                if target_id is None:
                     return pid, False
-                async with asyncio.timeout(FRONT_STEP_TIMEOUT_S):
-                    await ws.send(json.dumps({"id": 2, "method": "Target.getTargets"}))
-                    target_id = ui_window_target((await answer(ws, 2)).get("result"), ui_port)
-                    if target_id is None:
-                        return pid, False
-                    await ws.send(
-                        json.dumps(
-                            {
-                                "id": 3,
-                                "method": "Target.activateTarget",
-                                "params": {"targetId": target_id},
-                            }
-                        )
+                await ws.send(
+                    json.dumps(
+                        {
+                            "id": 3,
+                            "method": "Target.activateTarget",
+                            "params": {"targetId": target_id},
+                        }
                     )
-                    done = await answer(ws, 3)
-            except Exception as exc:
-                log.info("could not bring netkeep's window to the front: %s", personal_exc(exc))
-                return pid, False
-            finally:
-                deadline.reschedule(asyncio.get_running_loop().time() + FRONT_STEP_TIMEOUT_S)
-            return pid, "error" not in done and isinstance(done.get("result"), Mapping)
+                )
+                done = await answer(ws, 3)
+        except Exception as exc:
+            log.info("could not bring netkeep's window to the front: %s", personal_exc(exc))
+            return pid, False
+        finally:
+            deadline.reschedule(asyncio.get_running_loop().time() + FRONT_STEP_TIMEOUT_S)
+        return pid, "error" not in done and isinstance(done.get("result"), Mapping)
+
+    found: tuple[int | None, bool] = (None, False)
+    answered = False
+    try:
+        async with asyncio.timeout(PROBE_STEP_TIMEOUT_S) as deadline:
+            async with NoRedirect(
+                ws_url, proxy=None, compression=None, max_size=IDENTITY_READ_MAX_BYTES
+            ) as ws:
+                found = await talk(ws, deadline)
+                answered = True
+    except TimeoutError:
+        if not answered:
+            raise
+        # Every answer arrived, and only the close ran out of time: they stand, so a
+        # window already fronted isn't reported as a Chrome that named no pid.
+        log.info("the identity read's websocket was slow to close")
+    return found
 
 
 class ActivityLocks:
@@ -3105,6 +3126,10 @@ class ActivityLocks:
                     claim.release()
         finally:
             lock.release()
+
+    def held_paths(self, account: str) -> frozenset[Path]:
+        """The lock files this registry holds for ``account`` right now (#678 review)."""
+        return frozenset(claim.path for claim in self._held.get(account, ()) if claim.held)
 
     def record_browser(self, account: str, browser_pid: int | None) -> None:
         """Note in ``account``'s held lock files the Chrome pid its attach verified (#636).
