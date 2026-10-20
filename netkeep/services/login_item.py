@@ -158,8 +158,9 @@ def tool_shim(environment: Path, beside: Path) -> Path | None:
 
     Read from the ``install-path`` of the ``netkeep`` entry point in the environment's
     :data:`UV_RECEIPT`, which follows ``UV_TOOL_BIN_DIR`` and the XDG folders as uv did
-    at install time. It counts only when it is there and is the same file as ``beside``
-    (uv symlinks it), so a shim since replaced by another program is never the target.
+    at install time. It counts only when it is an absolute path, is there, and is the
+    same file as ``beside`` (uv symlinks it), so a shim since replaced by another program
+    is never the target.
     """
     try:
         receipt = tomllib.loads((environment / UV_RECEIPT).read_text(encoding="utf-8"))
@@ -174,7 +175,7 @@ def tool_shim(environment: Path, beside: Path) -> Path | None:
         if not isinstance(install_path, str) or not install_path:
             continue
         shim = Path(install_path)
-        if _runnable(shim) and _runnable(beside) and _same_file(shim, beside):
+        if shim.is_absolute() and _runnable(shim) and _same_file(shim, beside):
             return shim
     return None
 

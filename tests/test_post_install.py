@@ -203,6 +203,32 @@ def test_a_login_item_for_another_netkeep_is_repointed(machine: Machine, tmp_pat
     assert "bootout" in machine.launchctl.changes()
 
 
+def test_an_old_agent_beside_a_right_login_item_is_adopted(machine: Machine) -> None:
+    """A correct, loaded plist isn't "already done" while an agent from the removed
+    install script still serves this data directory: setup adopts it."""
+    assert machine.setup()[0] == 0
+    old = machine.agents / f"{login_item.LEGACY_LABEL_BASE}.plist"
+    old.write_bytes(
+        plistlib.dumps(
+            {
+                "Label": login_item.LEGACY_LABEL_BASE,
+                "ProgramArguments": [str(machine.data / login_item.WRAPPER_NAME)],
+                "EnvironmentVariables": {paths.DATA_ENV: str(machine.data)},
+            }
+        )
+    )
+    assert machine.item().status().legacy
+    machine.launchctl.calls.clear()
+
+    code, output = machine.setup()
+
+    assert code == 0, output
+    assert not old.exists()
+    assert "1. Turn on the login item" in output
+    assert output.split("2. ")[0].count("already done") == 0
+    assert "enable" in machine.launchctl.changes()
+
+
 def test_a_port_the_login_item_was_given_is_kept_and_polled(machine: Machine) -> None:
     machine.agents.mkdir()
     machine.plist.write_bytes(
@@ -363,9 +389,10 @@ def test_a_checkout_venv_is_used_but_setup_says_so(machine: Machine) -> None:
     code, output = machine.setup()
 
     assert code == 0, output
-    assert f"note: this netkeep runs from {machine.executable}, not from a uv tool install" in (
+    assert f"note: the login item runs {machine.executable}, not a uv tool install's shim" in (
         output
     )
+    assert "a uv tool install whose shim is missing" in output
 
 
 @pytest.fixture
@@ -426,6 +453,39 @@ def test_a_checkout_without_a_receipt_uses_its_venv(tool_env: tuple[Path, Path, 
     )
 
 
+def _receipt(environment: Path, *entries: tuple[str, str]) -> None:
+    lines = [f'    {{ name = "{name}", install-path = "{path}" }},' for name, path in entries]
+    (environment / login_item.UV_RECEIPT).write_text(
+        "[tool]\nentrypoints = [\n" + "\n".join(lines) + "\n]\n"
+    )
+
+
+def test_only_the_netkeep_entry_point_counts(tool_env: tuple[Path, Path, Path]) -> None:
+    """Another entry point whose shim is the same file is not netkeep's shim."""
+    environment, python, shim = tool_env
+    other = shim.parent / "netkeep-other"
+    other.symlink_to(environment / "bin" / "netkeep")
+    shim.unlink()
+    _receipt(environment, ("netkeep-other", str(other)))
+    assert login_item.tool_shim(environment, python.parent / "netkeep") is None
+
+
+def test_a_relative_install_path_is_not_used(
+    tool_env: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    environment, python, _shim = tool_env
+    _receipt(environment, ("netkeep", "netkeep"))
+    monkeypatch.chdir(environment / "bin")  # where the relative path would resolve
+    assert login_item.tool_shim(environment, python.parent / "netkeep") is None
+
+
+def test_a_shim_that_isnt_executable_is_not_used(tool_env: tuple[Path, Path, Path]) -> None:
+    environment, python, shim = tool_env
+    (environment / "bin" / "netkeep").chmod(0o644)  # the shim links to it
+    assert login_item.tool_shim(environment, python.parent / "netkeep") is None
+    assert shim.exists()
+
+
 def test_a_receipt_that_doesnt_parse_is_ignored(tool_env: tuple[Path, Path, Path]) -> None:
     environment, python, _shim = tool_env
     (environment / login_item.UV_RECEIPT).write_text("[tool\n")
@@ -479,6 +539,59 @@ def test_serve_answers_only_for_an_ok_health(
     base, handler = health
     handler.reply = reply
     assert not post_install.serve_answers(base)
+
+
+def _server(handler: type[BaseHTTPRequestHandler]) -> tuple[ThreadingHTTPServer, str]:
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)  # a free port, never 8000
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_address[1]}"
+
+
+def test_a_redirect_is_not_followed(health: tuple[str, type[_Health]]) -> None:
+    """A program on serve's port answering 302 is not serve, and the GET goes nowhere else."""
+    target, target_handler = health
+    location = f"{target}/api/v1/health"
+
+    class Front(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(302)
+            self.send_header("Location", location)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *_args: object) -> None:
+            pass
+
+    front, base = _server(Front)
+    try:
+        assert not post_install.serve_answers(base)
+    finally:
+        front.shutdown()
+        front.server_close()
+    assert target_handler.paths == []
+
+
+def test_no_proxy_is_used(
+    health: tuple[str, type[_Health]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With a proxy in the environment (a dead loopback port) and no ``no_proxy``, the
+    health check still asks serve directly."""
+    with socket.socket() as dead:
+        dead.bind(("127.0.0.1", 0))
+        proxy = f"http://127.0.0.1:{dead.getsockname()[1]}"
+    for name in ("http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"):
+        monkeypatch.setenv(name, proxy)
+    for name in ("no_proxy", "NO_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+    base, handler = health
+    assert post_install.serve_answers(base)
+    assert handler.paths == ["/api/v1/health"]
+
+
+def test_an_oversized_body_isnt_read_whole(health: tuple[str, type[_Health]]) -> None:
+    base, handler = health
+    handler.reply = (200, {"status": "ok", "padding": "x" * 8192})
+    assert not post_install.serve_answers(base)  # cut at 4096 bytes, so no JSON
 
 
 def test_a_closed_port_doesnt_answer() -> None:
