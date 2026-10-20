@@ -77,7 +77,7 @@ from dataclasses import field as dataclass_field
 from datetime import date, datetime
 from typing import Any, Final, assert_never, cast
 
-from sqlalchemy import CursorResult, Date, Delete, inspect, or_, select
+from sqlalchemy import CursorResult, Delete, or_, select
 from sqlalchemy.orm import Session, class_mapper, selectinload
 
 from netkeep.crm import identity
@@ -110,7 +110,7 @@ from netkeep.crm.importer import (
     parse_csv,
     resolve_mapping,
 )
-from netkeep.crm.provenance import PROVENANCE_ORDER, may_overwrite
+from netkeep.crm.provenance import PROVENANCE_ORDER, column_value, may_overwrite
 from netkeep.crm.tags import ensure_default_rules, run_rules
 from netkeep.db import is_writer
 from netkeep.logging_setup import personal, personal_exc
@@ -177,7 +177,7 @@ CHILD_MODELS: Final[dict[str, type[ContactChild]]] = {
 }
 # Rows a run creates that belong to a contact rather than to one of its rows:
 # an archive run's interactions (#132), recorded in ``import_runs.created_json``.
-RUN_CREATED_MODELS: Final[dict[str, type[ContactChild]]] = {
+RUN_CREATED_MODELS: Final[dict[str, type[Interaction]]] = {
     Interaction.__tablename__: Interaction,
 }
 _CHILD_RELATIONSHIPS: Final[dict[str, str]] = {
@@ -227,16 +227,32 @@ class RunNotCommitted(ImportRunError, ValueError):
 
 
 class RunMerged(ImportRunError, ValueError):
-    """A contact the run created has since been merged, so the run cannot be undone safely."""
+    """A merge has since drawn in a contact the run wrote, so the run cannot be undone safely.
 
-    def __init__(self, contact_ids: Sequence[int]) -> None:
-        self.contact_ids = tuple(contact_ids)
-        shown = ", ".join(str(contact_id) for contact_id in self.contact_ids)
-        super().__init__(
-            f"this run created contact(s) {shown}, which a merge has since drawn in; "
-            "rolling it back would delete rows the merge moved onto them, or leave "
-            "behind rows it moved off them. Undo the merge first."
-        )
+    ``created`` are contacts the run created that a merge drew in either way;
+    ``enriched`` are contacts the run added child rows to that have since absorbed
+    another contact (#702). ``contact_ids`` is both, ascending.
+    """
+
+    def __init__(self, created: Sequence[int], enriched: Sequence[int] = ()) -> None:
+        self.contact_ids = tuple(sorted({*created, *enriched}))
+        parts = []
+        if created:
+            shown = ", ".join(str(contact_id) for contact_id in created)
+            parts.append(
+                f"this run created contact(s) {shown}, which a merge has since drawn in; "
+                "rolling it back would delete rows the merge moved onto them, or leave "
+                "behind rows it moved off them."
+            )
+        if enriched:
+            shown = ", ".join(str(contact_id) for contact_id in enriched)
+            parts.append(
+                f"this run added addresses, phones, links, or positions to contact(s) "
+                f"{shown}, which have since absorbed another contact in a merge; a row "
+                "the run added may now stand for the merged contact's copy too, and "
+                "rolling it back would delete that."
+            )
+        super().__init__(" ".join(parts) + " Undo the merge first.")
 
 
 class RunSuperseded(ImportRunError, ValueError):
@@ -1480,8 +1496,12 @@ def rollback(session: Session, user: User, run_id: int, *, force: bool = False) 
     the run created has a campaign message, which nothing may delete, ``force``
     or not (#242); ``RunMerged`` when a merge has drawn in a
     contact the run created, because deleting that contact would take rows the
-    run never made; ``RunSuperseded`` when a later committed run wrote over a
-    field this run wrote, because undoing this one first would leave that run's
+    run never made, or when a contact the run added child rows to has absorbed
+    another contact since, because a merge folds a duplicate address (or phone,
+    link, position) into the row the run added, keeping the worse email status,
+    and deleting that row would take the other contact's copy too (#702);
+    ``RunSuperseded`` when a later committed run wrote over a field this run
+    wrote, because undoing this one first would leave that run's
     rollback restoring a value nothing backs (#78); ``CreatedContactsChanged``
     when a contact the run created has gained things since, which deleting it
     would lose, unless ``force``. ``RunNotCommitted`` for a draft or an already
@@ -1508,8 +1528,9 @@ def rollback(session: Session, user: User, run_id: int, *, force: bool = False) 
     if messaged:
         raise CreatedContactsMessaged(messaged, messages)
     merged = _merged_since(session, user, created_ids)
-    if merged:
-        raise RunMerged(merged)
+    absorbed = _absorbed_since(session, user, run, rows, created_ids)
+    if merged or absorbed:
+        raise RunMerged(merged, absorbed)
     later_runs, overwritten = _superseded_by(session, user, run, rows, created_ids)
     if later_runs:
         raise RunSuperseded(later_runs, overwritten)
@@ -1602,7 +1623,7 @@ def _restore(
         change = changes["fields"].get(name)
         if change is None or name not in ours:
             continue
-        setattr(contact, name, _column_value(name, change["before"]))
+        setattr(contact, name, column_value(name, change["before"]))
         restored += 1
     for name, source in changes["sources"].items():
         if not undoable(name):
@@ -1696,6 +1717,63 @@ def _merged_since(session: Session, user: User, contact_ids: Iterable[int]) -> l
     return sorted(involved)
 
 
+_MERGE_DEDUPED: Final[tuple[str, ...]] = (
+    ContactEmail.__tablename__,
+    ContactPhone.__tablename__,
+    ContactLink.__tablename__,
+    ContactPosition.__tablename__,
+)
+"""The child tables :func:`netkeep.crm.identity.merge` deduplicates by natural key.
+
+Snapshots, aliases, and interactions move across whole, so a row of theirs the
+run added never comes to stand for the loser's too.
+"""
+
+
+def _absorbed_since(
+    session: Session,
+    user: User,
+    run: ImportRun,
+    rows: Sequence[ImportRow],
+    created_ids: set[int],
+) -> list[int]:
+    """The contacts the run enriched with child rows that a later merge folded another
+    contact into, ascending (#702).
+
+    A merge keeps the survivor's row where both contacts hold the same address,
+    phone, link, or position, and drops the loser's, so a row the run added can
+    end up standing for the loser's copy as well, with the worse of the two email
+    statuses. Nothing records which rows a merge folded together, so any loser
+    merged in after the commit counts. A merge records no time of its own; the
+    loser's ``updated_at``, which setting ``merged_into_id`` stamps, stands in for
+    it. That can only err toward refusing: a loser merged before the run and
+    touched after it also counts. Fields need no such check: a merge fills only
+    the survivor's empty fields, and :func:`_restore` puts back only a field
+    still holding the run's value.
+    """
+    enriched = {
+        row.contact_id
+        for row in rows
+        if row.contact_id is not None
+        and row.contact_id not in created_ids
+        and row.changes_json is not None
+        and not row.changes_json["created_contact"]
+        and any(row.changes_json["children"].get(table) for table in _MERGE_DEDUPED)
+    }
+    if not enriched:
+        return []
+    losers = scoped_contacts(user).where(Contact.merged_into_id.in_(sorted(enriched)))
+    if run.committed_at is not None:
+        losers = losers.where(Contact.updated_at >= run.committed_at)
+    return sorted(
+        {
+            contact.merged_into_id
+            for contact in session.scalars(losers)
+            if contact.merged_into_id is not None
+        }
+    )
+
+
 def _touched_keys(changes: RowChanges) -> set[str]:
     """Every field a row wrote a value, a source, or a ledger entry for."""
     return set(changes["fields"]) | set(changes["sources"]) | set(changes["synced"])
@@ -1766,7 +1844,9 @@ def _acquired_since(
 
     Rule-assigned tags are not counted: the rules would assign them again to
     anybody who still matched, so nothing a person did is lost with them. Nor
-    are the interactions the run itself wrote (an archive run's messages).
+    are the interactions the run itself wrote (an archive run's messages), unless
+    the inbox poll has adopted one since (#702): deleting the contact would lose
+    that record of a message netkeep observed.
 
     A contact counts as enriched when its ``field_sources`` or ``synced_values``
     name an automated source other than the run's own (#217). A sync that sets a
@@ -1781,13 +1861,16 @@ def _acquired_since(
     # Compared in Python: an archive's message history can hold more ids than a
     # statement may bind parameters.
     own_interactions = set((run.created_json or {}).get(Interaction.__tablename__, []))
-    interactions = set(
-        session.scalars(
-            scoped(user, Interaction)
-            .where(Interaction.contact_id.in_(ids))
-            .with_only_columns(Interaction.id)
-        )
-    )
+    interactions: set[int] = set()
+    for interaction_id, external_id, message_id in session.execute(
+        scoped(user, Interaction)
+        .where(Interaction.contact_id.in_(ids))
+        .with_only_columns(Interaction.id, Interaction.external_id, Interaction.message_id)
+    ):
+        interactions.add(interaction_id)
+        if external_id is not None or message_id is not None:
+            # The inbox poll adopted it since (#702): no longer only the run's.
+            own_interactions.discard(interaction_id)
 
     def count(statement: Any) -> int:
         return int(session.scalar(statement) or 0)
@@ -1842,7 +1925,14 @@ def _acquired_since(
 
 
 def _delete_run_created(session: Session, user: User, run: ImportRun) -> int:
-    """Delete the rows ``run.created_json`` records, by id. How many there were."""
+    """Delete the rows ``run.created_json`` records, by id. How many there were.
+
+    An interaction something outside the run has since claimed stays (#702): the
+    inbox poll adopts an archive message it observed by writing its URN into
+    ``external_id``, and a campaign send it confirms links through
+    ``message_id``. That row is now the timeline's record of a message netkeep
+    saw, and the poll will not write it again once the message leaves its window.
+    """
     deleted = 0
     for table, ids in (run.created_json or {}).items():
         model = RUN_CREATED_MODELS.get(table)
@@ -1850,7 +1940,9 @@ def _delete_run_created(session: Session, user: User, run: ImportRun) -> int:
             continue
         (key,) = class_mapper(model).primary_key
         for chunk in _chunks(sorted(ids)):
-            statement = scoped_delete(user, model).where(key.in_(chunk))
+            statement = scoped_delete(user, model).where(
+                key.in_(chunk), model.external_id.is_(None), model.message_id.is_(None)
+            )
             result = cast("CursorResult[Any]", session.execute(_unsynchronized(statement)))
             deleted += result.rowcount
     return deleted
@@ -1879,20 +1971,6 @@ def _unsynchronized(statement: Delete) -> Delete:
 def _json_value(value: str | date | None) -> str | None:
     """A column's value as ``changes_json`` stores it: a date in ISO form."""
     return value.isoformat() if isinstance(value, date) else value
-
-
-def _column_value(field: str, raw: str | None) -> str | date | None:
-    """A stored value back as the column holds it: a date parsed, an empty name ``''``.
-
-    The counterpart of :func:`_json_value`, and the same conversion
-    :mod:`netkeep.crm.provenance` makes for its own ledger.
-    """
-    column = inspect(Contact).columns[field]
-    if raw is None:
-        return None if column.nullable else ""  # names are '' when unknown, never NULL
-    if isinstance(column.type, Date):
-        return date.fromisoformat(raw)
-    return raw
 
 
 # --- saved presets ----------------------------------------------------------

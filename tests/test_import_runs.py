@@ -33,6 +33,7 @@ from netkeep.models import (
     ContactPhone,
     ContactSource,
     ContactTag,
+    EmailStatus,
     Enrollment,
     EnrollmentStatus,
     ImportResolution,
@@ -953,17 +954,92 @@ def test_a_rollback_is_refused_when_the_created_contact_was_merged_away(
     assert import_runs.get_run(writer, user, run_id).status is ImportStatus.COMMITTED
 
 
-def test_a_merge_between_contacts_the_run_never_created_does_not_block_a_rollback(
+def test_a_merge_into_a_contact_the_run_added_no_child_rows_to_does_not_block_a_rollback(
     writer: Session, user: User
 ) -> None:
+    """Wilhelmina's row wrote fields only, and a merge fills only a survivor's empty
+    fields, so every value the rollback puts back is still the run's own."""
     seeded = seed_existing(writer, user)
     run_id = import_sample(writer, user)
     bystander = factories.make_contact(writer, user, first_name="Ottoline", last_name="Gubbins")
-    identity.merge(writer, user, seeded["fern"].id, bystander.id)
+    identity.merge(writer, user, seeded["wilhelmina"].id, bystander.id)
 
     result = import_runs.rollback(writer, user, run_id)
 
     assert result.contacts_deleted == 2
+
+
+def test_a_rollback_is_refused_when_an_enriched_contact_absorbed_a_holder_of_its_new_address(
+    writer: Session, user: User
+) -> None:
+    """#702 B10: the run added Fern's address; a contact that already held it, bounced,
+    is merged into Fern. The run's row now stands for both copies, with the bounce."""
+    seeded = seed_existing(writer, user)
+    fern = seeded["fern"]
+    run_id = import_sample(writer, user)
+    older = factories.make_contact(
+        writer, user, first_name="Fern", last_name="Oglethorpe", emails=["fern@kites.example"]
+    )
+    older.emails[0].status = EmailStatus.BOUNCED
+    writer.flush()
+    identity.merge(writer, user, fern.id, older.id)
+    (address,) = fern.emails
+    assert address.status is EmailStatus.BOUNCED
+
+    with pytest.raises(import_runs.RunMerged) as raised:
+        import_runs.rollback(writer, user, run_id)
+
+    assert raised.value.contact_ids == (fern.id,)
+    assert "absorbed another contact" in str(raised.value)
+    # Nothing was undone: the refusal comes before the first write.
+    assert [(row.email, row.status) for row in fern.emails] == [
+        ("fern@kites.example", EmailStatus.BOUNCED)
+    ]
+    assert fern.current_title == "Head of Kites"
+    assert import_runs.get_run(writer, user, run_id).status is ImportStatus.COMMITTED
+
+
+def test_a_merge_into_an_enriched_contact_before_the_run_does_not_block_its_rollback(
+    writer: Session, user: User
+) -> None:
+    """Only a merge after the commit can fold another contact's copy into the run's row."""
+    seeded = seed_existing(writer, user)
+    bystander = factories.make_contact(writer, user, first_name="Ottoline", last_name="Gubbins")
+    identity.merge(writer, user, seeded["fern"].id, bystander.id)
+    run_id = import_sample(writer, user)
+
+    import_runs.rollback(writer, user, run_id)
+
+    assert seeded["fern"].emails == []
+
+
+def test_a_urn_a_slug_match_learned_is_rolled_back(writer: Session, user: User) -> None:
+    """#702 B11: the URN is written with the row, after the "before" snapshot, so the
+    run records it and its rollback takes it off again."""
+    fern = seed_existing(writer, user)["fern"]
+    content = (
+        "Profile Url,First Name,Last Name,Member Urn\n"
+        "https://www.linkedin.com/in/fern-oglethorpe-qz/,Fern,Oglethorpe,"
+        "urn:li:fsd_profile:FERNQZ\n"
+    )
+    run_id = import_sample(writer, user, content=content)
+    assert fern.li_urn == "urn:li:fsd_profile:FERNQZ"
+    assert fern.field_sources["li_urn"] == ContactSource.CSV.value
+    (row,) = import_runs.list_rows(writer, user, run_id)[0]
+    assert row.changes_json is not None
+    assert row.changes_json["fields"]["li_urn"] == {
+        "before": None,
+        "after": "urn:li:fsd_profile:FERNQZ",
+    }
+
+    import_runs.rollback(writer, user, run_id)
+
+    # Read through a fresh query: mypy keeps ``fern``'s narrowing from before the
+    # rollback and would call the check below unreachable.
+    restored = by_slug(writer, user, "fern-oglethorpe-qz")
+    assert restored is not None
+    assert restored.li_urn is None
+    assert "li_urn" not in restored.field_sources
 
 
 # --- the LinkedHelper sample: the item's "done when" ------------------------

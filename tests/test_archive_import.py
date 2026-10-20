@@ -861,6 +861,62 @@ def test_rolling_back_an_archive_run_restores_a_contact_it_enriched(
     assert list(_contacts(writer, user)) == ["ada-fictional"]
 
 
+def _ada_with_the_runs_messages(writer: Session, user: User, archive: Archive) -> tuple[int, int]:
+    """Ada, there before the archive; the run id, and Ada's id."""
+    ada = factories.make_contact(
+        writer, user, li_urn=None, li_public_id="ada-fictional", first_name="Ada"
+    )
+    writer.flush()
+    report = _run(writer, user, archive)
+    assert report.run_id is not None
+    return report.run_id, ada.id
+
+
+def test_rolling_back_an_archive_run_keeps_the_messages_the_inbox_poll_adopted(
+    writer: Session, user: User, archive: Archive
+) -> None:
+    """#702 B25: an adopted row is the timeline's record of a message the poll saw.
+
+    The poll adopts an archive row by writing the message URN into its
+    ``external_id`` (``crm/inbox_apply.py``), and a confirmed campaign send links
+    one through ``message_id``; set here directly, as the poll would.
+    """
+    run_id, ada_id = _ada_with_the_runs_messages(writer, user, archive)
+    first, second, *rest = [row for row in _interactions(writer, user) if row.contact_id == ada_id]
+    assert rest, "the sample gives Ada more than two messages"
+    first.external_id = "urn:li:msg_message:(2-QZ,ADOPTED)"
+    ada = writer.scalars(scoped(user, Contact).where(Contact.id == ada_id)).one()
+    campaign = factories.make_campaign(writer, user)
+    enrollment = factories.make_enrollment(writer, campaign, ada, current_step=1)
+    campaign_message = factories.make_message(writer, enrollment)
+    second.message_id = campaign_message.id
+    writer.flush()
+
+    import_runs.rollback(writer, user, run_id)
+
+    # Ada's other messages, and every interaction on the contacts the run created, go.
+    assert {row.id for row in _interactions(writer, user)} == {first.id, second.id}
+
+
+def test_an_adopted_message_on_a_contact_the_archive_created_counts_as_gained(
+    writer: Session, user: User, archive: Archive
+) -> None:
+    """Deleting the contact would take the adopted row with it, so only ``force`` may (#702)."""
+    report = _run(writer, user, archive)
+    assert report.run_id is not None
+    adopted = _interactions(writer, user)[0]
+    adopted.external_id = "urn:li:msg_message:(2-QZ,ADOPTED)"
+    writer.flush()
+
+    with pytest.raises(import_runs.CreatedContactsChanged) as raised:
+        import_runs.rollback(writer, user, report.run_id)
+
+    assert raised.value.acquired.interactions == 1
+    assert import_runs.get_run(writer, user, report.run_id).status is ImportStatus.COMMITTED
+    import_runs.rollback(writer, user, report.run_id, force=True)
+    assert _all_contacts(writer, user) == []
+
+
 def test_an_archive_imported_again_after_its_rollback_lands_again(
     writer: Session, user: User, archive: Archive
 ) -> None:
@@ -936,6 +992,39 @@ def test_an_unknown_assistant_log_is_imported_but_named(
     assert report.messages.added == 8  # the sample's, and nothing more
     assert "interview_prep_messages.csv" in caplog.text
     assert "An assistant's chat log" not in caplog.text  # never a body in the log
+
+
+FOREIGN_MESSAGES = (
+    '"CONVERSATION ID","CONVERSATION TITLE","FROM","SENDER PROFILE URL","TO",'
+    '"RECIPIENT PROFILE URLS","DATE","SUBJECT","CONTENT","FOLDER","ATTACHMENTS"\n'
+    '"conv-q1","","Quorbelle Fictionary","https://www.linkedin.com/in/quorbelle-fictionary",'
+    '"Cyd Invented","https://www.linkedin.com/in/cyd-invented","2023-07-01 10:00:00 UTC",'
+    '"","Invented note from someone else\'s export.","INBOX",""\n'
+    '"conv-q2","","Quorbelle Fictionary","https://www.linkedin.com/in/quorbelle-fictionary",'
+    '"Gus Nobody","https://www.linkedin.com/in/gus-nobody","2023-07-02 10:00:00 UTC",'
+    '"","Another invented note from the same stranger.","INBOX",""\n'
+)
+"""Someone else's messages table: on its own its traffic names Quorbelle as the owner."""
+
+
+def test_a_second_messages_table_is_read_as_the_first_ones_owner(
+    writer: Session, user: User, tmp_path: Path
+) -> None:
+    """#702 B26: read under its own detected owner, the foreign table would put a
+    stranger's words on Cyd's and Gus's timelines as if they were the user's."""
+    root = tmp_path / "export"
+    shutil.copytree(FIXTURES, root)
+    (root / "zz_other_messages.csv").write_text(FOREIGN_MESSAGES)
+    with open_archive(root) as opened:
+        report = _run(writer, user, opened)
+
+    assert report.owner_public_id == "nettie-keeperton"
+    assert report.messages.added == 8  # the sample's, and nothing of the stranger's
+    assert report.messages.group_threads == 1 + 2  # neither side of q1 or q2 is the owner
+    contacts = _contacts(writer, user)
+    strangers = {contacts["cyd-invented"].id, contacts["gus-nobody"].id}
+    july = [row for row in _interactions(writer, user) if (row.at.year, row.at.month) == (2023, 7)]
+    assert not [row for row in july if row.contact_id in strangers]
 
 
 def test_the_familiar_name_in_a_subdirectory_or_another_case_is_not_named(

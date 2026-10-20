@@ -284,7 +284,7 @@ def test_resolve_by_urn_is_per_user(writer: Session, users: tuple[User, User]) -
     assert resolve(writer, alice, incoming(li_urn="urn:li:fsd_profile/Y")) == New()
 
 
-def test_resolve_by_public_id_is_case_insensitive_and_adopts_the_urn(
+def test_resolve_by_public_id_is_case_insensitive_and_apply_adopts_the_urn(
     writer: Session, users: tuple[User, User]
 ) -> None:
     alice, bob = users
@@ -293,9 +293,16 @@ def test_resolve_by_public_id_is_case_insensitive_and_adopts_the_urn(
     )
     factories.make_contact(writer, bob, li_urn=None, li_public_id="ann-lee")
     row = incoming(li_urn="urn:li:fsd_profile/ANN", li_url="https://www.linkedin.com/in/Ann-Lee/")
-    assert resolve(writer, alice, row) == Matched(mine.id, by="public_id")
-    assert mine.li_urn == "urn:li:fsd_profile/ANN"
-    assert mine.field_sources == {"li_urn": "sync"}
+    resolution = resolve(writer, alice, row)
+    assert resolution == Matched(mine.id, by="public_id")
+    # resolve() only reads (#702): an importer's "before" snapshot, taken between
+    # resolve() and apply(), must see the contact without the URN.
+    assert mine.li_urn is None
+    assert "li_urn" not in mine.field_sources
+    applied = apply(writer, alice, row, resolution)
+    assert applied is mine
+    assert applied.li_urn == "urn:li:fsd_profile/ANN"
+    assert applied.field_sources["li_urn"] == "sync"
     # Now step 1 finds it; and the URN is not on bob's contact.
     assert resolve(writer, alice, row) == Matched(mine.id, by="urn")
     assert resolve(writer, bob, incoming(li_urn="urn:li:fsd_profile/ANN")) == New()

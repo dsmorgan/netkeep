@@ -16,9 +16,12 @@ row is a candidate too, never a silent match. Within a step, more than one
 contact (two sharing an email) is a candidate as well. A contact merged away
 resolves to its survivor.
 
-Transactions belong to the caller. Nothing here commits. Every function reads
-before it writes (:func:`resolve` too: a public-id match adopts the incoming
-URN, spec 8.2 step 2), so the session must be a writer:
+Transactions belong to the caller. Nothing here commits. :func:`resolve` only
+reads; a public-id match that brings a URN learns it when the row is applied
+(spec 8.2 step 2), under the same provenance rule as every other field, so an
+importer's "before" snapshot, taken between the two, already sees the contact
+as it was (#702). The session must still be a writer for every function here,
+:func:`resolve` included, because the caller applies with the same session:
 ``session_scope(factory, write=True)``, or a non-GET request's session.
 :func:`merge` flushes between its steps so the unique constraints on ``li_urn``
 and ``li_public_id`` never see the value on both rows at once; those flushes
@@ -507,13 +510,11 @@ def _resolve_identity(session: Session, user: User, incoming: IncomingContact) -
     if len(hits) > 1:
         return Candidate(tuple(sorted(hits)), by="identity")
     ((contact, by),) = hits.values()
-    if by != "urn" and incoming.li_urn is not None:
-        if urns:
-            # The URN matched nobody, so a URN on the slug's contact is another identity.
-            return Candidate((contact.id,), by="identity")
-        # Spec 8.2 step 2: a slug match learns the URN.
-        contact.li_urn = incoming.li_urn
-        _record(contact, "li_urn", incoming.source)
+    if by != "urn" and incoming.li_urn is not None and urns:
+        # The URN matched nobody, so a URN on the slug's contact is another identity.
+        return Candidate((contact.id,), by="identity")
+    # Spec 8.2 step 2: a slug match learns the URN, but not here. ``apply`` writes it
+    # with the row's other fields, after the caller's "before" snapshot (#702).
     return Matched(contact.id, by)
 
 
