@@ -162,6 +162,91 @@ def test_fresh_database_migrates_to_head_and_matches_the_models(migration_engine
     assert _diff_against_models(migration_engine) == []
 
 
+def _normalize_sql(text_: object) -> str:
+    """Lower-case, quote-free, whitespace-free: SQLite echoes a CHECK or default as written."""
+    return re.sub(r"[\s\"'`()]+", "", "" if text_ is None else str(text_)).lower()
+
+
+def _schema_shape(engine: Engine) -> dict[str, dict[str, Any]]:
+    """What the database holds that ``compare_metadata`` cannot see: server defaults, CHECK
+    constraints, partial-index predicates, unique constraints and foreign-key actions."""
+    inspector = inspect(engine)
+    shape: dict[str, dict[str, Any]] = {}
+    for table in sorted(inspector.get_table_names()):
+        if table == "alembic_version":
+            continue
+        indexes: dict[str, Any] = {}
+        for index in inspector.get_indexes(table):
+            where = index.get("dialect_options", {}).get("sqlite_where")
+            indexes[str(index["name"])] = (
+                tuple(index["column_names"]),
+                bool(index["unique"]),
+                _normalize_sql(where),
+            )
+        shape[table] = {
+            "defaults": {
+                column["name"]: _normalize_sql(column.get("default"))
+                for column in inspector.get_columns(table)
+            },
+            "checks": {
+                str(check["name"]): _normalize_sql(check["sqltext"])
+                for check in inspector.get_check_constraints(table)
+            },
+            "indexes": indexes,
+            "uniques": sorted(
+                (str(u["name"]), tuple(u["column_names"]))
+                for u in inspector.get_unique_constraints(table)
+            ),
+            "foreign_keys": sorted(
+                (
+                    tuple(fk["constrained_columns"]),
+                    fk["referred_table"],
+                    tuple(fk["referred_columns"]),
+                    str(fk.get("options", {}).get("ondelete")),
+                )
+                for fk in inspector.get_foreign_keys(table)
+            ),
+        }
+    return shape
+
+
+def test_migrated_schema_matches_create_all_in_what_compare_metadata_cannot_see(
+    tmp_path: Path,
+) -> None:
+    """``compare_metadata`` ignores CHECKs, partial indexes and server defaults; this does not."""
+    migrated = make_engine(database_url(tmp_path / "migrated"))
+    created = make_engine(database_url(tmp_path / "created"))
+    try:
+        migrations.upgrade(migrated)
+        Base.metadata.create_all(created)
+        migrated_shape = _schema_shape(migrated)
+        created_shape = _schema_shape(created)
+    finally:
+        migrated.dispose()
+        created.dispose()
+    assert migrated_shape.keys() == created_shape.keys()
+    drift = [
+        (
+            table,
+            part,
+            name,
+            migrated_shape[table][part].get(name),
+            created_shape[table][part].get(name),
+        )
+        for table in migrated_shape
+        for part in ("defaults", "checks", "indexes")
+        for name in migrated_shape[table][part].keys() | created_shape[table][part].keys()
+        if migrated_shape[table][part].get(name) != created_shape[table][part].get(name)
+    ]
+    drift += [
+        (table, part, None, migrated_shape[table][part], created_shape[table][part])
+        for table in migrated_shape
+        for part in ("uniques", "foreign_keys")
+        if migrated_shape[table][part] != created_shape[table][part]
+    ]
+    assert drift == [], "(table, kind, name, migrated, create_all)"
+
+
 def test_upgrade_downgrade_upgrade(migration_engine: Engine) -> None:
     migrations.upgrade(migration_engine)
     migrations.downgrade(migration_engine)
@@ -3583,3 +3668,102 @@ def test_0045_adds_the_headline_markers_and_downgrades_without_them(
     migrations.downgrade(migration_engine, "0044")
     columns = {c["name"] for c in inspect(migration_engine).get_columns("contacts")}
     assert not {"headline_via", "card_headline_seen"} & columns
+
+
+# --- a sent message has a time; the retired review schema (0047, #706) ---------------------
+
+
+def _seed_message_world(connection: Connection) -> None:
+    _seed_users(connection, 1)
+    _insert_contact(connection, id=1, user_id=1)
+    _insert_campaign(connection, id=1)
+    _insert_enrollment(connection, id=1, campaign_id=1, contact_id=1)
+
+
+def _set_sent_at(connection: Connection, message_id: int, value: str | None) -> None:
+    connection.execute(
+        text("UPDATE messages SET sent_at = :value WHERE id = :id"),
+        {"value": value, "id": message_id},
+    )
+
+
+def test_0047_gives_a_sent_message_without_a_time_its_updated_at(
+    migration_engine: Engine,
+) -> None:
+    migrations.upgrade(migration_engine, "0046")
+    with migration_engine.begin() as connection:
+        _seed_message_world(connection)
+        _insert_message(connection, id=1, enrollment_id=1, contact_id=1, status="sent")
+        _insert_message(
+            connection, id=2, enrollment_id=1, contact_id=1, status="received", direction="in"
+        )
+        _insert_message(connection, id=3, enrollment_id=1, contact_id=1, status="scheduled")
+        _insert_message(connection, id=4, enrollment_id=1, contact_id=1, status="sent")
+        _set_sent_at(connection, 4, "2026-09-21 08:00:00")
+    migrations.upgrade(migration_engine, "0047")
+    with migration_engine.begin() as connection:
+        rows = connection.execute(text("SELECT id, sent_at FROM messages ORDER BY id")).all()
+    stamps = [str(sent_at)[:19] if sent_at is not None else None for _id, sent_at in rows]
+    # The two without a time take the row's updated_at; a scheduled message stays untimed;
+    # a message that already had its time keeps it.
+    assert stamps == [STAMP, STAMP, None, "2026-09-21 08:00:00"]
+
+
+def test_messages_refuse_a_sent_or_received_row_without_a_time(
+    migration_engine: Engine,
+) -> None:
+    migrations.upgrade(migration_engine)
+    with migration_engine.begin() as connection:
+        _seed_message_world(connection)
+        _insert_message(connection, id=1, enrollment_id=1, contact_id=1, status="scheduled")
+    for status, direction in (("sent", "out"), ("received", "in")):
+        with pytest.raises(IntegrityError), migration_engine.begin() as connection:
+            _insert_message(
+                connection,
+                id=2,
+                enrollment_id=1,
+                contact_id=1,
+                status=status,
+                direction=direction,
+            )
+    with migration_engine.begin() as connection:
+        _set_sent_at(connection, 1, None)  # a scheduled message needs none
+    with pytest.raises(IntegrityError), migration_engine.begin() as connection:
+        connection.execute(text("UPDATE messages SET status = 'sent' WHERE id = 1"))
+
+
+def test_0047_drops_the_retired_review_schema_and_downgrades_with_it_empty(
+    migration_engine: Engine,
+) -> None:
+    migrations.upgrade(migration_engine, "0046")
+    with migration_engine.begin() as connection:
+        _seed_message_world(connection)
+        connection.execute(text("UPDATE campaigns SET guards_summary = '1 in audience'"))
+        connection.execute(
+            text(
+                "INSERT INTO campaign_review_previews (user_id, campaign_id, enrollment_id,"
+                " sampled, viewed_at, created_at, updated_at)"
+                " VALUES (1, 1, 1, 1, :t, :t, :t)"
+            ),
+            {"t": STAMP},
+        )
+    migrations.upgrade(migration_engine, "0047")
+    inspector = inspect(migration_engine)
+    assert "campaign_review_previews" not in inspector.get_table_names()
+    columns = {column["name"] for column in inspector.get_columns("campaigns")}
+    assert columns.isdisjoint({"guards_acknowledged_at", "guards_fingerprint", "guards_summary"})
+    with migration_engine.begin() as connection:
+        assert _count(connection, "campaigns") == 1
+    migrations.downgrade(migration_engine, "0046")
+    inspector = inspect(migration_engine)
+    assert "campaign_review_previews" in inspector.get_table_names()
+    columns = {column["name"] for column in inspector.get_columns("campaigns")}
+    assert {"guards_acknowledged_at", "guards_fingerprint", "guards_summary"} <= columns
+    with migration_engine.begin() as connection:
+        assert _count(connection, "campaigns") == 1
+        assert _count(connection, "campaign_review_previews") == 0
+        # The downgraded schema takes the rows the old one did: a sent message with no time.
+        _insert_message(connection, id=1, enrollment_id=1, contact_id=1, status="sent")
+    assert _diff_against_models(migration_engine) != []  # the old schema, not the models'
+    migrations.upgrade(migration_engine, "0047")
+    assert _diff_against_models(migration_engine) == []

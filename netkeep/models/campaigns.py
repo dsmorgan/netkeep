@@ -275,12 +275,6 @@ class Campaign(UserOwned, TimestampMixin, Base):
     # template changes the fingerprint, and the record no longer counts.
     lint_checked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     lint_fingerprint: Mapped[str | None] = mapped_column(String(64))
-    # Retired (#346): the guard acknowledgement these recorded (0024) no longer exists,
-    # and nothing reads or writes them. They stay mapped so the schema matches the
-    # migrations; a later migration drops them.
-    guards_acknowledged_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
-    guards_fingerprint: Mapped[str | None] = mapped_column(String(64))
-    guards_summary: Mapped[str | None] = mapped_column(Text)
 
     @validates("mailbox_id")
     def _lock_mailbox(self, _key: str, value: int | None) -> int | None:
@@ -457,6 +451,10 @@ class Message(UserOwned, TimestampMixin, Base):
         CheckConstraint(
             "(direction = 'in') = (status = 'received')", name="message_direction_status"
         ),
+        # A sent or received message has its time (0047).
+        CheckConstraint(
+            "status NOT IN ('sent', 'received') OR sent_at IS NOT NULL", name="message_sent_at"
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, sort_order=-100)
@@ -538,33 +536,6 @@ class Message(UserOwned, TimestampMixin, Base):
     reconcile_last_miss_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     enrollment: Mapped[Enrollment] = relationship()
-
-
-class ReviewPreview(UserOwned, TimestampMixin, Base):
-    """One enrollment's rendered previews, viewed in a campaign's review (spec 11.8; P3-09).
-
-    ``sampled`` rows are the server's draw of up to ten, for the audience whose
-    fingerprint is ``sample_fingerprint``; the others are enrollments the person
-    looked up. Every one must be approved (``approved_at``) for the content
-    fingerprint that is current at activation: a change to a step or a template
-    after the approval undoes it.
-    """
-
-    __tablename__ = "campaign_review_previews"
-    __table_args__ = (UniqueConstraint("user_id", "campaign_id", "enrollment_id"),)
-
-    id: Mapped[int] = mapped_column(primary_key=True, sort_order=-100)
-    campaign_id: Mapped[int] = mapped_column(
-        ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    enrollment_id: Mapped[int] = mapped_column(
-        ForeignKey("enrollments.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    sampled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    sample_fingerprint: Mapped[str | None] = mapped_column(String(64))
-    viewed_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
-    approved_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
-    approved_fingerprint: Mapped[str | None] = mapped_column(String(64))
 
 
 class StepApproval(UserOwned, TimestampMixin, Base):
@@ -678,13 +649,3 @@ class StepModeChange(UserOwned, TimestampMixin, Base):
     changed_by: Mapped[int] = mapped_column(Integer, nullable=False)
     kept_prefill: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     auto_send_on: Mapped[bool] = mapped_column(Boolean, nullable=False)
-
-
-REVIEW_TABLES: tuple[type[UserOwned], ...] = (ReviewPreview, StepApproval, TestSend)
-"""The review gate's tables (P3-09, #339), for tests and tooling that iterate them."""
-
-TEMPLATE_TABLES: tuple[type[UserOwned], ...] = (Template,)
-"""The tables P3-03 added, for tests and tooling that iterate them."""
-
-CAMPAIGN_TABLES: tuple[type[UserOwned], ...] = (Campaign, CampaignStep, Enrollment, Message)
-"""The tables P3-04 added, in creation order, for tests and tooling that iterate them."""

@@ -3,13 +3,10 @@
 from netkeep.models.base import Base, TimestampMixin, UserOwned, UTCDateTime, string_enum
 from netkeep.models.campaigns import (
     CAMPAIGN_NAME_MAX_LENGTH,
-    CAMPAIGN_TABLES,
     MESSAGE_SNIPPET_MAX_LENGTH,
     MESSAGE_SUBJECT_MAX_LENGTH,
-    REVIEW_TABLES,
     TEMPLATE_NAME_MAX_LENGTH,
     TEMPLATE_SUBJECT_MAX_LENGTH,
-    TEMPLATE_TABLES,
     Campaign,
     CampaignMailboxLocked,
     CampaignStatus,
@@ -21,7 +18,6 @@ from netkeep.models.campaigns import (
     MessageStatus,
     ResponseOutcome,
     ResponseVia,
-    ReviewPreview,
     StepApproval,
     StepCondition,
     StepMode,
@@ -57,14 +53,12 @@ from netkeep.models.contacts import (
 )
 from netkeep.models.do_not_send import DO_NOT_SEND_RANK, DoNotSendAddress, DoNotSendReason
 from netkeep.models.history import (
-    HISTORY_TABLES,
     REPLY_KIND_RANK,
     HistoryCampaign,
     HistoryRecipient,
     HistoryReplyKind,
 )
 from netkeep.models.imports import (
-    IMPORT_TABLES,
     FieldChange,
     ImportDecisionKind,
     ImportResolution,
@@ -79,7 +73,6 @@ from netkeep.models.imports import (
 from netkeep.models.linkedin import DEFAULT_ACCOUNT_LABEL, LiConversation, LinkedInAccount
 from netkeep.models.lists import (
     LIST_NAME_MAX_LENGTH,
-    LIST_TABLES,
     VIEW_NAME_MAX_LENGTH,
     ContactList,
     ListKind,
@@ -91,7 +84,6 @@ from netkeep.models.runs import SyncRun, SyncRunKind, SyncRunStatus, SyncRunTrig
 from netkeep.models.settings import JsonValue, SettingKV
 from netkeep.models.tags import (
     TAG_NAME_MAX_LENGTH,
-    TAG_TABLES,
     AutotagRule,
     ContactTag,
     ContactTagSuppression,
@@ -114,24 +106,17 @@ from netkeep.models.user_positions import UserPosition
 __all__ = [
     "BATCH_ID_LENGTH",
     "CAMPAIGN_NAME_MAX_LENGTH",
-    "CAMPAIGN_TABLES",
     "CONTACT_CHILDREN",
     "DEFAULT_ACCOUNT_LABEL",
     "DO_NOT_SEND_RANK",
-    "HISTORY_TABLES",
-    "IMPORT_TABLES",
     "LIST_NAME_MAX_LENGTH",
-    "LIST_TABLES",
     "MESSAGE_SNIPPET_MAX_LENGTH",
     "MESSAGE_SUBJECT_MAX_LENGTH",
     "REASON_MAX_LENGTH",
     "REPLY_KIND_RANK",
-    "REVIEW_TABLES",
     "TAG_NAME_MAX_LENGTH",
-    "TAG_TABLES",
     "TEMPLATE_NAME_MAX_LENGTH",
     "TEMPLATE_SUBJECT_MAX_LENGTH",
-    "TEMPLATE_TABLES",
     "VIEW_NAME_MAX_LENGTH",
     "AutotagRule",
     "Base",
@@ -188,7 +173,6 @@ __all__ = [
     "RefusedField",
     "ResponseOutcome",
     "ResponseVia",
-    "ReviewPreview",
     "RowChanges",
     "RowDecision",
     "RuleField",
