@@ -144,7 +144,7 @@ import re
 import sys
 from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from functools import partial
 from types import SimpleNamespace
 from typing import Any, Final
@@ -526,8 +526,14 @@ class MergeValues:
     contact: Mapping[str, object]
     campaign_name: str | None = None
     step_number: int | None = None
-    previous_send_date: date | datetime | None = None
+    previous_send_date: date | None = None
     personal_line: str | None = None
+
+    def __post_init__(self) -> None:
+        # A datetime is a date, so the type alone lets one through; its UTC day is off
+        # by one for an evening send in US Pacific time (#709).
+        if isinstance(self.previous_send_date, datetime):
+            raise TypeError("previous_send_date is the local day, a date, not a datetime")
 
 
 @dataclass(frozen=True, slots=True)
@@ -728,10 +734,10 @@ def ago(value: object, *, today: date) -> str:
     Counted in whole calendar days. Both days are the user's local days: the
     engine passes ``today`` and the previous send's date from its local zone
     (``Suggested.local_date``, #709), since a UTC day is off by one for an
-    evening send in US Pacific time or a morning send in Australia. An aware
-    datetime counts by its UTC day, so a caller passes a date. No value renders
-    as an empty string, like any missing field. A date on or after ``today`` is
-    "today".
+    evening send in US Pacific time or a morning send in Australia. A datetime
+    is refused, since it carries no answer to which zone's day it falls on. No
+    value renders as an empty string, like any missing field. A date on or after
+    ``today`` is "today".
 
     ======== ===================
     days     phrasing
@@ -749,13 +755,9 @@ def ago(value: object, *, today: date) -> str:
     """
     if value is None or isinstance(value, Undefined) or value == "":
         return ""
-    if isinstance(value, datetime):
-        day = value.astimezone(UTC).date() if value.tzinfo is not None else value.date()
-    elif isinstance(value, date):
-        day = value
-    else:
+    if isinstance(value, datetime) or not isinstance(value, date):
         raise FilterArgumentError(f"ago needs a date, not {type(value).__name__}")
-    days = (today - day).days
+    days = (today - value).days
     if days <= 0:
         return "today"
     if days == 1:
