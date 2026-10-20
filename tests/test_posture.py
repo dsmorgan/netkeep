@@ -2034,13 +2034,13 @@ def test_a_recent_reply_poll_is_on_for_a_draft_or_send_armed_mailbox(
     )
 
 
-HELD = "Follow-ups that start a new conversation are held until replies are checked again"
+HELD = "Follow-ups are held until replies are checked again."
 
 
 def test_an_armed_mailbox_never_polled_is_a_note_and_the_report_stays_clear(
     writer: Session, user: User
 ) -> None:
-    """A stopped ``serve`` is a choice, and the sender holds new-conversation follow-ups
+    """A stopped ``serve`` is a choice, and the sender holds every follow-up (#694)
     meanwhile, so it is a note: the row stays on and the verdict stays clear."""
     _mailbox(writer, user, armed_at=ARMED_AT)
     report = _report(writer, user)

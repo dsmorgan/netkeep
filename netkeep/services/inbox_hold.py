@@ -1,6 +1,6 @@
 """Hold LinkedIn steps while the LinkedIn inbox poll is stale (#417).
 
-Gmail sending refuses while its reply poll is behind (``GmailSender._replies_stale``),
+Gmail sending refuses while its reply poll is behind (``GmailSender.replies_held``),
 so a broken poll can never mean a follow-up goes to someone who replied. This is the
 LinkedIn twin. If the inbox poll fails or stops running, LinkedIn replies are not seen,
 and a prefill, or an email step that follows a LinkedIn conversation, would go to

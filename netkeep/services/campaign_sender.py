@@ -84,8 +84,11 @@ Each tick, before anything is chosen, :meth:`GmailSender.reconcile` looks up wha
   holds a follow-up because its replies are stale is polled again alone at the next
   tick, never the others with it (#413). One whose poll failed is polled again alone
   after :data:`REPLY_BACKOFF_FIRST`, doubling up to the interval. A mailbox seen not
-  ready keeps its old ``replies_polled_at`` and holds its own new conversations until
-  a poll of it catches up after it is ready again, however recent its last good poll.
+  ready keeps its old ``replies_polled_at`` and holds its own follow-ups until a poll
+  of it catches up after it is ready again, however recent its last good poll.
+  The engine's chooser asks :meth:`GmailSender.replies_held` before it claims a
+  follow-up, so a held one is skipped, not counted as a try (#694); ``send`` asks
+  again just before Gmail.
 
 Arming (#277)
 -------------
@@ -350,7 +353,7 @@ class GmailSender:
         # Mailboxes the last poll of them could not open, with the code (the poll status).
         self._replies_not_ready: dict[int, dict[int, str]] = {}
         # Mailboxes seen not ready whose poll has not caught up since: their follow-ups
-        # that start a new conversation wait for it, however recent the last good poll.
+        # wait for it, however recent the last good poll.
         self._replies_catch_up: dict[int, set[int]] = {}
         # A person's "Check now" (#409), per user: when it was first asked for. The lock
         # makes a press's check-and-set one step, since requests run on worker threads.
@@ -428,7 +431,7 @@ class GmailSender:
         It only sets a flag. The poll itself still runs in :meth:`_poll_replies`, in the
         campaign tick, with the same arming, mailbox readiness and read budget as every
         other poll; nothing here opens Gmail or a session. It leaves the send hold
-        (:meth:`_replies_stale`, the catch-up set) alone, and never reads a mailbox still
+        (:meth:`replies_held`, the catch-up set) alone, and never reads a mailbox still
         in its backoff before its retry time."""
         with self._requests_lock:
             if user_id in self._replies_requested:
@@ -479,36 +482,48 @@ class GmailSender:
             return "the mailbox is armed for drafts only; nothing was sent"
         return None
 
-    def _replies_stale(self, firing: Firing) -> str | None:
-        """Why a follow-up that starts a new conversation must wait: the reply poll has not
-        caught up within :data:`~netkeep.services.campaign_replies.STALE_AFTER_POLLS`
-        intervals (#296 review). A ``same_thread`` follow-up reads its thread before it
-        goes, so it needs no poll; a first step has nothing to be replied to yet."""
-        if firing.step_position <= 1 or firing.mailbox_id is None:
-            return None
-        if firing.same_thread and firing.thread_id is not None:
-            return None
-        if firing.mailbox_id in self._replies_catch_up.get(firing.user_id, ()):
+    def replies_held(self, session: Session, user: User, mailbox_id: int) -> str | None:
+        """Why the mailbox's follow-ups must wait, or None: the engine's hold
+        (:class:`~netkeep.services.campaign_engine.RepliesGated`, #694), and the check
+        :meth:`send` makes again just before Gmail.
+
+        A follow-up waits while the reply poll has not caught up within
+        :data:`~netkeep.services.campaign_replies.STALE_AFTER_POLLS` intervals (#296
+        review), or has not caught up since the mailbox was ready again (#413). That holds
+        a ``same_thread`` follow-up too: its own thread read sees a reply in the thread,
+        but not one the contact sent as a fresh email (#694). Each hold asks for a poll of
+        this mailbox alone at the next tick. A first step has nothing to be replied to
+        yet, so the caller asks only for a later one."""
+        if mailbox_id in self._replies_catch_up.get(user.id, ()):
             # Not ready since its last good poll (#413): a reply may have come meanwhile.
-            self._poll_soon(firing.user_id, firing.mailbox_id)
+            self._poll_soon(user.id, mailbox_id)
             return "replies have not been read since the mailbox was ready again; nothing was sent"
-        with session_scope(self._factory) as session:
-            user = session.get(User, firing.user_id)
-            mailbox = (
-                None if user is None else get_scoped(session, user, Mailbox, firing.mailbox_id)
-            )
-            polled = None if mailbox is None else mailbox.replies_polled_at
+        mailbox = get_scoped(session, user, Mailbox, mailbox_id)
+        polled = None if mailbox is None else mailbox.replies_polled_at
         try:
-            limit = replies.STALE_AFTER_POLLS * self.replies_every_of(firing.user_id)
+            limit = replies.STALE_AFTER_POLLS * self.replies_every_of(user.id)
         except Exception:
             # Fail closed: without the user's interval, replies count as not read recently.
-            log.exception("reply poll interval of user %d unreadable", firing.user_id)
-            self._poll_soon(firing.user_id, firing.mailbox_id)
+            log.exception("reply poll interval of user %d unreadable", user.id)
+            self._poll_soon(user.id, mailbox_id)
             return "replies have not been polled recently; nothing was sent"
         if polled is not None and self._clock() - polled <= limit:
             return None
-        self._poll_soon(firing.user_id, firing.mailbox_id)  # not the user's other mailboxes
+        self._poll_soon(user.id, mailbox_id)  # not the user's other mailboxes
         return "replies have not been polled recently; nothing was sent"
+
+    def _replies_stale(self, firing: Firing) -> str | None:
+        """:meth:`replies_held` for ``firing``, read fresh just before Gmail: the poll or a
+        sign-in may have moved since the claim. None for a first step."""
+        if firing.step_position <= 1 or firing.mailbox_id is None:
+            return None
+        with session_scope(self._factory) as session:
+            user = session.get(User, firing.user_id)
+            if user is None:
+                # Fail closed, as for a mailbox that is gone.
+                self._poll_soon(firing.user_id, firing.mailbox_id)
+                return "replies have not been polled recently; nothing was sent"
+            return self.replies_held(session, user, firing.mailbox_id)
 
     # --- sending ---------------------------------------------------------------------
 
@@ -516,9 +531,15 @@ class GmailSender:
         """Send or draft one firing. Never raises for a Gmail failure."""
         verb = "draft" if firing.mode is StepMode.DRAFT else "send"
         purpose = f"{verb} step {firing.step_position} for enrollment {firing.enrollment_id}"
-        refused = self._disarmed_for(firing) or self._replies_stale(firing)
+        refused = self._disarmed_for(firing)
         if refused is not None:
             return _not_sent(firing, refused)
+        held = self._replies_stale(firing)
+        if held is not None:
+            # The chooser holds the same (#694): not a try, and the mailbox's next send
+            # stays where it was.
+            log.warning("message %d held: %s", firing.message_id, held)
+            return SendResult(SendOutcome.NOT_SENT, error=held, held=True)
         try:
             gmail, message_id = self._ready(firing)
             threading_ = self._threading(gmail, firing, purpose)
@@ -864,7 +885,7 @@ class GmailSender:
     ) -> None:
         """Record how each polled mailbox ended (#413): a failed one backs off 1, 2, 4, ...
         minutes, never longer than the interval, and starts over once one reads; one not
-        ready must catch up before it starts a new conversation again."""
+        ready must catch up before it sends a follow-up again."""
         for mailbox_id in polled.failed:
             failures = self._replies_backoff.get((user_id, mailbox_id), (0, now))[0] + 1
             # The full poll each interval reads it anyway; the cap keeps the next due time
