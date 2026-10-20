@@ -126,6 +126,13 @@ waits twice as long as the one before, up to :data:`RETRY_AFTER_MAX`. Only
 :data:`NOT_SENT_GIVE_UP_TRIES` tries in a row fail the step, with the reason, for a
 person (#280). Any other outcome ends the run.
 
+**Held for replies** (#694). A Gmail follow-up waits while its mailbox's replies have
+not been read recently: a sender that is :class:`RepliesGated` says so, and the
+chooser skips the step (``replies_stale``) without changing the enrollment, as the
+LinkedIn inbox hold does. The sender checks again just before Gmail; a send it holds
+there is :attr:`SendResult.held`, and its claim is given back without counting a try
+or moving the mailbox's next send.
+
 **Off the event loop** (#259). :class:`CampaignEngine` runs each tick in a
 worker thread (``asyncio.to_thread``), as :class:`~netkeep.services.mailboxes.MailboxMonitor`
 does. A blocking SQLite write on the loop thread deadlocks against a request
@@ -260,6 +267,7 @@ class Skip(enum.StrEnum):
     MAILBOX_DISARMED = "mailbox_disarmed"
     GUARD_EXCLUDED = "guard_excluded"
     LINKEDIN_INBOX_STALE = "linkedin_inbox_stale"
+    REPLIES_STALE = "replies_stale"
     ENDED = "ended"
 
 
@@ -327,6 +335,9 @@ class SendOutcome(enum.StrEnum):
 class SendResult:
     """What the sender did. ``at`` is when the message went out (``sent_at``); it is what
     the next step's timing derives from. ``error`` is one line, never a body or header.
+    ``held`` marks a ``not_sent`` that is a hold the chooser also checks (stale replies,
+    #694), not a failure: it is never counted as a try, and the mailbox's next send stays
+    where it was.
     ``thread_known`` is, for a draft, the Gmail message ids its thread already held when
     the draft was made: none of them is ever the draft, sent (#273 review)."""
 
@@ -337,6 +348,7 @@ class SendResult:
     gmail_draft_id: str | None = None
     error: str | None = None
     thread_known: tuple[str, ...] = ()
+    held: bool = False
 
 
 class Sender(Protocol):
@@ -376,6 +388,18 @@ class ArmGated(Protocol):
     A sender without it (the tests' fakes) fires on every mailbox."""
 
     def armed(self, session: Session, user: User, mailbox_id: int) -> MailboxArm | None: ...
+
+
+@runtime_checkable
+class RepliesGated(Protocol):
+    """A sender that holds a Gmail follow-up while its mailbox's replies have not been
+    read recently (#694). The engine asks :meth:`replies_held` in the claim's writer
+    session, last, for an email step after the first: a reason holds the step
+    (``replies_stale``), with nothing on the enrollment changed, and None lets it go.
+
+    A sender without it (the tests' fakes) holds nothing."""
+
+    def replies_held(self, session: Session, user: User, mailbox_id: int) -> str | None: ...
 
 
 # --- what a tick did ----------------------------------------------------------------
@@ -1465,9 +1489,12 @@ class _Chooser:
         result: TickResult,
         rng: random.Random,
         gate: ArmGated | None = None,
+        replies: RepliesGated | None = None,
     ) -> None:
         self.rng = rng
         self.gate = gate
+        self.replies = replies
+        self._replies_held: dict[int, bool] = {}
         self.session = session
         self.user = user
         self.settings = settings
@@ -1484,6 +1511,17 @@ class _Chooser:
         if self._stale is None:
             self._stale = inbox_hold.stale(self.session, self.user, now=self.now)
         return self._stale
+
+    def _replies_stale(self, mailbox_id: int) -> bool:
+        """Whether the mailbox's Gmail follow-ups are held (#694), asked once per mailbox
+        and choose phase."""
+        if self.replies is None:
+            return False
+        held = self._replies_held.get(mailbox_id)
+        if held is None:
+            reason = self.replies.replies_held(self.session, self.user, mailbox_id)
+            held = self._replies_held[mailbox_id] = reason is not None
+        return held
 
     def skip(self, enrollment: Enrollment, *reasons: str) -> None:
         self.result.decisions.append(Decision(enrollment.id, False, tuple(reasons)))
@@ -1709,6 +1747,10 @@ class _Chooser:
         if self._inbox_stale() and inbox_hold.contact_watched(session, user, enrollment.contact_id):
             self.skip(enrollment, Skip.LINKEDIN_INBOX_STALE)
             return None
+        # The same for Gmail's replies (#694): a follow-up waits for them to be read.
+        if step.position > 1 and self._replies_stale(campaign.mailbox_id):
+            self.skip(enrollment, Skip.REPLIES_STALE)
+            return None
         mode = StepMode.DRAFT if arm is MailboxArm.DRAFT else step.mode
         return self._claim(campaign, enrollment, step, latest, mode)
 
@@ -1905,6 +1947,9 @@ def _record(
         log.error("message %d vanished while it was being sent", firing.message_id)
         return
     session.refresh(message)
+    if result.outcome is SendOutcome.NOT_SENT and result.held:
+        _hand_back(session, user, message, now=now)
+        return
     if result.outcome is SendOutcome.NOT_SENT:
         if _give_back(session, user, settings, message, result, now=now):
             if firing.mailbox_id is not None:
@@ -2012,6 +2057,20 @@ def _clear_not_sent(session: Session, user: User, enrollment_id: int) -> None:
     enrollment.not_sent_count = 0
     enrollment.not_sent_since = None
     enrollment.not_sent_error = None
+
+
+def _hand_back(session: Session, user: User, message: Message, *, now: datetime) -> None:
+    """Undo a claim the sender held (:attr:`SendResult.held`, #694): the message row goes
+    and the enrollment is due again now, for the chooser to hold until the hold lifts.
+    Not a try: the run of tries that sent nothing is neither counted nor cleared, and
+    the mailbox's next send stays where it was."""
+    # A merge may have moved the message to another enrollment meanwhile: follow it.
+    enrollment = _enrollment(session, user, message.enrollment_id)
+    log.info("message %d held by the sender; enrollment %d is due again", message.id, enrollment.id)
+    session.delete(message)
+    if enrollment.status in (EnrollmentStatus.ACTIVE, EnrollmentStatus.PAUSED):
+        enrollment.next_action_at = now
+    session.flush()
 
 
 def _give_back(
@@ -2789,7 +2848,6 @@ def tick_user(
             sender.reconcile(factory, user_id, settings=in_force, now=clock())
         except Exception:  # what it could not settle waits for the next tick
             log.exception("reconciling campaign messages failed for user %d", user_id)
-    claims: list[_Claim] = []
     for _ in range(BATCH_PER_TICK):
         if stopping():
             break
@@ -2799,10 +2857,10 @@ def tick_user(
                 return result
             now = clock()
             gate = sender if isinstance(sender, ArmGated) else None
-            claim = _Chooser(session, user, in_force, now, result, rng, gate).choose()
+            replies = sender if isinstance(sender, RepliesGated) else None
+            claim = _Chooser(session, user, in_force, now, result, rng, gate, replies).choose()
         if claim is None:
             break
-        claims.append(claim)
         outcome = _send(sender, claim.firing)
         if not _record_after_send(factory, user_id, in_force, claim, outcome, clock=clock):
             return result

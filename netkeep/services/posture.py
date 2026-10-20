@@ -236,7 +236,7 @@ MISSING_MEANS: Final[dict[JobKind, str]] = {
 #: The Gmail reply poll is late once a mailbox's last complete poll is older than this
 #: many ``[campaigns] reply_poll_minutes`` (#327). One missed poll is noise (a slow tick,
 #: a transient Gmail error the next tick retries); three in a row is a poll that is not
-#: running. The sender already holds follow-ups that start a new conversation past two
+#: running. The sender already holds every follow-up past two
 #: (``campaign_replies.STALE_AFTER_POLLS``), so a late poll is a note, not a warning.
 REPLY_POLL_LATE_AFTER_POLLS: Final = 3
 
@@ -1926,10 +1926,9 @@ def _reply_poll(session: Session, user: User, *, now: datetime, settings: Settin
     reply_poll_minutes``. ``mailboxes.replies_polled_at`` is when it last read
     everything up to then. A poll that never ran, or is over
     :data:`REPLY_POLL_LATE_AFTER_POLLS` intervals old, gets a note, not a warning:
-    the protection still holds, because the sender holds every follow-up that starts
-    a new conversation until replies are checked again, and a ``same_thread``
-    follow-up reads its thread before it goes. The usual cause is that ``serve`` is
-    not running, which is a choice, not a fault.
+    the protection still holds, because every email follow-up, ``same_thread`` or
+    not, is held until replies are checked again (#694). The usual cause is that
+    ``serve`` is not running, which is a choice, not a fault.
     """
     minutes = max(settings.campaigns.reply_poll_minutes, 1)
     late_after = timedelta(minutes=minutes * REPLY_POLL_LATE_AFTER_POLLS)
@@ -1946,11 +1945,7 @@ def _reply_poll(session: Session, user: User, *, now: datetime, settings: Settin
             value="no armed mailbox: no campaign email goes out, so there is no reply to poll for",
             brief="no armed mailbox",
         )
-    held = (
-        "Follow-ups that start a new conversation are held until replies are checked"
-        " again; a follow-up in the same thread reads the thread before it goes."
-        " The poll runs in `netkeep serve`"
-    )
+    held = "Follow-ups are held until replies are checked again. The poll runs in `netkeep serve`"
     details: list[str] = []
     notes: list[str] = []
     never_polled = 0

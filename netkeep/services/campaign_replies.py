@@ -187,8 +187,8 @@ for it)."""
 
 STALE_AFTER_POLLS: Final = 2
 """A mailbox whose last complete poll is older than this many poll intervals holds its
-follow-ups that start a new conversation (:meth:`GmailSender.send`): nothing reads the
-thread for them before they go, so the poll is all that would see a reply."""
+follow-ups (:meth:`GmailSender.replies_held`, #694): the poll is all that sees a reply
+the contact sent as a fresh email, even for a ``same_thread`` follow-up."""
 
 AUTO_REPLY_PRECEDENCE: Final = frozenset({"auto_reply", "bulk", "junk"})
 """``Precedence`` values that mark a message as automatic."""

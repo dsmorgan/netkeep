@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from email.message import EmailMessage
+from types import SimpleNamespace
 
 import factories
 import pytest
@@ -44,15 +45,18 @@ from netkeep.models import (
     User,
 )
 from netkeep.scoping import get_scoped, scoped
+from netkeep.services import campaign_engine as engine_module
 from netkeep.services import campaign_replies as replies
 from netkeep.services import campaigns as campaign_service
 from netkeep.services import mailboxes as mailbox_service
 from netkeep.services.campaign_engine import (
     RECONCILE_SEARCH_EVERY,
+    RETRY_AFTER,
     REVIEW_GATE,
     Firing,
     SendOutcome,
     SendResult,
+    Skip,
     activate,
 )
 from netkeep.services.campaign_sender import GmailSender
@@ -886,14 +890,144 @@ def test_a_new_conversation_waits_while_replies_are_not_polled(
     due = NOW + WEEK
     mail.gmail.fail_next("history.list", GmailTransient("down", code="unavailable"))
 
-    [(_, outcome)] = mail.tick(due).fired  # the poll failed: last success a week ago
-    assert outcome.outcome is SendOutcome.NOT_SENT
-    assert outcome.error is not None and "not been polled" in outcome.error
+    held = mail.tick(due)  # the poll failed: last success a week ago
+    assert held.fired == []  # the chooser holds it (#694): no claim, so no try
+    assert held.skipped()[enrollment_id] == (Skip.REPLIES_STALE.value,)
     assert len(mail.gmail.sent()) == 1
+    assert mail.enrollment(enrollment_id).not_sent_count == 0
 
-    [(_, outcome)] = mail.tick(due + timedelta(minutes=16)).fired  # polled first: goes out
+    # The hold asked for a poll of the mailbox; it reads after its 1-minute backoff.
+    [(_, outcome)] = mail.tick(due + timedelta(minutes=1)).fired
     assert outcome.outcome is SendOutcome.SENT
     assert mail.enrollment(enrollment_id).status is EnrollmentStatus.COMPLETED
+
+
+def test_a_same_thread_follow_up_waits_while_replies_are_not_polled(mail: Mail) -> None:
+    """#694: a ``same_thread`` follow-up reads its own thread before it goes, but not a
+    reply the contact sent as a fresh email. Only the poll sees that, so the stale-replies
+    hold covers it too, and the poll that catches up ends the enrollment."""
+    mail.sender = poller(mail, every=timedelta(minutes=10))
+    enrollment_id = mail.enroll(ADA)
+    mail.tick(NOW)
+    mail.tick(NOW + timedelta(minutes=10))  # the baseline scan
+    due = NOW + WEEK
+    mail.gmail.deliver(
+        fresh_email(ADA, "Coffee next week?", "Saw your note."), at=due - timedelta(hours=1)
+    )
+    for _ in range(3):  # at due, +1 and +3 minutes; the poll at +7 reads
+        mail.gmail.fail_next("history.list", GmailTransient("down", code="unavailable"))
+
+    for minute in (0, 1, 3):
+        result = mail.tick(due + timedelta(minutes=minute))
+        assert result.fired == []
+        assert result.skipped()[enrollment_id] == (Skip.REPLIES_STALE.value,)
+    mail.tick(due + timedelta(minutes=7))
+
+    assert mail.enrollment(enrollment_id).status is EnrollmentStatus.REPLIED
+    assert len(mail.gmail.sent()) == 1
+
+
+@pytest.mark.parametrize("state", ["poll_failing", "catch_up", "signed_in_again"])
+def test_the_send_time_hold_covers_a_same_thread_follow_up(mail: Mail, state: str) -> None:
+    """#694: the sender's check just before Gmail holds a ``same_thread`` follow-up in each
+    state where a fresh-email reply may be unread: the poll has failed for two intervals,
+    a poll has not caught up since the mailbox was ready again (it stopped at the read
+    budget, say), or a sign-in cleared ``replies_polled_at`` after the claim."""
+    sender = poller(mail, every=timedelta(minutes=10))
+    polled_at = {
+        "poll_failing": NOW - timedelta(minutes=21),
+        "catch_up": NOW - timedelta(minutes=1),
+        "signed_in_again": None,
+    }[state]
+    mail.write(lambda s: setattr(mailbox_of(mail, s), "replies_polled_at", polled_at))
+    if state == "catch_up":
+        sender._replies_catch_up[mail.user.id] = {mail.mailbox.id}
+    firing = SimpleNamespace(
+        user_id=mail.user.id,
+        mailbox_id=mail.mailbox.id,
+        step_position=2,
+        same_thread=True,
+        thread_id="thread-of-step-1",
+    )
+
+    held = sender._replies_stale(firing)  # type: ignore[arg-type]
+
+    assert held == (HELD_CATCH_UP if state == "catch_up" else HELD_STALE)
+    assert sender.replies_due(mail.user.id) == frozenset({mail.mailbox.id})
+
+
+def test_follow_ups_held_for_replies_never_count_as_tries(mail: Mail) -> None:
+    """#694: while the reply poll keeps failing and sends work, a held follow-up is skipped
+    by the chooser, not claimed and given back. It never counts a try, so it never reaches
+    the 16 that fail it, and it never moves the mailbox's next send, so step 1s keep
+    going out."""
+    mail.any_time()
+    mail.sender = poller(mail, every=timedelta(minutes=10))
+    held_id = mail.enroll(ADA)
+    mail.tick(NOW)
+    mail.tick(NOW + timedelta(minutes=10))  # the baseline scan
+    due = NOW + WEEK
+    for _ in range(40):
+        mail.gmail.fail_next("history.list", GmailTransient("down", code="unavailable"))
+    mail.clock.now = due
+    new_ids = [mail.enroll(f"new{n}@example.test") for n in range(2)]
+    spacing = mail.read(lambda s: engine_module.next_send_at(s, mail.user, mail.mailbox.id))
+
+    first = mail.tick(due)
+
+    assert first.skipped()[held_id] == (Skip.REPLIES_STALE.value,)
+    [(firing, outcome)] = first.fired  # a step 1 goes out in the same tick
+    assert firing.enrollment_id in new_ids and firing.step_position == 1
+    assert outcome.outcome is SendOutcome.SENT
+    assert mail.enrollment(held_id).not_sent_count == 0
+    assert mail.enrollment(held_id).next_action_at == due
+    after = mail.read(lambda s: engine_module.next_send_at(s, mail.user, mail.mailbox.id))
+    assert spacing is not None and after is not None and after - due < RETRY_AFTER
+
+    for half_hour in range(1, 5):  # a counted hold made a try at each of these
+        mail.tick(due + half_hour * timedelta(minutes=30))
+    enrollment = mail.enrollment(held_id)
+    assert enrollment.status is EnrollmentStatus.ACTIVE
+    assert enrollment.not_sent_count == 0
+    assert [m.status for m in mail.messages(held_id)] == [MessageStatus.SENT]
+    assert all(len(mail.messages(n)) == 1 for n in new_ids)  # every step 1 went out
+
+
+@dataclass
+class HeldAtSend:
+    """The sender's own hold, just before Gmail: what :meth:`GmailSender.send` returns when
+    the poll or a sign-in moved after the chooser let the claim through."""
+
+    firings: list[Firing] = field(default_factory=list)
+
+    def send(self, firing: Firing) -> SendResult:
+        self.firings.append(firing)
+        return SendResult(SendOutcome.NOT_SENT, error=HELD_STALE, held=True)
+
+
+def test_a_claim_held_at_send_is_given_back_without_a_try(mail: Mail) -> None:
+    """#694: a send the sender held hands its claim back: the row goes, the enrollment is
+    due again at once, no try is counted (an earlier run's count stays as it was), and the
+    mailbox's next send does not move."""
+    enrollment_id = mail.enroll(ADA)
+    send_first(mail)
+    due = NOW + WEEK
+    mail.set_enrollment(enrollment_id, not_sent_count=2, not_sent_error="earlier")
+    spacing = mail.read(lambda s: engine_module.next_send_at(s, mail.user, mail.mailbox.id))
+    holding = HeldAtSend()
+
+    [(_, outcome)] = mail.tick(due, sender=holding).fired
+
+    assert outcome.held and len(holding.firings) == 1
+    enrollment = mail.enrollment(enrollment_id)
+    assert (enrollment.not_sent_count, enrollment.not_sent_error) == (2, "earlier")
+    assert enrollment.next_action_at == due
+    assert [m.status for m in mail.messages(enrollment_id)] == [MessageStatus.SENT]
+    after = mail.read(lambda s: engine_module.next_send_at(s, mail.user, mail.mailbox.id))
+    assert after == spacing
+    # The hold lifted: the next tick claims it again, and it goes out.
+    [(_, outcome)] = mail.tick(due + timedelta(minutes=1)).fired
+    assert outcome.outcome is SendOutcome.SENT
 
 
 # --- arming and users --------------------------------------------------------------------------
@@ -1195,6 +1329,12 @@ def two(session_factory: sessionmaker[Session]) -> TwoBoxes:
     return TwoBoxes(mail, reauth_id, reauth_gmail, campaign_id, locked)
 
 
+def held_reason(mail: Mail, mailbox_id: int) -> str | None:
+    """Why the sender holds the mailbox's follow-ups now (#694); the chooser only says
+    ``replies_stale``."""
+    return mail.read(lambda s: mail.sender.replies_held(s, user_of(mail, s), mailbox_id))
+
+
 def start_both(two: TwoBoxes) -> tuple[int, int]:
     """Step 1 goes out on each mailbox in the first minutes (sends are spaced apart); the
     poll at NOW + 10 min, the first with something to watch, reads both."""
@@ -1213,8 +1353,8 @@ def start_both(two: TwoBoxes) -> tuple[int, int]:
 def test_a_mailbox_not_ready_leaves_the_others_on_their_interval(two: TwoBoxes, how: str) -> None:
     """#413: the healthy mailbox is polled once an interval, not at every minute tick, while
     the other is not ready. Needing sign-in, the engine claims nothing on it; with its
-    Keychain locked, it is claimed and the sender holds its follow-up (stale replies),
-    which asks for a poll of that mailbox alone."""
+    Keychain locked, the chooser holds its follow-up (stale replies, #694), which asks
+    for a poll of that mailbox alone."""
     mail = two.mail
     healthy, stuck = start_both(two)
     two.not_ready(how)
@@ -1231,20 +1371,21 @@ def test_a_mailbox_not_ready_leaves_the_others_on_their_interval(two: TwoBoxes, 
     # Step 2 comes due on both: the healthy one sends; the other's stays held.
     due = NOW + WEEK
     mail.gmail.calls.clear()
-    held: list[str | None] = []
+    fired: list[str | None] = []
+    skipped: set[tuple[str, ...]] = set()
     for minute in range(0, 40):
         result = mail.tick(due + timedelta(minutes=minute))
-        held += [o.error for f, o in result.fired if f.enrollment_id == stuck]
-        if how == "reauth":
-            assert result.skipped().get(stuck, ("mailbox_unhealthy",)) == ("mailbox_unhealthy",)
+        fired += [o.error for f, o in result.fired if f.enrollment_id == stuck]
+        if stuck in result.skipped():
+            skipped.add(result.skipped()[stuck])
+    # Needing sign-in, the mailbox is unhealthy; locked, the chooser holds the follow-up
+    # before any claim (#694).
+    assert skipped == {("mailbox_unhealthy",) if how == "reauth" else (Skip.REPLIES_STALE.value,)}
     assert len(mail.gmail.sent()) == 2
     assert mail.enrollment(healthy).status is EnrollmentStatus.COMPLETED
     assert len(two.reauth_gmail.sent()) == 1
-    if how == "locked":  # claimed again after each retry wait, and held each time
-        assert held
-        assert set(held) == {HELD_CATCH_UP}
-    else:
-        assert held == []
+    assert fired == []
+    assert mail.enrollment(stuck).not_sent_count == 0
     assert two.reauth_gmail.calls == []
     # A full poll at due, +10, +20 and +30: the held follow-up asks for its mailbox only.
     assert two.polls(mail.gmail) == 4
@@ -1296,10 +1437,11 @@ def test_after_signing_in_again_a_follow_up_waits_for_a_poll_that_catches_up(
     two.needs_sign_in(False)
     two.reauth_gmail.fail_next("history.list", GmailTransient("down", code="unavailable"))
 
-    [outcome] = [o for f, o in mail.tick(due).fired if f.enrollment_id == stuck]
+    held = mail.tick(due)
 
-    assert outcome.outcome is SendOutcome.NOT_SENT
-    assert outcome.error == HELD_CATCH_UP
+    assert stuck not in [f.enrollment_id for f, _ in held.fired]
+    assert held.skipped()[stuck] == (Skip.REPLIES_STALE.value,)
+    assert held_reason(mail, two.reauth_id) == HELD_CATCH_UP
     assert len(two.reauth_gmail.sent()) == 1
     mail.tick(due + timedelta(minutes=1))  # polled again a minute on: the reply ends it
     assert mail.enrollment(stuck).status is EnrollmentStatus.REPLIED
@@ -1326,12 +1468,13 @@ def test_signing_in_again_soon_still_waits_for_a_poll_that_catches_up(two: TwoBo
     two.needs_sign_in(False)
     two.reauth_gmail.fail_next("history.list", GmailTransient("down", code="unavailable"))
 
-    [outcome] = [o for f, o in mail.tick(due).fired if f.enrollment_id == stuck]
+    held = mail.tick(due)
 
     # The stale rule alone would let it go: the last good poll is 15 minutes old.
     assert due - two.polled_at(two.reauth_id) <= replies.STALE_AFTER_POLLS * INTERVAL  # type: ignore[operator]
-    assert outcome.outcome is SendOutcome.NOT_SENT
-    assert outcome.error == HELD_CATCH_UP
+    assert stuck not in [f.enrollment_id for f, _ in held.fired]
+    assert held.skipped()[stuck] == (Skip.REPLIES_STALE.value,)
+    assert held_reason(mail, two.reauth_id) == HELD_CATCH_UP
     assert len(two.reauth_gmail.sent()) == 1
     mail.tick(due + timedelta(minutes=1))  # the backoff's first retry reads the reply
     assert mail.enrollment(stuck).status is EnrollmentStatus.REPLIED
@@ -1363,10 +1506,10 @@ def test_signing_in_again_clears_the_last_poll_so_a_restart_holds_too(
     mail.sender = poller(mail, every=INTERVAL)  # serve restarted
     mail.gmail.fail_next("history.list", GmailTransient("down", code="unavailable"))
 
-    [(_, outcome)] = mail.tick(due).fired
+    held = mail.tick(due)
 
-    assert outcome.outcome is SendOutcome.NOT_SENT
-    assert outcome.error == HELD_STALE
+    assert held.fired == []
+    assert held.skipped()[enrollment_id] == (Skip.REPLIES_STALE.value,)
     assert len(mail.gmail.sent()) == 1
     mail.tick(due + timedelta(minutes=1))
     assert mail.enrollment(enrollment_id).status is EnrollmentStatus.REPLIED
@@ -1431,7 +1574,7 @@ def test_a_stale_follow_up_asks_for_a_poll_of_its_mailbox_alone(two: TwoBoxes) -
     held_at: datetime | None = None
     for minute in range(0, 6):  # sends are spaced apart: the other's comes within minutes
         at = due + timedelta(minutes=minute)
-        if [o for f, o in mail.tick(at).fired if f.enrollment_id == other]:
+        if mail.tick(at).skipped().get(other) == (Skip.REPLIES_STALE.value,):
             held_at = at
             break
     assert held_at is not None

@@ -314,7 +314,7 @@ def connect(
         mailbox.keychain_ref = token_name(mailbox.id)
     if mailbox.status is not MailboxStatus.OK:
         # Signed in again after a gap (#413): a reply may have come meanwhile, so its
-        # follow-ups that start a new conversation wait for a poll that catches up.
+        # follow-ups wait for a poll that catches up.
         mailbox.replies_polled_at = None
     mailbox.status = MailboxStatus.OK
     mailbox.status_reason = None
