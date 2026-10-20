@@ -36,8 +36,8 @@ export interface PrefillRun {
 /**
  * The prefill going now, from the LinkedIn status (`running_run_id`, whose run is a
  * manual `message_send`; a scheduled one is an auto-send, `autoSendId`), and its live
- * progress over the app's one SSE stream. A run's start or end refreshes the queue, what waits for you, and the campaigns, since any of them
- * may have moved.
+ * progress over the app's one SSE stream. A run's start or end refreshes the queue, what
+ * waits for you, and the campaigns, since any of them may have moved.
  */
 export function usePrefillRun(): PrefillRun {
   const queryClient = useQueryClient()

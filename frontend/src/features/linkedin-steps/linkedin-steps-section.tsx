@@ -79,6 +79,7 @@ import {
   PREFILL_NOTE,
   TRY_AGAIN_NOTE,
   AUTO_SENDING,
+  AUTO_STAYS_DUE,
   AUTO_STOPPED,
   AUTO_TYPED_NOT_SENT,
   AUTO_UNKNOWN,
@@ -583,6 +584,25 @@ function FinishedPrefill({ runId, onDismiss }: { runId: number; onDismiss: () =>
           Dismiss
         </Button>
       </p>
+    )
+  }
+  // An auto-send that opened nothing is given back due and retried by itself, unless a
+  // person cancelled it: that parks the step for Try again (#708).
+  if (
+    auto &&
+    run.data.counts?.opened === false &&
+    run.data.cancel_requested_at === null &&
+    run.data.stop_reason === 'not_typed'
+  ) {
+    const why = prefillReason(run.data.error)
+    return (
+      <Callout tone="warning" role="alert" title={AUTO_STOPPED}>
+        {why.text !== null && <p>{why.text}</p>}
+        <p>{AUTO_STAYS_DUE}</p>
+        <Button size="sm" variant="outline" className="mt-2" onClick={onDismiss}>
+          Dismiss
+        </Button>
+      </Callout>
     )
   }
   const ending = prefillEnding(run.data.stop_reason, run.data.error, run.data.counts)
