@@ -34,9 +34,13 @@ export const AUTO_SENT = 'Auto-send typed the message and clicked Send. Nothing 
 export const AUTO_TYPED_NOT_SENT =
   'Auto-send typed the message but did not click Send. It waits for you below: review it in Chrome and click Send yourself.'
 
-/** An auto-send tried to click Send and netkeep could not confirm it (`unknown`). */
+/** An auto-send ended `unknown`: stopped while typing or at Send, how far it got is not recorded. */
 export const AUTO_UNKNOWN =
-  "Auto-send typed the whole message, but netkeep can't confirm whether Send was clicked. The message may already be sent. Check the conversation in Chrome and on LinkedIn before you clear, send or discard anything. netkeep never retries."
+  "Auto-send stopped while it typed or at Send, and netkeep can't tell how far it got. The message may already be sent, or only part of it may be in the composer. Check the conversation on LinkedIn, and read the whole composer in Chrome, before you send, clear or discard anything. netkeep never retries."
+
+/** An auto-send stopped before it opened anything: the step is given back, still due. */
+export const AUTO_STAYS_DUE =
+  'Nothing was opened or typed. The step stays due, and auto-send will try it again on its own.'
 
 /** The title of an auto-send that stopped before it sent. */
 export const AUTO_STOPPED = 'The auto-send stopped.'

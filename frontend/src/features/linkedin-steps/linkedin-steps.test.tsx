@@ -50,6 +50,7 @@ import reasons from './prefill-reasons.json'
 import {
   AUTO_SENDING,
   AUTO_SENT,
+  AUTO_STAYS_DUE,
   AUTO_TYPED_NOT_SENT,
   AUTO_UNKNOWN,
   CLOSE_BUBBLE,
@@ -1752,6 +1753,9 @@ describe('an auto-send is not a prefill (#704)', () => {
 
     expect(await screen.findByText(AUTO_UNKNOWN)).toBeVisible()
     expect(screen.getByText('Check whether it was sent.')).toBeVisible()
+    // An `unknown` run may have stopped partway through typing.
+    expect(AUTO_UNKNOWN).not.toMatch(/typed the whole message/)
+    expect(AUTO_UNKNOWN).toMatch(/only part of it may be in the composer/)
     expect(screen.queryByText(PARTLY_TYPED)).toBeNull()
     expect(screen.queryByText(/can't tell how much it typed/)).toBeNull()
   })
@@ -1764,10 +1768,34 @@ describe('an auto-send is not a prefill (#704)', () => {
   })
 
   it('calls an auto-send that typed nothing an auto-send, not a prefill', async () => {
-    await endAutoSend({ status: 'failed', stop_reason: 'not_typed' })
+    await endAutoSend({ status: 'aborted', stop_reason: 'not_typed', counts: { opened: true } })
 
     expect(await screen.findByText('The auto-send stopped.')).toBeVisible()
     expect(screen.queryByText(/Not prefilled/)).toBeNull()
+  })
+
+  it('says an auto-send that opened nothing stays due and tries again by itself', async () => {
+    await endAutoSend({
+      status: 'aborted',
+      stop_reason: 'not_typed',
+      error: 'the Message control could not be clicked',
+      counts: { opened: false, typed_chars: 0 },
+    })
+
+    expect(await screen.findByText(AUTO_STAYS_DUE)).toBeVisible()
+    expect(screen.queryByText(TRY_AGAIN_STEP)).toBeNull()
+  })
+
+  it('sends a person-cancelled auto-send that opened nothing to Try again', async () => {
+    await endAutoSend({
+      status: 'aborted',
+      stop_reason: 'not_typed',
+      counts: { opened: false, typed_chars: 0 },
+      cancel_requested_at: '2026-09-23T10:01:00Z',
+    })
+
+    expect(await screen.findByText(TRY_AGAIN_STEP)).toBeVisible()
+    expect(screen.queryByText(AUTO_STAYS_DUE)).toBeNull()
   })
 
   it('calls any other auto-send stop an auto-send', async () => {

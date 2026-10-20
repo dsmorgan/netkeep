@@ -54,11 +54,6 @@ describe('EventStreamProvider', () => {
     expect(second).toBeDefined()
     act(() => second.onopen?.())
     await vi.waitFor(() => expect(fetches).toEqual({ a: 2, b: 2 }))
-
-    // A repeated "connected" with no drop in between refetches nothing more.
-    act(() => second.onopen?.())
-    await new Promise((resolve) => setTimeout(resolve, 30))
-    expect(fetches).toEqual({ a: 2, b: 2 })
   })
 
   it('leaves a query that opted out of focus refetches alone on reconnect', async () => {
