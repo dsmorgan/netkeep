@@ -1,20 +1,26 @@
 """The one-line installer, scripts/install.sh (#686, ADR 0011 rule 5).
 
 Users pipe this script to a shell, so its safety properties are pinned here. Each test
-runs a stamped copy with `sh`, a scratch HOME, and fake `curl`, `uv`, `netkeep`,
-`uname` and `id` first on PATH: the fakes log every call and serve canned files, so
-nothing is downloaded or installed for real. The real `shasum`, `awk` and `mktemp`
-still run.
+runs a stamped copy with a scratch HOME, PATH set to the sandbox's own bin plus
+`/usr/bin:/bin`, every install location pointed into the sandbox, and fake `curl`, `uv`,
+`netkeep`, `uname` and `id`. The fakes log every call, serve canned files, and refuse to
+write outside the sandbox, so nothing is downloaded or installed for real, and a broken
+script can't make a fake write elsewhere. The real `shasum`, `awk` and `mktemp` still
+run. An autouse check asserts that no command of a fake's name changed on the real PATH.
 """
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -46,9 +52,28 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-# The fakes. Each logs its argv, one line per call, to $FAKE_LOG.
-_FAKE_CURL = r"""#!/bin/sh
-printf 'curl %s\n' "$*" >> "$FAKE_LOG"
+# The fakes. Each logs its argv, one line per call, to $FAKE_LOG, and refuses to write
+# anywhere outside $FAKE_ROOT (the sandbox under tmp_path): a mutated or broken script
+# that hands one an outside path gets exit 97 and a REFUSED line, never a real write.
+_GUARD = r"""#!/bin/sh
+case ${FAKE_ROOT:-} in /?*) ;; *) echo "fake: FAKE_ROOT unset" >&2; exit 97 ;; esac
+case ${FAKE_LOG:-} in "$FAKE_ROOT"/*) ;; *) echo "fake: bad FAKE_LOG" >&2; exit 97 ;; esac
+log() { printf '%s\n' "$*" >> "$FAKE_LOG"; }
+confined() {
+    case $1 in
+        */../* | */..) ;;
+        "$FAKE_ROOT"/*) return 0 ;;
+    esac
+    log "REFUSED write outside the sandbox: $1"
+    echo "fake: refusing to write outside the sandbox: $1" >&2
+    exit 97
+}
+"""
+
+_FAKE_CURL = (
+    _GUARD
+    + r"""
+log "curl $*"
 out=''
 url=''
 while [ $# -gt 0 ]; do
@@ -58,42 +83,92 @@ while [ $# -gt 0 ]; do
         *) url=$1; shift ;;
     esac
 done
+confined "$out"
 name=$(printf '%s' "$url" | tr -c 'A-Za-z0-9._\n-' '_')
 [ -f "$FAKE_SERVE/$name" ] || exit 22
 cp "$FAKE_SERVE/$name" "$out"
 """
+)
 
-_FAKE_UV = r"""#!/bin/sh
-printf 'uv %s\n' "$*" >> "$FAKE_LOG"
+_FAKE_UV = (
+    _GUARD
+    + r"""
+log "uv $*"
 case "$1 $2" in
     "tool dir")
-        printf '%s\n' "$HOME/.local/bin"
+        printf '%s\n' "$UV_TOOL_BIN_DIR"
         ;;
     "tool install")
+        if [ -n "${FAKE_UV_SLEEP:-}" ]; then
+            sleep "$FAKE_UV_SLEEP"
+            exit 1
+        fi
         [ -z "${FAKE_UV_INSTALL_FAILS:-}" ] || exit 2
-        mkdir -p "$HOME/.local/bin"
-        cp "$FAKE_TEMPLATES/netkeep" "$HOME/.local/bin/netkeep"
+        [ -z "${FAKE_UV_NO_BIN:-}" ] || exit 0
+        confined "$UV_TOOL_BIN_DIR/netkeep"
+        mkdir -p "$UV_TOOL_BIN_DIR"
+        cp "$FAKE_TEMPLATES/netkeep" "$UV_TOOL_BIN_DIR/netkeep"
         ;;
 esac
 """
+)
 
-_FAKE_NETKEEP = r"""#!/bin/sh
-printf 'netkeep %s\n' "$*" >> "$FAKE_LOG"
+_FAKE_NETKEEP = (
+    _GUARD
+    + r"""
+log "netkeep $*"
 if [ "$*" = "setup --help" ] && [ -n "${FAKE_NO_SETUP:-}" ]; then
     echo "No such command 'setup'." >&2
     exit 2
 fi
+if [ "$*" = "setup" ] && [ -n "${FAKE_SETUP_FAILS:-}" ]; then
+    echo "setup: something went wrong" >&2
+    exit 1
+fi
 """
+)
 
-# uv's installer, as served: it puts the fake uv where it was told to.
-_FAKE_UV_INSTALLER = rb"""#!/bin/sh
-printf 'uv-installer UV_INSTALL_DIR=%s\n' "$UV_INSTALL_DIR" >> "$FAKE_LOG"
+# The variables uv 0.12.23's installer reads that redirect its download, send a token,
+# move its install folder, or name a file outside HOME to append to. The script clears
+# them all for the installer.
+_INSTALLER_REDIRECTS = (
+    "UV_DOWNLOAD_URL",
+    "INSTALLER_DOWNLOAD_URL",
+    "UV_INSTALLER_GHE_BASE_URL",
+    "UV_INSTALLER_GITHUB_BASE_URL",
+    "CARGO_DIST_FORCE_INSTALL_DIR",
+    "UV_UNMANAGED_INSTALL",
+    "UV_GITHUB_TOKEN",
+    "GITHUB_PATH",
+)
+
+# uv's installer, as served. It logs any redirect variable it can see, then applies the
+# real installer's PATH rule: it edits the shell profile only when its install folder
+# isn't on PATH already. Then it puts the fake uv where it was told to.
+_FAKE_UV_INSTALLER = (
+    _GUARD
+    + r"""
+log "uv-installer UV_INSTALL_DIR=$UV_INSTALL_DIR"
+for name in """
+    + " ".join(_INSTALLER_REDIRECTS)
+    + r"""; do
+    eval "isset=\${$name+set}"
+    [ -z "$isset" ] || log "uv-installer saw $name"
+done
+case ":$PATH:" in
+    *":$UV_INSTALL_DIR:"*) log "uv-installer profile skipped: $UV_INSTALL_DIR is on PATH" ;;
+    *) log "uv-installer profile updated" ;;
+esac
+[ -z "${FAKE_INSTALLER_NOOP:-}" ] || exit 0
+confined "$UV_INSTALL_DIR/uv"
 mkdir -p "$UV_INSTALL_DIR"
 cp "$FAKE_TEMPLATES/uv" "$UV_INSTALL_DIR/uv"
 """
+).encode()
 
 _FAKE_UNAME = '#!/bin/sh\nprintf "%s\\n" "${FAKE_OS:-Darwin}"\n'
 _FAKE_ID = '#!/bin/sh\nprintf "%s\\n" "${FAKE_UID:-501}"\n'
+_FAKE_NAMES = ("curl", "uv", "uvx", "netkeep", "uname", "id")
 
 
 def _served_name(url: str) -> str:
@@ -123,23 +198,65 @@ class Sandbox:
     def uv_on_path(self) -> None:
         shutil.copy(self.templates / "uv", self.bin / "uv")
 
-    def run(self, *args: str, **env: str) -> subprocess.CompletedProcess[str]:
+    @property
+    def path(self) -> str:
+        # The sandbox's own bin, then the system's: nothing from the real PATH.
+        return f"{self.bin}:/usr/bin:/bin"
+
+    def environ(self, env: dict[str, str], unset: tuple[str, ...] = ()) -> dict[str, str]:
+        local = str(self.home / ".local")
         environ = {
             "HOME": str(self.home),
-            "PATH": f"{self.bin}:/usr/bin:/bin:/usr/sbin:/sbin",
+            "PATH": self.path,
             "TMPDIR": str(self.outside),
+            # Every install location a uv or its installer reads, inside the sandbox.
+            # UV_INSTALL_DIR is a decoy: the script must set its own.
+            "UV_INSTALL_DIR": str(self.root / "decoy-install-dir"),
+            "UV_TOOL_BIN_DIR": f"{local}/bin",
+            "UV_TOOL_DIR": f"{local}/share/uv/tools",
+            "UV_PYTHON_INSTALL_DIR": f"{local}/share/uv/python",
+            "UV_CACHE_DIR": str(self.home / ".cache" / "uv"),
+            "XDG_BIN_HOME": f"{local}/bin",
+            "XDG_DATA_HOME": f"{local}/share",
+            "XDG_CONFIG_HOME": str(self.home / ".config"),
+            "XDG_CACHE_HOME": str(self.home / ".cache"),
+            "CARGO_HOME": str(self.home / ".cargo"),
+            "FAKE_ROOT": str(self.root),
             "FAKE_LOG": str(self.log),
             "FAKE_SERVE": str(self.serve),
             "FAKE_TEMPLATES": str(self.templates),
             "LC_ALL": "C",
             **env,
         }
+        for name in unset:
+            environ.pop(name, None)
+        return environ
+
+    def run(
+        self,
+        *args: str,
+        unset: tuple[str, ...] = (),
+        extra: dict[str, str] | None = None,
+        **env: str,
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["/bin/sh", str(self.script), *args],
             cwd=self.outside,
-            env=environ,
+            env=self.environ({**(extra or {}), **env}, unset),
             capture_output=True,
             text=True,
+            timeout=20,
+            check=False,
+        )
+
+    def pipe(self, shell: str, script: bytes) -> subprocess.CompletedProcess[bytes]:
+        """Run the script the way users do: `curl ... | sh`."""
+        return subprocess.run(
+            [shell, "-s"],
+            input=script,
+            cwd=self.outside,
+            env=self.environ({}),
+            capture_output=True,
             timeout=20,
             check=False,
         )
@@ -163,24 +280,50 @@ def _files(path: Path) -> list[str]:
     return sorted(str(p.relative_to(path)) for p in path.rglob("*"))
 
 
+def _real_path_snapshot() -> dict[str, tuple[int, int, int] | None]:
+    snapshot: dict[str, tuple[int, int, int] | None] = {}
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        if not directory:
+            continue
+        for name in _FAKE_NAMES:
+            path = os.path.join(directory, name)
+            try:
+                st = os.stat(path)
+            except OSError:
+                snapshot[path] = None
+            else:
+                snapshot[path] = (st.st_ino, st.st_size, st.st_mtime_ns)
+    return snapshot
+
+
+@pytest.fixture(autouse=True)
+def _real_path_unchanged() -> Iterator[None]:
+    """No test here touches a command of a fake's name anywhere on the real PATH."""
+    before = _real_path_snapshot()
+    yield
+    assert _real_path_snapshot() == before
+
+
 @pytest.fixture
 def box(tmp_path: Path) -> Sandbox:
     """A stamped script, fakes on PATH, and a release with matching checksums.
 
+    The sandbox is tmp_path/box, so tmp_path itself has room for a path outside it.
     uv starts missing, and the script's uv pin is restamped to the fake installer's hash
     (the real installer is never in a test)."""
+    root = tmp_path / "box"
     sandbox = Sandbox(
-        root=tmp_path,
-        home=tmp_path / "home",
-        outside=tmp_path / "outside",
-        bin=tmp_path / "bin",
-        templates=tmp_path / "templates",
-        serve=tmp_path / "serve",
-        log=tmp_path / "calls.log",
-        script=tmp_path / "script" / "install.sh",
+        root=root,
+        home=root / "home",
+        outside=root / "outside",
+        bin=root / "bin",
+        templates=root / "templates",
+        serve=root / "serve",
+        log=root / "calls.log",
+        script=root / "script" / "install.sh",
     )
     for d in (sandbox.home, sandbox.outside, sandbox.bin, sandbox.templates, sandbox.serve):
-        d.mkdir()
+        d.mkdir(parents=True)
     sandbox.script.parent.mkdir()
     _executable(sandbox.bin / "curl", _FAKE_CURL)
     _executable(sandbox.bin / "uname", _FAKE_UNAME)
@@ -195,6 +338,8 @@ def box(tmp_path: Path) -> Sandbox:
     sandbox.serve_file(f"{RELEASE_URL}/constraints.txt", CONSTRAINTS)
     sums = (
         f"{'a' * 64}  netkeep-{VERSION}-py3-none-any.whl\n"
+        # A decoy whose name contains the real one: only an exact name match is used.
+        f"{'c' * 64}  evil-constraints.txt\n"
         f"{_sha256(CONSTRAINTS)}  constraints.txt\n"
         f"{'b' * 64}  install.sh\n"
     )
@@ -215,6 +360,11 @@ _RELEASE_CALLS = [
     "netkeep setup --help",
     "netkeep setup",
 ]
+_UV_INSTALLER_CALLS = [
+    f"{_CURL} <HOME>/<work>/uv-installer.sh {UV_INSTALLER_URL}",
+    "uv-installer UV_INSTALL_DIR=<HOME>/.local/bin",
+    "uv-installer profile updated",
+]
 
 
 # --- the commands ---------------------------------------------------------------------
@@ -225,11 +375,7 @@ def test_installs_uv_then_netkeep_with_the_checked_constraints_then_runs_setup(
 ) -> None:
     result = box.run()
     assert result.returncode == 0, result.stderr
-    assert box.calls() == [
-        f"{_CURL} <HOME>/<work>/uv-installer.sh {UV_INSTALLER_URL}",
-        "uv-installer UV_INSTALL_DIR=<HOME>/.local/bin",
-        *_RELEASE_CALLS,
-    ]
+    assert box.calls() == [*_UV_INSTALLER_CALLS, *_RELEASE_CALLS]
     assert (box.home / ".local" / "bin" / "uv").exists()
     assert (box.home / ".local" / "bin" / "netkeep").exists()
     assert f"Done: netkeep {VERSION} is installed" in result.stdout
@@ -456,6 +602,207 @@ def test_skips_setup_with_a_message_when_this_version_has_none(box: Sandbox) -> 
     assert "netkeep setup" not in calls
     assert "has no 'netkeep setup' command, so the installer skips it" in result.stdout
     assert "netkeep serve" in result.stdout
+
+
+# --- PATH -----------------------------------------------------------------------------
+
+
+def test_a_fresh_uv_install_sees_the_callers_path_and_gets_a_full_path_hint(
+    box: Sandbox,
+) -> None:
+    # ~/.local/bin isn't on the caller's PATH: uv's installer must see that, so it edits
+    # the shell profile, and the hint must name uv by its full path, since a new
+    # terminal may not find a bare `uv` either.
+    result = box.run()
+    assert result.returncode == 0, result.stderr
+    assert "uv-installer profile updated" in box.calls()
+    out = result.stdout.replace(str(box.home), "<HOME>")
+    assert "<HOME>/.local/bin isn't on this terminal's PATH" in out
+    assert "'<HOME>/.local/bin/uv' tool update-shell" in out
+    assert 'export PATH="<HOME>/.local/bin:$PATH"' in out
+
+
+def test_no_path_hint_when_the_folder_is_already_on_path(box: Sandbox) -> None:
+    result = box.run(PATH=f"{box.home}/.local/bin:{box.path}")
+    assert result.returncode == 0, result.stderr
+    assert any(c.startswith("uv-installer profile skipped") for c in box.calls())
+    assert "isn't on this terminal's PATH" not in result.stdout
+
+
+def test_a_uv_in_local_bin_but_not_on_path_is_used(box: Sandbox) -> None:
+    (box.home / ".local" / "bin").mkdir(parents=True)
+    shutil.copy(box.templates / "uv", box.home / ".local" / "bin" / "uv")
+    result = box.run()
+    assert result.returncode == 0, result.stderr
+    assert box.calls() == _RELEASE_CALLS
+    assert f"uv is already installed: {box.home}/.local/bin/uv" in result.stdout
+
+
+# --- uv's installer environment -------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", _INSTALLER_REDIRECTS)
+def test_uv_installer_never_sees_a_redirect_variable(box: Sandbox, name: str) -> None:
+    value = str(box.root / "redirected") if name == "GITHUB_PATH" else "https://evil.invalid"
+    result = box.run(extra={name: value})
+    assert result.returncode == 0, result.stderr
+    assert box.calls() == [*_UV_INSTALLER_CALLS, *_RELEASE_CALLS]
+
+
+def test_uv_installer_is_told_the_home_install_dir_not_the_callers(box: Sandbox) -> None:
+    # The environment's UV_INSTALL_DIR is a decoy; the logged one must be HOME's.
+    box.run()
+    assert "uv-installer UV_INSTALL_DIR=<HOME>/.local/bin" in box.calls()
+    assert not (box.root / "decoy-install-dir").exists()
+
+
+def test_a_fake_refuses_an_install_dir_outside_the_sandbox(box: Sandbox, tmp_path: Path) -> None:
+    # The shape of the mutation that once wrote a fake uv into a real PATH folder: the
+    # script hands uv's installer a folder outside HOME. The fake must refuse it.
+    escape = tmp_path / "escape"
+    text = box.script.read_text(encoding="utf-8")
+    assert text.count('UV_INSTALL_DIR="$local_bin" sh') == 1
+    box.write_script(
+        text.replace('UV_INSTALL_DIR="$local_bin" sh', f'UV_INSTALL_DIR="{escape}" sh')
+    )
+    result = box.run()
+    assert result.returncode != 0
+    assert f"REFUSED write outside the sandbox: {escape}/uv" in box.calls()
+    assert not escape.exists()
+
+
+def test_stops_when_uvs_installer_leaves_no_uv(box: Sandbox) -> None:
+    result = box.run(FAKE_INSTALLER_NOOP="1")
+    assert result.returncode != 0
+    assert "there is no uv in" in result.stderr
+    assert box.calls() == [*_UV_INSTALLER_CALLS]
+
+
+# --- HOME -----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("home", ["", "/", "missing"])
+def test_refuses_a_home_that_isnt_a_home_directory(box: Sandbox, home: str) -> None:
+    if home == "/" and os.geteuid() == 0:
+        pytest.skip("as root, a broken check could write to /")
+    value = str(box.root / "no-such-home") if home == "missing" else home
+    result = box.run(HOME=value)
+    assert result.returncode != 0
+    assert "HOME must be your home directory" in result.stderr
+    assert box.calls() == []
+
+
+def test_refuses_an_unset_home(box: Sandbox) -> None:
+    result = box.run(unset=("HOME",))
+    assert result.returncode != 0
+    assert "HOME must be your home directory" in result.stderr
+    assert box.calls() == []
+
+
+# --- more refusals --------------------------------------------------------------------
+
+
+def test_refuses_a_checksum_that_isnt_64_hex_digits(box: Sandbox) -> None:
+    box.uv_on_path()
+    short = _sha256(CONSTRAINTS)[:63]
+    box.serve_file(f"{RELEASE_URL}/SHA256SUMS", f"{short}  constraints.txt\n".encode())
+    result = box.run()
+    assert result.returncode != 0
+    assert "no valid checksum for constraints.txt" in result.stderr
+
+
+def test_the_exact_name_is_used_not_a_decoy(box: Sandbox) -> None:
+    # The fixture's SHA256SUMS lists evil-constraints.txt first; the install still
+    # matches constraints.txt's own line.
+    box.uv_on_path()
+    result = box.run()
+    assert result.returncode == 0, result.stderr
+    assert f"constraints.txt matches SHA256SUMS ({_sha256(CONSTRAINTS)})" in result.stdout
+
+
+def test_stops_when_the_netkeep_command_is_missing_after_install(box: Sandbox) -> None:
+    box.uv_on_path()
+    result = box.run(FAKE_UV_NO_BIN="1")
+    assert result.returncode != 0
+    assert "netkeep was installed, but" in result.stderr
+    assert not [c for c in box.calls() if c.startswith("netkeep")]
+
+
+def test_a_failed_netkeep_setup_fails_the_install(box: Sandbox) -> None:
+    box.uv_on_path()
+    result = box.run(FAKE_SETUP_FAILS="1")
+    assert result.returncode != 0
+    assert "netkeep setup failed" in result.stderr
+    assert box.calls()[-1] == "netkeep setup"
+
+
+_DASH = shutil.which("dash", path="/usr/bin:/bin")
+
+
+@pytest.mark.parametrize(
+    "shell",
+    [
+        "/bin/sh",
+        pytest.param(_DASH, marks=pytest.mark.skipif(_DASH is None, reason="no dash")),
+    ],
+)
+def test_a_signal_still_removes_the_downloads(box: Sandbox, shell: str | None) -> None:
+    # dash runs no EXIT trap when a signal kills it; the script's signal trap turns the
+    # signal into an exit, so the download folder is removed either way.
+    assert shell is not None
+    box.uv_on_path()
+    proc = subprocess.Popen(
+        [shell, str(box.script)],
+        cwd=box.outside,
+        env=box.environ({"FAKE_UV_SLEEP": "1"}),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    try:
+        deadline = time.monotonic() + 10
+        while not any(c.startswith("uv tool install") for c in box.calls()):
+            assert time.monotonic() < deadline, "the install never started"
+            time.sleep(0.02)
+        assert list(box.home.glob(".netkeep-install.*"))
+        proc.send_signal(signal.SIGTERM)
+        assert proc.wait(timeout=10) != 0
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait(timeout=10)
+    assert not list(box.home.glob(".netkeep-install.*"))
+
+
+def test_a_truncated_download_piped_to_a_shell_runs_nothing(box: Sandbox) -> None:
+    full = box.script.read_bytes()
+    cuts = set()
+    offset = 0
+    for line in full.splitlines(keepends=True):
+        cuts.add(offset)
+        offset += len(line)
+    last_line_start = full.rstrip(b"\n").rfind(b"\n") + 1
+    cuts.update(range(last_line_start, len(full.rstrip(b"\n"))))
+    cuts.discard(len(full))
+    shells = ["/bin/sh"] + ([_DASH] if _DASH else [])
+    for shell in shells:
+        for cut in sorted(cuts):
+            result = box.pipe(shell, full[:cut])
+            assert box.calls() == [], f"{shell}, cut at byte {cut}, ran: {box.calls()}"
+            assert b"==>" not in result.stdout, f"{shell}, cut at byte {cut}, printed a step"
+    assert _files(box.home) == []
+    assert _files(box.outside) == []
+    # And the whole script, piped, does run (as a dry run).
+    whole = subprocess.run(
+        ["/bin/sh", "-s", "--", "--dry-run"],
+        input=full,
+        cwd=box.outside,
+        env=box.environ({}),
+        capture_output=True,
+        timeout=20,
+        check=False,
+    )
+    assert whole.returncode == 0 and b"==> 4. Run netkeep setup" in whole.stdout
 
 
 # --- lint and release ------------------------------------------------------------------

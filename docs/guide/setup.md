@@ -22,7 +22,7 @@ It installs uv if you don't have it, installs netkeep with the dependency versio
 
 `netkeep setup` turns on the login item, so `serve` starts whenever you log in, and opens the first-run page in netkeep's Chrome. If your release has no `netkeep setup` yet, the installer says so: start netkeep yourself with `netkeep serve`, leave it running in its own terminal (press Ctrl+C to stop it), and open <http://127.0.0.1:8000> in Chrome. You see an empty dashboard. `serve` creates and migrates the database itself.
 
-If `netkeep` isn't found in a new terminal, run `uv tool update-shell`, then open another terminal.
+If `netkeep` isn't found in a new terminal, the installer's last lines say what to do: run `~/.local/bin/uv tool update-shell` (by its full path, since `uv` may not be found either), or add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile (`~/.zshrc` for zsh), then open another terminal.
 
 ### From a checkout
 
