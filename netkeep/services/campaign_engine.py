@@ -215,7 +215,8 @@ review, in another campaign ...) is checked again this much later."""
 
 SCAN_LIMIT: Final = 500
 """At most this many due enrollments are looked at in one tick. The rest wait a minute.
-Blocked and LinkedIn rows are left out of the query, so they never use it up."""
+Blocked and LinkedIn rows, and follow-ups on a mailbox held for its replies (#694), are
+left out of the query, so they never use it up."""
 
 PAGE_SIZE: Final = 50
 """Due enrollments are read this many at a time, each page leaving out what is blocked."""
@@ -1325,13 +1326,16 @@ def _due(
     seen: Collection[int],
     campaigns: Collection[int],
     mailboxes: Collection[int],
+    held: Collection[int] = (),
 ) -> list[tuple[Enrollment, CampaignStep | None]]:
     """The next page of due enrollments with their next step, oldest due first.
 
     Left out in the query, so they can never fill the scan and starve the rest: the
     rows this tick has already looked at, those of a campaign or mailbox blocked this
-    tick (a cap, a mailbox needing re-authorization ...), and those whose next step
-    is on LinkedIn (P4), which keep their due time (review of #264).
+    tick (a cap, a mailbox needing re-authorization ...), those whose next step
+    is on LinkedIn (P4), which keep their due time (review of #264), and the
+    follow-ups (a step already sent) on a mailbox in ``held``, whose replies are not
+    read (#694): they stay due, and step 1s on that mailbox still go.
     """
     statement = _selected(user, now).add_columns(CampaignStep).where(_not_on_linkedin())
     if seen:
@@ -1341,6 +1345,14 @@ def _due(
     if mailboxes:
         statement = statement.where(
             or_(Campaign.mailbox_id.is_(None), Campaign.mailbox_id.not_in(sorted(mailboxes)))
+        )
+    if held:
+        statement = statement.where(
+            or_(
+                Enrollment.current_step.is_(None),
+                Campaign.mailbox_id.is_(None),
+                Campaign.mailbox_id.not_in(sorted(held)),
+            )
         )
     rows = session.execute(
         statement.order_by(Enrollment.next_action_at, Enrollment.id)
@@ -1514,7 +1526,7 @@ class _Chooser:
 
     def _replies_stale(self, mailbox_id: int) -> bool:
         """Whether the mailbox's Gmail follow-ups are held (#694), asked once per mailbox
-        and choose phase."""
+        and choose phase. Once held, its follow-ups are left out of the next pages."""
         if self.replies is None:
             return False
         held = self._replies_held.get(mailbox_id)
@@ -1569,6 +1581,7 @@ class _Chooser:
                 seen=seen,
                 campaigns=self.blocks.campaigns.keys(),
                 mailboxes=self.blocks.mailboxes.keys(),
+                held=[m for m, is_held in self._replies_held.items() if is_held],
             )
             if not page:
                 break

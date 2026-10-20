@@ -8,6 +8,7 @@ Nothing here reaches Gmail or Google.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from email.message import EmailMessage
@@ -1028,6 +1029,88 @@ def test_a_claim_held_at_send_is_given_back_without_a_try(mail: Mail) -> None:
     # The hold lifted: the next tick claims it again, and it goes out.
     [(_, outcome)] = mail.tick(due + timedelta(minutes=1)).fired
     assert outcome.outcome is SendOutcome.SENT
+
+
+@dataclass
+class FlipsBeforeSend:
+    """The real :class:`GmailSender`, with the reply state moved after the chooser let the
+    claim through and before :meth:`GmailSender.send` runs: a sign-in or a not-ready poll
+    landing in between (#694)."""
+
+    inner: GmailSender
+    flip: Callable[[], None]
+
+    def armed(self, session: Session, user: User, mailbox_id: int) -> MailboxArm | None:
+        return self.inner.armed(session, user, mailbox_id)
+
+    def replies_held(self, session: Session, user: User, mailbox_id: int) -> str | None:
+        return self.inner.replies_held(session, user, mailbox_id)
+
+    def reconcile(
+        self, factory: sessionmaker[Session], user_id: int, *, settings: Settings, now: datetime
+    ) -> None:
+        self.inner.reconcile(factory, user_id, settings=settings, now=now)
+
+    def send(self, firing: Firing) -> SendResult:
+        self.flip()
+        return self.inner.send(firing)
+
+
+@pytest.mark.parametrize("state", ["catch_up", "signed_in_again"])
+def test_the_sender_holds_a_follow_up_whose_replies_went_unread_after_the_claim(
+    mail: Mail, state: str
+) -> None:
+    """#694: the chooser let the ``same_thread`` follow-up through, then the mailbox needs a
+    catch-up poll or a sign-in cleared its last poll. ``send`` checks again before Gmail:
+    nothing reaches Gmail, and the hold hands the claim back as no try."""
+    enrollment_id = mail.enroll(ADA)
+    send_first(mail)
+    due = NOW + WEEK
+    sender = mail.sender
+
+    def flip() -> None:
+        mail.gmail.calls.clear()
+        if state == "catch_up":
+            sender._replies_catch_up[mail.user.id] = {mail.mailbox.id}
+        else:
+            mail.write(lambda s: setattr(mailbox_of(mail, s), "replies_polled_at", None))
+
+    [(firing, outcome)] = mail.tick(due, sender=FlipsBeforeSend(sender, flip)).fired
+
+    assert firing.enrollment_id == enrollment_id and firing.same_thread
+    assert outcome.outcome is SendOutcome.NOT_SENT and outcome.held
+    assert outcome.error == (HELD_CATCH_UP if state == "catch_up" else HELD_STALE)
+    assert mail.gmail.calls == []
+    assert len(mail.gmail.sent()) == 1
+    enrollment = mail.enrollment(enrollment_id)
+    assert enrollment.not_sent_count == 0 and enrollment.next_action_at == due
+    assert [m.status for m in mail.messages(enrollment_id)] == [MessageStatus.SENT]
+
+
+def test_held_follow_ups_never_fill_the_scan(mail: Mail, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#694 review: held follow-ups stay due, oldest first. Once one is held, the rest on
+    its mailbox are left out of the query, so however many there are, a step 1 behind
+    them is still reached within the scan limit."""
+    mail.any_time()
+    mail.sender = poller(mail, every=timedelta(minutes=10))
+    held_ids = [mail.enroll(f"held{n}@example.test") for n in range(3)]
+    for minute in range(0, 60):
+        mail.tick(NOW + timedelta(minutes=minute))
+    assert len(mail.gmail.sent()) == 3
+    due = NOW + WEEK + timedelta(hours=2)  # every step 2 is due
+    for _ in range(5):
+        mail.gmail.fail_next("history.list", GmailTransient("down", code="unavailable"))
+    mail.clock.now = due
+    fresh = mail.enroll("new@example.test")
+    monkeypatch.setattr(engine_module, "SCAN_LIMIT", 2)
+    monkeypatch.setattr(engine_module, "PAGE_SIZE", 1)
+
+    result = mail.tick(due)
+
+    [(firing, outcome)] = result.fired
+    assert firing.enrollment_id == fresh and outcome.outcome is SendOutcome.SENT
+    assert result.skipped()[held_ids[0]] == (Skip.REPLIES_STALE.value,)
+    assert all(mail.enrollment(e).not_sent_count == 0 for e in held_ids)
 
 
 # --- arming and users --------------------------------------------------------------------------
