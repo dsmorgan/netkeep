@@ -182,12 +182,30 @@ async def test_a_messages_shaped_file_under_another_name_is_named(
     assert run["archive"]["unfamiliar_message_files"] == ["interview_prep_messages.csv"]
 
 
+async def test_a_messages_table_naming_another_owner_is_named_as_skipped(
+    client: httpx.AsyncClient, tmp_path: Path
+) -> None:
+    """#702: someone else's messages table is skipped, and both the upload's answer
+    and the run the history keeps name it."""
+    foreign = (FIXTURES.parent / "foreign_messages.csv").read_text(encoding="utf-8")
+    data = _zipped(tmp_path, extra={"aa_other_messages.csv": foreign})
+    response = await _upload(client, data)
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["foreign_message_files"] == ["aa_other_messages.csv"]
+    assert body["unfamiliar_message_files"] == []
+    assert body["messages"]["added"] == KNOWN_MESSAGES["added"]
+    run = (await client.get(f"/api/v1/imports/{body['run_id']}")).json()
+    assert run["archive"]["foreign_message_files"] == ["aa_other_messages.csv"]
+
+
 async def test_the_sample_names_no_unfamiliar_message_file(
     client: httpx.AsyncClient, tmp_path: Path
 ) -> None:
     response = await _upload(client, _zipped(tmp_path))
     assert response.status_code == 201, response.text
     assert response.json()["unfamiliar_message_files"] == []
+    assert response.json()["foreign_message_files"] == []
 
 
 async def test_reimporting_the_same_archive_adds_nothing(
