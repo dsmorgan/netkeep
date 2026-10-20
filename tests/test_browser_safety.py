@@ -3187,6 +3187,99 @@ def test_the_raw_connection_pin_catches_a_new_opener(line: str) -> None:
     assert raw_connections(sources) != ALLOWED_RAW_CONNECTIONS
 
 
+#: #684 review: the names that open an HTTP client connection or opener, and the client
+#: libraries netkeep could import instead. A reach of one (an attribute, a ``from``
+#: import, a ``getattr`` literal, an import of the library) outside
+#: :data:`HTTP_CLIENT_PIN_SKIPS` must be one of :data:`ALLOWED_HTTP_CLIENTS`.
+HTTP_CLIENT_NAMES = frozenset(
+    {
+        "HTTPConnection",
+        "HTTPSConnection",
+        "urlopen",
+        "build_opener",
+        "OpenerDirector",
+        "HTTPHandler",
+        "HTTPSHandler",
+    }
+)
+HTTP_CLIENT_LIBRARIES = frozenset({"httpx", "requests", "aiohttp", "urllib3", "httplib2"})
+#: Gmail's own clients (the API's write-once connection and the OAuth token exchange)
+#: are left to #677, which pins the outbound sites to Google.
+HTTP_CLIENT_PIN_SKIPS = frozenset(
+    {PACKAGE / "campaigns" / "gmail.py", PACKAGE / "campaigns" / "gmail_oauth.py"}
+)
+#: Every HTTP client the rest of the package opens, by (file, function, name): count.
+ALLOWED_HTTP_CLIENTS = {
+    # `netkeep setup`'s health check (#684): one GET of /api/v1/health on a loopback
+    # name only, no redirect followed, no proxy, the body capped.
+    (PACKAGE / "services" / "post_install.py", "serve_answers", "HTTPConnection"): 1,
+}
+
+
+def http_clients(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int]:
+    """Each reach of a :data:`HTTP_CLIENT_NAMES` name or an import of a
+    :data:`HTTP_CLIENT_LIBRARIES` library, by file and function."""
+    found: dict[tuple[Path, str, str], int] = {}
+    for path, source in sources.items():
+        if path in HTTP_CLIENT_PIN_SKIPS:
+            continue
+        for name in HTTP_CLIENT_NAMES:
+            for item, _ in name_reaches(source, name, path):
+                key = (path, item.function, name)
+                found[key] = found.get(key, 0) + 1
+        tree = parse(source)
+        scopes = _scoped(tree)
+        for node in walk(tree):
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                modules = [node.module or ""]
+            else:
+                continue
+            for module in modules:
+                root = module.split(".")[0]
+                if root in HTTP_CLIENT_LIBRARIES:
+                    key = (path, scopes.get(id(node), ""), root)
+                    found[key] = found.get(key, 0) + 1
+    return found
+
+
+def test_only_the_reviewed_sites_open_an_http_client() -> None:
+    """#684 review: an HTTP client is a request of netkeep's own that no other rule here
+    reads. Outside Gmail's (#677), only setup's loopback health check opens one."""
+    assert http_clients(package_sources()) == ALLOWED_HTTP_CLIENTS
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "import urllib.request\nurllib.request.urlopen('http://127.0.0.1:1/')\n",
+        "from urllib.request import urlopen\n",
+        "from urllib.request import build_opener as b\n",
+        "import http.client\nc = http.client.HTTPSConnection('example.invalid')\n",
+        "from http import client\nc = client.HTTPConnection('127.0.0.1', 1)\n",
+        "import http.client\nc = getattr(http.client, 'HTTPConnection')\n",
+        "import httpx\n",
+        "from requests import get\n",
+        "import urllib3.poolmanager\n",
+    ],
+)
+def test_the_http_client_pin_catches_a_new_opener(line: str) -> None:
+    sources = package_sources()
+    sources[PACKAGE / "services" / "chrome_launch.py"] += "\n" + line
+    assert http_clients(sources) != ALLOWED_HTTP_CLIENTS
+
+
+def test_the_http_client_pin_catches_a_second_opener_in_setup() -> None:
+    sources = package_sources()
+    planted = PACKAGE / "services" / "post_install.py"
+    sources[planted] += (
+        "\n\ndef _sneaky():\n    from urllib.request import urlopen\n"
+        "    return urlopen('http://127.0.0.1:1/')\n"
+    )
+    assert http_clients(sources) != ALLOWED_HTTP_CLIENTS
+
+
 def test_no_code_path_alters_or_answers_a_request() -> None:
     """ADR 0006: the page's requests are read, never held, changed, or answered."""
     findings = scan([PACKAGE], request_mutations)
@@ -4559,6 +4652,8 @@ PAGE_ACTION_REACHES = {
         ("services/backup.py", "_vacuum_into", "close", 1),
         ("services/config_adopt.py", "_sync_directory", "close", 1),
         ("services/login_item.py", "LoginItem._write_plist", "close", 1),
+        # #684: setup's health check closes its own loopback HTTP connection, not a tab.
+        ("services/post_install.py", "serve_answers", "close", 1),
     ]
 }
 #: What each of ``browser.py``'s reaches is on, called or held: the run's own

@@ -96,11 +96,11 @@ Each warning starts with the protection it belongs to. These are the ones you're
 | 1. The login item | "Run at login uses launchd, which only macOS has." | On Linux, run netkeep in its container instead. |
 | 1. The login item | "can't find the installed netkeep command" | Install netkeep with the installer in the README, then run `netkeep setup` again. |
 | 1. The login item | "launchctl ... failed" | `netkeep login-item status` shows where it stands. Nothing is left half-installed. |
-| 2. Waiting for serve | "netkeep serve didn't answer ... within 60 s" | Look in `<data>/logs/serve.err.log` for why it didn't start, for example another program on port 8000. A slow first start can take longer: run `netkeep setup --wait 180`. |
+| 2. Waiting for serve | "netkeep serve didn't answer ... within 60 s" | Look in `<data>/logs/serve.err.log` for why it didn't start, for example another program on `serve`'s port (8000 by default). A slow first start can take longer: run `netkeep setup --wait 180`. |
 | 3. The first-run page | "Another Chrome holds netkeep's debugging port" | Quit that Chrome, then run `netkeep setup` again. |
 | 3. The first-run page | "the Keychain refused the local API key" | Unlock your login keychain, or allow netkeep when macOS asks. |
 
-Setup prints a note when it runs from a checkout's `.venv` instead of a uv tool install: the login item then runs that checkout's `netkeep`, and stops working if you move or delete the folder. When netkeep's Chrome is already running, step 3 opens no other window; run `netkeep open` to bring up the UI.
+Setup prints a note when the login item can't use uv's `~/.local/bin/netkeep` shim: when it runs from a checkout's `.venv`, or from a uv tool install whose shim is missing (`uv tool install --reinstall netkeep` puts it back). The login item then runs that environment's own `netkeep`, and stops working if you move or delete the folder. When netkeep's Chrome is already running, step 3 opens no other window; run `netkeep open` to bring up the UI. Step 2 can't tell this data directory's `serve` from another netkeep's on the same port, because `/api/v1/health` names no data directory: if you run two data directories, give each its own `web.port`.
 
 `netkeep setup --remove` turns the login item off. Your data directory, logs and Keychain items stay.
 

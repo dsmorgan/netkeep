@@ -117,7 +117,7 @@ netkeep login-item off                 # stop the agent and remove the plist; da
 NETKEEP_DATA=~/nk netkeep login-item on   # another data directory gets its own agent
 ```
 
-The agent runs the `netkeep` you ran this from (the one beside the active Python, so a checkout's `.venv/bin/netkeep` after `make install`), with `NETKEEP_DATA` set to the data directory in use. The default data directory's agent is `fun.tnkr.netkeep`; any other gets `fun.tnkr.netkeep.<hash of its path>`, so two data directories never replace each other's agent. The plist is `~/Library/LaunchAgents/<label>.plist`, outside the data directory: it is the one thing the switch writes there, and turning it off removes it.
+The agent runs the `netkeep` you ran this from: uv's `~/.local/bin/netkeep` shim for a uv tool install, and otherwise the one beside the active Python, so a checkout's `.venv/bin/netkeep` after `make install`. It runs with `NETKEEP_DATA` set to the data directory in use. The default data directory's agent is `fun.tnkr.netkeep`; any other gets `fun.tnkr.netkeep.<hash of its path>`, so two data directories never replace each other's agent. The plist is `~/Library/LaunchAgents/<label>.plist`, outside the data directory: it is the one thing the switch writes there, and turning it off removes it.
 
 If a `netkeep serve` is already running (the switch is always used from one), turning the item on registers it without starting it, so launchd starts it at your next login rather than racing the running copy for the serve lock. From a terminal with nothing running, `login-item on` starts it now. The agent that is serving you stops a moment after you turn the switch off.
 

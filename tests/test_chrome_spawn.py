@@ -629,15 +629,26 @@ def _package_sources() -> dict[str, str]:
 
 def _first_run_keywords(sources: dict[str, str]) -> dict[tuple[str, str], list[str]]:
     """Every ``first_run=`` keyword in ``sources``, by file and enclosing function, as
-    source text."""
+    source text, and every ``**`` splat into a launch (#684 review): a call of
+    :data:`LAUNCH_CALLS`, as ``**<source text>``, since a splat can carry ``first_run``."""
     found: dict[tuple[str, str], list[str]] = {}
     for rel, source in sources.items():
         tree = ast.parse(source)
         for function, call in _calls_by_function(tree):
+            func = call.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
             for keyword in call.keywords:
                 if keyword.arg == "first_run":
                     found.setdefault((rel, function), []).append(ast.unparse(keyword.value))
+                elif keyword.arg is None and name in LAUNCH_CALLS:
+                    splat = f"**{ast.unparse(keyword.value)}"
+                    found.setdefault((rel, function), []).append(splat)
     return found
+
+
+#: The calls a ``first_run`` reaches the launcher through: a launcher's ``start``, the
+#: shared submit, and the launch's own record.
+LAUNCH_CALLS = frozenset({"start", "submit_launch", "ChromeLaunch"})
 
 
 def _calls_by_function(tree: ast.AST) -> Iterator[tuple[str, ast.Call]]:
@@ -688,6 +699,23 @@ def test_only_the_route_and_setup_pass_first_run_to_the_launcher() -> None:
             "netkeep/worker.py",
             "    holder = profile_lock_pid(",
             "    submit_launch(tasks, bus, launcher, user_id=0, first_run=True)\n",
+        ),
+        # A splat that carries it, in `netkeep open` and in serve's startup path.
+        (
+            "netkeep/cli.py",
+            "        launched = asyncio.run(_open_launcher(cdp_url, base, key).start())\n",
+            "        asyncio.run("
+            "_open_launcher(cdp_url, base, key).start(**{'first_run': True}))\n",
+        ),
+        (
+            "netkeep/worker.py",
+            "    holder = profile_lock_pid(",
+            "    submit_launch(tasks, bus, launcher, user_id=0, **{'first_run': True})\n",
+        ),
+        (
+            "netkeep/chrome_spawn.py",
+            "    async def start(self, *, first_run: bool = False) -> LaunchResult:\n",
+            "    def _sneaky(self, how):\n        return self.start(**how)\n\n",
         ),
         # A second first-run launch in setup itself.
         (

@@ -33,8 +33,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Final
-from urllib.parse import urlsplit, urlunsplit
-from urllib.request import ProxyHandler, build_opener
+from urllib.parse import urlsplit
 
 from netkeep.services.chrome_launch import LaunchResult, LaunchStatus, Refusal
 from netkeep.services.login_item import SERVE_ERR_LOG, LoginItem, LoginItemError
@@ -45,6 +44,7 @@ SERVE_WAIT_S: Final = 60.0
 
 HEALTH_PATH: Final = "/api/v1/health"
 _HEALTH_TIMEOUT_S: Final = 2.0
+_HEALTH_MAX_BYTES: Final = 4096
 _POLL_S: Final = 0.5
 _LOOPBACK: Final = frozenset({"127.0.0.1", "localhost", "::1"})
 
@@ -156,9 +156,10 @@ def _login_item(item: LoginItem, say: Say, *, tool_install: bool) -> None:
         )
     if not tool_install:
         say(
-            f"   note: this netkeep runs from {executable}, not from a uv tool install (a"
-            " checkout's .venv, for example). The login item runs it from there, so it stops"
-            " working if you move or delete that folder."
+            f"   note: the login item runs {executable}, not a uv tool install's shim in uv's"
+            " bin folder: this is a checkout's .venv, or a uv tool install whose shim is"
+            " missing (run uv tool install --reinstall netkeep to put it back). The login item"
+            " stops working if that folder moves or is deleted."
         )
     if status.enabled and status.loaded and not status.stale and not status.legacy:
         say(
@@ -220,24 +221,35 @@ def _first_run(seams: Seams, say: Say, base: str) -> None:
 def serve_answers(base: str, *, timeout_s: float = _HEALTH_TIMEOUT_S) -> bool:
     """Whether a netkeep ``serve`` answers ``GET /api/v1/health`` at ``base``.
 
-    Only an ``http`` origin on a loopback name is asked; any other is never connected to.
+    One ``http.client`` GET to a loopback name and an explicit port, and nothing else:
+    an origin that isn't ``http`` on loopback is never connected to, a redirect is an
+    answer that isn't ``serve``'s and is never followed, no proxy is consulted, and at
+    most :data:`_HEALTH_MAX_BYTES` of the body is read.
+
+    It can't tell this data directory's ``serve`` from another netkeep's on the same
+    port: ``/health`` names no data directory, so any netkeep answering ``ok`` counts.
     """
     parts = urlsplit(base)
     host = parts.hostname
     if parts.scheme != "http" or host not in _LOOPBACK:
         return False
     try:
-        parts.port  # noqa: B018 -- raises for a port out of range
+        port = parts.port
     except ValueError:
         return False
-    # No proxy: a loopback address is asked directly, whatever the environment says.
-    opener = build_opener(ProxyHandler({}))
-    url = urlunsplit(("http", parts.netloc, HEALTH_PATH, "", ""))
+    if port is None:
+        return False
+    connection = http.client.HTTPConnection(host, port, timeout=timeout_s)
     try:
-        with opener.open(url, timeout=timeout_s) as response:
-            if response.status != 200:
-                return False
-            body = json.loads(response.read(4096))
+        connection.putrequest("GET", HEALTH_PATH)
+        connection.putheader("Accept", "application/json")
+        connection.endheaders()
+        response = connection.getresponse()
+        if response.status != 200:
+            return False
+        body = json.loads(response.read(_HEALTH_MAX_BYTES))
     except (OSError, http.client.HTTPException, ValueError):
         return False
+    finally:
+        connection.close()
     return isinstance(body, dict) and body.get("status") == "ok"
