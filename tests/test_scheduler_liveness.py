@@ -14,6 +14,7 @@ from datetime import UTC, datetime, time, timedelta
 from random import Random
 
 import factories
+import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
 from netkeep.db import session_scope
@@ -101,7 +102,12 @@ def _registry(handler: Callable[[JobContext], object]) -> scheduler.JobRegistry:
 
 
 def _message_send(
-    factory: sessionmaker[Session], user: User, *, started: datetime, beat: datetime | None
+    factory: sessionmaker[Session],
+    user: User,
+    *,
+    started: datetime,
+    beat: datetime | None,
+    beat_by: str | None = None,
 ) -> int:
     with session_scope(factory, write=True) as session:
         run = runs.create_run(
@@ -114,6 +120,8 @@ def _message_send(
             browser_held=lambda _account: False,
         )
         run.heartbeat_at = beat
+        if beat_by is not None:
+            run.heartbeat_by = beat_by
         return run.id
 
 
@@ -140,6 +148,35 @@ def test_a_message_send_row_still_in_its_start_grace_counts_as_running(
 ) -> None:
     user = _user(session_factory)
     _message_send(session_factory, user, started=NOW - timedelta(seconds=30), beat=None)
+    assert scheduler._last_message_send(session_factory, user, NOW) == NOW
+
+
+def test_a_message_send_row_whose_browser_lock_is_held_counts_as_running(
+    session_factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Past its start grace, but a process here still holds the account's lock: the run
+    is alive, however old, and keeps holding the gap (#696 review)."""
+    user = _user(session_factory)
+    _message_send(session_factory, user, started=NOW - timedelta(minutes=10), beat=None)
+    monkeypatch.setattr(runs, "browser_held_for", lambda session: lambda account_id: True)
+    assert scheduler._last_message_send(session_factory, user, NOW) == NOW
+
+
+def test_a_message_send_row_another_runner_beats_for_counts_as_running(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """Started ten minutes ago in another data directory, which beat 30 seconds ago: its
+    heartbeat is the sign of life, so it is still running (#696 review, #467)."""
+    user = _user(session_factory)
+    other = "b" * runs.RUNNER_ID_LENGTH
+    assert other != runs.runner_id()
+    _message_send(
+        session_factory,
+        user,
+        started=NOW - timedelta(minutes=10),
+        beat=NOW - timedelta(seconds=30),
+        beat_by=other,
+    )
     assert scheduler._last_message_send(session_factory, user, NOW) == NOW
 
 
@@ -381,6 +418,36 @@ def test_a_stagger_push_past_the_windows_end_goes_to_its_next_start(
         )
     dues = sorted(r.due for r in results.values())
     assert dues == [at + timedelta(days=1), datetime(2026, 9, 23, 8, 0, tzinfo=UTC)]
+
+
+def test_a_stagger_push_snapped_onto_another_kinds_due_time_is_staggered_again(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """Two kinds due at 20:59 and a third due at 08:00 the day after next: the gap pushes
+    the second past 21:00, the snap puts it on the third's 08:00, and the stagger after
+    the snap pushes one of those two a gap later (#696 review)."""
+    user = _user(session_factory)
+    at = datetime(2026, 9, 21, 20, 59, tzinfo=UTC)
+    morning = datetime(2026, 9, 23, 8, 0, tzinfo=UTC)
+    schedules = {
+        JobKind.CONNECTIONS_INCREMENTAL: DAILY,
+        JobKind.ENRICH: JobSchedule(JobKind.ENRICH, timedelta(days=1)),
+        JobKind.INBOX: JobSchedule(JobKind.INBOX, morning - at),
+    }
+    with session_scope(session_factory, write=True) as session:
+        results = scheduler.sync_account_schedule(
+            session,
+            user,
+            ACCOUNT,
+            now=at,
+            schedules=schedules,
+            rng=Random(0),
+            tz="UTC",
+            active_start=WINDOW[0],
+            active_end=WINDOW[1],
+        )
+    dues = sorted(r.due for r in results.values())
+    assert dues == [at + timedelta(days=1), morning, morning + scheduler.MIN_JOB_KIND_GAP]
 
 
 def test_a_seeded_kind_pushed_past_the_windows_end_goes_to_its_next_start(
