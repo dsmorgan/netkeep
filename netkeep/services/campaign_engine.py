@@ -1838,15 +1838,15 @@ class _Chooser:
         slots = self.blocks.slots
         assert slots is not None  # _consider set it before any claim
         today = slots.local_date(self.now)
-        values = MergeValues(
-            contact=contact_fields(contact, today),
-            campaign_name=campaign.name,
-            step_number=step.position,
-            # The local day, as ``today`` is: the UTC day says "today" for yesterday's
-            # evening send in US Pacific time (#709).
-            previous_send_date=None if latest is None else slots.local_date(latest),
-        )
-        try:
+        try:  # MergeValues refuses a bad value with a render error, so it parks too
+            values = MergeValues(
+                contact=contact_fields(contact, today),
+                campaign_name=campaign.name,
+                step_number=step.position,
+                # The local day, as ``today`` is: the UTC day says "today" for yesterday's
+                # evening send in US Pacific time (#709).
+                previous_send_date=None if latest is None else slots.local_date(latest),
+            )
             rendered = render(
                 template.channel, template.subject, template.body, values, today=today
             )

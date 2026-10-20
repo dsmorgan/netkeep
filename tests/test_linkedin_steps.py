@@ -26,6 +26,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from netkeep.campaigns import schedule
 from netkeep.campaigns.render import LintIssue, LintRule, Part, Rendered, Severity
 from netkeep.campaigns.templates import REMOVED_FIELD_BLOCK, TEMPLATE_ERRORS_BLOCK, block_reason
 from netkeep.config import BudgetSettings, LinkedInSettings, Settings
@@ -1225,6 +1226,26 @@ def test_an_empty_rendered_body_parks_it(
     assert lane.claim(enrollment_id).reasons == (Skip.RENDER_FAILED,)
     assert lane.enrollment(enrollment_id).next_action_at is None
     assert lane.messages(enrollment_id) == []
+
+
+def test_a_previous_send_date_merge_values_refuse_parks_the_prefill(
+    session_factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#709 review: a ``previous_send_date`` ``MergeValues`` refuses (a datetime, from a
+    stubbed ``local_date``) parks the step as render_failed instead of raising."""
+    lane = make_lane(session_factory, channels=(EMAIL, LINKEDIN))
+    enrollment_id = lane.enroll(current_step=1)
+    sent_at = NOW - timedelta(days=8)
+    _sent_step_one(lane, enrollment_id, at=sent_at)
+    real = schedule.Suggested.local_date
+
+    def local_date(self: schedule.Suggested, at: datetime) -> Any:
+        return at if at == sent_at else real(self, at)
+
+    monkeypatch.setattr(schedule.Suggested, "local_date", local_date)
+    assert lane.claim(enrollment_id).reasons == (Skip.RENDER_FAILED,)
+    assert lane.enrollment(enrollment_id).next_action_at is None
+    assert len(lane.messages(enrollment_id)) == 1  # step 1's only
 
 
 def test_an_interrupted_claim_is_named_listed_and_discardable(lane: Lane) -> None:

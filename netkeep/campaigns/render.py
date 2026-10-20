@@ -533,7 +533,8 @@ class MergeValues:
         # A datetime is a date, so the type alone lets one through; its UTC day is off
         # by one for an evening send in US Pacific time (#709).
         if isinstance(self.previous_send_date, datetime):
-            raise TypeError("previous_send_date is the local day, a date, not a datetime")
+            # A render error, so the engine parks this one message (#709 review).
+            raise TemplateRenderError("previous_send_date is the local day, a date, not a datetime")
 
 
 @dataclass(frozen=True, slots=True)
