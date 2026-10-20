@@ -10,6 +10,7 @@ not to a coincidence of two code paths landing on the same number (the
 
 from __future__ import annotations
 
+import asyncio
 import re
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, time, timedelta
@@ -1980,6 +1981,52 @@ async def test_build_scheduler_with_the_skip_explicitly_disabled_still_fires(
     await job.func()
 
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("fails", [False, True])
+async def test_the_heartbeat_is_busy_from_its_claim_until_it_returns(
+    session_factory: sessionmaker[Session], fails: bool
+) -> None:
+    """#707: a restart gate reads ``busy``. A handler mid-fire (its run claimed, recorded
+    and waited on) keeps the scheduler busy, and it is idle again once the heartbeat
+    returns, or raises."""
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def blocking_handler(ctx: scheduler.JobContext) -> None:
+        started.set()
+        await release.wait()
+        if fails:
+            raise RuntimeError("the run failed")
+
+    with session_scope(session_factory, write=True) as session:
+        owner = factories.make_user(session, timezone="UTC")
+    built = scheduler.build_scheduler(
+        session_factory,
+        lambda: [(owner, ACCOUNT)],
+        registry={scheduler.JobKind.ENRICH: blocking_handler},
+        schedules={scheduler.JobKind.ENRICH: THREE_HOURLY},
+        active_start=ALL_DAY[0],
+        active_end=ALL_DAY[1],
+        heat_settings=scheduler.HEAT_SKIP_DISABLED,
+        rng=Random(0),
+        armed=scheduler.ARMING_NOT_REQUIRED,
+    )
+    _make_due_and_hot(session_factory, owner, scheduler.JobKind.ENRICH)
+    job = built.get_job(scheduler.HEARTBEAT_JOB_ID)
+    assert job is not None
+
+    def busy() -> bool:  # read afresh each time (no narrowing across the awaits)
+        return built.busy
+
+    assert not busy()
+    heartbeat = asyncio.ensure_future(job.func())
+    await asyncio.sleep(0)
+    assert busy()  # counted before its first await: before any claim
+    await asyncio.wait_for(started.wait(), 5)
+    assert busy()
+    release.set()
+    await asyncio.wait_for(asyncio.gather(heartbeat, return_exceptions=True), 5)
+    assert not busy()
 
 
 # --- poll_once's interleave gap, covered directly ----------------------------

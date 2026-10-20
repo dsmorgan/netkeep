@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 import plistlib
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -584,13 +584,14 @@ async def test_cancel_during_the_quiesce_resumes_the_real_scheduler_the_engine_a
     """#597 final review: a Cancel that lands while the engine waits out a send must
     still undo the whole quiesce. The real APScheduler pins pause over shutdown: a
     shut-down scheduler cannot resume, so scheduled runs would never come back."""
-    from apscheduler.schedulers.asyncio import AsyncIOScheduler
     from apscheduler.schedulers.base import STATE_PAUSED, STATE_RUNNING
+
+    from netkeep.services.scheduler import HeartbeatScheduler
 
     stops: list[None] = []
     running_app.state.restarter = restart.Restarter(stop=lambda: stops.append(None), mode="exec")
     running_app.state.restart_gate = None
-    scheduler = AsyncIOScheduler()
+    scheduler = HeartbeatScheduler()  # what serve builds (#707)
     scheduler.start()
     engine, backups = _SlowEngine(), _Backups()
     running_app.state.scheduler = scheduler
@@ -675,3 +676,200 @@ async def test_a_restart_asked_for_during_a_cancel_is_refused_until_it_finishes(
         await _until(lambda: len(stops) == 1)
     finally:
         running_app.state.campaign_engine = None
+
+
+# --- #707: heartbeats in flight, errors, the owner --------------------------------
+
+
+async def test_a_heartbeat_in_flight_holds_the_restart_until_it_returns(
+    running_app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    """#707 (B6): between claiming a fire and submitting its run, a heartbeat shows in no
+    task and no run row. The gate reads the scheduler's own count, so a restart asked for
+    then waits for the heartbeat (and the run it waits on) instead of cutting it off."""
+    from netkeep.services.scheduler import HeartbeatScheduler
+
+    stops: list[None] = []
+    running_app.state.restarter = restart.Restarter(stop=lambda: stops.append(None), mode="exec")
+    running_app.state.restart_gate = None
+    scheduler = HeartbeatScheduler()
+    scheduler.start()
+    running_app.state.scheduler = scheduler
+    release = asyncio.Event()
+    heartbeat = asyncio.ensure_future(scheduler.counted(_held(release)))
+    try:
+        await asyncio.sleep(0)
+        refused = await client.post(URL, headers=CSRF)
+        assert refused.status_code == 409
+        assert "the scheduler is starting or finishing a scheduled run" in refused.json()["detail"]
+        waiting = await client.post(URL, headers=CSRF, json={"when_idle": True})
+        assert waiting.status_code == 202
+        await asyncio.sleep(0.1)
+        assert stops == []
+        release.set()
+        await heartbeat
+        await _until(lambda: len(stops) == 1)
+    finally:
+        release.set()
+        running_app.state.scheduler = None
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
+
+
+async def test_a_heartbeat_that_starts_during_the_quiesce_is_waited_for() -> None:
+    """#707 (B6): the gate's last look, after the quiesce paused the scheduler, sees a
+    heartbeat that began before the pause."""
+    from netkeep.services.scheduler import HeartbeatScheduler
+
+    stops: list[None] = []
+    hook = restart.Restarter(stop=lambda: stops.append(None), mode="exec")
+    scheduler = HeartbeatScheduler()
+    release = asyncio.Event()
+    heartbeats: list[asyncio.Future[None]] = []
+
+    async def busy() -> list[str]:
+        return restart_gate.live_busy(None, None, None, scheduler)
+
+    async def quiesce() -> None:
+        # a heartbeat the scheduler ran just before it paused
+        heartbeats.append(asyncio.ensure_future(scheduler.counted(_held(release))))
+        await asyncio.sleep(0)
+
+    gate = restart_gate.RestartGate(
+        hook, busy=busy, quiesce=quiesce, resume=lambda: None, poll_s=0.01
+    )
+    gate.start()
+    await _until(lambda: gate.waiting_on != [])
+    await asyncio.sleep(0.05)
+    assert stops == [] and gate.waiting
+    release.set()
+    await heartbeats[0]
+    await _until(lambda: len(stops) == 1)
+
+
+@pytest.mark.parametrize("where", ["busy", "quiesce"])
+async def test_an_error_while_the_gate_waits_is_busy_and_it_looks_again(where: str) -> None:
+    """#707 (B18): an error in a look, or in the quiesce, never ends the wait with the
+    scheduler and the engine paused. It counts as busy, the gate looks again, and the
+    restart goes ahead only after a clean look following a quiesce that finished."""
+    stops: list[None] = []
+    hook = restart.Restarter(stop=lambda: stops.append(None), mode="exec")
+    calls: list[str] = []
+    seen: list[list[str]] = []
+    failures = [1]
+
+    def fail_once(at: str) -> None:
+        if where == at and failures:
+            failures.pop()
+            raise OSError("the disk hiccuped")
+
+    async def busy() -> list[str]:
+        calls.append("busy")
+        if "quiesce" in calls or where == "busy":
+            fail_once("busy")
+        return []
+
+    async def quiesce() -> None:
+        calls.append("quiesce")
+        fail_once("quiesce")
+
+    gate = restart_gate.RestartGate(
+        hook, busy=busy, quiesce=quiesce, resume=lambda: calls.append("resume"), poll_s=0.01
+    )
+
+    async def watch() -> None:
+        while not stops:
+            seen.append(list(gate.waiting_on))
+            await asyncio.sleep(0.001)
+
+    watcher = asyncio.ensure_future(watch())
+    gate.start()
+    await _until(lambda: len(stops) == 1)
+    await watcher
+    assert [restart_gate.CHECK_FAILED] in seen
+    assert failures == []
+    # The restart came only after a quiesce that finished, and a clean look after it.
+    last_quiesce = len(calls) - 1 - calls[::-1].index("quiesce")
+    assert calls[last_quiesce + 1 :] == ["busy"]
+    assert calls.count("quiesce") == (2 if where == "quiesce" else 1)
+
+
+async def test_cancel_after_an_error_resumes_what_the_gate_paused() -> None:
+    """#707 (B18): before the fix, the gate's task died on the error, and Cancel answered
+    False with the scheduler and the engine left paused."""
+    stops: list[None] = []
+    hook = restart.Restarter(stop=lambda: stops.append(None), mode="exec")
+    calls: list[str] = []
+
+    async def busy() -> list[str]:
+        if "quiesce" in calls:
+            raise OSError("the database is locked")
+        return []
+
+    async def quiesce() -> None:
+        calls.append("quiesce")
+
+    gate = restart_gate.RestartGate(
+        hook, busy=busy, quiesce=quiesce, resume=lambda: calls.append("resume"), poll_s=0.01
+    )
+    gate.start()
+    await _until(lambda: gate.waiting_on == [restart_gate.CHECK_FAILED])
+    await asyncio.sleep(0.05)
+    still: bool = gate.waiting
+    assert still and stops == []
+    assert await gate.cancel()
+    assert calls == ["quiesce", "resume"] and stops == []
+
+
+async def test_an_unreadable_browser_lock_counts_as_busy(
+    running_app: FastAPI, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#707 (B18): an OSError reading the browser lock refuses the restart (409), never
+    answers 500 or idle."""
+
+    def unreadable(*_: object, **__: object) -> activity_lock.LockState:
+        raise PermissionError("the lock folder cannot be read")
+
+    stops: list[None] = []
+    running_app.state.restarter = restart.Restarter(stop=lambda: stops.append(None), mode="exec")
+    monkeypatch.setattr(activity_lock, "inspect", unreadable)
+    response = await client.post(URL, headers=CSRF)
+    assert response.status_code == 409
+    assert "could not tell whether the browser is in use" in response.json()["detail"]
+    assert stops == []
+
+
+@pytest.mark.parametrize("method", ["POST", "DELETE"])
+async def test_only_the_local_owner_restarts_or_cancels(
+    running_app: FastAPI, client: httpx.AsyncClient, method: str
+) -> None:
+    """#707 (I14): a restart stops serve for everyone, and Cancel resumes everyone's
+    sends; another user gets 403 and nothing changes."""
+    import factories
+    from isolation.harness import acting_as
+
+    from netkeep.models import UserKind
+
+    stops: list[None] = []
+    running_app.state.restarter = restart.Restarter(stop=lambda: stops.append(None), mode="exec")
+    running_app.state.restart_gate = None
+    with session_scope(running_app.state.session_factory, write=True) as session:
+        other = factories.make_user(session, kind=UserKind.LOCAL).id
+    with acting_as(running_app, other):
+        response = await client.request(method, URL, headers=CSRF)
+    assert response.status_code == 403
+    assert response.json()["detail"] == "only the local owner account restarts netkeep"
+    assert running_app.state.restart_gate is None
+    await asyncio.sleep(0.05)
+    assert stops == []
+    # the owner still can
+    assert (await client.request(method, URL, headers=CSRF)).status_code in (200, 202)
+
+
+def _held(release: asyncio.Event) -> Callable[[], Awaitable[None]]:
+    """A heartbeat body that runs until ``release`` is set."""
+
+    async def heartbeat() -> None:
+        await release.wait()
+
+    return heartbeat

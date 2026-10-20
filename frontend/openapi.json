@@ -25099,7 +25099,7 @@
     },
     "/api/v1/settings/restart": {
       "delete": {
-        "description": "Cancel a restart that waits for idle (**Cancel** on the banner). ``user`` is\nunused; every route resolves the current user.",
+        "description": "Cancel a restart that waits for idle (**Cancel** on the banner). The local owner\nonly: ``owner`` is otherwise unused.",
         "operationId": "cancel_restart",
         "responses": {
           "200": {
@@ -25112,6 +25112,9 @@
             },
             "description": "Successful Response"
           },
+          "403": {
+            "description": "Anyone but the local owner account"
+          },
           "409": {
             "description": "The restart has already begun"
           }
@@ -25122,7 +25125,7 @@
         ]
       },
       "post": {
-        "description": "Restart ``netkeep serve`` so settings it reads at startup apply, never in the\nmiddle of work: ``409`` names what is running, unless ``when_idle`` asks to wait for\nit. ``user`` is unused; every route resolves the current user.",
+        "description": "Restart ``netkeep serve`` so settings it reads at startup apply, never in the\nmiddle of work: ``409`` names what is running, unless ``when_idle`` asks to wait for\nit. The local owner only: ``owner`` is otherwise unused.",
         "operationId": "restart_serve",
         "requestBody": {
           "content": {
@@ -25151,6 +25154,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "Anyone but the local owner account"
           },
           "409": {
             "description": "This process cannot restart, config.toml does not load, or something is running (a LinkedIn run, the browser, a task, a campaign send)"

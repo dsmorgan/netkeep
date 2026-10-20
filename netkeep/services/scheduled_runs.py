@@ -59,7 +59,6 @@ from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from typing import Final
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy.orm import Session, sessionmaker
 
 from netkeep.config import LinkedInSettings, Settings
@@ -86,6 +85,7 @@ from netkeep.services.scheduler import (
     AUTO_SEND_SPACING_MIN,
     SERVED_SCHEDULES,
     ActiveHoursProvider,
+    HeartbeatScheduler,
     JobContext,
     JobHandler,
     JobKind,
@@ -492,7 +492,7 @@ class ServeScheduler:
     """What the app keeps while it runs: the executor, and the started scheduler."""
 
     executor: runs.RunExecutor
-    scheduler: AsyncIOScheduler
+    scheduler: HeartbeatScheduler
 
     def stop(self) -> None:
         if self.scheduler.running:

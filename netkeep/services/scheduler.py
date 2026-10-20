@@ -1813,6 +1813,37 @@ def offer_again(
 # --- production wiring: build, never start -----------------------------------
 
 HEARTBEAT_JOB_ID: Final = "netkeep-scheduler-heartbeat"
+
+
+class HeartbeatScheduler(AsyncIOScheduler):  # type: ignore[misc]  # apscheduler is untyped
+    """The scheduler :func:`build_scheduler` returns: an :class:`AsyncIOScheduler` that
+    counts its heartbeats in flight (#707).
+
+    ``pause()`` stops new heartbeats but not one already running, and a heartbeat claims
+    a fire, records its run and waits on it before the task runner or the run row shows
+    anything. So a restart waiting for idle reads :attr:`busy` too
+    (:func:`netkeep.services.restart_gate.live_busy`): a restart never cuts off a fire
+    between its claim and its record, a prefill or an auto-send part way, or the due time
+    the heartbeat writes after the run."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._in_flight = 0
+
+    @property
+    def busy(self) -> bool:
+        """A heartbeat is running now."""
+        return self._in_flight > 0
+
+    async def counted(self, heartbeat: Callable[[], Awaitable[None]]) -> None:
+        """Run ``heartbeat``, counted in :attr:`busy` until it returns or raises."""
+        self._in_flight += 1
+        try:
+            await heartbeat()
+        finally:
+            self._in_flight -= 1
+
+
 DEFAULT_HEARTBEAT_INTERVAL: Final = timedelta(minutes=1)
 
 AccountsProvider = Callable[[], Iterable[tuple[User, int]]]
@@ -1842,8 +1873,8 @@ def build_scheduler(
     rng: random.Random | None = None,
     clock: Callable[[], datetime] = utcnow,
     kind_off: KindOffProvider | None = None,
-) -> AsyncIOScheduler:
-    """Build (never start) an :class:`AsyncIOScheduler` with one heartbeat job.
+) -> HeartbeatScheduler:
+    """Build (never start) a :class:`HeartbeatScheduler` with one heartbeat job.
 
     Deliberately **one** APScheduler job, not one per ``(account, kind)`` the
     way igtracker parks per-fire ``DateTrigger`` one-shots: ``linkedin_account``
@@ -1878,7 +1909,7 @@ def build_scheduler(
     registry = dict(registry) if registry is not None else default_registry()
     schedules = dict(schedules) if schedules is not None else dict(DEFAULT_SCHEDULES)
     jitter = rng if rng is not None else random.Random()  # noqa: S311 -- pacing jitter, not crypto
-    scheduler = AsyncIOScheduler()
+    scheduler = HeartbeatScheduler()
 
     # Users whose schedule could not be established because their window was unreadable
     # (#464). Their stored due times are from an earlier run of serve and have had no
@@ -1929,7 +1960,7 @@ def build_scheduler(
             ready.append((user, account_id))
         return ready
 
-    async def _heartbeat() -> None:
+    async def _poll() -> None:
         # The accounts are read off the event loop too (#259); poll_once runs each
         # of its sessions there.
         await poll_once(
@@ -1947,6 +1978,10 @@ def build_scheduler(
             clock=clock,
             kind_off=kind_off,
         )
+
+    async def _heartbeat() -> None:
+        # Counted from its first await, so a restart gate sees it (#707).
+        await scheduler.counted(_poll)
 
     scheduler.add_job(
         _heartbeat,
