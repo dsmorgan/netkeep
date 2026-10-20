@@ -114,15 +114,11 @@ fi
 db="$data_dir/$DB_NAME"
 archives="$data_dir/$ARCHIVES_DIRNAME"
 
-# The netkeep that --restore hands the restore to: this checkout's venv, else the one
-# on PATH. Empty when there is none.
-repo=$(cd "$(dirname "$0")/.." && pwd -P)
-netkeep_bin=
-if [ -x "$repo/.venv/bin/netkeep" ]; then
-  netkeep_bin="$repo/.venv/bin/netkeep"
-elif command -v netkeep >/dev/null 2>&1; then
-  netkeep_bin=$(command -v netkeep)
-fi
+# The netkeep that --restore hands the restore to: this checkout's venv, and only that.
+# A netkeep found on PATH could be an older install, or another checkout's, that does
+# not clear auto-send (#700 review). CDPATH is cleared so cd prints nothing extra.
+repo=$(CDPATH='' cd -P -- "$(dirname "$0")/.." && pwd -P)
+netkeep_bin="$repo/.venv/bin/netkeep"
 
 run() {
   if [ "$dry_run" = yes ]; then
@@ -454,17 +450,20 @@ case $mode in
     # One restore path (#700): netkeep restore does the write, so a restore from here
     # gets the same serve lock, migration check, auto-send clear (#598) and db upgrade
     # as one from the CLI. A plain cp skipped all four.
-    [ -n "$netkeep_bin" ] || die "netkeep is needed to restore; run make install first"
+    [ -x "$netkeep_bin" ] || die "netkeep is needed to restore, and $netkeep_bin is missing; run make install in $repo first"
     verified "$source" || die "$source did not pass SQLite's quick_check; not restoring it"
     refuse_if_in_use
     target=$(archive_path)
     printf 'restoring: %s (%s)\n' "$source" "$(human_size "$source")"
+    printf 'netkeep:   %s\n' "$netkeep_bin"
     if [ -f "$db" ]; then
       printf 'the database in place is archived first, to %s\n' "$target"
     fi
     confirm "Replace $db with this archive?"
     refuse_if_in_use
+    had_db=no
     if [ -f "$db" ]; then
+      had_db=yes
       archive_db
     else
       # Only stray sidecars: a -wal left next to the new file could be replayed onto it.
@@ -474,8 +473,23 @@ case $mode in
       printf '  would: NETKEEP_DATA=%s %s restore %s\n' "$data_dir" "$netkeep_bin" "$source"
       exit 0
     fi
-    NETKEEP_DATA=$data_dir "$netkeep_bin" restore "$source" ||
-      die "netkeep restore failed; see above"
+    if ! NETKEEP_DATA=$data_dir "$netkeep_bin" restore "$source"; then
+      if [ "$had_db" = yes ]; then
+        die "netkeep restore failed (see above). The database in place was left as it was; a copy of it is in $archives (see --list)."
+      fi
+      die "netkeep restore failed (see above). There was no database in place, and none was put there."
+    fi
+    # Fail closed (#700 review): whatever netkeep ran, a restored database must not
+    # carry the Settings-page auto-send. Only a person's confirmation turns it on. Not
+    # -readonly: db upgrade left the file in WAL mode, which a read-only open can't
+    # read without its -shm; the -f check keeps sqlite3 from creating an empty file.
+    [ -f "$db" ] || die "netkeep restore put no database at $db"
+    auto_send=$(sqlite3 "$db" \
+      "SELECT count(*) FROM settings_kv WHERE key = 'config.campaigns.linkedin_auto_send'") ||
+      die "could not check $db for LinkedIn auto-send after the restore. Don't start netkeep serve until you have checked it in Settings."
+    if [ "$auto_send" != 0 ]; then
+      die "the restored $db still has the Settings-page LinkedIn auto-send setting, which netkeep restore should have removed. Don't start netkeep serve: restore again with this checkout's netkeep (make install first), or restore the previous database from $archives (see --list)."
+    fi
     printf '\nStart the server:\n'
     printf '  make serve\n'
     ;;
