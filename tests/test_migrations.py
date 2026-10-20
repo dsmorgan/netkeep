@@ -3743,9 +3743,9 @@ def test_0047_drops_the_retired_review_schema_and_downgrades_with_it_empty(
             text(
                 "INSERT INTO campaign_review_previews (user_id, campaign_id, enrollment_id,"
                 " sampled, viewed_at, created_at, updated_at)"
-                " VALUES (1, 1, 1, 1, :t, :t, :t)"
+                " VALUES (1, 1, 1, :sampled, :t, :t, :t)"
             ),
-            {"t": STAMP},
+            {"sampled": True, "t": STAMP},
         )
     migrations.upgrade(migration_engine, "0047")
     inspector = inspect(migration_engine)

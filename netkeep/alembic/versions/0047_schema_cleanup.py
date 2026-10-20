@@ -20,11 +20,14 @@ Create Date: 2026-10-20 00:00:00 UTC
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from typing import Final
 
 import sqlalchemy as sa
 from alembic import op
+
+logger = logging.getLogger("alembic.runtime.migration")
 
 revision: str = "0047"
 down_revision: str | None = "0046"
@@ -44,6 +47,18 @@ GUARD_COLUMNS: Final = (
 
 
 def upgrade() -> None:
+    dated = (
+        op.get_bind()
+        .execute(
+            sa.text(
+                "SELECT COUNT(*) FROM messages"
+                " WHERE status IN ('sent', 'received') AND sent_at IS NULL"
+            )
+        )
+        .scalar()
+    )
+    if dated:
+        logger.warning("0047: dating %s sent or received messages that had no sent_at", dated)
     op.execute(
         "UPDATE messages SET sent_at = updated_at"
         " WHERE status IN ('sent', 'received') AND sent_at IS NULL"
