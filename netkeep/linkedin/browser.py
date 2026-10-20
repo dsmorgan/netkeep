@@ -20,6 +20,7 @@ Nothing here imports the ORM or opens a session (spec 9.10, ADR 0005).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import enum
 import inspect
 import json
@@ -2705,8 +2706,10 @@ class PlaywrightCdpConnector:
             ) from exc
         except BaseException:
             # A cancel, Ctrl-C or SystemExit is not an unreachable browser (#697): the
-            # run is recorded as aborted, not failed, so it goes on as itself.
-            await playwright.stop()
+            # run is recorded as aborted, not failed, so it goes on as itself. A stop that
+            # fails must not replace it.
+            with contextlib.suppress(Exception):
+                await playwright.stop()
             raise
         try:
             # On this same connection, so the pid belongs to the browser the run will
