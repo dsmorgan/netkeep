@@ -1373,6 +1373,30 @@ def test_a_draft_made_before_the_rename_and_scheduled_stays_drafted(drafts: Mail
         )
 
 
+def test_a_pre_rename_draft_back_in_drafts_under_a_new_id_is_followed(drafts: Mail) -> None:
+    """#721: a draft netkeeper made before the rename, sent with Schedule send and then
+    canceled, comes back to Drafts under a new draft id. The Drafts search finds it by
+    its old seed's Message-ID: it is followed under the new ids, never marked missing,
+    discarded, or its enrollment removed."""
+    enrollment_id = drafts.enroll()
+    drafts.tick(sender=PreRename(drafts, drafts.sender))
+    [message] = drafts.messages(enrollment_id)
+    assert message.gmail_draft_id is not None
+    scheduled = drafts.gmail.schedule_draft(message.gmail_draft_id)
+    drafts.tick(NOW + timedelta(hours=1))
+    back = drafts.gmail.cancel_scheduled(scheduled)
+    assert back.id != message.gmail_draft_id
+    stored = drafts.gmail.get_message(back.message.id, purpose="test")
+    assert stored.header("Message-ID") == pre_rename_message_id(drafts, message.id)
+
+    for hours in (2, 3, 4):
+        drafts.tick(NOW + timedelta(hours=hours))
+        [message] = drafts.messages(enrollment_id)
+        assert (message.status, message.error) == (MessageStatus.DRAFTED, None)
+        assert (message.gmail_draft_id, message.gmail_message_id) == (back.id, back.message.id)
+    assert drafts.enrollment(enrollment_id).status is EnrollmentStatus.ACTIVE
+
+
 @pytest.mark.parametrize("delivered", [True, False])
 def test_a_removed_enrollments_leftover_is_reconciled_not_discarded_blindly(
     mail: Mail, delivered: bool
