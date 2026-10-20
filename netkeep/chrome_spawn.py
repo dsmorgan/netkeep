@@ -129,7 +129,8 @@ class ChromeLaunch:
 
     ``app_url`` is the UI's connect link (:func:`netkeep.services.local_api_key.connect_url`),
     and ``ui_port`` the port ``serve`` listens on, which that link must name.
-    ``first_run`` adds LinkedIn's sign-in page; only setup's first-run button sets it.
+    ``first_run`` adds LinkedIn's sign-in page; only setup's first-run button and
+    ``netkeep setup`` (#684) set it.
     """
 
     port: int

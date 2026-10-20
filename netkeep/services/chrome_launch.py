@@ -12,7 +12,8 @@ answers 503.
 both go through :func:`submit_launch`: one task named :data:`LAUNCH_TASK` at a time,
 whose result is published as :data:`LAUNCH_EVENT`. So a press while the startup launch
 is still settling answers 409, and nothing launches twice. Only setup's first-run button
-passes ``first_run=True``.
+passes ``first_run=True`` here; ``netkeep setup`` (#684), its equivalent after install,
+passes it to ``netkeep open``'s launcher.
 """
 
 from __future__ import annotations

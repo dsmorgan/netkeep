@@ -37,6 +37,7 @@ import subprocess
 import sys
 import threading
 import time
+import tomllib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -126,16 +127,67 @@ def legacy_label_for(data: Path) -> str:
     return f"{LEGACY_LABEL_BASE}.{paths.data_dir_digest(data)}"
 
 
-def installed_executable() -> Path | None:
-    """The ``netkeep`` that belongs to the running interpreter: the one beside it in
-    the environment's ``bin`` (a uv tool, or a checkout's ``.venv``), else the first on
-    ``PATH``. Not resolved, so a symlink the installer keeps stable stays the plist's
-    target across upgrades."""
-    beside = Path(sys.executable).parent / "netkeep"
-    if beside.is_file() and os.access(beside, os.X_OK):
+UV_RECEIPT: Final = "uv-receipt.toml"
+"""What ``uv tool install`` writes into a tool's environment: its entry points, with the
+path of each one's shim in uv's bin folder."""
+
+
+def installed_executable(*, prefix: Path | None = None, python: Path | None = None) -> Path | None:
+    """The ``netkeep`` that belongs to the running interpreter (``python``, by default
+    ``sys.executable``, in the environment at ``prefix``, by default ``sys.prefix``).
+
+    Under ``uv tool install`` that is the shim uv made in its bin folder, such as
+    ``~/.local/bin/netkeep`` (:func:`tool_shim`), never the tool environment's own
+    ``bin``. Otherwise it is the one beside the interpreter (a checkout's ``.venv``),
+    else the first on ``PATH``. Not resolved, so a symlink the installer keeps stable
+    stays the plist's target across upgrades."""
+    environment = Path(sys.prefix) if prefix is None else prefix
+    interpreter = Path(sys.executable) if python is None else python
+    beside = interpreter.parent / "netkeep"
+    shim = tool_shim(environment, beside)
+    if shim is not None:
+        return shim
+    if _runnable(beside):
         return beside
     found = shutil.which("netkeep")
     return Path(found) if found else None
+
+
+def tool_shim(environment: Path, beside: Path) -> Path | None:
+    """The shim ``uv tool install`` made for netkeep, when ``environment`` is a uv tool's.
+
+    Read from the ``install-path`` of the ``netkeep`` entry point in the environment's
+    :data:`UV_RECEIPT`, which follows ``UV_TOOL_BIN_DIR`` and the XDG folders as uv did
+    at install time. It counts only when it is there and is the same file as ``beside``
+    (uv symlinks it), so a shim since replaced by another program is never the target.
+    """
+    try:
+        receipt = tomllib.loads((environment / UV_RECEIPT).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        return None
+    tool = receipt.get("tool")
+    entrypoints = tool.get("entrypoints") if isinstance(tool, dict) else None
+    for entry in entrypoints if isinstance(entrypoints, list) else ():
+        if not isinstance(entry, dict) or entry.get("name") != "netkeep":
+            continue
+        install_path = entry.get("install-path")
+        if not isinstance(install_path, str) or not install_path:
+            continue
+        shim = Path(install_path)
+        if _runnable(shim) and _runnable(beside) and _same_file(shim, beside):
+            return shim
+    return None
+
+
+def _runnable(path: Path) -> bool:
+    return path.is_file() and os.access(path, os.X_OK)
+
+
+def _same_file(left: Path, right: Path) -> bool:
+    try:
+        return left.samefile(right)
+    except OSError:
+        return False
 
 
 def _is_macos() -> bool:
@@ -247,6 +299,21 @@ class LoginItem:
     @property
     def plist_path(self) -> Path:
         return self._agents_dir / f"{self.label}.plist"
+
+    @property
+    def data(self) -> Path:
+        """The data directory this agent serves, resolved."""
+        return self._data
+
+    @property
+    def executable(self) -> Path | None:
+        """The ``netkeep`` a plist written now runs (:func:`installed_executable`)."""
+        return self._executable
+
+    def serve_address(self) -> tuple[str | None, int | None]:
+        """The ``--host`` and ``--port`` the agent's ``serve`` runs with, or ``None`` for
+        each one it leaves to the config. ``netkeep setup`` asks it where to look."""
+        return self._kept_arguments(self._adoptable_legacy())
 
     @property
     def _domain(self) -> str:
