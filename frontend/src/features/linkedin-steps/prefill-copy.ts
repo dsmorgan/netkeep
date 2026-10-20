@@ -40,7 +40,7 @@ export const AUTO_UNKNOWN =
 
 /** An auto-send stopped before it opened anything: the step is given back, still due. */
 export const AUTO_STAYS_DUE =
-  'Nothing was opened or typed. The step stays due, and auto-send will try it again on its own.'
+  "Nothing was opened or typed. The step is back in the queue. Auto-send tries it again if it's still on."
 
 /** The title of an auto-send that stopped before it sent. */
 export const AUTO_STOPPED = 'The auto-send stopped.'
