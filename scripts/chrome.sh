@@ -406,12 +406,14 @@ else
   mkdir -p "$profile"
 fi
 
-# The same two flags `netkeep browser launch` prints; nothing else, so this
-# Chrome looks like any other.
+# The same flags `netkeep browser launch` prints, in its order; nothing else, so
+# this Chrome looks like any other. --no-first-run and --no-default-browser-check
+# skip Chrome's first-run dialog on a fresh profile (#733).
 case $(uname -s) in
   Darwin)
     set -- open -na "Google Chrome" --args \
-      "--remote-debugging-port=$port" "--user-data-dir=$profile"
+      "--remote-debugging-port=$port" --no-first-run --no-default-browser-check \
+      "--user-data-dir=$profile"
     ;;
   *)
     chrome_bin=
@@ -422,7 +424,8 @@ case $(uname -s) in
       [ "$dry_run" = yes ] || die "no Chrome found (looked for google-chrome, chromium)"
       chrome_bin=google-chrome
     fi
-    set -- "$chrome_bin" "--remote-debugging-port=$port" "--user-data-dir=$profile"
+    set -- "$chrome_bin" "--remote-debugging-port=$port" --no-first-run \
+      --no-default-browser-check "--user-data-dir=$profile"
     ;;
 esac
 

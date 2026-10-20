@@ -77,9 +77,31 @@ def test_the_arguments_are_the_printed_flags_then_the_ui(
 ) -> None:
     profile = tmp_path / "data dir" / "chrome-profile"  # a space survives as one argument
     flags = _printed_flags(monkeypatch, platform, profile)
-    assert flags == [f"--remote-debugging-port={PORT}", f"--user-data-dir={profile}"]
+    # #733: the two first-run flags are the only change to this list.
+    assert flags == [
+        f"--remote-debugging-port={PORT}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        f"--user-data-dir={profile}",
+    ]
     argv = chrome_argv(ChromeLaunch(PORT, profile, APP_URL, UI_PORT, platform=platform))
     assert argv == [binary, *flags, f"--app={APP_URL}"]
+
+
+@pytest.mark.parametrize("platform", ["darwin", "linux"])
+@pytest.mark.parametrize("first_run", [False, True])
+def test_the_first_run_dialog_is_skipped_in_print_and_in_launch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, platform: str, first_run: bool
+) -> None:
+    """#733: a fresh profile shows no first-run dialog, whichever way Chrome starts."""
+    flags = _printed_flags(monkeypatch, platform, tmp_path)
+    argv = chrome_argv(
+        ChromeLaunch(PORT, tmp_path, APP_URL, UI_PORT, first_run=first_run, platform=platform)
+    )
+    for flag in ("--no-first-run", "--no-default-browser-check"):
+        assert flag in flags
+        assert argv.count(flag) == 1
+    assert argv[1 : 1 + len(flags)] == flags
 
 
 def test_only_the_first_run_adds_linkedins_sign_in_page(
@@ -99,6 +121,8 @@ def test_nothing_else_is_ever_added(tmp_path: Path) -> None:
         flags = [a for a in argv[1:] if a.startswith("-")]
         assert [f.split("=", 1)[0] for f in flags] == [
             "--remote-debugging-port",
+            "--no-first-run",  # #733: skip the first-run dialog
+            "--no-default-browser-check",  # #733
             "--user-data-dir",
             "--app",
         ]

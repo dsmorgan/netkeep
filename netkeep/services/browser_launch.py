@@ -37,14 +37,27 @@ CHROME_PROFILE_DIRNAME = "chrome-profile"
 #: uses it in place of a port ``cdp_url`` doesn't name (#701).
 DEFAULT_CDP_PORT = 9222
 
+#: The flags that skip Chrome's first-run dialog on a fresh profile (#733), in the
+#: order :func:`chrome_flags` passes and :func:`chrome_launch_command` prints them.
+FIRST_RUN_FLAGS = ("--no-first-run", "--no-default-browser-check")
+
 
 def chrome_flags(port: int, profile: Path) -> list[str]:
     """The flags :func:`chrome_launch_command` prints, as arguments: the launcher's (#636).
 
     ``netkeep.chrome_spawn`` passes exactly these to Chrome's binary, then ``--app``;
     ``tests/test_chrome_spawn.py`` checks them against the printed lines, parsed.
+
+    ``--no-first-run`` and ``--no-default-browser-check`` skip Chrome's first-run dialog
+    (default browser, usage statistics) on a fresh profile (#733). Neither changes what
+    a page can read (``navigator.webdriver``, the user agent), and usage statistics stay
+    off, Chrome's default without consent.
     """
-    return [f"--remote-debugging-port={port}", f"--user-data-dir={profile}"]
+    return [
+        f"--remote-debugging-port={port}",
+        *FIRST_RUN_FLAGS,
+        f"--user-data-dir={profile}",
+    ]
 
 
 def chrome_launch_command(port: int, profile: Path) -> list[str]:
@@ -56,7 +69,12 @@ def chrome_launch_command(port: int, profile: Path) -> list[str]:
     """
     platform: str = sys.platform
     opener = 'open -na "Google Chrome" --args \\' if platform == "darwin" else "google-chrome \\"
-    return [opener, f"  --remote-debugging-port={port} \\", f'  --user-data-dir="{profile}"']
+    return [
+        opener,
+        f"  --remote-debugging-port={port} \\",
+        *(f"  {flag} \\" for flag in FIRST_RUN_FLAGS),
+        f'  --user-data-dir="{profile}"',
+    ]
 
 
 def no_port_note(cdp_url: str) -> str:

@@ -443,8 +443,12 @@ Chrome setup, wrapped by `netkeep browser launch`:
 ```sh
 open -na "Google Chrome" --args \
   --remote-debugging-port=9222 \
+  --no-first-run \
+  --no-default-browser-check \
   --user-data-dir="$HOME/Library/Application Support/netkeep/chrome-profile"
 ```
+
+`--no-first-run` and `--no-default-browser-check` skip Chrome's first-run dialog on a fresh profile (#733). Neither changes what a page can read, such as `navigator.webdriver` or the user agent.
 
 Chrome 136 and later refuse `--remote-debugging-port` on the default profile directory, so a dedicated profile is mandatory. You log in to LinkedIn in that profile once. LinkedIn sees one new device at setup and then a stable one. Use that profile for your own LinkedIn browsing too, so organic activity and sidecar activity share a session.
 

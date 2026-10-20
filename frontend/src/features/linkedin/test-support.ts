@@ -47,6 +47,8 @@ export const BROWSER_LAUNCH: BrowserLaunch = {
   launch_command: [
     'open -na "Google Chrome" --args \\',
     '  --remote-debugging-port=9222 \\',
+    '  --no-first-run \\',
+    '  --no-default-browser-check \\',
     '  --user-data-dir="/tmp/netkeep-data-test/chrome-profile"',
   ],
   remote_host_note: null,
