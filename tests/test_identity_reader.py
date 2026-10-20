@@ -966,6 +966,28 @@ async def test_a_cancel_during_the_attach_is_not_an_unreachable_browser(
     assert fake.stopped == 1
 
 
+async def test_a_stop_that_fails_during_a_cancel_does_not_replace_the_cancel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#697 review: the cancel still goes on as itself when stopping the driver fails."""
+    import playwright.async_api
+
+    class _StopFails(_NoWindowsPlaywright):
+        async def connect_over_cdp(self, cdp_url: str) -> object:
+            raise asyncio.CancelledError()
+
+        async def stop(self) -> None:
+            self.stopped += 1
+            raise RuntimeError("the driver had already gone")
+
+    fake = _StopFails()
+    monkeypatch.setattr(PlaywrightCdpConnector, "connect", REAL_CONNECT)
+    monkeypatch.setattr(playwright.async_api, "async_playwright", fake)
+    with pytest.raises(asyncio.CancelledError):
+        await PlaywrightCdpConnector().connect("http://127.0.0.1:9333")
+    assert fake.stopped == 1
+
+
 def test_the_reader_guard_is_in_place() -> None:
     """``tests/conftest.py`` replaced the reader for this test, as for every other."""
     assert CdpIdentityReader.read is not REAL_READ
