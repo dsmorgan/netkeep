@@ -245,14 +245,20 @@ class UpdateState:
 
 
 # The compatibility rule across versions (#705). An update runs two versions on one
-# STATE_FILE: the new version's --finish writes it and the old version's --rollback reads
-# it. So the fields below and PHASES are frozen: no version renames, removes, retypes or
-# changes the meaning of one, and tests/test_update.py pins them. A later version may add a
-# field, with a default, that an older version can safely ignore; anything a rollback must
-# honor to stay safe (the scheduler marker, restored) is already here. A key this version
-# doesn't know is kept and written back (UpdateState.carried); a known key of the wrong
-# type, or a phase this version doesn't know, is still refused, and a refusal never
-# restores.
+# STATE_FILE: the old version writes it, the new version's --finish reads and rewrites it,
+# and the old version's --rollback reads it again. So:
+# - The fields below and PHASES are frozen: no version renames, removes, retypes or changes
+#   the meaning of one, and tests/test_update.py pins them. Every one must be present: a
+#   file missing one is refused, so a version that dropped `restored` or `new_version_ran`
+#   stops an older rollback instead of letting it read the unsafe default.
+# - A later version may add a field outside this table. It must be optional when read
+#   (an older version's file lacks it) and safe for an older version to ignore: a key this
+#   version doesn't know is kept and written back (UpdateState.carried), never acted on.
+# - A later version never relies on a new key alone to stop an older rollback from
+#   restoring. To stop one, it writes the scheduler marker, sets `restored`, or uses a
+#   phase older versions refuse.
+# A known key of the wrong type, or a phase this version doesn't know, is refused, and a
+# refusal never restores.
 _STATE_TYPES: Final[dict[str, tuple[type, ...]]] = {
     "from_version": (str,),
     "to_version": (str,),
@@ -270,7 +276,7 @@ _STATE_TYPES: Final[dict[str, tuple[type, ...]]] = {
 
 def read_state(data: Path | None = None) -> UpdateState | None:
     """The update in progress, or ``None``. :class:`UpdateError` for a file that isn't
-    one a netkeep wrote: a field of the wrong type or missing, a version that isn't
+    one a netkeep wrote: a frozen field missing or of the wrong type, a version that isn't
     ``X.Y.Z`` (it goes to ``uv``), or a phase it doesn't know. Keys it doesn't know are
     kept in :attr:`UpdateState.carried` (the rule above :data:`_STATE_TYPES`)."""
     path = update_dir(data) / STATE_FILE
@@ -281,7 +287,7 @@ def read_state(data: Path | None = None) -> UpdateState | None:
     except (OSError, ValueError) as exc:
         raise UpdateError(f"{path} can't be read ({exc}); look at it, then delete it") from exc
     unknown = f"{path} isn't an update netkeep knows; look at it, then delete it"
-    if not isinstance(raw, dict):
+    if not isinstance(raw, dict) or set(_STATE_TYPES) - set(raw):
         raise UpdateError(unknown)
     known = {name: value for name, value in raw.items() if name in _STATE_TYPES}
     carried = {name: value for name, value in raw.items() if name not in _STATE_TYPES}
@@ -332,6 +338,11 @@ def clear_state(data: Path | None = None) -> None:
     directory = update_dir(data)
     (directory / STATE_FILE).unlink(missing_ok=True)
     (directory / SCHEDULER_MARKER).unlink(missing_ok=True)
+    # What a write_atomic killed before its rename left of the files only an update writes.
+    # Never the marker's: a serve may be writing it.
+    for pattern in (f".{STATE_FILE}.*.tmp", ".constraints-*.txt.*.tmp"):
+        for leftover in directory.glob(pattern):
+            leftover.unlink(missing_ok=True)
     sync_directory(directory)
 
 
@@ -430,7 +441,8 @@ def download_constraints(seams: Seams, version: str, data: Path) -> Path:
         )
     target = constraints_path(version, data)
     # Durably, and never half-written: a rollback reinstalls the old version from it.
-    write_atomic(_update_dir_made(data) / target.name, constraints, mode=0o644)
+    _update_dir_made(data)
+    write_atomic(target, constraints, mode=0o644)
     return target
 
 

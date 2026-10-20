@@ -1324,8 +1324,13 @@ def test_read_state_is_strict(tmp_path: Path, change: dict[str, object]) -> None
         update.read_state(tmp_path)
 
 
-@pytest.mark.parametrize("missing", ["from_version", "phase", "login_item_was_on"])
-def test_a_state_missing_a_required_field_is_refused(tmp_path: Path, missing: str) -> None:
+@pytest.mark.parametrize(
+    "missing",
+    ["from_version", "phase", "login_item_was_on", "restored", "new_version_ran", "reason"],
+)
+def test_a_state_missing_a_frozen_field_is_refused(tmp_path: Path, missing: str) -> None:
+    """Every frozen field must be there, defaulted ones too: a state without ``restored``
+    must never read as "not restored yet" and let a second rollback restore."""
     update.write_state(_state(OLD, NEW, tmp_path, None, True, "finishing"), tmp_path)
     path = update.update_dir(tmp_path) / update.STATE_FILE
     raw = json.loads(path.read_text())
@@ -1426,6 +1431,46 @@ def test_unknown_keys_never_let_a_rollback_restore_after_a_scheduler_ran(
     state = world.state()
     assert state is not None and state.phase == "stopped"
     assert state.carried["scheduler_ran"] is False
+
+
+def test_a_rollback_refuses_a_state_without_restored(world: World) -> None:
+    """A newer version that dropped ``restored`` (breaking the frozen rule) stops the
+    older rollback; it never restores a second time on the default."""
+    world.install_login_item(running=False)
+    update.write_state(
+        _state(
+            OLD,
+            NEW,
+            world.data,
+            str(world.backup()),
+            True,
+            "rolling-back",
+            new_version_ran=True,
+            restored=True,
+        ),
+        world.data,
+    )
+    path = update.update_dir(world.data) / update.STATE_FILE
+    raw = json.loads(path.read_text())
+    del raw["restored"]
+    path.write_text(json.dumps(raw))
+    assert update.rollback(world.item(), world.seams(), world.say) == 1
+    assert "isn't an update netkeep knows" in world.text
+    assert world.restored == []
+
+
+def test_clear_state_removes_what_an_interrupted_write_left(tmp_path: Path) -> None:
+    update.write_state(_state(OLD, NEW, tmp_path, None, True, "finishing"), tmp_path)
+    directory = update.update_dir(tmp_path)
+    leftovers = [f".{update.STATE_FILE}.abc123.tmp", f".constraints-{OLD}.txt.def456.tmp"]
+    for name in leftovers:
+        (directory / name).write_text("half")
+    marker_temporary = directory / f".{update.SCHEDULER_MARKER}.ghi789.tmp"
+    marker_temporary.write_text("a serve is writing this")
+    kept = update.constraints_path(OLD, tmp_path)
+    kept.write_text("kept\n")
+    update.clear_state(tmp_path)
+    assert sorted(p.name for p in directory.iterdir()) == sorted([kept.name, marker_temporary.name])
 
 
 def test_unknown_keys_never_let_a_second_rollback_restore(world: World) -> None:
