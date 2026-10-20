@@ -76,7 +76,7 @@ def user_id(session_factory: sessionmaker[Session]) -> int:
 def live_in_a(
     session_factory: sessionmaker[Session], user_id: int, data_dirs: tuple[Path, Path]
 ) -> Iterator[SyncRun]:
-    """A's run, ``running``, with A holding the account's lock (and the legacy one) in A."""
+    """A's run, ``running``, with A holding the account's lock in A."""
     a, _ = data_dirs
     with session_scope(session_factory, write=True) as session:
         user = _user(session, user_id)
@@ -85,20 +85,15 @@ def live_in_a(
         )
         key = activity_lock.account_key(run.linkedin_account_id)
     locks = a / activity_lock.LOCKS_DIRNAME
-    claims = [
-        activity_lock.try_claim(activity_lock.LEGACY_SHARED_KEY, locks),
-        activity_lock.try_claim(key, locks),
-    ]
-    assert all(claim is not None for claim in claims)
+    claim = activity_lock.try_claim(key, locks)
+    assert claim is not None
     try:
         # A sees its own lock held; B, reading its own directory, does not.
         assert activity_lock.inspect(key, locks).held
         assert not activity_lock.inspect(key).held
         yield run
     finally:
-        for claim in claims:
-            assert claim is not None
-            claim.release()
+        claim.release()
 
 
 def _connections_gate(

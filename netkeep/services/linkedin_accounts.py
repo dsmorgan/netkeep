@@ -50,12 +50,7 @@ def ensure_account(session: Session, user: User) -> LinkedInAccount:
 
 
 def local_account_id(session: Session) -> int | None:
-    """The account of the first local user, or ``None`` before there is one. Read-only.
-
-    The account that code older than P2-10 acted for whenever it took the
-    browser lock, whatever its id: the one whose hold also claims the legacy
-    ``browser-local.lock`` (``linkedin.activity_lock.LEGACY_SHARED_KEY``).
-    """
+    """The account of the first local user, or ``None`` before there is one. Read-only."""
     user = local_owner(session)
     if user is None:
         return None

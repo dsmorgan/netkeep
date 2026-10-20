@@ -1082,13 +1082,12 @@ def test_a_lock_that_cannot_be_read_counts_as_held(monkeypatch: pytest.MonkeyPat
         raise PermissionError("locks/ is not readable")
 
     monkeypatch.setattr(activity_lock, "inspect", unreadable)
-    assert runs.lock_held(1, legacy=False)
-    assert runs.lock_held(1, legacy=True)
+    assert runs.lock_held(1)
 
 
-def test_the_legacy_lock_counts_for_the_local_account_only(writer: Session) -> None:
-    """X7, F10: an older process holding ``browser-local.lock`` is running the local
-    user's account, whatever its id; another account is not held by it."""
+def test_only_an_accounts_own_lock_holds_its_runs(writer: Session) -> None:
+    """#710: a run is held by its account's own lock file, whatever the account's id;
+    the pre-P2-10 ``browser-local.lock`` no longer counts for the local account."""
     from netkeep.linkedin import activity_lock
     from netkeep.models import UserKind
 
@@ -1096,19 +1095,25 @@ def test_the_legacy_lock_counts_for_the_local_account_only(writer: Session) -> N
     other_account = ensure_account(writer, hosted).id  # id 1
     local = factories.make_user(writer)
     local_account = ensure_account(writer, local).id
-    old = activity_lock.try_claim(activity_lock.LEGACY_SHARED_KEY)
-    assert old is not None
+    left = runs.create_run(
+        writer, local, SyncRunKind.ENRICH, trigger=SyncRunTrigger.MANUAL, now=NOW
+    )
+    legacy = activity_lock.try_claim("local")
+    assert legacy is not None
+    try:
+        assert not runs.browser_held_for(writer)(local_account)
+    finally:
+        legacy.release()
+    claim = activity_lock.try_claim(activity_lock.account_key(local_account))
+    assert claim is not None
     try:
         held = runs.browser_held_for(writer)
         assert held(local_account)
         assert not held(other_account)
-        left = runs.create_run(
-            writer, local, SyncRunKind.ENRICH, trigger=SyncRunTrigger.MANUAL, now=NOW
-        )
         assert runs.fail_interrupted_runs(writer, now=NOW + runs.STALE_AFTER) == 0
         assert left.status is SyncRunStatus.RUNNING
     finally:
-        old.release()
+        claim.release()
     assert runs.fail_interrupted_runs(writer, now=NOW + runs.STALE_AFTER) == 1
 
 

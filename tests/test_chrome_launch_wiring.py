@@ -550,7 +550,7 @@ async def test_a_launch_that_raises_still_reports_failed(
     assert "RuntimeError" in event.data["message"]
 
 
-async def test_a_busy_legacy_lock_never_trusts_a_note_left_on_the_free_account_lock(
+async def test_a_busy_hold_never_trusts_a_note_left_on_the_free_account_lock(
     tmp_path: Path,
 ) -> None:
     key = activity_lock.SINGLE_ACCOUNT_KEY
@@ -559,17 +559,13 @@ async def test_a_busy_legacy_lock_never_trusts_a_note_left_on_the_free_account_l
     activity_lock.lock_path(key, tmp_path).write_text(
         '{"pid": 1, "command": "netkeep serve", "browser_pid": 4242}'
     )
-    legacy = activity_lock.try_claim(activity_lock.LEGACY_SHARED_KEY, tmp_path)
-    assert legacy is not None
+    # Busy without the file lock: another coroutine in this process is mid-hold.
+    locks = ActivityLocks(tmp_path)
+    await locks.lock_for(key).acquire()
     try:
-        probe = await launcher_probe(
-            CDP_URL,
-            locks=ActivityLocks(tmp_path, legacy_partner=key),
-            account=key,
-            reader=_FakeReader(),
-        )
+        probe = await launcher_probe(CDP_URL, locks=locks, account=key, reader=_FakeReader())
     finally:
-        legacy.release()
+        locks.lock_for(key).release()
     assert probe == PortProbe(busy=True, verified_pid=None)
 
 

@@ -814,10 +814,9 @@ def serve_extractor(
     """The extractor ``netkeep serve`` hands the app: a worker on the one attach provider.
 
     ``provider`` defaults to :class:`~netkeep.linkedin.browser.AttachBrowserProvider`
-    on ``linkedin.cdp_url``, built once the app has its database, so the
-    legacy-lock co-claim (#169 F) goes with the local user's account whatever its
-    id (#175 review, F10), and the address is the one in force for the local user:
-    the file's, else the Settings page's (#597). It is read here only, so a change
+    on ``linkedin.cdp_url``, built once the app has its database, so the address
+    is the one in force for the local user: the file's, else the Settings page's
+    (#597). It is read here only, so a change
     applies at serve's next start. Building it attaches to nothing; the provider only
     connects inside a run, and a run on a disarmed account is never scheduled.
     """
@@ -826,10 +825,8 @@ def serve_extractor(
         chosen = provider
         if chosen is None:
             with session_scope(factory) as session:
-                local = local_account_id(session)
                 cdp_url = _local_cdp_url(session, settings)
-            partner = activity_lock.SINGLE_ACCOUNT_KEY if local is None else account_key(local)
-            chosen = AttachBrowserProvider(cdp_url, locks=ActivityLocks(legacy_partner=partner))
+            chosen = AttachBrowserProvider(cdp_url)
         return BrowserWorker(
             chosen, factory, settings.linkedin, bus=bus, campaign_settings=settings
         )
@@ -927,8 +924,8 @@ async def launcher_probe(
                 return PortProbe(busy=False)
             return PortProbe(busy=False, browser_pid=found.pid, fronted=found.fronted)
     except BrowserBusy:
-        # Only the account's own lock's note, and only while it's held: a busy legacy
-        # lock, or a note a crash left on a free lock, verifies nothing.
+        # Only the lock's note while it's held: a note a crash left on a free lock
+        # verifies nothing.
         if not activity_lock.inspect(account, locks.directory).held:
             return PortProbe(busy=True)
         holder = activity_lock.read_holder(account, locks.directory)
@@ -981,9 +978,7 @@ def serve_chrome_launcher(app: FastAPI, settings: Settings, ui_base: str) -> Chr
 
     async def probe(url: str, front: UiFront | None) -> PortProbe:
         key = (await off_loop(address))[1]
-        return await launcher_probe(
-            url, locks=ActivityLocks(legacy_partner=key), account=key, front=front
-        )
+        return await launcher_probe(url, locks=ActivityLocks(), account=key, front=front)
 
     def app_url() -> str:
         held: local_api_key.LocalApiKey = app.state.local_api_key

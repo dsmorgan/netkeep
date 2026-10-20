@@ -107,11 +107,7 @@ from netkeep.models import (
 )
 from netkeep.scoping import get_scoped, scoped, scoped_count, scoped_update
 from netkeep.services import heat as heat_service
-from netkeep.services.linkedin_accounts import (
-    ensure_account,
-    local_account_id,
-    scheduled_runs_armed,
-)
+from netkeep.services.linkedin_accounts import ensure_account, scheduled_runs_armed
 from netkeep.services.linkedin_session import session_flag
 from netkeep.services.settings_kv import delete_setting, get_setting, set_setting
 
@@ -199,26 +195,28 @@ RUNNER_ID_LENGTH: Final = 32
 BrowserHeld = Callable[[int], bool]
 
 
-def lock_held(account_id: int, *, legacy: bool) -> bool:
-    """Whether any process holds ``account_id``'s browser lock (and, for the local
-    user's account, ``legacy``, the pre-P2-10 ``browser-local.lock``). Never attaches.
+def lock_held(account_id: int) -> bool:
+    """Whether any process holds ``account_id``'s browser lock. Never attaches.
 
-    Reads the lock files with a shared peek that is dropped at once. When a lock
+    Reads the lock file with a shared peek that is dropped at once. When the lock
     cannot be inspected at all the answer is "held": a run nobody can prove is
     over is left alone rather than failed under a process that may be running it.
     """
     try:
-        if activity_lock.inspect(activity_lock.account_key(account_id)).held:
-            return True
-        return legacy and activity_lock.inspect(activity_lock.LEGACY_SHARED_KEY).held
+        return activity_lock.inspect(activity_lock.account_key(account_id)).held
     except OSError:
         return True
 
 
 def browser_held_for(session: Session) -> BrowserHeld:
-    """:func:`lock_held` for this database: the legacy lock counts for the local account."""
-    local = local_account_id(session)
-    return lambda account_id: lock_held(account_id, legacy=account_id == local)
+    """The lock view for this database's runs: :func:`lock_held`.
+
+    ``session`` is no longer read: it named the local account, whose hold also
+    claimed the legacy ``browser-local.lock`` until #710 removed that. The signature
+    stays for its callers and their test seams.
+    """
+    del session
+    return lock_held
 
 
 def any_browser_lock_held(

@@ -215,6 +215,32 @@ def test_preflight_finding_no_session_leaves_a_standing_logged_out_flag_alone(
 # --- F4: preflight never requires a database, and never creates one -------------
 
 
+def test_preflight_builds_its_provider_with_the_one_provider_helper(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """#710: preflight's provider comes from ``_provider(settings)``, like every other
+    command's, not from a constructor call of its own."""
+    monkeypatch.setenv("NETKEEP_DATA", str(tmp_path / "data"))
+    monkeypatch.delenv("NETKEEP_DATABASE_URL", raising=False)
+
+    def not_this_way(*args: object, **kwargs: object) -> None:
+        raise AssertionError("preflight built its provider without _provider")
+
+    built: list[Settings] = []
+
+    def provider(settings: Settings) -> object:
+        built.append(settings)
+        return make_provider()
+
+    monkeypatch.setattr("netkeep.cli.AttachBrowserProvider", not_this_way)
+    monkeypatch.setattr("netkeep.cli._provider", provider)
+
+    result = CliRunner().invoke(cli, ["preflight"])
+
+    assert result.exit_code == 0, result.output
+    assert len(built) == 1
+
+
 def test_preflight_with_no_database_at_all_still_prints_the_report(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

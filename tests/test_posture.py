@@ -413,7 +413,7 @@ def _held(
         )
     return activity_lock.LockState(
         account=activity_lock.SINGLE_ACCOUNT_KEY,
-        path=Path("/nonexistent/locks/browser-local.lock"),
+        path=Path("/nonexistent/locks/browser-account-1.lock"),
         held=True,
         holder=holder,
     )

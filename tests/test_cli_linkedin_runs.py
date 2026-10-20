@@ -655,8 +655,6 @@ def test_the_lock_key_is_the_local_users_account(cli_db: sessionmaker[Session]) 
     from netkeep.linkedin.activity_lock import account_key
 
     assert cli_module._browser_lock_key() == account_key(account)
-    provider = cli_module._provider(Settings())
-    assert provider.locks.legacy_partner == account_key(account)
 
 
 # --- #324: pause a run, pause the schedule ------------------------------------------------

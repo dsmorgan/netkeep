@@ -612,9 +612,7 @@ def _open_launcher(cdp_url: str, base: str, key: str) -> ChromeLauncher:
 
     async def probe(url: str, front: UiFront | None) -> PortProbe:
         account = _browser_lock_key()
-        return await launcher_probe(
-            url, locks=ActivityLocks(legacy_partner=account), account=account, front=front
-        )
+        return await launcher_probe(url, locks=ActivityLocks(), account=account, front=front)
 
     ui_port = configured_port(base)
     return ChromeLauncher(
@@ -1196,7 +1194,7 @@ def preflight(ctx: typer.Context) -> None:
     """
     state = ctx.ensure_object(CliState)
     settings = _load_settings_or_exit(state)
-    provider = AttachBrowserProvider(settings.linkedin.cdp_url)
+    provider = _provider(settings)
     report = asyncio.run(run_preflight(provider, _browser_lock_key()))
     for line in _clear_session_flag_after_login(report):
         typer.echo(line)
@@ -1707,14 +1705,8 @@ def _browser_lock_key() -> str:
 
 
 def _provider(settings: Settings) -> AttachBrowserProvider:
-    """The one provider there is, pointed at the configured debug port (ADR 0002).
-
-    Its lock registry co-claims the legacy lock with the local user's account
-    (#169 F, #175 review F10), the same account `_browser_lock_key` names.
-    """
-    return AttachBrowserProvider(
-        settings.linkedin.cdp_url, locks=ActivityLocks(legacy_partner=_browser_lock_key())
-    )
+    """The one provider there is, pointed at the configured debug port (ADR 0002)."""
+    return AttachBrowserProvider(settings.linkedin.cdp_url)
 
 
 @app.command("simulate")
