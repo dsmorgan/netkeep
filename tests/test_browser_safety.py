@@ -3334,6 +3334,11 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
                             add(path, where, f"socket.{name}")
                     elif node.module in SOCKET_MODULES and alias.name in SOCKET_TYPES:
                         add(path, where, f"socket.{alias.name}")
+                    elif alias.name in SOCKET_MODULES | SOCKET_TYPES:
+                        # #723 re-review: a socket module, or a socket type, imported
+                        # from a module that re-exports it (``from ssl import socket``),
+                        # the same as the attribute read ``ssl.socket``.
+                        add(path, where, "socket.socket")
             elif isinstance(node, ast.Call):
                 for arg in _attribute_name_arguments(node):
                     if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
@@ -3834,6 +3839,16 @@ def test_the_socket_module_pin_catches_a_new_reach(line: str) -> None:
     assert socket_reaches(sources) != ALLOWED_SOCKET_REACHES
 
 
+def test_the_socket_module_pin_catches_a_held_module_where_socket_is_imported() -> None:
+    """#723 re-review: no new import, only the module handed on under another name, in
+    a file that already imports it; only the bare read gives it away."""
+    sources = package_sources()
+    planted = PACKAGE / "chrome_spawn.py"
+    sources[planted] += "\n\ndef _sneaky():\n    s_ = socket\n    return s_\n"
+    assert raw_connections(sources) == ALLOWED_RAW_CONNECTIONS
+    assert socket_reaches(sources) != ALLOWED_SOCKET_REACHES
+
+
 @pytest.mark.parametrize(
     "line",
     [
@@ -3841,6 +3856,10 @@ def test_the_socket_module_pin_catches_a_new_reach(line: str) -> None:
         "import ssl\nmodule = ssl.socket\n",
         "import ssl\nmodule = getattr(ssl, 'socket')\n",
         "import ssl\nmade = ssl._socket.socket()\n",
+        # #723 re-review: the same re-exports, imported by name.
+        "from ssl import socket as S_\n",
+        "from ssl import _socket as m_\n",
+        "from asyncio.base_events import socket as m_\n",
     ],
 )
 def test_the_raw_connection_pin_catches_a_reexported_socket(line: str) -> None:
