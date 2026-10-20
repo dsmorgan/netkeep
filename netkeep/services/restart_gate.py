@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from typing import Final, Literal, Protocol, runtime_checkable
 
@@ -51,6 +52,10 @@ POLL_S: Final = 2.0
 
 CHECK_FAILED: Final = "netkeep could not check what is running (see the log); it looks again"
 """What a restart waits on while its busy check or the quiesce raises (#707)."""
+
+ERROR_LOG_S: Final = 60.0
+"""While the same error repeats, a restart waiting for idle logs it at most this often:
+its traceback once, then one line (#707 review)."""
 
 
 @runtime_checkable
@@ -147,6 +152,7 @@ class RestartGate:
         quiesce: Callable[[], Awaitable[None]],
         resume: Callable[[], None],
         poll_s: float = POLL_S,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self._hook = hook
         self._busy = busy
@@ -156,6 +162,7 @@ class RestartGate:
         self._quiescing: asyncio.Task[None] | None = None
         self._cancelling = False
         self._poll_s = poll_s
+        self._monotonic = monotonic
         self._task: asyncio.Task[None] | None = None
         self.waiting_on: list[str] = []
 
@@ -209,9 +216,14 @@ class RestartGate:
 
     async def _run(self) -> None:
         quiet = False  # the quiesce finished without an error
+        logged: list[str] | None = None  # the reasons last logged
+        failing: type[BaseException] | None = None  # the error the last look raised
+        failures = 0  # looks that raised it since its traceback or last warning
+        warned_at = 0.0
         while True:
             try:
                 reasons = await self._busy()
+                failing = None
                 self.waiting_on = reasons
                 if not reasons:
                     if quiet:
@@ -223,13 +235,29 @@ class RestartGate:
                     await asyncio.shield(self._quiescing)
                     quiet = True
                     continue  # look once more: something may have started meanwhile
-            except Exception:
+            except Exception as exc:
                 # Never stop waiting on an error (#707): this task would end with the
                 # scheduler, the engine and backups paused, and Cancel could not undo it.
-                # Unknown is not idle, and a quiesce that failed is tried again.
-                log.exception("restart: could not check what is running; trying again")
+                # Unknown is not idle, and a quiesce that failed is tried again. One
+                # traceback per kind of error, then a line at most every ERROR_LOG_S, so
+                # an error that persists never rotates the rest of the log away.
+                now = self._monotonic()
+                failures += 1
+                if type(exc) is not failing:
+                    log.exception("restart: could not check what is running; trying again")
+                    failing, failures, warned_at = type(exc), 0, now
+                elif now - warned_at >= ERROR_LOG_S:
+                    log.warning(
+                        "restart: still could not check what is running (%s, %d more"
+                        " times); trying again",
+                        type(exc).__name__,
+                        failures,
+                    )
+                    failures, warned_at = 0, now
                 reasons = [CHECK_FAILED]
                 self.waiting_on = reasons
-            log.info("restart waits: %s", "; ".join(reasons))
+            if reasons != logged:
+                log.info("restart waits: %s", "; ".join(reasons))
+                logged = reasons
             await asyncio.sleep(self._poll_s)
         self._hook.trigger()
