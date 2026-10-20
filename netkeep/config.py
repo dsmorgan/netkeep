@@ -21,7 +21,9 @@ from dataclasses import dataclass, field, fields, is_dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Union, get_args, get_origin, get_type_hints
 
+from netkeep.localtime import find_zone
 from netkeep.logging_setup import DEFAULT_KEEP, DEFAULT_MAX_MB, personal
+from netkeep.loopback import cdp_url_problem
 from netkeep.paths import config_candidates
 
 if TYPE_CHECKING:
@@ -221,6 +223,7 @@ def _load_file(path: Path) -> Settings:
     raw = _drop_deprecated(raw, source=path)
     raw, legacy_me = _drop_me(raw, source=path)
     settings = _from_table(Settings, raw, prefix="", source=path)
+    _check_linkedin(settings.linkedin, source=path)
     log.debug("loaded settings from %s", personal(path))
     file_keys = frozenset(_leaf_keys(raw))
     if "linkedin.active_hours" in file_keys:
@@ -228,6 +231,25 @@ def _load_file(path: Path) -> Settings:
             settings, linkedin=replace(settings.linkedin, active_hours_pinned_in=str(path))
         )
     return replace(settings, source_path=path, legacy_me=legacy_me, file_keys=file_keys)
+
+
+def _check_linkedin(linkedin: LinkedInSettings, *, source: Path) -> None:
+    """Refuse a ``[linkedin]`` time zone or debug address that nothing could use (#701).
+
+    Both are read by the run gates and the launcher; a typo found here stops netkeep
+    at startup with the key named, instead of a 500 or a gate that raises later.
+    """
+    if find_zone(linkedin.timezone) is None:
+        raise ConfigError(
+            f"{source}: linkedin.timezone {linkedin.timezone!r} is not a time zone this"
+            " machine knows, such as America/New_York"
+        )
+    problem = cdp_url_problem(linkedin.cdp_url)
+    if problem is not None:
+        raise ConfigError(
+            f"{source}: linkedin.cdp_url {linkedin.cdp_url!r} {problem};"
+            " use an address such as http://127.0.0.1:9222"
+        )
 
 
 def _leaf_keys(raw: Mapping[str, object], prefix: str = "") -> list[str]:

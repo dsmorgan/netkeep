@@ -94,6 +94,16 @@ def test_a_window_that_does_not_parse_refuses_rather_than_runs_unguarded() -> No
         runs.refuse_if_outside_active_hours(linkedin, now=TWO_PM)
 
 
+@pytest.mark.parametrize("zone", ["America/New York", "Nowhere/Quorbelle", ""])
+def test_a_zone_this_machine_does_not_know_refuses_with_a_run_error(zone: str) -> None:
+    """#701: ZoneInfoNotFoundError (a LookupError) became a 500 on POST /linkedin/runs
+    and a misleading 404 on prefill and check-sent; a RunError is the 422 and the
+    refusal every gate already maps."""
+    linkedin = replace(Settings().linkedin, timezone=zone)
+    with pytest.raises(runs.RunError, match="not a time zone this machine knows"):
+        runs.refuse_if_outside_active_hours(linkedin, now=TWO_PM)
+
+
 @pytest.mark.parametrize("kind", ["connections_incremental", "enrich"])
 async def test_the_api_refuses_a_manual_run_outside_the_window_and_records_nothing(
     bare_engine: Engine,

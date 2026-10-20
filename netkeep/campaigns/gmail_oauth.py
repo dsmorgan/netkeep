@@ -50,6 +50,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import BaseHandler, ProxyHandler, Request, build_opener
 
+from netkeep.loopback import LOOPBACK_HOSTS
+
 log = logging.getLogger(__name__)
 
 GMAIL_SCOPE: Final = "https://www.googleapis.com/auth/gmail.modify"
@@ -473,7 +475,7 @@ _OAUTH_ERROR_STATUSES: Final = frozenset({400, 401})
 
 def _require_loopback(redirect_uri: str) -> None:
     parts = urlsplit(redirect_uri)
-    if parts.scheme != "http" or parts.hostname not in {"127.0.0.1", "localhost", "::1"}:
+    if parts.scheme != "http" or parts.hostname not in LOOPBACK_HOSTS:
         raise ClientConfigError(
             "the redirect must be a loopback http URL (the installed-app flow)",
             code="bad_redirect",

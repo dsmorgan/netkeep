@@ -135,7 +135,11 @@ from netkeep.services.backup import (
     prune_backups,
     restore_backup,
 )
-from netkeep.services.browser_launch import cdp_port, chrome_launch_command, remote_host_note
+from netkeep.services.browser_launch import (
+    chrome_launch_command,
+    no_port_note,
+    remote_host_note,
+)
 from netkeep.services.chrome_launch import LaunchResult, PortProbe, UiFront
 from netkeep.services.events import EventBus
 from netkeep.services.linkedin_accounts import (
@@ -1119,6 +1123,11 @@ def browser_launch(
     settings = _load_settings_or_exit(state)
     cdp_url = settings.linkedin.cdp_url
     profile = data_dir() / CHROME_PROFILE_DIRNAME
+    port = configured_port(cdp_url)
+    if port is None:
+        # #701: no guessed 9222. scripts/chrome.sh stops on this exit with the message.
+        typer.echo(f"error: {no_port_note(cdp_url)}.", err=True)
+        raise typer.Exit(1)
     if as_json:
         # What `make chrome` reads, so it starts Chrome on the port `serve` and
         # `preflight` will attach to, not on a guess. `remote` is the reason the
@@ -1127,7 +1136,7 @@ def browser_launch(
             json.dumps(
                 {
                     "cdp_url": cdp_url,
-                    "port": cdp_port(cdp_url),
+                    "port": port,
                     "profile": str(profile),
                     "remote": remote_host_note(cdp_url),
                 }
@@ -1137,7 +1146,7 @@ def browser_launch(
     typer.echo("netkeep attaches to a Chrome you start yourself. A run never starts one.")
     typer.echo("Run this in a terminal (again whenever that Chrome is not running):")
     typer.echo()
-    for line in chrome_launch_command(cdp_port(cdp_url), profile):
+    for line in chrome_launch_command(port, profile):
         typer.echo(f"  {line}")
     typer.echo()
     typer.echo("Then, in that window:")

@@ -67,6 +67,7 @@ from sqlalchemy.orm import Session
 
 from netkeep.config import Settings
 from netkeep.logging_setup import personal_exc
+from netkeep.loopback import LOOPBACK_HOSTS, host_of
 from netkeep.models import JsonValue, SettingKV, User
 from netkeep.models.base import utcnow
 from netkeep.scoping import scoped
@@ -113,10 +114,6 @@ MAX_HOLIDAYS: Final = 366
 WARMUP_STEP_MAX: Final = 30
 """The fastest warm-up the page accepts: 30 more profile visits each day, three times
 spec 9.5's 10. A file value may be faster; the posture report still judges it."""
-
-LOOPBACK_CDP_HOSTS: Final = frozenset({"127.0.0.1", "localhost", "::1"})
-"""The hosts ``linkedin.cdp_url`` may name when the page sets it. Chrome's debug port
-answers on its own loopback only; a remote one stays a deliberate config.toml edit."""
 
 _CLOCK = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -781,7 +778,8 @@ def _parse_cdp_url(url: str) -> str:
         raise ValueError(f"{example}, with its port")
     if not 1 <= port <= 65535:
         raise ValueError(f"{example}: the port must be 1 to 65535")
-    if parts.hostname not in LOOPBACK_CDP_HOSTS:
+    # The page sets loopback only; a remote debug address stays a config.toml edit.
+    if parts.hostname not in LOOPBACK_HOSTS:
         raise ValueError(
             f"names {parts.hostname}, not this machine's loopback; a remote debug address"
             " can only be set in config.toml"
@@ -1039,8 +1037,8 @@ def checks(key: str, settings: Settings) -> tuple[tuple[str, ...], tuple[str, ..
                 " daily limit, so a fresh install gets its full budget on day one."
             )
     elif key == "linkedin.cdp_url":
-        host = _host_of(settings.linkedin.cdp_url)
-        if host not in LOOPBACK_CDP_HOSTS:
+        host = host_of(settings.linkedin.cdp_url)
+        if host not in LOOPBACK_HOSTS:
             warnings.append(
                 f"linkedin.cdp_url points at {host or 'no host'}, not this machine's loopback."
                 " Chrome's debug port is only ever reachable on its own loopback address."
@@ -1095,13 +1093,6 @@ def _window_warnings(active_hours: tuple[str, str]) -> tuple[str, ...]:
             "linkedin.active_hours is not two HH:MM times, so no run can start until it is fixed",
         )
     return active_window_check(start, end)[1]
-
-
-def _host_of(url: str) -> str | None:
-    try:
-        return urlsplit(url).hostname
-    except ValueError:
-        return None
 
 
 def _some(text: str | None) -> tuple[str, ...]:

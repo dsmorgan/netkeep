@@ -65,6 +65,7 @@ from sqlalchemy.orm import Session
 
 from netkeep.config import LinkedInSettings
 from netkeep.crm.inbox_apply import clear_short_first_poll, forget_owner
+from netkeep.loopback import configured_port
 from netkeep.models import Contact, SyncRun, SyncRunKind, SyncRunStatus, SyncRunTrigger, User
 from netkeep.models.base import utcnow
 from netkeep.paths import data_dir
@@ -82,8 +83,8 @@ from netkeep.services import heat as heat_rows
 from netkeep.services import posture as posture_service
 from netkeep.services.browser_launch import (
     CHROME_PROFILE_DIRNAME,
-    cdp_port,
     chrome_launch_command,
+    no_port_note,
     remote_host_note,
 )
 from netkeep.services.chrome_launch import ChromeSpawner, LaunchUnderWay, submit_launch
@@ -932,7 +933,10 @@ def get_browser_health(
 @router.get(
     "/browser",
     operation_id="get_linkedin_browser",
-    responses={403: {"description": "Only the local owner account sees the Chrome profile"}},
+    responses={
+        403: {"description": "Only the local owner account sees the Chrome profile"},
+        409: {"description": "linkedin.cdp_url names no valid port, so there is no command"},
+    },
 )
 def get_browser(request: Request, session: SessionDep, user: CurrentUser) -> BrowserLaunchOut:
     """``netkeep browser launch``'s instructions, as data (spec 9.1, ADR 0002).
@@ -946,11 +950,14 @@ def get_browser(request: Request, session: SessionDep, user: CurrentUser) -> Bro
     """
     require_owner(session, user, "only the local owner account sees the Chrome profile")
     cdp_url = effective_settings(request, session, user).linkedin.cdp_url
+    port = configured_port(cdp_url)
+    if port is None:
+        raise HTTPException(status_code=409, detail=no_port_note(cdp_url))  # #701: no 9222
     profile = data_dir() / CHROME_PROFILE_DIRNAME
     return BrowserLaunchOut(
         cdp_url=cdp_url,
         profile_dir=str(profile),
-        launch_command=chrome_launch_command(cdp_port(cdp_url), profile),
+        launch_command=chrome_launch_command(port, profile),
         remote_host_note=remote_host_note(cdp_url),
         check_command="netkeep preflight",
     )

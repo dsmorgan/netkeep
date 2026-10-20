@@ -60,7 +60,6 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from typing import Final
-from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy.orm import Session
@@ -90,6 +89,7 @@ from netkeep.linkedin.pacing import (
     next_window_start,
     warmup_budget,
 )
+from netkeep.loopback import LOOPBACK_HOSTS, host_of
 from netkeep.models import Mailbox, SyncRunKind, SyncRunStatus, User
 from netkeep.paths import data_dir
 from netkeep.scoping import scoped
@@ -174,12 +174,6 @@ ATTACH_ONLY: Final = "attach"
 #: its scratch database. The browser lock is keyed by the row too
 #: (``linkedin.activity_lock.account_key``, #169 F).
 SINGLE_ACCOUNT_ID: Final = 1
-
-#: Hosts a CDP url may point at. Chrome's debug port is only ever on the
-#: machine's own loopback (spec 9.1); a url naming anything else is either a
-#: typo or a browser on another machine, and neither is the device LinkedIn is
-#: meant to see.
-LOOPBACK_HOSTS: Final = frozenset({"127.0.0.1", "localhost", "::1"})
 
 #: How many consecutive blocks may be needed to trip the skip threshold before
 #: the threshold stops being a brake. Spec 9.7 aborts a *run* after two
@@ -878,7 +872,9 @@ def _browser_mode(mode: str, cdp_url: str) -> Protection:
             " netkeep starts is a second device on your LinkedIn account, which can get the"
             " account restricted. netkeep attaches to your own Chrome to avoid that"
         )
-    host = _host_of(cdp_url)
+    # A url naming anything but loopback is a typo or a browser on another machine,
+    # and neither is the device LinkedIn is meant to see (spec 9.1).
+    host = host_of(cdp_url)
     if host not in LOOPBACK_HOSTS:
         warnings.append(
             f"linkedin.cdp_url points at {host or 'no host'}, not this machine's loopback."
@@ -2873,13 +2869,6 @@ def _parse_window(active_hours: tuple[str, str]) -> tuple[time, time] | None:
     try:
         return time.fromisoformat(active_hours[0]), time.fromisoformat(active_hours[1])
     except (ValueError, IndexError):
-        return None
-
-
-def _host_of(url: str) -> str | None:
-    try:
-        return urlsplit(url).hostname
-    except ValueError:
         return None
 
 

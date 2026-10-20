@@ -187,10 +187,10 @@ def test_one_deprecated_key_is_named_alone(
 
 
 def test_unknown_key_warns_and_is_ignored(isolated: Path, caplog: pytest.LogCaptureFixture) -> None:
-    path = _write(isolated / "c.toml", '[linkedin]\nbogus = 1\ncdp_url = "http://x"\n')
+    path = _write(isolated / "c.toml", '[linkedin]\nbogus = 1\ncdp_url = "http://x:9333"\n')
     with caplog.at_level(logging.WARNING, logger="netkeep.config"):
         settings = load_settings(path)
-    assert settings.linkedin.cdp_url == "http://x"
+    assert settings.linkedin.cdp_url == "http://x:9333"
     messages = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert len(messages) == 1
     assert "linkedin.bogus" in messages[0]
@@ -216,6 +216,52 @@ def test_wrong_scalar_type_raises_naming_key_and_file(isolated: Path) -> None:
     assert "web.port" in str(info.value)
     assert str(path) in str(info.value)
     assert "integer" in str(info.value)
+
+
+@pytest.mark.parametrize("zone", ["America/New York", "Nowhere/Quorbelle", ""])
+def test_a_time_zone_this_machine_does_not_know_is_refused_at_load(
+    isolated: Path, zone: str
+) -> None:
+    """#701: a typo was a 500, a misleading 404 and a gate that raised, much later."""
+    path = _write(isolated / "c.toml", f'[linkedin]\ntimezone = "{zone}"\n')
+    with pytest.raises(ConfigError, match=r"linkedin\.timezone") as info:
+        load_settings(path)
+    assert str(path) in str(info.value)
+
+
+@pytest.mark.parametrize(
+    ("url", "why"),
+    [
+        ("http://[::1", "is not a url"),
+        ("http://127.0.0.1:port", "is not a url"),
+        ("http://127.0.0.1", "names no port"),
+        ("http://127.0.0.1:0", "names no port"),
+        ("http://127.0.0.1:70000", "is not a url"),
+        ("http://:9222", "names no host"),
+        ("ftp://127.0.0.1:9222", "must start with"),
+        ("127.0.0.1:9222", "must start with"),
+        ("http://127.0.0.1:9222\t", "a space"),
+    ],
+)
+def test_a_cdp_url_nothing_could_attach_to_is_refused_at_load(
+    isolated: Path, url: str, why: str
+) -> None:
+    """#701: a malformed cdp_url was a 500 on GET /linkedin/browser, a CLI crash, and a
+    generic launcher error. TOML escapes keep the tab a tab."""
+    path = _write(isolated / "c.toml", f'[linkedin]\ncdp_url = "{url}"\n')
+    with pytest.raises(ConfigError, match=r"linkedin\.cdp_url") as info:
+        load_settings(path)
+    assert why in str(info.value)
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["http://127.0.0.1:9333", "http://[::1]:9222", "ws://localhost:9222", "http://10.0.0.5:9222"],
+)
+def test_a_well_formed_cdp_url_loads_remote_ones_included(isolated: Path, url: str) -> None:
+    """A remote host is still a deliberate config.toml edit; posture warns about it."""
+    path = _write(isolated / "c.toml", f'[linkedin]\ncdp_url = "{url}"\n')
+    assert load_settings(path).linkedin.cdp_url == url
 
 
 def test_bool_is_not_an_integer(isolated: Path) -> None:

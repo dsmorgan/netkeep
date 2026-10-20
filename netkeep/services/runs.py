@@ -96,6 +96,7 @@ from netkeep.db import CancelledWhileFailing, is_writer, off_loop, session_scope
 from netkeep.linkedin import activity_lock, pacing
 from netkeep.linkedin.classify import Outcome
 from netkeep.linkedin.errors import BrowserBusy, BrowserUnavailable, ProfileRefused
+from netkeep.localtime import find_zone
 from netkeep.models import (
     JsonValue,
     SyncRun,
@@ -879,10 +880,16 @@ def refuse_if_outside_active_hours(settings: LinkedInSettings, *, now: datetime)
     window (spec 9.5), and a person starting one by hand gets the same rule and
     the same sentence. Inside a run, only enrichment checks the window again
     between units, since a sync is minutes long and one stopped part-way through
-    the list would age nobody for the week. A window that does not parse is a
-    :class:`RunError`: nothing may run unguarded by it.
+    the list would age nobody for the week. A window that does not parse, or a
+    time zone this machine doesn't know (#701), is a :class:`RunError`: nothing may
+    run unguarded by it.
     """
     _require_aware(now)
+    if find_zone(settings.timezone) is None:
+        raise RunError(
+            f"[linkedin] timezone is not a time zone this machine knows ({settings.timezone!r}),"
+            " so no run can start until it is fixed"
+        )
     try:
         start, end = (time.fromisoformat(value) for value in settings.active_hours)
     except ValueError as exc:

@@ -22894,6 +22894,9 @@
           },
           "403": {
             "description": "Only the local owner account sees the Chrome profile"
+          },
+          "409": {
+            "description": "linkedin.cdp_url names no valid port, so there is no command"
           }
         },
         "summary": "Get Browser",

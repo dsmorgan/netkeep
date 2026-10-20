@@ -35,6 +35,7 @@ from dataclasses import dataclass
 from typing import Final
 from urllib.parse import urlsplit
 
+from netkeep.loopback import LOOPBACK_HOSTS
 from netkeep.services.chrome_launch import LaunchResult, LaunchStatus, Refusal
 from netkeep.services.login_item import SERVE_ERR_LOG, LoginItem, LoginItemError
 
@@ -46,7 +47,6 @@ HEALTH_PATH: Final = "/api/v1/health"
 _HEALTH_TIMEOUT_S: Final = 2.0
 _HEALTH_MAX_BYTES: Final = 4096
 _POLL_S: Final = 0.5
-_LOOPBACK: Final = frozenset({"127.0.0.1", "localhost", "::1"})
 
 #: What to do about each refusal of the launch, after the launcher's own message.
 REFUSAL_FIXES: Final[dict[Refusal, str]] = {
@@ -248,7 +248,7 @@ def health(base: str, *, timeout_s: float = _HEALTH_TIMEOUT_S) -> dict[str, obje
     """
     parts = urlsplit(base)
     host = parts.hostname
-    if parts.scheme != "http" or host not in _LOOPBACK:
+    if parts.scheme != "http" or host not in LOOPBACK_HOSTS:
         return None
     try:
         port = parts.port

@@ -56,6 +56,7 @@ from netkeep.linkedin import activity_lock
 from netkeep.linkedin.browser import AttachBrowserProvider
 from netkeep.linkedin.classify import Outcome
 from netkeep.linkedin.preflight import preflight
+from netkeep.loopback import LOOPBACK_HOSTS
 from netkeep.models import SettingKV, SyncRunKind, User
 from netkeep.scoping import unscoped
 from netkeep.services import heat as heat_rows
@@ -68,7 +69,6 @@ from netkeep.services.posture import (
     ATTACH_ONLY,
     ENFORCED_BY,
     KEY_DEDICATED_PROFILE,
-    LOOPBACK_HOSTS,
     MAX_BLOCKS_BEFORE_SKIP,
     MAX_PLAUSIBLE_HOLD_HOURS,
     MIN_HALF_LIFE_HOURS,
