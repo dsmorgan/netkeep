@@ -1127,14 +1127,14 @@ class _Claimer:
         if contact is None or contact.li_urn is None:  # the guards passed it a moment ago
             return self.park(enrollment, Skip.GUARD_EXCLUDED, Reason.NO_LINKEDIN.value)
         today = slots.local_date(now)
-        values = MergeValues(
-            contact=contact_fields(contact, today),
-            campaign_name=campaign.name,
-            step_number=step.position,
-            # The local day, as ``today`` is, so ``ago`` counts calendar days (#709).
-            previous_send_date=None if latest is None else slots.local_date(latest),
-        )
-        try:
+        try:  # MergeValues refuses a bad value with a render error, so it parks too
+            values = MergeValues(
+                contact=contact_fields(contact, today),
+                campaign_name=campaign.name,
+                step_number=step.position,
+                # The local day, as ``today`` is, so ``ago`` counts calendar days (#709).
+                previous_send_date=None if latest is None else slots.local_date(latest),
+            )
             rendered = render(template.channel, None, template.body, values, today=today)
         except TemplateRenderError as exc:
             log.warning(

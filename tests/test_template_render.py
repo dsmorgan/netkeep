@@ -475,7 +475,7 @@ def test_ago_refuses_a_datetime(sent: datetime) -> None:
     filter and the merge values both refuse it; a caller passes the local date."""
     with pytest.raises(FilterArgumentError, match="ago needs a date, not datetime"):
         ago(sent, today=TODAY)
-    with pytest.raises(TypeError, match="not a datetime"):
+    with pytest.raises(TemplateRenderError, match="not a datetime"):
         MergeValues(contact={}, previous_send_date=sent)
     assert ago(date(2026, 9, 24), today=TODAY) == "2 days ago"
 

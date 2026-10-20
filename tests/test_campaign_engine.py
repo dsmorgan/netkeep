@@ -1233,6 +1233,39 @@ def test_ago_counts_the_users_local_days(
     assert firing.body.endswith(", we spoke yesterday.")
 
 
+def test_a_previous_send_date_merge_values_refuse_parks_only_that_message(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#709 review: a ``previous_send_date`` that ``MergeValues`` refuses (a datetime, here
+    by a stubbed ``local_date``) parks that one message as render_failed, and the tick
+    goes on to send the next one."""
+    bad = world.enroll_new(current_step=1)
+    good = world.enroll_new(current_step=1)
+    bad_sent = NOW - timedelta(days=8)
+    good_sent = NOW - timedelta(days=9)
+
+    def history(session: Session) -> None:
+        for enrollment_id, sent_at in ((bad, bad_sent), (good, good_sent)):
+            enrollment = get_scoped(session, world.user, Enrollment, enrollment_id)
+            assert enrollment is not None
+            factories.make_message(session, enrollment, position=1, sent_at=sent_at)
+        record_poll(session, world.user, NOW - timedelta(minutes=1))  # #417
+
+    world.write(history)
+    real = schedule.Suggested.local_date
+
+    def local_date(self: schedule.Suggested, at: datetime) -> Any:
+        return at if at == bad_sent else real(self, at)
+
+    monkeypatch.setattr(schedule.Suggested, "local_date", local_date)
+    result = world.tick()
+    [(firing, outcome)] = result.fired
+    assert (firing.enrollment_id, outcome.outcome) == (good, SendOutcome.SENT)
+    assert reasons_of(result, bad) == (Skip.RENDER_FAILED,)
+    assert world.enrollment(bad).next_action_at is None
+    assert len(world.messages(bad)) == 1  # step 1's only: nothing written for step 2
+
+
 # --- #261 requirement 5: mailbox health ---------------------------------------------------
 
 
