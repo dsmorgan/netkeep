@@ -6,7 +6,7 @@ Keep your professional network warm.
 
 netkeep pulls your 1st-degree LinkedIn connections and their contact info into a local database, helps you sort out who you actually know, and runs reconnect-and-follow-up sequences over Gmail and LinkedIn messaging. It replaces the manual workflow of exporting from LinkedIn, sorting a spreadsheet, scraping profiles with a separate tool, and mailing through a bulk-mail tool, with one application that runs on your Mac.
 
-**Status: working toward 1.0.** Import, the CRM and triage, the LinkedIn extractor, email campaigns over Gmail, and LinkedIn messaging all work. Phase 6 (polish, backups, and these docs) ends with the 1.0 release. The [changelog](CHANGELOG.md) lists what has changed.
+**Status: working toward 1.0.** Import, the CRM and triage, the LinkedIn extractor, email campaigns over Gmail, and LinkedIn messaging all work. Phase 6 (polish, backups, and these docs) ends with the 1.0 release. The [changelog](https://github.com/dsmorgan/netkeep/blob/main/CHANGELOG.md) lists what has changed.
 
 ## Installing
 
@@ -44,7 +44,7 @@ The checksums are also in the release notes. Releases are immutable: once publis
 
 - macOS 14 or later. The installer supports macOS only; on Linux, run netkeep from a checkout.
 - Google Chrome. The UI requires it: other browsers may work, but they aren't tested or supported, and the UI shows a dismissible banner when you open it elsewhere. The LinkedIn steps drive their own, separate Chrome window, with its own profile (any Chromium build works there); Firefox and Safari have no DevTools protocol and can't be used for them.
-- A Gmail account and your own Google Cloud OAuth client for the email steps. [docs/gmail-setup.md](docs/gmail-setup.md) walks through the setup.
+- A Gmail account and your own Google Cloud OAuth client for the email steps. [docs/gmail-setup.md](https://github.com/dsmorgan/netkeep/blob/main/docs/gmail-setup.md) walks through the setup.
 - Optional, after 1.0: an Anthropic API key for the LLM features, which are deferred until after the 1.0 release. They will stay off unless you configure one.
 
 An installed netkeep needs no Xcode tools, Homebrew, Node or git. To remove it, turn off the login item (`netkeep setup --remove`), then run `uv tool uninstall netkeep`. Your data directory and Keychain items stay.
@@ -77,15 +77,15 @@ Everything stays on your machine: one SQLite file, tokens in the macOS Keychain,
 
 ## Where the method comes from
 
-The workflow is a five-stage reconnect method: validate your network, enrich it, reconnect in batches of about 100, handle responses, follow up a week later, and keep going weekly. It is described generically in [docs/networking-workflow.md](docs/networking-workflow.md), and [the spec](docs/architecture.md#3-mapping-to-the-reference-workflow) maps every manual step to a netkeep feature. The method comes from [hellophello](https://hellophello.com)'s job-search networking program, which is acknowledged here as the inspiration and appears nowhere in the implementation.
+The workflow is a five-stage reconnect method: validate your network, enrich it, reconnect in batches of about 100, handle responses, follow up a week later, and keep going weekly. It is described generically in [docs/networking-workflow.md](https://github.com/dsmorgan/netkeep/blob/main/docs/networking-workflow.md), and [the spec](https://github.com/dsmorgan/netkeep/blob/main/docs/architecture.md#3-mapping-to-the-reference-workflow) maps every manual step to a netkeep feature. The method comes from [hellophello](https://hellophello.com)'s job-search networking program, which is acknowledged here as the inspiration and appears nowhere in the implementation.
 
 ## Running
 
-`netkeep serve` runs netkeep at <http://127.0.0.1:8000>; open the address in Google Chrome. `serve` creates the database the first time and migrates it after every update, so you don't need to run `netkeep db upgrade` yourself. The [setup guide](docs/guide/setup.md) takes you from install to your first import and sync.
+`netkeep serve` runs netkeep at <http://127.0.0.1:8000>; open the address in Google Chrome. `serve` creates the database the first time and migrates it after every update, so you don't need to run `netkeep db upgrade` yourself. The [setup guide](https://github.com/dsmorgan/netkeep/blob/main/docs/guide/setup.md) takes you from install to your first import and sync.
 
 ### Upgrading from netkeeper
 
-netkeep was called netkeeper. The first time the new version starts, it moves your data directory, copies your Keychain items, and replaces your login item under the new name. Back up first, run `netkeep migrate --dry-run` to see exactly what it will do, then start it. [Upgrading from netkeeper](docs/guide/upgrading-from-netkeeper.md) has the steps, and how to undo them.
+netkeep was called netkeeper. The first time the new version starts, it moves your data directory, copies your Keychain items, and replaces your login item under the new name. Back up first, run `netkeep migrate --dry-run` to see exactly what it will do, then start it. [Upgrading from netkeeper](https://github.com/dsmorgan/netkeep/blob/main/docs/guide/upgrading-from-netkeeper.md) has the steps, and how to undo them.
 
 ### The browser sidecar
 
@@ -94,7 +94,7 @@ debug port. A run never launches a browser. You start that Chrome yourself: with
 **Start Chrome** in the UI, `netkeep open`, or the printed command, or, with the
 setting **Start netkeep's Chrome when netkeep starts** on (off by default), when
 `serve` starts. netkeep never starts or attaches to a Chrome on any other profile
-([ADR 0012](docs/adr/0012-chrome-profiles.md)), and you sign in to LinkedIn yourself.
+([ADR 0012](https://github.com/dsmorgan/netkeep/blob/main/docs/adr/0012-chrome-profiles.md)), and you sign in to LinkedIn yourself.
 
 ```sh
 .venv/bin/netkeep open             # start netkeep's Chrome with the UI in its own window
@@ -125,9 +125,9 @@ Logs live under `<data_dir>/logs/`: `netkeep.log` is the application log, rotate
 
 ## A plain note about LinkedIn's terms
 
-LinkedIn's User Agreement prohibits automated access, including reading data it already shows you. netkeep reads only your own 1st-degree connections, ships conservative defaults, warms up slowly, backs off when LinkedIn pushes back, and never retries a security checkpoint. Those safeguards reduce the risk of an account restriction; they do not remove it. Read [the security and terms section](docs/architecture.md#18-security-privacy-and-terms-of-service) before you run it, and treat the daily budgets as the ceiling, not a target.
+LinkedIn's User Agreement prohibits automated access, including reading data it already shows you. netkeep reads only your own 1st-degree connections, ships conservative defaults, warms up slowly, backs off when LinkedIn pushes back, and never retries a security checkpoint. Those safeguards reduce the risk of an account restriction; they do not remove it. Read [the security and terms section](https://github.com/dsmorgan/netkeep/blob/main/docs/architecture.md#18-security-privacy-and-terms-of-service) before you run it, and treat the daily budgets as the ceiling, not a target.
 
-LinkedIn messages are prefilled by default: netkeep types the message into the conversation in your Chrome and stops, and you click **Send**. Auto-send is off by default. You turn it on with the **LinkedIn auto-send** switch on the Settings page, which asks you to confirm the risks first (or with `[campaigns] linkedin_auto_send = true` in `config.toml`, which then wins over the page), plus `auto_send` on each step that should use it. **Automated sending is what LinkedIn restricts accounts for fastest, and a restricted account stops the whole workflow, not just one step.** With auto-send on, netkeep clicks Send itself, and nobody reads the message before it goes. It sends only during your LinkedIn active hours, at least 20 minutes apart, within the `li_messages_auto` daily budget, never while heat (LinkedIn pushing back) is at its skip threshold, and only after it checks again that the message box belongs to the right person and holds exactly the rendered message. The posture page shows a warning for as long as it's on. Turning it off applies at once: an auto-send that hasn't clicked Send yet stops, and due steps wait for you to prefill them. Turning it on applies from the next auto-send check, within 10 minutes, with no restart. After LinkedIn's own answer shows a message went, netkeep closes that message bubble and its own tab; if anything else happens, it leaves the bubble open and holds auto-send until you close the bubble and resume it, on the LinkedIn queue or with `netkeep linkedin auto-send-resume`. An auto-send brings its Chrome tab to the front, as a prefill does, so keep your own typing out of that window, and keep LinkedIn's **Press Enter to Send** setting off (its default): with it on, an Enter you type into the composer could send part of a message. [ADR 0008](docs/adr/0008-auto-send.md) has the details. Run a handful of supervised prefills before you turn it on.
+LinkedIn messages are prefilled by default: netkeep types the message into the conversation in your Chrome and stops, and you click **Send**. Auto-send is off by default. You turn it on with the **LinkedIn auto-send** switch on the Settings page, which asks you to confirm the risks first (or with `[campaigns] linkedin_auto_send = true` in `config.toml`, which then wins over the page), plus `auto_send` on each step that should use it. **Automated sending is what LinkedIn restricts accounts for fastest, and a restricted account stops the whole workflow, not just one step.** With auto-send on, netkeep clicks Send itself, and nobody reads the message before it goes. It sends only during your LinkedIn active hours, at least 20 minutes apart, within the `li_messages_auto` daily budget, never while heat (LinkedIn pushing back) is at its skip threshold, and only after it checks again that the message box belongs to the right person and holds exactly the rendered message. The posture page shows a warning for as long as it's on. Turning it off applies at once: an auto-send that hasn't clicked Send yet stops, and due steps wait for you to prefill them. Turning it on applies from the next auto-send check, within 10 minutes, with no restart. After LinkedIn's own answer shows a message went, netkeep closes that message bubble and its own tab; if anything else happens, it leaves the bubble open and holds auto-send until you close the bubble and resume it, on the LinkedIn queue or with `netkeep linkedin auto-send-resume`. An auto-send brings its Chrome tab to the front, as a prefill does, so keep your own typing out of that window, and keep LinkedIn's **Press Enter to Send** setting off (its default): with it on, an Enter you type into the composer could send part of a message. [ADR 0008](https://github.com/dsmorgan/netkeep/blob/main/docs/adr/0008-auto-send.md) has the details. Run a handful of supervised prefills before you turn it on.
 
 Enrichment opens each contact's LinkedIn profile from your account, so they may see a visit in **Who viewed your profile**. Whether they see your name and headline, a partial description (such as someone at your company), or an anonymous viewer depends on the Profile viewing options in LinkedIn's Visibility settings. netkeep never changes that setting, and it tells you this wherever enrichment starts or is enabled.
 
@@ -146,35 +146,35 @@ Enrichment opens each contact's LinkedIn profile from your account, so they may 
 
 The work runs in this order: phases 3, 4, then 6, which ends with the 1.0 release. Phase 5 and phase 7 come after 1.0.
 
-Details and exit criteria are in [the spec](docs/architecture.md#19-delivery-phases).
+Details and exit criteria are in [the spec](https://github.com/dsmorgan/netkeep/blob/main/docs/architecture.md#19-delivery-phases).
 
 ## Documentation
 
 User guides:
 
-- [Upgrading from netkeeper](docs/guide/upgrading-from-netkeeper.md): the one-time move of your data, Keychain items and login item to the new name.
-- [Setup](docs/guide/setup.md): install, the two Chrome windows, Gmail, your first import, triage, and your first LinkedIn sync.
-- [Your first campaign](docs/guide/first-campaign.md): templates, an email campaign, and a LinkedIn step.
-- [Backups and restore](docs/guide/backups.md).
-- [Troubleshooting](docs/guide/troubleshooting.md): what a run's stop reason or a posture warning means, and the actions that stay on the command line.
-- [Reporting a problem](docs/guide/reporting-a-problem.md): the support bundle to attach to an issue.
-- [Gmail setup](docs/gmail-setup.md): your own Google Cloud OAuth client, step by step.
-- [Import the old mailing tool's history](docs/history-import.md) (optional).
-- [Importing into macOS Contacts](docs/macos-contacts.md).
-- [Gmail drafts netkeep leaves behind](docs/gmail-deletes.md).
-- [Draft templates with your AI assistant](docs/ai-drafting.md): use an AI chat subscription you already have to draft templates, without sending it your contacts' data.
+- [Upgrading from netkeeper](https://github.com/dsmorgan/netkeep/blob/main/docs/guide/upgrading-from-netkeeper.md): the one-time move of your data, Keychain items and login item to the new name.
+- [Setup](https://github.com/dsmorgan/netkeep/blob/main/docs/guide/setup.md): install, the two Chrome windows, Gmail, your first import, triage, and your first LinkedIn sync.
+- [Your first campaign](https://github.com/dsmorgan/netkeep/blob/main/docs/guide/first-campaign.md): templates, an email campaign, and a LinkedIn step.
+- [Backups and restore](https://github.com/dsmorgan/netkeep/blob/main/docs/guide/backups.md).
+- [Troubleshooting](https://github.com/dsmorgan/netkeep/blob/main/docs/guide/troubleshooting.md): what a run's stop reason or a posture warning means, and the actions that stay on the command line.
+- [Reporting a problem](https://github.com/dsmorgan/netkeep/blob/main/docs/guide/reporting-a-problem.md): the support bundle to attach to an issue.
+- [Gmail setup](https://github.com/dsmorgan/netkeep/blob/main/docs/gmail-setup.md): your own Google Cloud OAuth client, step by step.
+- [Import the old mailing tool's history](https://github.com/dsmorgan/netkeep/blob/main/docs/history-import.md) (optional).
+- [Importing into macOS Contacts](https://github.com/dsmorgan/netkeep/blob/main/docs/macos-contacts.md).
+- [Gmail drafts netkeep leaves behind](https://github.com/dsmorgan/netkeep/blob/main/docs/gmail-deletes.md).
+- [Draft templates with your AI assistant](https://github.com/dsmorgan/netkeep/blob/main/docs/ai-drafting.md): use an AI chat subscription you already have to draft templates, without sending it your contacts' data.
 
 Design and project:
 
-- [Architecture spec](docs/architecture.md): design, data model, safety rules, phases.
-- [Implementation guide](docs/implementation-guide.md): the backlog, what runs in parallel, and the human checkpoints.
-- [Reconnect workflow](docs/networking-workflow.md): the method the tool automates.
-- [Architecture decision records](docs/adr/): why the contested parts are the way they are.
+- [Architecture spec](https://github.com/dsmorgan/netkeep/blob/main/docs/architecture.md): design, data model, safety rules, phases.
+- [Implementation guide](https://github.com/dsmorgan/netkeep/blob/main/docs/implementation-guide.md): the backlog, what runs in parallel, and the human checkpoints.
+- [Reconnect workflow](https://github.com/dsmorgan/netkeep/blob/main/docs/networking-workflow.md): the method the tool automates.
+- [Architecture decision records](https://github.com/dsmorgan/netkeep/tree/main/docs/adr/): why the contested parts are the way they are.
 
 ## Contributing
 
-Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for how the project works, and the [architecture decision records](docs/adr/) before proposing a change to the browser, Gmail, messaging, or user-scoping design. This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md).
+Contributions are welcome. Read [CONTRIBUTING.md](https://github.com/dsmorgan/netkeep/blob/main/CONTRIBUTING.md) for how the project works, and the [architecture decision records](https://github.com/dsmorgan/netkeep/tree/main/docs/adr/) before proposing a change to the browser, Gmail, messaging, or user-scoping design. This project follows the [Contributor Covenant](https://github.com/dsmorgan/netkeep/blob/main/CODE_OF_CONDUCT.md).
 
 ## License
 
-[MIT](LICENSE).
+[MIT](https://github.com/dsmorgan/netkeep/blob/main/LICENSE).

@@ -30,10 +30,16 @@ port="$("$work/venv/bin/python" -c 'import socket; s = socket.socket(); s.bind((
 export NETKEEP_DATA="$work/data"
 # A checkout's frontend/dist and the env override must not be what answers.
 unset NETKEEP_FRONTEND_DIST
+# serve gets a scratch HOME and a keyring that refuses every call, so a run on a Mac never
+# reaches the real Keychain (or blocks on its prompt): netkeep falls back to an in-memory
+# API key, as it does when the Keychain refuses. uv above keeps the real HOME, so it
+# reuses the Python and cache it already has.
+mkdir -p "$work/home"
 
 # Run from outside the checkout so nothing resolves against the source tree.
 cd "$work"
-"$work/venv/bin/netkeep" serve --host 127.0.0.1 --port "$port" >"$work/serve.log" 2>&1 &
+HOME="$work/home" PYTHON_KEYRING_BACKEND=keyring.backends.fail.Keyring \
+  "$work/venv/bin/netkeep" serve --host 127.0.0.1 --port "$port" >"$work/serve.log" 2>&1 &
 server_pid=$!
 
 page=""
