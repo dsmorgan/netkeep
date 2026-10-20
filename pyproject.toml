@@ -1,6 +1,6 @@
 [project]
 name = "netkeep"
-version = "0.0.1"
+version = "0.1.0"
 description = "Keep your professional network warm: LinkedIn contact extractor, local CRM, and reconnect sequences over Gmail and LinkedIn."
 readme = "README.md"
 license = "MIT"
