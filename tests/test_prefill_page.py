@@ -1347,6 +1347,23 @@ async def test_a_final_text_that_is_not_the_body_is_partially_typed() -> None:
     assert "after typing" in ran.result.outcome.reason
 
 
+async def test_a_compose_option_arriving_with_the_last_key_is_partially_typed() -> None:
+    """#697: the check after the last key refuses a later compose option too."""
+
+    def another(tab: MessagingTab) -> None:
+        tab.emit(
+            compose_option_url(ZEPHYRINE), compose_option_answer(ZEPHYRINE, existing_conversation=7)
+        )
+
+    site = MessagingSite(ZEPHYRINE)
+    keys = len(plan_typing(BODY, 3))
+    site.after_key[keys] = another
+    ran = await prefill(site)
+    assert ran.kind is MessageOutcomeKind.PARTIALLY_TYPED
+    assert ran.result.outcome.reason == "after typing: another_compose"
+    assert len(ran.tab.attempts) == keys
+
+
 # --- the browser methods on their own ---------------------------------------------------
 
 

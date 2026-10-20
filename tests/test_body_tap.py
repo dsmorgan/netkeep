@@ -128,6 +128,41 @@ async def test_a_read_that_succeeded_discards_its_copy() -> None:
     assert await tap.take("POST", PAGINATION, ASK, wait_s=1.0) == b"lost"
 
 
+async def test_a_redirect_to_an_unmatched_url_drops_the_held_entry() -> None:
+    """#697: a redirect is a second request event under the same id. What streams on
+    under it is the new url's answer, which the match does not name."""
+    stream = Stream()
+    tap = _tap(stream)
+    tap.on_request(
+        {"requestId": "9", "request": {"url": PAGINATION, "method": "POST", "postData": ASK}}
+    )
+    tap.on_request(
+        {
+            "requestId": "9",
+            "request": {"url": f"{ORIGIN}/voyager/api/graphql", "method": "POST"},
+            "redirectResponse": {"url": PAGINATION, "status": 307},
+        }
+    )
+    tap.on_response({"requestId": "9", "response": {"status": 200}})
+    tap.on_data({"requestId": "9", "data": _b64(b"not ours"), "dataLength": 8})
+    tap.on_failed({"requestId": "9", "errorText": "net::ERR_ABORTED", "canceled": True})
+    await asyncio.sleep(0)
+    assert stream.asked == [] and tap._streams == {}
+    assert await tap.take("POST", PAGINATION, ASK, wait_s=0.05) is None
+    assert tap.last_miss == body_tap.MISS_NOT_MATCHED
+
+
+async def test_a_redirect_to_a_matched_url_is_held_for_the_new_url() -> None:
+    tap = _tap(Stream())
+    other = f"{PAGINATION}&page=2"
+    tap.on_request(
+        {"requestId": "9", "request": {"url": PAGINATION, "method": "POST", "postData": ASK}}
+    )
+    _answer(tap, "9", url=other, chunks=(b"the new answer",))
+    assert await tap.take("POST", PAGINATION, ASK, wait_s=0.05) is None
+    assert await tap.take("POST", other, ASK, wait_s=1.0) == b"the new answer"
+
+
 async def test_held_answers_are_bounded() -> None:
     tap = _tap(Stream())
     for index in range(body_tap.MAX_STREAMS + 5):

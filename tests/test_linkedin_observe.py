@@ -492,6 +492,30 @@ async def test_a_redirect_keeps_its_location_and_reads_no_body() -> None:
     assert kept.location == "https://www.linkedin.com/login"
 
 
+async def test_a_redirect_and_a_timed_out_read_discard_the_streamed_copy() -> None:
+    """#697: a read that takes no copy forgets it, so a later read can't be handed it."""
+    tab = _tab()
+    tap = _Tap([])
+    limits = ObservationLimits(body_timeout_s=0.02)
+    observation = Observation(MATCH, tab, limits, tap)  # type: ignore[arg-type]
+    observation.start()
+
+    async def never() -> None:
+        await asyncio.Event().wait()
+
+    tab.emit(_response(status=302, headers={"location": f"{ORIGIN}/login"}))
+    tab.emit(_response(body_delay=never))
+    redirected = await observation.next(1.0)
+    timed_out = await observation.next(1.0)
+    assert redirected is not None and redirected.failure == FAILURE_REDIRECT
+    assert timed_out is not None and timed_out.failure == FAILURE_TIMEOUT
+    assert tap.calls == [
+        ("discard", "POST", '{"startIndex":10}'),
+        ("discard", "POST", '{"startIndex":10}'),
+    ]
+    await observation.close()
+
+
 # --- read-only, and quiet ------------------------------------------------------------------
 
 

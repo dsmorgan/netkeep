@@ -463,6 +463,9 @@ class Observation:
         resource_type = _safe(lambda: request.resource_type) or "other"
         request_body = _safe(lambda: request.post_data)
         if 300 <= status < 400:
+            # No body is read for a redirect, so no streamed copy is taken: forget it,
+            # so it can't be handed to a later read of the same request (#697).
+            self._discard_streamed(method, response.url, request_body)
             headers = _safe(lambda: response.headers) or {}
             location = headers.get("location") if isinstance(headers, Mapping) else None
             return ObservedResponse(
@@ -488,6 +491,7 @@ class Observation:
             body = await asyncio.wait_for(response.body(), self.limits.body_timeout_s)
         except TimeoutError:
             failure = FAILURE_TIMEOUT
+            self._discard_streamed(method, response.url, request_body)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -512,8 +516,7 @@ class Observation:
             )
             self.unreadable.append(diagnostics)
         else:
-            if self._tap is not None:
-                self._tap.discard(method, response.url, request_body)
+            self._discard_streamed(method, response.url, request_body)
         finally:
             self._reading -= 1
         self._ends.pop(request, None)
@@ -531,6 +534,11 @@ class Observation:
             diagnostics=diagnostics,
             streamed=streamed,
         )
+
+    def _discard_streamed(self, method: str, url: str, request_body: str | None) -> None:
+        """Forget the tap's copy of this request, if any: this read takes no copy."""
+        if self._tap is not None:
+            self._tap.discard(method, url, request_body)
 
     def _diagnose(
         self,

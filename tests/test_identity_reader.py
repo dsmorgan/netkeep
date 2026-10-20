@@ -946,6 +946,26 @@ async def test_any_other_attach_failure_keeps_its_own_reason(
     assert "no windows open" not in str(raised.value)
 
 
+@pytest.mark.parametrize("stop", [asyncio.CancelledError, KeyboardInterrupt, SystemExit])
+async def test_a_cancel_during_the_attach_is_not_an_unreachable_browser(
+    monkeypatch: pytest.MonkeyPatch, stop: type[BaseException]
+) -> None:
+    """#697: a cancel, Ctrl-C or SystemExit stops the driver and goes on as itself, so
+    the run is recorded as aborted rather than failed as browser_unavailable."""
+    import playwright.async_api
+
+    class _Stopped(_NoWindowsPlaywright):
+        async def connect_over_cdp(self, cdp_url: str) -> object:
+            raise stop()
+
+    fake = _Stopped()
+    monkeypatch.setattr(PlaywrightCdpConnector, "connect", REAL_CONNECT)
+    monkeypatch.setattr(playwright.async_api, "async_playwright", fake)
+    with pytest.raises(stop):
+        await PlaywrightCdpConnector().connect("http://127.0.0.1:9333")
+    assert fake.stopped == 1
+
+
 def test_the_reader_guard_is_in_place() -> None:
     """``tests/conftest.py`` replaced the reader for this test, as for every other."""
     assert CdpIdentityReader.read is not REAL_READ
