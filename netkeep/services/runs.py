@@ -80,7 +80,7 @@ import enum
 import hashlib
 import logging
 import socket
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Collection, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
@@ -220,13 +220,17 @@ def browser_held_for(session: Session) -> BrowserHeld:
     return lambda account_id: lock_held(account_id, legacy=account_id == local)
 
 
-def any_browser_lock_held(directory: Path | None = None) -> bool:
+def any_browser_lock_held(
+    directory: Path | None = None, *, ignoring: Collection[Path] = ()
+) -> bool:
     """Whether any process holds any account's browser lock in this data directory (#636).
 
     The Chrome launcher refuses a cold start while one is held: a run is attached, or
     about to attach. It reads every ``browser-*.lock`` file under ``directory`` (default
     ``<data dir>/locks``) with :func:`activity_lock.inspect_at`'s peek, so it needs no
     database and never attaches. A lock that can't be inspected counts as held.
+    ``ignoring`` names lock files the caller holds itself, which it skips: the launcher's
+    probe re-reads the others just before it fronts a window (#678).
     """
     folder = activity_lock.locks_dir() if directory is None else directory
     try:
@@ -234,6 +238,8 @@ def any_browser_lock_held(directory: Path | None = None) -> bool:
     except OSError:
         return True
     for path in paths:
+        if path in ignoring:
+            continue
         try:
             if activity_lock.inspect_at(path, path.stem).held:
                 return True

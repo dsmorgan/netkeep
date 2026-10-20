@@ -897,8 +897,9 @@ async def launcher_probe(
 
     With ``front`` (#678), the same read, still under the lock and on the same
     connection, brings an open UI window on ``front.ui_port`` to the front once
-    ``front.dedicated`` accepts the pid; ``fronted`` says whether it did. A held lock
-    fronts nothing, since nothing connects. The front step gets
+    ``front.dedicated`` accepts the pid and, looked at again just then, no other browser
+    lock is held; ``fronted`` says whether it did. A held lock fronts nothing, since
+    nothing connects. The front step gets
     :data:`~netkeep.linkedin.browser.FRONT_STEP_TIMEOUT_S` on top of ``timeout_s``.
     """
     chosen = CdpIdentityReader() if reader is None else reader
@@ -909,7 +910,11 @@ async def launcher_probe(
                     found = await asyncio.wait_for(chosen.read(cdp_url), timeout_s)
                 else:
                     found = await asyncio.wait_for(
-                        chosen.read(cdp_url, ui_port=front.ui_port, dedicated=front.dedicated),
+                        chosen.read(
+                            cdp_url,
+                            ui_port=front.ui_port,
+                            dedicated=_no_other_run(front, locks, account),
+                        ),
                         timeout_s + FRONT_STEP_TIMEOUT_S,
                     )
             except TimeoutError:
@@ -923,6 +928,23 @@ async def launcher_probe(
             return PortProbe(busy=True)
         holder = activity_lock.read_holder(account, locks.directory)
         return PortProbe(busy=True, verified_pid=None if holder is None else holder.browser_pid)
+
+
+def _no_other_run(front: UiFront, locks: ActivityLocks, account: str) -> Callable[[int], bool]:
+    """``front.dedicated``, after a fresh look at every browser lock but the probe's own.
+
+    #678 review: the launcher looked for a run before the probe took its lock, so a run
+    of another account could attach in between. The read calls this right before its
+    front step, which shrinks that window to the few milliseconds of one target list.
+    """
+
+    def dedicated(pid: int) -> bool:
+        if runs.any_browser_lock_held(locks.directory, ignoring=locks.held_paths(account)):
+            log.info("not bringing netkeep's window to the front: a run holds the browser")
+            return False
+        return front.dedicated(pid)
+
+    return dedicated
 
 
 def launcher_lock_key(session: Session) -> str:

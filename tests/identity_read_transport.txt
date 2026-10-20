@@ -60,29 +60,41 @@ async def _read_process_info(ws_url: str, ui_port: int | None=None, dedicated: C
     async def answer(ws: Any, number: int) -> Mapping[str, Any]:
         while True:
             message = json.loads(await ws.recv())
-            if isinstance(message, dict) and message.get('id') == number:
+            if isinstance(message, dict) and type(message.get('id')) is int and (message['id'] == number):
                 return message
-    async with asyncio.timeout(PROBE_STEP_TIMEOUT_S) as deadline:
-        async with NoRedirect(ws_url, proxy=None, compression=None, max_size=IDENTITY_READ_MAX_BYTES) as ws:
-            await ws.send(json.dumps({'id': 1, 'method': 'SystemInfo.getProcessInfo'}))
-            info = (await answer(ws, 1)).get('result')
-            pid = browser_pid_from_process_info(info) if isinstance(info, Mapping) else None
-            if pid is None or ui_port is None or dedicated is None:
+
+    async def talk(ws: Any, deadline: asyncio.Timeout) -> tuple[int | None, bool]:
+        await ws.send(json.dumps({'id': 1, 'method': 'SystemInfo.getProcessInfo'}))
+        info = (await answer(ws, 1)).get('result')
+        pid = browser_pid_from_process_info(info) if isinstance(info, Mapping) else None
+        if pid is None or ui_port is None or dedicated is None:
+            return (pid, False)
+        deadline.reschedule(None)
+        try:
+            if not dedicated(pid):
                 return (pid, False)
-            deadline.reschedule(None)
-            try:
-                if not dedicated(pid):
+            async with asyncio.timeout(FRONT_STEP_TIMEOUT_S):
+                await ws.send(json.dumps({'id': 2, 'method': 'Target.getTargets'}))
+                target_id = ui_window_target((await answer(ws, 2)).get('result'), ui_port)
+                if target_id is None:
                     return (pid, False)
-                async with asyncio.timeout(FRONT_STEP_TIMEOUT_S):
-                    await ws.send(json.dumps({'id': 2, 'method': 'Target.getTargets'}))
-                    target_id = ui_window_target((await answer(ws, 2)).get('result'), ui_port)
-                    if target_id is None:
-                        return (pid, False)
-                    await ws.send(json.dumps({'id': 3, 'method': 'Target.activateTarget', 'params': {'targetId': target_id}}))
-                    done = await answer(ws, 3)
-            except Exception as exc:
-                log.info("could not bring netkeep's window to the front: %s", personal_exc(exc))
-                return (pid, False)
-            finally:
-                deadline.reschedule(asyncio.get_running_loop().time() + FRONT_STEP_TIMEOUT_S)
-            return (pid, 'error' not in done and isinstance(done.get('result'), Mapping))
+                await ws.send(json.dumps({'id': 3, 'method': 'Target.activateTarget', 'params': {'targetId': target_id}}))
+                done = await answer(ws, 3)
+        except Exception as exc:
+            log.info("could not bring netkeep's window to the front: %s", personal_exc(exc))
+            return (pid, False)
+        finally:
+            deadline.reschedule(asyncio.get_running_loop().time() + FRONT_STEP_TIMEOUT_S)
+        return (pid, 'error' not in done and isinstance(done.get('result'), Mapping))
+    found: tuple[int | None, bool] = (None, False)
+    answered = False
+    try:
+        async with asyncio.timeout(PROBE_STEP_TIMEOUT_S) as deadline:
+            async with NoRedirect(ws_url, proxy=None, compression=None, max_size=IDENTITY_READ_MAX_BYTES) as ws:
+                found = await talk(ws, deadline)
+                answered = True
+    except TimeoutError:
+        if not answered:
+            raise
+        log.info("the identity read's websocket was slow to close")
+    return found
