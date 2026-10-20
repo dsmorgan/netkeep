@@ -76,12 +76,11 @@ netkeep_install() {
         die "HOME must be your home directory, and it is '${HOME:-}'."
     fi
 
+    # The caller's PATH, unchanged: uv's installer adds its folder to your shell profile
+    # only when that folder isn't on PATH, and the hint at the end checks the same PATH.
+    # Commands this script installs are called by their full path instead.
+    caller_path=$PATH
     local_bin="$HOME/.local/bin"
-    case ":$PATH:" in
-        *":$local_bin:"*) ;;
-        *) PATH="$local_bin:$PATH" ;;
-    esac
-    export PATH
 
     if [ "$dry_run" = 1 ]; then
         say "dry run: these are the steps; nothing is downloaded, installed or run."
@@ -97,8 +96,12 @@ netkeep_install() {
     fi
 
     # --- 1. uv ----------------------------------------------------------------------------
-    if command -v uv >/dev/null 2>&1; then
-        step "1. uv is already installed: $(command -v uv)"
+    uv=$(command -v uv 2>/dev/null) || uv=''
+    if [ -z "$uv" ] && [ -x "$local_bin/uv" ]; then
+        uv="$local_bin/uv"
+    fi
+    if [ -n "$uv" ]; then
+        step "1. uv is already installed: $uv"
     else
         step "1. Install uv $uv_version into $local_bin (uv's installer, checked against its pinned SHA-256)"
         say "download $uv_installer_url"
@@ -111,14 +114,17 @@ netkeep_install() {
                 die "uv's installer has SHA-256 $actual, not the pinned $uv_installer_sha256. Nothing was installed."
             fi
             # Only the pinned download location and the install folder: environment
-            # variables that redirect uv's installer elsewhere are cleared for it.
+            # variables that redirect uv's installer elsewhere, send it a token, or have
+            # it write to a file outside HOME are cleared for it.
             (
                 unset UV_DOWNLOAD_URL INSTALLER_DOWNLOAD_URL UV_INSTALLER_GHE_BASE_URL \
-                    UV_INSTALLER_GITHUB_BASE_URL CARGO_DIST_FORCE_INSTALL_DIR UV_UNMANAGED_INSTALL
-                UV_INSTALL_DIR="$local_bin" sh "$work/uv-installer.sh"
+                    UV_INSTALLER_GITHUB_BASE_URL CARGO_DIST_FORCE_INSTALL_DIR \
+                    UV_UNMANAGED_INSTALL UV_GITHUB_TOKEN GITHUB_PATH
+                PATH=$caller_path UV_INSTALL_DIR="$local_bin" sh "$work/uv-installer.sh"
             ) || die "uv's installer failed."
-            command -v uv >/dev/null 2>&1 || die "uv's installer finished, but there is no uv in $local_bin."
+            [ -x "$local_bin/uv" ] || die "uv's installer finished, but there is no uv in $local_bin."
         fi
+        uv="$local_bin/uv"
     fi
 
     # --- 2. The release's constraints file ------------------------------------------------
@@ -145,7 +151,7 @@ netkeep_install() {
     step "3. Install netkeep $netkeep_version as a uv tool, with uv's own Python 3.12"
     say "uv tool install --python 3.12 --managed-python -c $constraints netkeep==$netkeep_version"
     if [ "$dry_run" = 0 ]; then
-        uv tool install --python 3.12 --managed-python -c "$constraints" "netkeep==$netkeep_version" ||
+        "$uv" tool install --python 3.12 --managed-python -c "$constraints" "netkeep==$netkeep_version" ||
             die "uv tool install failed. If your uv is old, update it with 'uv self update' and run this again."
     fi
 
@@ -156,7 +162,7 @@ netkeep_install() {
         say "dry run: done. Run it again without --dry-run to install."
         return 0
     fi
-    bin_dir=$(uv tool dir --bin) || die "could not find uv's tool folder ('uv tool dir --bin' failed)."
+    bin_dir=$("$uv" tool dir --bin) || die "could not find uv's tool folder ('uv tool dir --bin' failed)."
     netkeep="$bin_dir/netkeep"
     [ -x "$netkeep" ] || die "netkeep was installed, but $netkeep isn't there."
     if "$netkeep" setup --help >/dev/null 2>&1; then
@@ -168,9 +174,14 @@ netkeep_install() {
     fi
 
     step "Done: netkeep $netkeep_version is installed at $netkeep"
-    case ":$PATH:" in
+    case ":$caller_path:" in
         *":$bin_dir:"*) ;;
-        *) say "$bin_dir isn't on your PATH. Run 'uv tool update-shell', then open a new terminal." ;;
+        *)
+            say "$bin_dir isn't on this terminal's PATH. Open a new terminal; if 'netkeep' still isn't found, run:"
+            say "  '$uv' tool update-shell"
+            say "or add this line to your shell profile (~/.zshrc for zsh):"
+            say "  export PATH=\"$bin_dir:\$PATH\""
+            ;;
     esac
 }
 
