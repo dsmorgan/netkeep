@@ -220,7 +220,9 @@ def test_preflight_builds_its_provider_with_the_one_provider_helper(
 ) -> None:
     """#710: preflight's provider comes from ``_provider(settings)``, like every other
     command's, not from a constructor call of its own."""
-    monkeypatch.setenv("NETKEEP_DATA", str(tmp_path / "data"))
+    # Not tmp_path / "data": conftest runs each test in tmp_path, and on Linux that is
+    # the default data directory, whose profile the fake Chrome refuses to hold.
+    monkeypatch.setenv("NETKEEP_DATA", str(tmp_path / "fresh-install"))
     monkeypatch.delenv("NETKEEP_DATABASE_URL", raising=False)
 
     def not_this_way(*args: object, **kwargs: object) -> None:
