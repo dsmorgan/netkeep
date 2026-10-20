@@ -520,6 +520,7 @@ class MergeValues:
 
     ``contact`` is keyed by :data:`CONTACT_FIELDS`; a key left out has no value.
     The campaign fields are ``None`` outside a campaign, as in a preview.
+    ``previous_send_date`` is the previous send's local day, like ``today`` (#709).
     """
 
     contact: Mapping[str, object]
@@ -724,8 +725,13 @@ def _environment(today: date) -> _Sandbox:
 def ago(value: object, *, today: date) -> str:
     """``{{ previous_send_date | ago }}``: how long before ``today``, in words.
 
-    Counted in whole UTC days. No value renders as an empty string, like any
-    missing field. A date on or after ``today`` is "today".
+    Counted in whole calendar days. Both days are the user's local days: the
+    engine passes ``today`` and the previous send's date from its local zone
+    (``Suggested.local_date``, #709), since a UTC day is off by one for an
+    evening send in US Pacific time or a morning send in Australia. An aware
+    datetime counts by its UTC day, so a caller passes a date. No value renders
+    as an empty string, like any missing field. A date on or after ``today`` is
+    "today".
 
     ======== ===================
     days     phrasing

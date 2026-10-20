@@ -892,18 +892,18 @@ def _check_sendable(
     contact: Contact | None,
     campaign: Campaign,
     step: CampaignStep,
-    now: datetime,
+    today: date,
     *,
     enrollment_id: int,
 ) -> None:
     """Refuse (:class:`ReviewConflict`) a message that can't be sent as it renders: the
     contact is gone, it does not render, or its render has a lint error, such as a
     LinkedIn message a merge value made multi-line (P4-11). Approving it would cover
-    nothing the engine could send."""
+    nothing the engine could send. ``today`` is the user's local day, as the engine
+    renders with (#709)."""
     where = f"enrollment {enrollment_id}'s message for step {step.position}"
     if contact is None:
         raise ReviewConflict(f"{where} can't be approved: the contact is gone")
-    today = now.date()
     try:
         rendered = _render_step(
             template,
@@ -949,13 +949,14 @@ def approve_messages(
         raise ReviewConflict(f"enrollment {unknown[0]} is not pending in this campaign")
     step_print = step_fingerprint(step, template, campaign)
     contacts = _contacts(session, user, [pending[i].contact_id for i in ids])
+    today = local_today(user.timezone, now)
     current = {
         i: message_fingerprint(
             step_print,
             contacts.get(pending[i].contact_id),
             campaign,
             step,
-            local_today(user.timezone, now),
+            today,
             enrollment_id=i,
         )
         for i in ids
@@ -968,7 +969,7 @@ def approve_messages(
             )
     for enrollment_id in ids:
         contact = contacts.get(pending[enrollment_id].contact_id)
-        _check_sendable(template, contact, campaign, step, now, enrollment_id=enrollment_id)
+        _check_sendable(template, contact, campaign, step, today, enrollment_id=enrollment_id)
     rows = {r.enrollment_id: r for r in _approvals(session, user, campaign_id, step.id)}
     out = []
     for enrollment_id in ids:

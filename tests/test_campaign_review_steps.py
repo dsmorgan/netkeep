@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from functools import partial
 from typing import Any
 
@@ -605,6 +605,74 @@ def test_a_legacy_linkedin_subject_is_a_warning_that_does_not_block_activation(
         ]
         gaps = campaign_review.missing(session, user, campaign, now=NOW)
         assert "lint" not in {g.requirement for g in gaps}
+
+
+@pytest.mark.parametrize(
+    ("timezone", "now", "connected_on", "refused"),
+    [
+        # Mon 16 Nov 16:10 PST is 00:10 UTC on the 17th: the UTC day reached the second
+        # anniversary a day early, so a clean message was refused.
+        (
+            "America/Los_Angeles",
+            datetime(2026, 11, 17, 0, 10, tzinfo=UTC),
+            date(2024, 11, 17),
+            False,
+        ),
+        # Mon 16 Nov 09:30 AEST is 23:30 UTC on the 15th: the UTC day had not reached the
+        # anniversary yet, so a message the engine would refuse was approved.
+        (
+            "Australia/Brisbane",
+            datetime(2026, 11, 15, 23, 30, tzinfo=UTC),
+            date(2024, 11, 16),
+            True,
+        ),
+    ],
+    ids=["us-pacific-winter-evening", "aest-morning"],
+)
+@pytest.mark.usefixtures("newlines_refused")
+def test_approving_a_message_lints_it_on_the_users_local_day(
+    session_factory: sessionmaker[Session],
+    timezone: str,
+    now: datetime,
+    connected_on: date,
+    refused: bool,
+) -> None:
+    """#709 (I10): the approval's lint renders with the user's local today, as the review
+    and the engine do. Two years connected adds a line the prefill would refuse."""
+    user, campaign_id = _linkedin_reviewing(
+        session_factory,
+        subject=None,
+        body="Hi {{ first_name }} {{ personal_line }}"
+        "{% if years_since_connected >= 2 %} in {{ location }}{% endif %}",
+        locations=("Two\nlines",),
+    )
+    user.timezone = timezone  # the caller's loaded user, as each request loads it
+    with session_scope(session_factory, write=True) as session:
+        row = session.get(User, user.id)
+        assert row is not None
+        row.timezone = timezone
+        for contact in session.scalars(scoped(user, Contact)):
+            contact.connected_on = connected_on
+    with session_scope(session_factory) as session:
+        campaign = campaign_review.get_campaign(session, user, campaign_id)
+        step_id = campaign.steps[0].id
+        review = campaign_review.review_step(session, user, campaign_id, step_id, now=now)
+    [message] = review.messages  # a per-message step pages through blocked ones too
+    assert (message.blocked is not None) is refused
+    approve = partial(
+        campaign_review.approve_messages,
+        user=user,
+        campaign_id=campaign_id,
+        step_id=step_id,
+        seen={message.enrollment_id: message.fingerprint},
+        now=now,
+    )
+    with session_scope(session_factory, write=True) as session:
+        if refused:
+            with pytest.raises(campaign_review.ReviewConflict, match="lint error"):
+                approve(session)
+        else:
+            assert [row.enrollment_id for row in approve(session)] == [message.enrollment_id]
 
 
 @pytest.mark.usefixtures("newlines_refused")
