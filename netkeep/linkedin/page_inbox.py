@@ -56,7 +56,6 @@ from urllib.parse import urlsplit
 
 from netkeep.linkedin.browser import BrowserRun, BrowserUnavailable, PageLike
 from netkeep.linkedin.classify import Outcome, classify
-from netkeep.linkedin.flagship import LINKEDIN_ORIGIN
 from netkeep.linkedin.inbox import (
     MAX_THREADS_OPENED,
     InboxConversation,
@@ -102,7 +101,7 @@ from netkeep.linkedin.pacing import (
     ScrollProfile,
     scroll_like_a_person,
 )
-from netkeep.linkedin.strict_origin import NotAStrictOrigin, parse_strict_origin
+from netkeep.linkedin.strict_origin import LINKEDIN_ORIGIN, require_page_origin, trim_path
 from netkeep.linkedin.voyager import RouteChanged
 
 log = logging.getLogger(__name__)
@@ -129,8 +128,6 @@ THREAD_PAUSE_S: Final = (4.0, 10.0)
 #: one read-only geometry lookup, never a click: nothing is run in the page, and the link
 #: is only hovered at its center as a bare point.
 CONVERSATION_LINK: Final = f'a[href*="{THREAD_PATH_PREFIX}"]'
-
-_LOOPBACK_HOSTS: Final[frozenset[str]] = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
 @dataclass(slots=True)
@@ -175,7 +172,7 @@ class PageInbox:
         limits: ObservationLimits | None = None,
     ) -> None:
         self._run = run
-        self._origin = _require_origin(origin)
+        self._origin = require_page_origin(origin, reader="the inbox reader")
         self._rng = rng if rng is not None else random.Random()  # noqa: S311 -- pacing, not crypto
         self._scroll_profile = scroll_profile
         self._sleep = sleep
@@ -540,8 +537,8 @@ class PageInbox:
             want.hostname,
             want.port,
         )
-        path = _trim(split.path)
-        on_page = path == _trim(MESSAGING_PAGE_PATH) or (
+        path = trim_path(split.path)
+        on_page = path == trim_path(MESSAGING_PAGE_PATH) or (
             thread and split.path.startswith(THREAD_PATH_PREFIX)
         )
         if not (same_origin and on_page):
@@ -561,26 +558,6 @@ def _outcome(response: ObservedResponse) -> Outcome:
     if response.status == 200:
         return Outcome.OK
     return classify(response.status, response.url, "")
-
-
-def _trim(path: str) -> str:
-    return path[:-1] if len(path) > 1 and path.endswith("/") else path
-
-
-def _require_origin(origin: str) -> str:
-    """LinkedIn's origin, or this machine's loopback for the smoke suite. Nothing else."""
-    try:
-        parsed = parse_strict_origin(origin)
-    except NotAStrictOrigin as exc:
-        raise ValueError(f"{origin!r} is not an origin this source may read") from exc
-    if str(parsed) == LINKEDIN_ORIGIN:
-        return LINKEDIN_ORIGIN
-    if parsed.scheme in ("http", "https") and parsed.host in _LOOPBACK_HOSTS:
-        return str(parsed)
-    raise ValueError(
-        f"the inbox is read from {LINKEDIN_ORIGIN!r}, or this machine's own"
-        f" loopback for tests, never {origin!r}"
-    )
 
 
 __all__ = ["PageInbox"]

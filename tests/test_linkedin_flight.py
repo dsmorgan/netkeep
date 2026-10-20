@@ -190,6 +190,44 @@ def test_a_stream_cut_after_its_first_chunk_is_not_whole(start: bytes) -> None:
     assert _whole(started + chunk + b'9:C{"last":true}\n' + root)
 
 
+@pytest.mark.parametrize("start", [b"R", b"r", b"X", b"x"])
+def test_a_stream_of_several_chunks_is_read_whole_in_order(start: bytes) -> None:
+    """#698: every chunk of a stream arrives as a row of the stream's id. Two or more
+    are the stream's chunks, kept in order, never "a row id appears twice"; a
+    lower-case ``r`` or ``x`` start is a stream like ``R`` and ``X``."""
+    root = b'0:["$","div",null,{"children":"$' + start.upper() + b'9"}]\n'
+    body = b"9:" + start + b'\n9:{"chunk":1}\n9:{"chunk":2}\n9:["$L7"]\n9:C\n'
+    body += b'7:{"leaf":"q"}\n' + root
+    payload = parse_flight(body, endpoint=E)
+    assert payload.streams == {"9"} and payload.closed == {"9"}
+    assert payload.chunks == {"9": ({"chunk": 1}, {"chunk": 2}, ["$L7"])}
+    assert set(payload.rows) == {"0", "7"}
+    assert "q" in list(payload.nodes(endpoint=E))
+    assert _whole(body)
+    # A row only a chunk reaches is reached; without the chunk it is an orphan.
+    assert not _whole(body.replace(b'9:["$L7"]\n', b""))
+    # Still cut short without its close.
+    assert not _whole(body.replace(b"9:C\n", b""))
+
+
+def test_a_chunk_reference_to_a_missing_row_is_not_whole() -> None:
+    root = b'0:["$","div",null,{"children":"$R9"}]\n'
+    assert not _whole(b'9:R\n9:{"a":"$L5"}\n9:C\n' + root)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        b'9:R\n9:R\n9:C\n0:{"x":"$R9"}\n',
+        b'9:{"early":1}\n9:R\n9:C\n0:{"x":"$R9"}\n',
+    ],
+)
+def test_a_stream_started_twice_or_after_its_row_is_route_changed(body: bytes) -> None:
+    with pytest.raises(RouteChanged) as caught:
+        parse_flight(body, endpoint=E)
+    assert "a row id appears twice" in caught.value.detail
+
+
 def test_a_close_for_another_stream_does_not_close_this_one() -> None:
     root = b'0:["$","div",null,{"children":"$R9"}]\n'
     assert not _whole(b'9:R\n9:{"chunk":1}\n8:C\n' + root)

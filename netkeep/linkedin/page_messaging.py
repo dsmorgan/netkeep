@@ -62,7 +62,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Final
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import quote
 
 from netkeep.linkedin.browser import (
     BUBBLE_ALREADY_OPEN,
@@ -78,9 +78,10 @@ from netkeep.linkedin.browser import (
     SendClick,
     TypingEnd,
     TypingResult,
+    _on_path,
 )
 from netkeep.linkedin.classify import Outcome, classify
-from netkeep.linkedin.enrich import LINKEDIN_ORIGIN
+from netkeep.linkedin.enrich import masked
 from netkeep.linkedin.messaging import (
     COMPOSE_OPTIONS_PATH,
     MESSAGES_CREATE_PATH,
@@ -115,7 +116,7 @@ from netkeep.linkedin.pacing import (
     scroll_back_to_top,
     scroll_like_a_person,
 )
-from netkeep.linkedin.strict_origin import NotAStrictOrigin, parse_strict_origin
+from netkeep.linkedin.strict_origin import LINKEDIN_ORIGIN, require_page_origin
 
 log = logging.getLogger(__name__)
 
@@ -148,32 +149,10 @@ SCROLL_BACK_DELTA_PX: Final = BRIEF_SCROLL_DELTA_PX
 PROFILE_PREFIX: Final = "/in/"
 
 _WALLS: Final = frozenset({Outcome.CHECKPOINT, Outcome.LOGGED_OUT, Outcome.THROTTLED})
-_LOOPBACK_HOSTS: Final = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
-
-
-def _require_origin(origin: str) -> str:
-    """LinkedIn's origin, or this machine's loopback for the smoke replica. Nothing else."""
-    try:
-        parsed = parse_strict_origin(origin)
-    except NotAStrictOrigin as exc:
-        raise ValueError(f"{origin!r} is not an origin the prefill may open") from exc
-    if str(parsed) == LINKEDIN_ORIGIN:
-        return LINKEDIN_ORIGIN
-    if parsed.scheme in ("http", "https") and parsed.host in _LOOPBACK_HOSTS:
-        return str(parsed)
-    raise ValueError(f"the prefill opens {LINKEDIN_ORIGIN!r} or loopback, never {origin!r}")
-
-
-def _on_path(url: str, path: str) -> bool:
-    try:
-        seen = unquote(urlsplit(url).path).rstrip("/").casefold()
-    except ValueError:
-        return False
-    return seen == unquote(path).rstrip("/").casefold()
 
 
 #: #444's pre-click refusals a person must clear: an auto-send holds on them (ADR 0008).
@@ -220,7 +199,7 @@ class PagePrefill:
         send_confirm_wait_s: float = SEND_CONFIRM_WAIT_S,
     ) -> None:
         self._run = run
-        self._origin = _require_origin(origin)
+        self._origin = require_page_origin(origin, reader="the prefill")
         self._sleep = sleep
         self._clock = clock
         self._rng = rng if rng is not None else random.Random()  # noqa: S311 -- pacing
@@ -272,7 +251,10 @@ class PagePrefill:
         path = f"{PROFILE_PREFIX}{quote(spec.recipient_public_id, safe='')}/"
         await self._run.bring_tab_forward()
         page = await self._run.goto(f"{self._origin}{path}")
-        landed = classify(200, page.url, "")
+        # #698: classify the url with its profile slug masked. A slug is a name, and
+        # one that reads ``login...`` or ``authwall...`` is not a login wall.
+        seen = masked(page.url)
+        landed = classify(200, seen, "")
         if landed in _WALLS:
             log.warning("prefill: the profile landed on a %s page", landed.value)
             return PrefillResult(
@@ -280,9 +262,10 @@ class PagePrefill:
                     MessageOutcomeKind.NOT_TYPED, f"the page answered {landed.value}", None, 0
                 ),
                 wall=landed,
-                wall_url=page.url,
+                wall_url=seen,
             )
-        if not _on_path(page.url, path):
+        # The tab must be on the profile, on the origin it was sent to (#698).
+        if not _on_path(page.url, path, base=self._origin):
             return _not_typed("the profile opened somewhere else")
         if await cancelled():
             return _not_typed("cancelled")
@@ -582,7 +565,7 @@ class PageMessageCheck:
         rng: random.Random | None = None,
     ) -> None:
         self._run = run
-        self._origin = _require_origin(origin)
+        self._origin = require_page_origin(origin, reader="the prefill")
         self._sleep = sleep
         self._rng = rng if rng is not None else random.Random()  # noqa: S311 -- pacing
         self._used = False
@@ -597,13 +580,14 @@ class PageMessageCheck:
         path = f"{PROFILE_PREFIX}{quote(public_id, safe='')}/"
         await self._run.bring_tab_forward()
         page = await self._run.goto(f"{self._origin}{path}")
-        landed = classify(200, page.url, "")
+        seen = masked(page.url)  # the prefill's own masked classify (#698)
+        landed = classify(200, seen, "")
         if landed in _WALLS:
             log.warning("message check: the profile landed on a %s page", landed.value)
             return MessageCheckResult(
-                stopped=f"the page answered {landed.value}", wall=landed, wall_url=page.url
+                stopped=f"the page answered {landed.value}", wall=landed, wall_url=seen
             )
-        if not _on_path(page.url, path):
+        if not _on_path(page.url, path, base=self._origin):
             return MessageCheckResult(stopped="the profile opened somewhere else")
         if await cancelled():
             return MessageCheckResult(stopped="cancelled")
@@ -659,7 +643,7 @@ class PageBubbleCheck:
 
     def __init__(self, run: BrowserRun, *, origin: str = LINKEDIN_ORIGIN) -> None:
         self._run = run
-        self._origin = _require_origin(origin)
+        self._origin = require_page_origin(origin, reader="the prefill")
         self._used = False
 
     async def run(self, profile_id: str) -> BubbleCheck:

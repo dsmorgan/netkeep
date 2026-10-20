@@ -129,7 +129,6 @@ from netkeep.linkedin.flagship import (
     CONNECTIONS_PAGE_PATH,
     CONNECTIONS_SCREEN_PATH,
     FULL_PAGE,
-    LINKEDIN_ORIGIN,
     PAGINATION_PATH,
     SORT_NEWEST_FIRST,
     ConnectionsChunk,
@@ -154,7 +153,7 @@ from netkeep.linkedin.pacing import (
     ScrollProfile,
     scroll_like_a_person,
 )
-from netkeep.linkedin.strict_origin import NotAStrictOrigin, parse_strict_origin
+from netkeep.linkedin.strict_origin import LINKEDIN_ORIGIN, require_page_origin, url_path
 from netkeep.linkedin.voyager import ConnectionsPageResult, ConnectionSummary, RouteChanged
 
 log = logging.getLogger(__name__)
@@ -200,8 +199,6 @@ MOVED_PAST: Final = "the page moved past it"
 #: How a lost answer ends when the run stops for another reason first (#201 review, L2).
 STOPPED_PENDING: Final = "the run stopped before it was read again"
 
-_LOOPBACK_HOSTS: Final[frozenset[str]] = frozenset({"127.0.0.1", "::1", "localhost"})
-
 
 class PageConnections:
     """The connections list from the page's own answers. One instance per run.
@@ -230,7 +227,7 @@ class PageConnections:
         limits: ObservationLimits | None = None,
     ) -> None:
         self._run = run
-        self._origin = _require_origin(origin)
+        self._origin = require_page_origin(origin, reader="the connections reader")
         self._require_newest_first = require_newest_first
         self._rng = rng if rng is not None else random.Random()  # noqa: S311 -- pacing, not crypto
         self._scroll_profile = scroll_profile
@@ -435,7 +432,7 @@ class PageConnections:
             if response is None:
                 log.warning("connections: the page loaded, but no first screen arrived")
                 return SourcePage(Outcome.ROUTE_CHANGED, self._url)
-            if _path(response.url) == _path(PAGINATION_PATH):
+            if url_path(response.url) == url_path(PAGINATION_PATH):
                 log.warning("connections: a page of the list arrived before its first screen")
                 return SourcePage(Outcome.ROUTE_CHANGED, self._url)
             outcome = _outcome(response)
@@ -527,7 +524,7 @@ class PageConnections:
         return None
 
     def _take_answer(self, response: ObservedResponse) -> SourcePage | None:
-        if _path(response.url) != _path(PAGINATION_PATH):
+        if url_path(response.url) != url_path(PAGINATION_PATH):
             # A second first screen (the client refetching it) says nothing new.
             return None
         request = parse_pagination_request(response.request_body)
@@ -816,7 +813,7 @@ class PageConnections:
             want.scheme,
             want.hostname,
             want.port,
-        ) and _path(split.path) == _path(CONNECTIONS_PAGE_PATH)
+        ) and url_path(split.path) == url_path(CONNECTIONS_PAGE_PATH)
         if not on_page:
             log.warning("connections: the tab left the connections page; stopping")
             return SourcePage(Outcome.ROUTE_CHANGED, url)
@@ -850,24 +847,3 @@ def _outcome(response: ObservedResponse) -> Outcome:
 def _not_kept(response: ObservedResponse) -> ObservationFailed:
     """A ``200`` answer the run needed whose body the observation could not keep."""
     return ObservationFailed(f"an answer of the page could not be kept: {response.failure}")
-
-
-def _path(url: str) -> str:
-    path = urlsplit(url).path if "://" in url else url
-    return path[:-1] if len(path) > 1 and path.endswith("/") else path
-
-
-def _require_origin(origin: str) -> str:
-    """LinkedIn's origin, or this machine's loopback for the smoke suite. Nothing else."""
-    try:
-        parsed = parse_strict_origin(origin)
-    except NotAStrictOrigin as exc:
-        raise ValueError(f"{origin!r} is not an origin this source may read") from exc
-    if str(parsed) == LINKEDIN_ORIGIN:
-        return LINKEDIN_ORIGIN
-    if parsed.scheme in ("http", "https") and parsed.host in _LOOPBACK_HOSTS:
-        return str(parsed)
-    raise ValueError(
-        f"the connections list is read from {LINKEDIN_ORIGIN!r}, or this machine's own"
-        f" loopback for tests, never {origin!r}"
-    )

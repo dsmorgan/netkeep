@@ -13,6 +13,9 @@ line, where ``<id>`` is a hex number and ``<value>`` is JSON, or a tag and its d
 * ``2:E{...}`` -- ``E``: the server's own error for that row.
 * ``5:R`` / ``5:X`` -- the start of a stream (``R``) or an async iterable (``X``)
   whose chunks follow as rows of the same id, and ``5:C`` -- its close (#196 item 10).
+  React writes the byte stream and the async iterator as lower-case ``5:r`` and
+  ``5:x``; they start a stream the same way (#698). A chunk is not a row of its own:
+  however many arrive, they are kept in order under the stream's id.
 * ``:HL[...]`` and other upper-case tags -- hints about fonts, preloads, and the like.
 
 Rendered elements are four-item lists, ``["$", type, key, props]``, and a string of
@@ -34,7 +37,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Final
 
 from netkeep.linkedin.voyager import RouteChanged
@@ -59,6 +62,11 @@ _ROW_ID: Final = re.compile(rb"[0-9a-f]*")
 #: Upper-case tags. ``I``, ``T``, and ``E`` mean something here; the rest are hints.
 _TAG: Final = re.compile(rb"[A-Z]+")
 
+#: The lower-case stream starts, ``r`` (a byte stream) and ``x`` (an async iterator).
+#: Upper-case ``R`` and ``X`` are read as tags; these two would otherwise read as a
+#: model row that is not JSON. Each is the whole value of its row.
+_LOWER_STREAM_STARTS: Final = frozenset({b"r", b"x"})
+
 #: The characters a JSON value can start with.
 _JSON_START: Final = frozenset(b'[{"-0123456789tfn')
 
@@ -74,7 +82,8 @@ class FlightPayload:
 
     ``rows`` holds every JSON model row by id. ``modules`` holds each ``I`` row's
     import (its data, unparsed beyond JSON). ``texts`` holds each ``T`` row's text.
-    ``streams`` holds the id of each ``R`` or ``X`` row (a stream started) and
+    ``streams`` holds the id of each ``R``, ``r``, ``X`` or ``x`` row (a stream
+    started), ``chunks`` each started stream's JSON chunks in the order they came, and
     ``closed`` the id of each ``C`` row (a stream closed).
     """
 
@@ -83,6 +92,7 @@ class FlightPayload:
     texts: Mapping[str, str]
     streams: frozenset[str] = frozenset()
     closed: frozenset[str] = frozenset()
+    chunks: Mapping[str, tuple[object, ...]] = field(default_factory=dict)
 
     def resolve(self, value: object) -> object | None:
         """The JSON row ``value`` refers to, or ``None`` when it is not a reference to one."""
@@ -121,9 +131,12 @@ class FlightPayload:
                         stack.append(self.rows[target])
 
     def nodes(self, *, endpoint: str) -> Iterator[object]:
-        """Every node of every JSON row, without following references (each row once)."""
+        """Every node of every JSON row and stream chunk, without following references."""
         for row in self.rows.values():
             yield from self.walk(row, follow=False, endpoint=endpoint)
+        for chunks in self.chunks.values():
+            for chunk in chunks:
+                yield from self.walk(chunk, follow=False, endpoint=endpoint)
 
 
 def is_whole(payload: FlightPayload, *, endpoint: str) -> bool:
@@ -134,11 +147,12 @@ def is_whole(payload: FlightPayload, *, endpoint: str) -> bool:
     to it, as React's ``outlineModel`` writes them, or after -- so a cut copy is told
     apart by what it lacks: row ``0``, the root, is required; every id-bearing
     reference reachable from it (:data:`_ROW_MARKER`) must name a model row, an ``I``
-    import, or a ``T`` text row the copy holds; and every model row must be reachable
-    from the root, since a whole answer sends none that nothing uses (#207 review).
-    A stream (``R``) or async iterable (``X``) that started and never closed (no
-    ``C`` row of its id) is a copy cut mid-stream, however whole its rows look
-    (#196 item 10).
+    import, a ``T`` text row, or a stream the copy holds; and every model row must be
+    reachable from the root, since a whole answer sends none that nothing uses (#207
+    review). A stream's chunks are walked like a row once something reaches the
+    stream. A stream (``R``, ``r``) or async iterable (``X``, ``x``) that started and
+    never closed (no ``C`` row of its id) is a copy cut mid-stream, however whole its
+    rows look (#196 item 10).
     """
     if ROOT_ROW not in payload.rows:
         return False
@@ -147,20 +161,23 @@ def is_whole(payload: FlightPayload, *, endpoint: str) -> bool:
     reached = {ROOT_ROW}
     stack = [ROOT_ROW]
     while stack:
-        for node in payload.walk(payload.rows[stack.pop()], follow=False, endpoint=endpoint):
-            if not isinstance(node, str):
-                continue
-            match = _ROW_MARKER.fullmatch(node)
-            if match is None:
-                continue
-            row = match.group(1)
-            if row in payload.rows:
-                if row not in reached:
-                    reached.add(row)
-                    stack.append(row)
-            elif row not in payload.modules and row not in payload.texts:
-                return False
-    return reached == set(payload.rows)
+        row_id = stack.pop()
+        held = payload.chunks.get(row_id, ()) if row_id in payload.streams else ()
+        for value in (payload.rows[row_id],) if row_id in payload.rows else held:
+            for node in payload.walk(value, follow=False, endpoint=endpoint):
+                if not isinstance(node, str):
+                    continue
+                match = _ROW_MARKER.fullmatch(node)
+                if match is None:
+                    continue
+                row = match.group(1)
+                if row in payload.rows or row in payload.streams:
+                    if row not in reached:
+                        reached.add(row)
+                        stack.append(row)
+                elif row not in payload.modules and row not in payload.texts:
+                    return False
+    return reached - payload.streams == set(payload.rows)
 
 
 def is_element(node: object) -> bool:
@@ -189,7 +206,9 @@ def parse_flight(body: bytes | str, *, endpoint: str) -> FlightPayload:
 
     ``endpoint`` names what was being read, for the error. An empty body, a row with
     no ``:``, a JSON row that does not parse, a text row whose length runs past the
-    body, an ``E`` row, and a row id seen twice are all :class:`RouteChanged`.
+    body, an ``E`` row, and a row id seen twice are all :class:`RouteChanged`. A model
+    row whose id names a stream already started is that stream's next chunk, not a
+    second row of that id.
     """
     data = body.encode("utf-8") if isinstance(body, str) else body
     if not data.strip():
@@ -198,6 +217,7 @@ def parse_flight(body: bytes | str, *, endpoint: str) -> FlightPayload:
     modules: dict[str, object] = {}
     texts: dict[str, str] = {}
     streams: set[str] = set()
+    chunks: dict[str, list[object]] = {}
     closed: set[str] = set()
     seen: set[str] = set()
     position = 0
@@ -230,9 +250,14 @@ def parse_flight(body: bytes | str, *, endpoint: str) -> FlightPayload:
         stop = end if newline == -1 else newline
         value = data[after_tag:stop]
         position = stop + 1
+        if tag == "" and value.strip() in _LOWER_STREAM_STARTS:
+            tag = "R"
         if tag == "":
             if not value or value[0] not in _JSON_START:
                 raise RouteChanged(endpoint, f"row {line}: a model row that is not JSON")
+            if row_id in streams:
+                chunks[row_id].append(_json(value, endpoint, line))
+                continue
             _mark(seen, row_id, endpoint, line)
             rows[row_id] = _json(value, endpoint, line)
         elif tag == "I":
@@ -241,7 +266,11 @@ def parse_flight(body: bytes | str, *, endpoint: str) -> FlightPayload:
         elif tag == "E":
             raise RouteChanged(endpoint, f"row {line}: the server sent an error row")
         elif tag in ("R", "X"):
+            # A start is marked like a row: a second start, or a model row of that id
+            # sent before it, is a row id seen twice.
+            _mark(seen, row_id, endpoint, line)
             streams.add(row_id)
+            chunks[row_id] = []
         elif tag == "C":
             closed.add(row_id)
         # Any other tag is a hint (fonts, preloads, debug info): nothing to read.
@@ -253,6 +282,7 @@ def parse_flight(body: bytes | str, *, endpoint: str) -> FlightPayload:
         texts=texts,
         streams=frozenset(streams),
         closed=frozenset(closed),
+        chunks={stream: tuple(values) for stream, values in chunks.items()},
     )
 
 

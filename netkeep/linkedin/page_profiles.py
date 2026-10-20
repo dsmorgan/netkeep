@@ -112,7 +112,6 @@ from netkeep.linkedin.browser import (
 )
 from netkeep.linkedin.classify import Outcome, classify
 from netkeep.linkedin.enrich import (
-    LINKEDIN_ORIGIN,
     Answer,
     ScrollCancelled,
     UnreadableCause,
@@ -153,7 +152,7 @@ from netkeep.linkedin.observe import (
     ResponseRule,
 )
 from netkeep.linkedin.pacing import ScrollPlan
-from netkeep.linkedin.strict_origin import NotAStrictOrigin, parse_strict_origin
+from netkeep.linkedin.strict_origin import LINKEDIN_ORIGIN, require_page_origin, url_path
 from netkeep.linkedin.voyager import ContactInfo, ProfileDetails, RouteChanged
 
 log = logging.getLogger(__name__)
@@ -187,7 +186,6 @@ PROFILE_OBSERVATION_LIMITS: Final = ObservationLimits(max_pending=64)
 #: The fixed cause of a profile navigation that timed out (#197).
 NAVIGATION_TIMED_OUT: Final = "navigation timed out"
 
-_LOOPBACK_HOSTS: Final[frozenset[str]] = frozenset({"127.0.0.1", "::1", "localhost"})
 _STOPPING: Final = frozenset({Outcome.CHECKPOINT, Outcome.LOGGED_OUT, Outcome.THROTTLED})
 
 
@@ -216,7 +214,7 @@ class PageProfiles:
         # Shapes BrowserRun.scroll's one pointer-rest walk per tab (#192); a caller
         # that passes a seeded one gets a visit that replays from that seed.
         self._rng = rng
-        self._origin = _require_origin(origin)
+        self._origin = require_page_origin(origin, reader="the profile reader")
         self._sleep = sleep
         self._landing_wait_s = landing_wait_s
         self._lazy_wait_s = lazy_wait_s
@@ -409,8 +407,8 @@ class PageProfiles:
                     # moves the tab soon after. Read its address again, nothing more.
                     continue
                 return self._no_screen("the profile page loaded, but no profile screen arrived")
-            path = _path(response.url)
-            if path in (_path(COMPONENT_PATH), _path(NAVIGATION_PATH)):
+            path = url_path(response.url)
+            if path in (url_path(COMPONENT_PATH), url_path(NAVIGATION_PATH)):
                 # Before this profile's screen, a lazy card can only be the last page's,
                 # still in flight as the tab left it: never kept, but a throttle or a
                 # wall on it still stops the run.
@@ -618,9 +616,9 @@ class PageProfiles:
         assert observation is not None
         response = await observation.next(0.0)
         while response is not None:
-            path = _path(response.url)
+            path = url_path(response.url)
             blocked: Answer[None] | None
-            if path in (_path(COMPONENT_PATH), _path(NAVIGATION_PATH)):
+            if path in (url_path(COMPONENT_PATH), url_path(NAVIGATION_PATH)):
                 blocked = self._take_other(response, keep=False)
             elif response.failure == FAILURE_REDIRECT:
                 blocked = self._redirect(response)
@@ -713,7 +711,7 @@ class PageProfiles:
         assert observation is not None
         response = await observation.next(wait_s)
         while response is not None:
-            if _path(response.url) in (_path(COMPONENT_PATH), _path(NAVIGATION_PATH)):
+            if url_path(response.url) in (url_path(COMPONENT_PATH), url_path(NAVIGATION_PATH)):
                 blocked = self._take_other(response)
                 if blocked is not None:
                     return blocked
@@ -735,7 +733,11 @@ class PageProfiles:
         outcome = _status_outcome(response)
         if outcome in _STOPPING:
             return Answer(outcome, masked(response.url))
-        if not keep or _path(response.url) != _path(COMPONENT_PATH) or outcome is not Outcome.OK:
+        if (
+            not keep
+            or url_path(response.url) != url_path(COMPONENT_PATH)
+            or outcome is not Outcome.OK
+        ):
             return None
         body = response.body
         if body is None:
@@ -784,10 +786,10 @@ class PageProfiles:
                     unparsed=True,
                     cause=UnreadableCause.OVERLAY_NEVER_ANSWERED,
                 )
-            if _path(response.url) != _path(NAVIGATION_PATH):
+            if url_path(response.url) != url_path(NAVIGATION_PATH):
                 blocked = (
                     self._take_other(response)
-                    if _path(response.url) == _path(COMPONENT_PATH)
+                    if url_path(response.url) == url_path(COMPONENT_PATH)
                     else None
                 )
                 if blocked is not None:
@@ -1097,24 +1099,3 @@ def _names_only(request_body: str | None, slug: str, urn: str | None) -> bool:
         elif isinstance(node, list):
             stack.extend(node)
     return True
-
-
-def _path(url: str) -> str:
-    path = urlsplit(url).path if "://" in url else url
-    return path[:-1] if len(path) > 1 and path.endswith("/") else path
-
-
-def _require_origin(origin: str) -> str:
-    """LinkedIn's origin, or this machine's loopback for tests and rehearsals. Nothing else."""
-    try:
-        parsed = parse_strict_origin(origin)
-    except NotAStrictOrigin as exc:
-        raise ValueError(f"{origin!r} is not an origin this source may read") from exc
-    if str(parsed) == LINKEDIN_ORIGIN:
-        return LINKEDIN_ORIGIN
-    if parsed.scheme in ("http", "https") and parsed.host in _LOOPBACK_HOSTS:
-        return str(parsed)
-    raise ValueError(
-        f"profiles are read from {LINKEDIN_ORIGIN!r}, or this machine's own loopback for"
-        f" tests, never {origin!r}"
-    )

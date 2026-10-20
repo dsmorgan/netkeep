@@ -29,7 +29,7 @@ from typing import Any
 import pytest
 from factories import make_contact
 from messaging_dom import MessagingSite
-from messaging_pages import ZEPHYRINE, compose_href
+from messaging_pages import ZEPHYRINE, Member, compose_href
 from run_fakes import fake_provider, no_sleep
 from sqlalchemy.orm import Session, sessionmaker
 from test_message_click_scroll_back import (
@@ -273,6 +273,31 @@ async def test_a_wall_stops_the_check_before_any_read() -> None:
     assert result.wall is Outcome.CHECKPOINT and result.snapshots == ()
     assert result.stopped == "the page answered checkpoint"
     assert site.geometry_sessions == []
+
+
+async def _check_member(site: MessagingSite, member: Member) -> MessageCheckResult:
+    provider, _ = fake_provider(site)
+    async with provider.run() as run:
+        return await PageMessageCheck(run, sleep=no_sleep, rng=random.Random(5)).run(
+            member.slug, member.profile_id, cancelled=_never
+        )
+
+
+async def test_a_slug_that_reads_like_a_login_wall_does_not_stop_the_check() -> None:
+    """#698: the check classifies its landing with the slug masked, as the prefill does."""
+    member = Member(107, "Loginquor", "Fictionary", "Analyst at Fictional Robotics Co")
+    site = MessagingSite(member)
+    site.viewport = (1280.0, 800.0)
+    result = await _check_member(site, member)
+    assert result.wall is None and result.wall_url is None
+    assert result.stopped is None and len(result.snapshots) == len(CHECK_PHASES)
+
+
+async def test_the_profile_path_on_another_origin_stops_the_check() -> None:
+    """#698: the landing must be on the origin the check opened, not only the path."""
+    site = MessagingSite(ZEPHYRINE, land_on=f"https://elsewhere.example.test{PATH}")
+    result, _ = await check(site)
+    assert result.stopped == "the profile opened somewhere else" and result.snapshots == ()
 
 
 async def test_a_cancel_stops_before_the_reads() -> None:

@@ -328,6 +328,33 @@ async def test_a_profile_that_redirects_elsewhere_refuses() -> None:
     assert ran.tab.clicks == []
 
 
+#: #698: invented members whose vanity slugs start the way a login wall's path does.
+LOGIN_SLUG = Member(107, "Loginquor", "Fictionary", "Analyst at Fictional Robotics Co")
+AUTHWALL_SLUG = Member(108, "Authwallis", "Fictionary", "Planner at Acme Testing Group")
+
+
+@pytest.mark.parametrize("member", [LOGIN_SLUG, AUTHWALL_SLUG])
+async def test_a_slug_that_reads_like_a_login_wall_is_not_one(member: Member) -> None:
+    """#698: the landing is classified with its slug masked. Unmasked, a slug that
+    starts ``login`` or ``authwall`` read as a login wall and flagged the session."""
+    ran = await prefill(MessagingSite(member), member=member)
+    assert ran.result.wall is None and ran.result.wall_url is None
+    assert ran.kind is MessageOutcomeKind.PREFILLED
+
+
+@pytest.mark.parametrize(
+    "origin", ["https://elsewhere.example.test", "http://www.linkedin.com", "https://linkedin.com"]
+)
+async def test_the_profile_path_on_another_origin_refuses(origin: str) -> None:
+    """#698: landing on the profile's path is not enough; it must be the origin the run
+    opened. Before, only the path was compared."""
+    site = MessagingSite(ZEPHYRINE, land_on=f"{origin}/in/{ZEPHYRINE.slug}/")
+    ran = await prefill(site)
+    assert_no_keys(ran)
+    assert ran.result.outcome.reason == "the profile opened somewhere else"
+    assert ran.tab.clicks == []
+
+
 async def test_a_contact_without_a_public_id_is_never_opened() -> None:
     site = MessagingSite(ZEPHYRINE)
     ran = await prefill(site, spec=spec_for(ZEPHYRINE, public_id=None))
