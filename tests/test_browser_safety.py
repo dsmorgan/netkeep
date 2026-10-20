@@ -2947,6 +2947,12 @@ def test_only_the_launchers_probe_reaches_the_identity_read() -> None:
     [
         (PACKAGE / "cli.py", "import websockets\n"),
         (PACKAGE / "services" / "chrome_launch.py", "from websockets.sync import client\n"),
+        # #677: websockets' own ``connect``, from any module path, under any name.
+        (
+            PACKAGE / "services" / "chrome_launch.py",
+            "from websockets.asyncio.client import connect as c\n",
+        ),
+        (PACKAGE / "web" / "api" / "events.py", "import websockets.client as wc\n"),
         (LINKEDIN / "preflight.py", "from netkeep.linkedin.browser import CdpIdentityReader\n"),
         (LINKEDIN / "browser.py", "_HELD = _read_process_info\n"),
         (PACKAGE / "worker.py", "_ALSO = getattr(browser_module, 'CdpIdentityReader')\n"),
@@ -3258,8 +3264,21 @@ RAW_CONNECTION_NAMES = frozenset(
         "sock_connect",
         "socketpair",
         "fromfd",
+        # #703: asyncio's datagram opener, and anyio's stream and datagram openers
+        # (anyio is imported in web/api, so ``anyio.connect_tcp`` is one line away).
+        "create_datagram_endpoint",
+        "connect_tcp",
+        "connect_unix",
+        "create_udp_socket",
+        "create_connected_udp_socket",
+        "create_unix_datagram_socket",
+        "create_connected_unix_datagram_socket",
     }
 )
+#: #703: the modules a socket is made from (``_socket`` is the C module ``socket``
+#: re-exports), and the names in them that make one.
+SOCKET_MODULES = frozenset({"socket", "_socket"})
+SOCKET_TYPES = frozenset({"socket", "SocketType"})
 #: Every raw connection the package opens, by (file, function, name): count.
 ALLOWED_RAW_CONNECTIONS = {
     # The launcher's port check: connects to loopback and sends nothing (#636).
@@ -3271,8 +3290,9 @@ ALLOWED_RAW_CONNECTIONS = {
 
 
 def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int]:
-    """Each reach of a :data:`RAW_CONNECTION_NAMES` name, and of ``socket.socket``
-    (``socket`` read on the module, or imported from it), by file and function."""
+    """Each reach of a :data:`RAW_CONNECTION_NAMES` name, and of a :data:`SOCKET_TYPES`
+    name read on a :data:`SOCKET_MODULES` module (or imported from it), by file and
+    function. Either socket name is keyed as ``socket.<name>``."""
     found: dict[tuple[Path, str, str], int] = {}
 
     def add(path: Path, where: str, name: str) -> None:
@@ -3281,13 +3301,13 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
     for path, source in sources.items():
         tree = parse(source)
         scopes = _scoped(tree)
-        # Every name the socket module is bound to here: ``import socket as _s`` too.
-        modules = {"socket"} | {
+        # Every name a socket module is bound to here: ``import socket as _s`` too.
+        modules = set(SOCKET_MODULES) | {
             alias.asname
             for node in walk(tree)
             if isinstance(node, ast.Import)
             for alias in node.names
-            if alias.name == "socket" and alias.asname
+            if alias.name in SOCKET_MODULES and alias.asname
         }
         for node in walk(tree):
             where = scopes.get(id(node), "")
@@ -3295,17 +3315,20 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
                 if node.attr in RAW_CONNECTION_NAMES:
                     add(path, where, node.attr)
                 elif (
-                    node.attr == "socket"
+                    node.attr in SOCKET_TYPES
                     and isinstance(node.value, ast.Name)
                     and node.value.id in modules
                 ):
-                    add(path, where, "socket.socket")
+                    add(path, where, f"socket.{node.attr}")
             elif isinstance(node, ast.ImportFrom):
                 for alias in node.names:
                     if alias.name in RAW_CONNECTION_NAMES:
                         add(path, where, alias.name)
-                    elif node.module == "socket" and alias.name in ("socket", "*"):
-                        add(path, where, "socket.socket")
+                    elif node.module in SOCKET_MODULES and alias.name == "*":
+                        for name in sorted(SOCKET_TYPES):
+                            add(path, where, f"socket.{name}")
+                    elif node.module in SOCKET_MODULES and alias.name in SOCKET_TYPES:
+                        add(path, where, f"socket.{alias.name}")
             elif isinstance(node, ast.Call):
                 for arg in _attribute_name_arguments(node):
                     if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
@@ -3313,12 +3336,10 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
                             if part in RAW_CONNECTION_NAMES:
                                 add(path, where, part)
                         held = node.args[0] if node.args else None
-                        if (
-                            "socket" in arg.value.split(".")
-                            and isinstance(held, ast.Name)
-                            and held.id in modules
-                        ):
-                            add(path, where, "socket.socket")
+                        if isinstance(held, ast.Name) and held.id in modules:
+                            for part in arg.value.split("."):
+                                if part in SOCKET_TYPES:
+                                    add(path, where, f"socket.{part}")
     return found
 
 
@@ -3345,6 +3366,28 @@ def test_only_the_reviewed_sites_open_a_raw_connection() -> None:
         "from socket import socket as S\n",
         "from socket import *\n",
         "import socket as _s\nmade = getattr(_s, 'socket')\n",
+        # #703: anyio's openers, asyncio's datagram one, ``_socket``, ``SocketType``.
+        "import anyio\nasync def f():\n    await anyio.connect_tcp('127.0.0.1', 1)\n",
+        "from anyio import connect_tcp\n",
+        "from anyio import connect_tcp as c\n",
+        "import anyio as a\nopener = getattr(a, 'connect_tcp')\n",
+        "import anyio\nasync def f():\n    await anyio.connect_unix('/tmp/x')\n",
+        "from anyio import connect_unix\n",
+        "import anyio\nasync def f():\n    await anyio.create_udp_socket(local_port=1)\n",
+        "from anyio import create_connected_udp_socket\n",
+        "from anyio import create_unix_datagram_socket\n",
+        "import anyio\nmade = anyio.create_connected_unix_datagram_socket\n",
+        "async def f(loop):\n    await loop.create_datagram_endpoint(object)\n",
+        "import _socket\ns = _socket.socket()\n",
+        "import _socket as _c\ns = _c.socket()\n",
+        "from _socket import socket\n",
+        "from _socket import *\n",
+        "import _socket\nmade = getattr(_socket, 'socket')\n",
+        "import socket\ns = socket.SocketType()\n",
+        "from socket import SocketType\n",
+        "from socket import SocketType as T\n",
+        "import socket as _s\nmade = getattr(_s, 'SocketType')\n",
+        "import _socket\ns = _socket.SocketType()\n",
     ],
 )
 def test_the_raw_connection_pin_catches_a_new_opener(line: str) -> None:
@@ -3368,7 +3411,14 @@ HTTP_CLIENT_MODULES = frozenset(
         "ftplib",
         "smtplib",
         "telnetlib",
+        # #703: the mail and news clients.
+        "imaplib",
+        "poplib",
+        "nntplib",
         "logging.handlers",
+        # #677: ``dictConfig`` can build an ``HTTPHandler``, and ``listen()`` opens a
+        # socket.
+        "logging.config",
         "urllib.robotparser",
         "googleapiclient",
         "google_auth_httplib2",
@@ -3581,6 +3631,20 @@ def test_only_the_reviewed_sites_open_an_http_client() -> None:
         "import google\ngoogle.auth.transport.requests.Request()\n",
         "from google import auth\nauth.transport.requests.Request()\n",
         "import google as g\nt = getattr(g.auth, 'transport')\n",
+        # #703: the mail and news clients.
+        "import imaplib\n",
+        "from imaplib import IMAP4_SSL\n",
+        "import poplib as p\n",
+        "from poplib import POP3\n",
+        "import nntplib\n",
+        "from nntplib import NNTP as N\n",
+        # #677: logging.config, by import, attribute and getattr.
+        "import logging.config\n",
+        "from logging.config import dictConfig\n",
+        "from logging import config\n",
+        "import logging\nlogging.config.listen(1)\n",
+        "import logging as lg\nlg.config.dictConfig({})\n",
+        "import logging\nc = getattr(logging, 'config')\n",
     ],
 )
 def test_the_http_client_pin_catches_a_new_opener(line: str) -> None:
@@ -3604,6 +3668,143 @@ def test_the_http_client_pin_catches_a_send_on_gmails_connection() -> None:
     planted = PACKAGE / "campaigns" / "gmail.py"
     sources[planted] += "\n\ndef _sneaky(conn):\n    conn.putrequest('GET', '/')\n"
     assert http_clients(sources) != ALLOWED_HTTP_CLIENTS
+
+
+#: #703: every reach of anyio, exactly, by (file, function, dotted name): count. anyio
+#: opens TCP, Unix and UDP connections (``connect_tcp`` and the rest are in
+#: :data:`RAW_CONNECTION_NAMES` too), so any new use of it, an opener or not, is
+#: reviewed here first.
+ALLOWED_ANYIO_REACHES = {
+    # The event stream's stop signal (#584): an ``anyio.Event`` and its annotation.
+    (PACKAGE / "web" / "api" / "events.py", "", "import anyio"): 1,
+    (PACKAGE / "web" / "api" / "events.py", "stream_events", "anyio.Event"): 1,
+    (PACKAGE / "web" / "api" / "events.py", "_frames", "anyio.Event"): 1,
+    # A handler on the thread pool publishing to the bus on the loop.
+    (PACKAGE / "web" / "api" / "mailboxes.py", "", "anyio.from_thread"): 1,
+    (PACKAGE / "web" / "api" / "mailboxes.py", "_publish", "anyio.from_thread.run_sync"): 1,
+}
+
+
+def anyio_reaches(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int]:
+    """Each reach of anyio, by file and function: each import of it or from it
+    (``import anyio``, ``from anyio import X`` as ``anyio.X``, a star import as
+    ``anyio.*``), and each use of a name bound to it, read as far as its dotted name
+    goes (``from_thread.run_sync`` as ``anyio.from_thread.run_sync``; a ``getattr``
+    literal as one more part)."""
+    found: dict[tuple[Path, str, str], int] = {}
+
+    def add(path: Path, where: str, name: str) -> None:
+        found[(path, where, name)] = found.get((path, where, name), 0) + 1
+
+    def is_anyio(module: str) -> bool:
+        return module == "anyio" or module.startswith("anyio.")
+
+    for path, source in sources.items():
+        tree = parse(source)
+        scopes = _scoped(tree)
+        bound: dict[str, str] = {}
+        for node in walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if is_anyio(alias.name):
+                        top = alias.name if alias.asname else alias.name.split(".")[0]
+                        bound[alias.asname or top] = top
+            elif (
+                isinstance(node, ast.ImportFrom)
+                and node.level == 0
+                and node.module
+                and is_anyio(node.module)
+            ):
+                for alias in node.names:
+                    if alias.name != "*":
+                        bound[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+        inner: set[int] = set()
+        for node in walk(tree):
+            if isinstance(node, ast.Attribute):
+                inner.add(id(node.value))
+        for node in walk(tree):
+            where = scopes.get(id(node), "")
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if is_anyio(alias.name):
+                        add(path, where, f"import {alias.name}")
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                if is_anyio(node.module):
+                    for alias in node.names:
+                        add(path, where, f"{node.module}.{alias.name}")
+            elif isinstance(node, ast.Attribute | ast.Name) and id(node) not in inner:
+                parts: list[str] = []
+                root: ast.AST = node
+                while isinstance(root, ast.Attribute):
+                    parts.append(root.attr)
+                    root = root.value
+                if isinstance(root, ast.Name) and root.id in bound:
+                    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                        continue
+                    add(path, where, ".".join([bound[root.id], *reversed(parts)]))
+            if isinstance(node, ast.Call):
+                held = node.args[0] if node.args else None
+                for arg in _attribute_name_arguments(node):
+                    if (
+                        isinstance(arg, ast.Constant)
+                        and isinstance(arg.value, str)
+                        and held is not None
+                        and (base := _dotted(held, bound)) is not None
+                    ):
+                        add(path, where, f"{base}.{arg.value}")
+    return found
+
+
+def test_only_the_reviewed_sites_reach_anyio() -> None:
+    """#703: anyio is a way to open a connection (to Chrome's debug port, say) that the
+    raw-connection pin reads only by its openers' names. Every use of it is pinned."""
+    found = anyio_reaches(package_sources())
+    assert found == ALLOWED_ANYIO_REACHES, sorted(
+        (str(p.relative_to(PACKAGE)), f, n, c)
+        for (p, f, n), c in found.items()
+        if ALLOWED_ANYIO_REACHES.get((p, f, n)) != c
+    )
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "import anyio\nasync def f():\n    await anyio.connect_tcp('127.0.0.1', 1)\n",
+        "import anyio as a\nasync def f():\n    await a.connect_unix('/tmp/x')\n",
+        "from anyio import connect_tcp\n",
+        "from anyio import *\n",
+        "import anyio.abc\n",
+        "from anyio.streams import tls\n",
+        "from anyio import abc as streams\nkind = streams.SocketStream\n",
+        "import anyio\nopener = getattr(anyio, 'connect_tcp')\n",
+        "import anyio\nf = anyio.from_thread.run\n",
+        "import anyio\nmodule = anyio\n",
+        "import anyio\nanyio.run(print)\n",
+    ],
+)
+def test_the_anyio_pin_catches_a_new_reach(line: str) -> None:
+    sources = package_sources()
+    sources[PACKAGE / "services" / "chrome_launch.py"] += "\n" + line
+    assert anyio_reaches(sources) != ALLOWED_ANYIO_REACHES
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("anyio.Event()", "anyio.Event(); anyio.sleep(0)"),
+        ("from_thread.run_sync(bus.publish, event)", "from_thread.run(bus.publish, event)"),
+        ("from_thread.run_sync(bus.publish, event)", "getattr(from_thread, 'run')(bus.publish)"),
+    ],
+)
+def test_the_anyio_pin_catches_a_change_at_a_reviewed_site(old: str, new: str) -> None:
+    sources = package_sources()
+    for path in (PACKAGE / "web" / "api" / "events.py", PACKAGE / "web" / "api" / "mailboxes.py"):
+        if old in sources[path]:
+            sources[path] = sources[path].replace(old, new, 1)
+            break
+    else:
+        raise AssertionError(old)
+    assert anyio_reaches(sources) != ALLOWED_ANYIO_REACHES
 
 
 def test_no_code_path_alters_or_answers_a_request() -> None:

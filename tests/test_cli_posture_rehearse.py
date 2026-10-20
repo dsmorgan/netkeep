@@ -421,7 +421,9 @@ def test_rehearse_uses_the_pacing_in_the_config_file(
     pacing module's 25-second default and the log said 25 while the live run
     would have used 1 -- the exact inversion of what rehearsing is for.
     """
-    config = tmp_path / "config.toml"
+    # Not ``tmp_path / "config.toml"``: tests run in tmp_path (#703), and the default
+    # run below would read that file from its working directory.
+    config = tmp_path / "brisk.toml"
     config.write_text(
         "[linkedin.pacing]\n"
         "profile_delay_median_s = 1\n"
