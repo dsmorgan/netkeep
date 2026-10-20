@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+import typer
 from run_fakes import ConnectionsContext, fake_provider, fast_profiles, no_sleep
 from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
@@ -632,21 +633,57 @@ def test_resuming_a_sync_says_it_has_no_plan(cli_db: sessionmaker[Session]) -> N
     assert result.exception is None or isinstance(result.exception, SystemExit)
 
 
+def test_a_database_with_no_tables_yet_keys_the_lock_by_account_one(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A database file with no schema (before `netkeep db upgrade`) has no account to
+    confuse: account 1, the one `serve` would take too, not a refusal."""
+    from netkeep.linkedin.activity_lock import SINGLE_ACCOUNT_KEY
+
+    empty = tmp_path / "empty.db"
+    empty.touch()
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", f"sqlite:///{empty}")
+    assert cli_module._browser_lock_key() == SINGLE_ACCOUNT_KEY
+
+
+def test_a_column_the_code_expects_but_the_database_lacks_refuses(
+    cli_db: sessionmaker[Session],
+) -> None:
+    """#710 review: code a migration ahead of the database (a `git pull` while `serve`
+    runs the old code) can't tell which account is the local user's. Guessing account
+    1 could take another lock file than `serve`'s, and both would attach."""
+    with session_scope(cli_db, write=True) as session:
+        ensure_account(session, _user(session))
+    with cli_db.kw["bind"].begin() as connection:
+        connection.exec_driver_sql(
+            "ALTER TABLE linkedin_accounts DROP COLUMN scheduled_runs_armed_at"
+        )
+    with pytest.raises(typer.Exit) as refused:
+        cli_module._browser_lock_key()
+    assert refused.value.exit_code == 1
+
+
 @pytest.mark.parametrize("error", ["OperationalError", "ProgrammingError"])
-def test_an_unreadable_schema_keys_the_lock_by_account_one(
+def test_preflight_refuses_and_attaches_nothing_when_the_schema_is_unreadable(
     cli_db: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch, error: str
 ) -> None:
-    """#175 review F9: SQLite calls a missing column operational, PostgreSQL a
-    programming error; either way preflight keys the lock by account 1, not a crash."""
+    """#175 review F9, #710 review: SQLite calls a missing column operational,
+    PostgreSQL a programming error; either way preflight refuses in one line and
+    never reaches the browser."""
     from sqlalchemy import exc
-
-    from netkeep.linkedin.activity_lock import SINGLE_ACCOUNT_KEY
 
     def schema_too_old(*args: object) -> int:
         raise getattr(exc, error)("SELECT ...", {}, Exception("no such column"))
 
+    async def never(*args: object, **kwargs: object) -> None:
+        raise AssertionError("preflight attached without a lock key it can trust")
+
     monkeypatch.setattr(cli_module, "account_id_for", schema_too_old)
-    assert cli_module._browser_lock_key() == SINGLE_ACCOUNT_KEY
+    monkeypatch.setattr(cli_module, "run_preflight", never)
+    result = CliRunner().invoke(cli, ["preflight"])
+    assert result.exit_code == 1, result.output
+    assert "can't read the database to find which account's browser lock" in result.output
+    assert "nothing attached" in result.output
 
 
 def test_the_lock_key_is_the_local_users_account(cli_db: sessionmaker[Session]) -> None:

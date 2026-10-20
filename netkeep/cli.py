@@ -1674,9 +1674,15 @@ def _browser_lock_key() -> str:
     Every browser path in every process has to meet at the same lock file, and
     `netkeep serve` keys its runs by the account row. So a command that
     attaches (preflight, posture's probe, rehearse) reads the row too, without
-    writing anything: no database yet (a fresh install, before `db upgrade`), no
-    local user, or no account row all mean account 1, the first user's, which
-    is also the row every existing install has (migration 0011).
+    writing anything: no database yet (a fresh install, before `db upgrade`), a
+    database file with no tables yet, no local user, or no account row all mean
+    account 1, the first user's, which is also the row every existing install has
+    (migration 0011).
+
+    Any other database error refuses the command, which then attaches to nothing
+    (#710 review). A guess could name another account than the one `serve` holds,
+    for example when this code is a migration ahead of the database: the two would
+    take different lock files and both attach to the one Chrome.
     """
     url = database_url()
     parsed = make_url(url)
@@ -1694,12 +1700,22 @@ def _browser_lock_key() -> str:
                 return SINGLE_ACCOUNT_KEY
             return account_key(account_id_for(session, user))
     except (OperationalError, ProgrammingError) as exc:
-        # SQLite says a missing table or column is operational; PostgreSQL says it
-        # is a programming error. Either means a schema this cannot read yet.
-        log.debug(
-            "no account row to key the browser lock by (%s); using account 1", personal_exc(exc)
+        if isinstance(exc, OperationalError) and _is_missing_schema(exc):
+            log.debug(
+                "no schema to key the browser lock by yet (%s); using account 1", personal_exc(exc)
+            )
+            return SINGLE_ACCOUNT_KEY
+        # A missing column (code ahead of the schema), PostgreSQL's programming
+        # errors, permissions, I/O, a malformed file: which account is the local
+        # user's is unknown, so no lock key is safe to take.
+        log.warning("can't read the browser lock's account: %s", personal_exc(exc))
+        typer.echo(
+            "netkeep: can't read the database to find which account's browser lock to take"
+            f" ({exc.orig or exc}), so nothing attached. Run netkeep db upgrade, or stop"
+            " netkeep serve first",
+            err=True,
         )
-        return SINGLE_ACCOUNT_KEY
+        raise typer.Exit(code=1) from exc
     finally:
         engine.dispose()
 
