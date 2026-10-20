@@ -7,15 +7,14 @@ serve``'s jobs, ``netkeep preflight``, ``netkeep posture --probe``, and ``netkee
 rehearse`` all meet at the same file, and whichever arrives second is refused.
 
 **The mechanism is ``flock(2)``** on ``<data dir>/locks/browser-<account>.lock``
-(``browser-account-<id>.lock``, :func:`account_key`, plus the legacy
-``browser-local.lock`` a hold of the local account also claims, :data:`LEGACY_SHARED_KEY`), taken
-with ``LOCK_EX | LOCK_NB``. The kernel owns the lock and drops it when the descriptor
-closes, and the descriptor closes when the process exits *however* it exits, ``SIGKILL``
-included. A crashed holder therefore cannot park the lock: there is no heartbeat, no
-staleness rule, and no clock involved, because nothing stale can exist. The file's
-contents (pid, command, since) are a note for the busy message and are never what
-decides whether the lock is held; a note left behind by a crash is overwritten by the
-next holder and ignored until then.
+(``browser-account-<id>.lock``, :func:`account_key`), taken with ``LOCK_EX | LOCK_NB``.
+The kernel owns the lock and drops it when the descriptor closes, and the descriptor
+closes when the process exits *however* it exits, ``SIGKILL`` included. A crashed
+holder therefore cannot park the lock: there is no heartbeat, no staleness rule, and
+no clock involved, because nothing stale can exist. The file's contents (pid,
+command, since) are a note for the busy message and are never what decides whether
+the lock is held; a note left behind by a crash is overwritten by the next holder and
+ignored until then.
 
 The price is scope. The lock binds processes that share this data directory on this
 machine. That is exactly netkeep's deployment today (one machine, one Chrome, one data
@@ -61,19 +60,6 @@ def account_key(account_id: int) -> str:
 #: user's account (migration 0011). ``netkeep preflight`` and ``rehearse`` on a
 #: fresh install, before any database exists, hold this one.
 SINGLE_ACCOUNT_KEY = account_key(1)
-
-#: The key every browser path used before the lock was keyed by account (#169 F).
-#: A netkeep process started from older code and still running (a ``serve``,
-#: a ``preflight``) holds ``browser-local.lock`` and knows nothing of
-#: ``browser-account-<id>.lock``. Older code only ever acted for the local user's
-#: account, so :class:`~netkeep.linkedin.browser.ActivityLocks` claims this file
-#: *as well as* that account's own, first, whenever it holds that account (its
-#: ``legacy_partner``: the local user's account, whatever its id, when the caller
-#: can read the database; :data:`SINGLE_ACCOUNT_KEY` when it cannot). An old
-#: holder and a new one can never both attach. Any other account is not affected
-#: and never waits on it. Dropping this co-claim, once no
-#: pre-P2-10 process can still be running, is a follow-up.
-LEGACY_SHARED_KEY = "local"
 
 _SAFE_KEY = re.compile(r"[A-Za-z0-9_-]{1,64}")
 

@@ -44,7 +44,6 @@ from netkeep.chrome_profile import (
     check_dedicated_profile,
 )
 from netkeep.linkedin import activity_lock
-from netkeep.linkedin.activity_lock import LEGACY_SHARED_KEY
 from netkeep.linkedin.activity_lock import SINGLE_ACCOUNT_KEY as SINGLE_ACCOUNT_KEY
 from netkeep.linkedin.body_tap import BodyTap
 from netkeep.linkedin.errors import BrowserBusy as BrowserBusy
@@ -3069,17 +3068,10 @@ class ActivityLocks:
     #: before calling the account busy.
     CONFIRM_S = 0.05
 
-    def __init__(
-        self, directory: Path | None = None, *, legacy_partner: str | None = SINGLE_ACCOUNT_KEY
-    ) -> None:
+    def __init__(self, directory: Path | None = None) -> None:
         self._directory = directory
         self._locks: dict[str, asyncio.Lock] = {}
-        self._held: dict[str, list[activity_lock.Claim]] = {}
-        #: The account whose holds also claim the legacy ``browser-local.lock``
-        #: (#169 F): the local user's account, which is what pre-P2-10 code acted
-        #: for. Account 1 unless whoever builds the registry knows better; a
-        #: caller with a database passes the local account's key (#175 review, F10).
-        self.legacy_partner = legacy_partner
+        self._held: dict[str, activity_lock.Claim] = {}
 
     @property
     def directory(self) -> Path:
@@ -3099,12 +3091,7 @@ class ActivityLocks:
         lock = self._locks.get(account)
         if lock is not None and lock.locked():
             return True
-        if activity_lock.inspect(account, self.directory).held:
-            return True
-        return (
-            account == self.legacy_partner
-            and activity_lock.inspect(LEGACY_SHARED_KEY, self.directory).held
-        )
+        return activity_lock.inspect(account, self.directory).held
 
     @asynccontextmanager
     async def hold(self, account: str, *, wait: bool = False) -> AsyncIterator[None]:
@@ -3124,20 +3111,20 @@ class ActivityLocks:
             )
         await lock.acquire()
         try:
-            claims = await self._claims(account, wait=wait)
-            self._held[account] = claims
+            claim = await self._claim(account, wait=wait)
+            self._held[account] = claim
             try:
                 yield
             finally:
                 self._held.pop(account, None)
-                for claim in reversed(claims):
-                    claim.release()
+                claim.release()
         finally:
             lock.release()
 
     def held_paths(self, account: str) -> frozenset[Path]:
         """The lock files this registry holds for ``account`` right now (#678 review)."""
-        return frozenset(claim.path for claim in self._held.get(account, ()) if claim.held)
+        claim = self._held.get(account)
+        return frozenset() if claim is None or not claim.held else frozenset({claim.path})
 
     def record_browser(self, account: str, browser_pid: int | None) -> None:
         """Note in ``account``'s held lock files the Chrome pid its attach verified (#636).
@@ -3146,39 +3133,21 @@ class ActivityLocks:
         netkeep Chrome during a run needs that pid to be the profile's lock holder,
         and the launcher may not open a second CDP client to find out.
         """
-        for claim in self._held.get(account, ()):
+        claim = self._held.get(account)
+        if claim is not None:
             claim.record_browser(browser_pid)
 
-    async def _claims(self, account: str, *, wait: bool) -> list[activity_lock.Claim]:
-        """The account's file lock; for :attr:`legacy_partner`, the legacy one first (#169 F).
-
-        See :data:`~netkeep.linkedin.activity_lock.LEGACY_SHARED_KEY`: a process
-        running older code holds only the legacy file, and only ever for the local
-        user's account.
-        Either one busy releases whatever was taken and raises.
-        """
-        keys = [LEGACY_SHARED_KEY, account] if account == self.legacy_partner else [account]
-        held: list[activity_lock.Claim] = []
-        try:
-            for key in keys:
-                held.append(await self._claim(key, wait=wait, account=account))
-        except BaseException:
-            for claim in reversed(held):
-                claim.release()
-            raise
-        return held
-
-    async def _claim(self, key: str, *, wait: bool, account: str) -> activity_lock.Claim:
-        """The file lock ``key``, or :class:`BrowserBusy` when another process has it."""
-        claim = activity_lock.try_claim(key, self.directory)
+    async def _claim(self, account: str, *, wait: bool) -> activity_lock.Claim:
+        """The account's file lock, or :class:`BrowserBusy` when another process has it."""
+        claim = activity_lock.try_claim(account, self.directory)
         if claim is None:
             await asyncio.sleep(self.CONFIRM_S)
-            claim = activity_lock.try_claim(key, self.directory)
+            claim = activity_lock.try_claim(account, self.directory)
         while claim is None and wait:
             await asyncio.sleep(self.POLL_S)
-            claim = activity_lock.try_claim(key, self.directory)
+            claim = activity_lock.try_claim(account, self.directory)
         if claim is None:
-            holder = activity_lock.read_holder(key, self.directory)
+            holder = activity_lock.read_holder(account, self.directory)
             who = holder.describe() if holder is not None else "another netkeep process"
             raise BrowserBusy(
                 f"the browser for LinkedIn account {account!r} is in use by {who}; {_BUSY_ADVICE}"

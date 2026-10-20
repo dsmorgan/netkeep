@@ -1189,49 +1189,29 @@ def test_the_lock_key_is_the_account_row() -> None:
 
     assert activity_lock.account_key(1) == "account-1" == SINGLE_ACCOUNT_KEY
     assert activity_lock.account_key(12) == "account-12"
-    assert activity_lock.LEGACY_SHARED_KEY == "local"
     with pytest.raises(ValueError):
         activity_lock.account_key(0)
 
 
-@pytest.mark.wall_clock  # BUSY_TIMEOUT_S bounds an instant refusal (#472)
-async def test_an_older_process_holding_the_legacy_lock_blocks_account_one() -> None:
-    """A pre-P2-10 netkeep holds only ``browser-local.lock``; a new hold of account 1
-    must not attach alongside it, and a new hold must keep an old one out too."""
+async def test_a_hold_claims_only_its_own_accounts_lock_file() -> None:
+    """#710: a hold of the local account takes ``browser-account-1.lock`` and nothing
+    else; the pre-P2-10 ``browser-local.lock`` co-claim is gone, so no hold creates it."""
     from netkeep.linkedin import activity_lock
 
-    old = activity_lock.try_claim(activity_lock.LEGACY_SHARED_KEY)
-    assert old is not None
-    connector = FakeConnector()
-    provider = make_provider(connector)
-    try:
-        with pytest.raises(BrowserBusy):
-            async with asyncio.timeout(BUSY_TIMEOUT_S), provider.run(SINGLE_ACCOUNT_KEY):
-                pass
-        assert connector.attaches == 0
-        assert provider.locks.is_busy(SINGLE_ACCOUNT_KEY)
-        # Another account never waits on the legacy file.
-        async with provider.run("account-2"):
-            pass
-        # A refused hold of account 1 took nothing with it.
-        assert not activity_lock.inspect(SINGLE_ACCOUNT_KEY).held
-    finally:
-        old.release()
-
+    provider = make_provider()
+    folder = activity_lock.locks_dir()
     async with provider.run(SINGLE_ACCOUNT_KEY):
-        assert activity_lock.try_claim(activity_lock.LEGACY_SHARED_KEY) is None
-    assert not activity_lock.inspect(activity_lock.LEGACY_SHARED_KEY).held
-
-
-async def test_the_legacy_lock_goes_with_the_named_partner_account() -> None:
-    """#175 review F10: whichever account is the local user's co-claims the legacy lock."""
-    from netkeep.linkedin import activity_lock
-
-    provider = make_provider(locks=ActivityLocks(legacy_partner="account-5"))
-    async with provider.run("account-5"):
-        assert activity_lock.inspect(activity_lock.LEGACY_SHARED_KEY).held
-    async with provider.run(SINGLE_ACCOUNT_KEY):
-        assert not activity_lock.inspect(activity_lock.LEGACY_SHARED_KEY).held
+        held = sorted(
+            path.name
+            for path in folder.glob("*.lock")
+            if activity_lock.inspect_at(path, path.stem).held
+        )
+        assert held == ["browser-account-1.lock"]
+        assert provider.locks.held_paths(SINGLE_ACCOUNT_KEY) == {
+            activity_lock.lock_path(SINGLE_ACCOUNT_KEY)
+        }
+    assert not (folder / "browser-local.lock").exists()
+    assert provider.locks.held_paths(SINGLE_ACCOUNT_KEY) == frozenset()
 
 
 async def test_a_cancel_during_the_dwell_stops_it_within_one_slice() -> None:

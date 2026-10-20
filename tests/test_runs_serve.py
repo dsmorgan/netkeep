@@ -896,12 +896,10 @@ async def test_the_worker_does_not_refuse_a_tripped_breaker_for_enrichment(
 def test_the_real_serve_builds_its_extractor_on_the_attach_provider(
     session_factory: Any, settings: Settings
 ) -> None:
-    """``netkeep serve``'s app gets the worker on the one attach provider, building it
-    attaches to nothing, and the legacy-lock co-claim goes with the local user's
-    account whatever its id (#175 review, F10)."""
+    """``netkeep serve``'s app gets the worker on the one attach provider, and building
+    it attaches to nothing, whatever the local user's account id."""
     import factories
 
-    from netkeep.linkedin.activity_lock import account_key
     from netkeep.models import UserKind
     from netkeep.worker import BrowserWorker, serve_extractor
 
@@ -917,7 +915,6 @@ def test_the_real_serve_builds_its_extractor_on_the_attach_provider(
     assert isinstance(executor, BrowserWorker)
     assert isinstance(executor.provider, AttachBrowserProvider)
     assert executor.provider.cdp_url == settings.linkedin.cdp_url
-    assert executor.provider.locks.legacy_partner == account_key(local_account)
 
 
 @pytest.mark.wall_clock  # an asyncio timeout bounds a step (#472)
