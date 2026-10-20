@@ -16,12 +16,15 @@ import dataclasses
 import hashlib
 import json
 import os
+import plistlib
+import re
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NoReturn
 
 import pytest
+import typer
 from fastapi import FastAPI
 from sqlalchemy import Engine
 from typer.testing import CliRunner
@@ -1338,12 +1341,13 @@ def in_progress() -> Path:
     "args",
     [
         ["campaigns", "linkedin", "prefill", "1"],
-        ["serve"],
-        ["--config", "/nonexistent.toml", "serve"],
-        ["restore", "netkeep-20261010T000000Z.sqlite3"],
+        ["--config", "/nonexistent.toml", "tags", "run-rules"],
+        ["--config", "update", "tags", "run-rules"],
         ["db", "upgrade"],
-        ["login-item", "on"],
         ["backup", "create"],
+        # #692 re-review: a --help that is an option's value, or after --, isn't help.
+        ["campaigns", "create", "x", "--mailbox", "--help"],
+        ["import", "csv", "--", "--help"],
     ],
 )
 def test_other_commands_refuse_during_an_update(in_progress: Path, args: list[str]) -> None:
@@ -1397,9 +1401,133 @@ def test_no_refusal_without_an_update(tmp_path: Path) -> None:
 
 
 def test_command_words() -> None:
-    assert cli._command_words(["--config", "c.toml", "db", "current", "--x", "y"]) == [
-        "db",
-        "current",
-    ]
-    assert cli._command_words(["update", "--finish"]) == ["update"]
-    assert cli._command_words(["--config=c.toml", "serve"]) == ["serve"]
+    words = cli._command_words
+    assert words(["--config", "c.toml", "db", "current", "--x", "y"]) == [(2, "db"), (3, "current")]
+    assert words(["update", "--finish"]) == [(0, "update")]
+    assert words(["--config=c.toml", "serve"]) == [(1, "serve")]
+    assert words(["import", "--", "csv"]) == [(0, "import")]
+
+
+def _hook_allows(args: list[str]) -> bool:
+    """Whether the pre-command hook lets ``args`` through, with an update in progress."""
+    root = typer.main.get_command(cli.app)
+    ctx = root.make_context("netkeep", [], resilient_parsing=True)
+    try:
+        cli._refuse_during_an_update(ctx, args)  # type: ignore[arg-type]
+    except typer.Exit:
+        return False
+    return True
+
+
+def test_the_login_agents_own_serve_passes_the_hook(world: World, in_progress: Path) -> None:
+    """#692 re-review: the agent's exact ProgramArguments, with --host and --port."""
+    agents = world.tmp / "agents"
+    agents.mkdir(exist_ok=True)
+    item = world.item()
+    document = plistlib.loads(item.render_plist(host="127.0.0.1", port=8123))
+    arguments = document["ProgramArguments"]
+    assert arguments[1:] == ["serve", "--host", "127.0.0.1", "--port", "8123"]
+    assert _hook_allows(arguments[1:])
+    assert _hook_allows(plistlib.loads(item.render_plist())["ProgramArguments"][1:])
+
+
+def test_every_printed_recovery_step_passes_the_hook(world: World, in_progress: Path) -> None:
+    """Each netkeep command the update prints, and each the troubleshooting guide's
+    Updating section gives, runs while state.json is still there."""
+    world.install_login_item()
+    world.serve_answers[NEW] = False
+    assert world.run_update() == 1  # stop and explain
+    printed = re.findall(
+        r"\bnetkeep ((?:update|restore|login-item|serve|version)[^.,;:]*)", world.text
+    )
+    guide = (Path(__file__).parent.parent / "docs" / "guide" / "troubleshooting.md").read_text()
+    section = guide[guide.index("## Updating") : guide.index("## Run at login does nothing")]
+    documented = re.findall(r"`netkeep ([^`]+)`", section)
+    steps = {step.strip() for step in printed + documented}
+    assert {"login-item on", "update --finish", "update --rollback"} <= steps
+    assert any(step.startswith("restore ") for step in steps)
+    for step in sorted(steps):
+        assert _hook_allows(step.replace("<backup>", "b.sqlite3").split()), step
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["campaigns", "linkedin", "prefill", "--help"],
+        ["campaigns", "linkedin", "--help"],
+        ["tags", "run-rules", "--help"],
+    ],
+)
+def test_real_help_passes_the_hook(in_progress: Path, args: list[str]) -> None:
+    assert _hook_allows(args)
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["serve"],
+        ["--config", "/c.toml", "serve", "--port", "8123"],
+        ["restore", "netkeep-20261010T000000Z.sqlite3"],
+        ["login-item", "on"],
+        ["login-item", "off"],
+        ["login-item", "status"],
+    ],
+)
+def test_serve_and_the_recovery_commands_pass_the_hook(in_progress: Path, args: list[str]) -> None:
+    """Checked through the hook alone: running them would start a server or touch launchd."""
+    assert _hook_allows(args)
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["campaigns", "create", "x", "--mailbox", "--help"],
+        ["import", "csv", "--", "--help"],
+        ["tags", "run-rules"],
+    ],
+)
+def test_the_hook_refuses_what_isnt_help(in_progress: Path, args: list[str]) -> None:
+    assert not _hook_allows(args)
+
+
+def test_finish_passes_when_the_agents_serve_runs_through_the_cli(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End to end: launchd's bootstrap runs the plist's ProgramArguments through the real
+    CLI, hook included, with state.json present. Only the server itself is a fake."""
+    served: list[list[str]] = []
+
+    class FakeServer:
+        started = True
+        should_exit = False
+
+        def __init__(self, _config: object) -> None:
+            pass
+
+        def run(self) -> None:
+            World._start_agent(world)
+
+    class FakeApp:
+        class state:
+            pass
+
+    monkeypatch.setattr("netkeep.cli.serve_app", lambda *_a, **_k: FakeApp())
+    monkeypatch.setattr("netkeep.cli.uvicorn.Server", FakeServer)
+    monkeypatch.setattr("netkeep.cli.uvicorn.Config", lambda *_a, **_k: None)
+    monkeypatch.setattr("netkeep.cli.serve_lock.state", world.lock.state)
+
+    def through_the_cli() -> None:
+        document = plistlib.loads(world.item().plist_path.read_bytes())
+        arguments = document["ProgramArguments"][1:]
+        served.append(arguments)
+        result = CliRunner().invoke(
+            cli.app, arguments, env=document["EnvironmentVariables"], catch_exceptions=False
+        )
+        assert result.exit_code == 0, result.output
+
+    world.install_login_item()
+    world._start_agent = through_the_cli  # type: ignore[method-assign]
+    assert world.run_update() == 0, world.text
+    assert served and served[-1][0] == "serve"
+    assert world.running == NEW
+    assert world.state() is None

@@ -70,7 +70,7 @@ If the install or that check fails, and the new version's `serve` hadn't started
 
 If the login item was off, `netkeep update` installs the new version and leaves it off; start netkeep with `netkeep serve`.
 
-While an update is in progress, other netkeep commands refuse, except `netkeep version`, `--help` and a few read-only status commands, so nothing writes to the data the update backed up.
+While an update is in progress, other netkeep commands refuse, so nothing else writes to the data the update backed up. `serve`, the recovery commands the update prints (`restore` and `login-item`), `version`, `--help` and a few read-only status commands still run.
 
 A checkout doesn't update this way: run `git pull`, then `make install`.
 

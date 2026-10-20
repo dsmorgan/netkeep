@@ -316,7 +316,7 @@ def main(
 ) -> None:
     """netkeep command group."""
     ctx.obj = CliState(config=config)
-    _refuse_during_an_update(ctx.meta.get(_ARGS_KEY, []))
+    _refuse_during_an_update(ctx, ctx.meta.get(_ARGS_KEY, []))
     # Before logging, which opens its file in the data directory the migration may move.
     done = _auto_migrate(ctx.invoked_subcommand)
     setup_logging(log_to_file=ctx.invoked_subcommand not in _NO_LOG_FILE)
@@ -324,13 +324,20 @@ def main(
         log.info("migrate: %s", line)
 
 
-#: What runs while ``netkeep update`` is in progress (#685): the update's own steps,
-#: ``version``, and status commands that only read. Everything else could write to the
-#: data the update backed up, or start a ``serve`` whose scheduler sends.
+#: What runs while ``netkeep update`` is in progress (#685): the update's own steps;
+#: ``serve``, which the update's login item starts and which writes the scheduler marker
+#: durably before its scheduler runs, so no rollback restores over what it sent; the
+#: recovery steps the update prints and the troubleshooting guide gives (``login-item``
+#: and ``restore``, each of which takes the serve lock); ``version``; and status
+#: commands that only read. Everything else could write to the data the update backed up.
 _DURING_AN_UPDATE: Final = frozenset(
     {
         ("update",),
+        ("serve",),
+        ("restore",),
         ("version",),
+        ("login-item", "on"),
+        ("login-item", "off"),
         ("login-item", "status"),
         ("db", "current"),
         ("backup", "list"),
@@ -343,34 +350,57 @@ UPDATE_IN_PROGRESS: Final = (
 )
 
 
-def _command_words(args: Sequence[str]) -> list[str]:
-    """The subcommand names at the front of ``args``: the words after the root's options
-    and before the first option of the command itself."""
-    words: list[str] = []
+def _command_words(args: Sequence[str]) -> list[tuple[int, str]]:
+    """The words at the front of ``args`` after the root's options, up to the first option
+    (or ``--``) after them, each with its index in ``args``."""
+    words: list[tuple[int, str]] = []
     skip = False
-    for arg in args:
+    for index, arg in enumerate(args):
         if skip:
             skip = False
             continue
+        if arg == "--":
+            break
         if arg.startswith("-"):
             if words:
                 break
             skip = arg == "--config"
             continue
-        words.append(arg)
+        words.append((index, arg))
     return words
 
 
-def _refuse_during_an_update(args: Sequence[str]) -> None:
+def _asks_for_help(ctx: typer.Context, args: Sequence[str]) -> bool:
+    """Whether Click would show help for ``args``: the words resolved down the command
+    tree as Click resolves them, then what follows parsed by that command's own parser,
+    so a ``--help`` that is an option's value or comes after ``--`` doesn't count."""
+    command = ctx.command
+    start = 0
+    for index, word in _command_words(args):
+        if not isinstance(command, TyperGroup):
+            break
+        found = command.get_command(ctx, word)
+        if found is None:
+            return False
+        command, start = found, index + 1
+    if start == 0:
+        return False  # the root's own --help never reaches this hook
+    try:
+        sub = command.make_context(command.name or "", [], parent=ctx, resilient_parsing=True)
+        options, _, _ = command.make_parser(sub).parse_args(args=list(args[start:]))
+    except Exception:  # an argument line Click would refuse shows no help either
+        return False
+    return "help" in options
+
+
+def _refuse_during_an_update(ctx: typer.Context, args: Sequence[str]) -> None:
     """While ``<data>/update/state.json`` exists, refuse every command but the allowed ones
-    (:data:`_DURING_AN_UPDATE`) and ``--help``."""
-    if "--help" in args:
-        return
-    words = _command_words(args)
+    (:data:`_DURING_AN_UPDATE`) and a request for help."""
+    words = [word for _, word in _command_words(args)]
     if tuple(words[:1]) in _DURING_AN_UPDATE or tuple(words[:2]) in _DURING_AN_UPDATE:
         return
     state_file = update_service.update_dir() / update_service.STATE_FILE
-    if not state_file.exists():
+    if not state_file.exists() or _asks_for_help(ctx, args):
         return
     typer.echo(f"error: {UPDATE_IN_PROGRESS}. {state_file} records it.", err=True)
     raise typer.Exit(code=1)
