@@ -152,6 +152,10 @@ class BodyTap:
             post_data = request.get("postData")
         except (KeyError, TypeError, AttributeError):
             return
+        # A redirect is a second request event under the same id, for the new url
+        # (#697). The entry held for the old url is dropped either way: what streams on
+        # under this id is the new url's answer, which only a new match may keep.
+        self._streams.pop(request_id, None)
         if not self.match.matches(method, url):
             return
         body = post_data if isinstance(post_data, str) else None

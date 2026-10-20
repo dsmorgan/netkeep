@@ -2695,7 +2695,7 @@ class PlaywrightCdpConnector:
         playwright = await async_playwright().start()
         try:
             browser = await playwright.chromium.connect_over_cdp(cdp_url)
-        except BaseException as exc:
+        except Exception as exc:
             await playwright.stop()
             if NO_WINDOWS_ERROR in str(exc):
                 raise BrowserUnavailable(no_windows_message(cdp_url)) from exc
@@ -2703,6 +2703,11 @@ class PlaywrightCdpConnector:
                 f"cannot attach to Chrome at {cdp_url}: {_reason(exc)}; "
                 "start it with the command `netkeep browser launch` prints"
             ) from exc
+        except BaseException:
+            # A cancel, Ctrl-C or SystemExit is not an unreachable browser (#697): the
+            # run is recorded as aborted, not failed, so it goes on as itself.
+            await playwright.stop()
+            raise
         try:
             # On this same connection, so the pid belongs to the browser the run will
             # drive, not to whatever answered the port a moment earlier (#624).
@@ -4549,8 +4554,9 @@ class BrowserRun:
         The first key call *attempted* is the point of no return: ``started_at`` is
         taken just before it. After it, a failed check or a cancel ends
         ``partially_typed``, and a lost tab or a key call that raised ends ``unknown``.
-        At the end the composer's text must be the whole body, or the result is
-        ``partially_typed``. Nothing here reopens, navigates, or clears anything.
+        At the end every check runs once more (a later compose option included) and the
+        composer's text must be the whole body, or the result is ``partially_typed``.
+        Nothing here reopens, navigates, or clears anything.
         """
         page = self._page
         if page is None or page.is_closed() or not self._message_clicked:
@@ -4613,7 +4619,9 @@ class BrowserRun:
                 )
             so_far += "\n" if step.newline else step.chunk
         body = so_far
-        final = await self._composer_refusal(tab, composer, recipient, body)
+        final = await self._composer_refusal(
+            tab, composer, recipient, body, another_compose=another_compose
+        )
         if final is not None:
             end = TypingEnd.UNKNOWN if self._lost(page) else TypingEnd.PARTIALLY_TYPED
             return TypingResult(end, f"after typing: {final}", len(body), started_at)
