@@ -158,6 +158,8 @@ class World:
     uv_exit: dict[str, int] = field(default_factory=dict)
     """The exit status ``uv tool install netkeep==<version>`` returns; 0 by default."""
     uv_calls: list[list[str]] = field(default_factory=list)
+    uv_locked: list[bool] = field(default_factory=list)
+    """For each uv call, whether the update held the serve lock."""
     fetched: list[str] = field(default_factory=list)
     execs: list[list[str]] = field(default_factory=list)
     serve_answers: dict[str, bool] = field(default_factory=dict)
@@ -255,7 +257,7 @@ class World:
 
     def uv(self, arguments: list[str]) -> int:
         self.uv_calls.append(list(arguments))
-        assert self.lock.holder is None or self.lock.holder == os.getpid()
+        self.uv_locked.append(self.lock.holder == os.getpid())
         assert self.running is None, "uv ran while a serve was running"
         spec = next(a for a in arguments if a.startswith("netkeep=="))
         version = spec.removeprefix("netkeep==")
@@ -733,8 +735,15 @@ def test_serve_writes_the_marker_only_during_an_update(tmp_path: Path) -> None:
     assert not update.update_dir(tmp_path).exists()
     update.write_state(update.UpdateState(OLD, NEW, "a", "b", None, True, "finishing"), tmp_path)
     update.mark_scheduler_starting(NEW, tmp_path)
-    assert update.scheduler_started(NEW, tmp_path)
-    assert not update.scheduler_started("9.9.9", tmp_path)
+    assert update.scheduler_started(tmp_path)
+
+
+def test_a_marker_from_any_version_counts_as_started(tmp_path: Path) -> None:
+    """Whichever netkeep wrote it (a checkout's serve, another install), a scheduler ran on
+    this data directory during the update, and a restore would forget what it sent."""
+    update.write_state(update.UpdateState(OLD, NEW, "a", "b", None, True, "finishing"), tmp_path)
+    update.mark_scheduler_starting("9.9.9", tmp_path)
+    assert update.scheduler_started(tmp_path)
 
 
 async def test_the_lifespan_marks_before_the_scheduler_starts(
@@ -755,7 +764,7 @@ async def test_the_lifespan_marks_before_the_scheduler_starts(
             return None
 
     def scheduler(*_args: Any, **_kwargs: Any) -> _Stopped:
-        seen.append(update.scheduler_started(__version__, data))
+        seen.append(update.scheduler_started(data))
         return _Stopped()
 
     class _Monitor:
@@ -793,7 +802,8 @@ class _Response:
         return self._location if name == "Location" else None
 
     def read(self, limit: int) -> bytes:
-        return self._body[:limit]
+        chunk, self._body = self._body[:limit], self._body[limit:]
+        return chunk
 
 
 class _Connections:
@@ -1011,4 +1021,271 @@ def test_a_marker_that_names_no_version_counts_as_started(tmp_path: Path, marker
     """The safe reading: a marker serve wrote, whatever it holds, means don't restore."""
     update.update_dir(tmp_path).mkdir(parents=True)
     (update.update_dir(tmp_path) / update.SCHEDULER_MARKER).write_text(marker)
-    assert update.scheduler_started(NEW, tmp_path)
+    assert update.scheduler_started(tmp_path)
+
+
+# -- review fixes (#692): no restore after any scheduler may have run -----------------
+
+
+def test_rollback_refuses_to_restore_once_a_scheduler_ran(world: World) -> None:
+    """The review's path: --finish fails before the scheduler, the old version's reinstall
+    fails, the new version starts from the login item at the next login and runs its
+    scheduler, then the person reinstalls the old version and runs --rollback."""
+    world.install_login_item()
+    world.serve_answers[NEW] = False
+    world.scheduler_runs[NEW] = False
+    world.uv_exit[OLD] = 1
+    assert world.run_update() == 1
+    state = world.state()
+    assert state is not None and state.phase == "rolling-back" and state.new_version_ran
+    # The next login: launchd starts the netkeep that is installed, whose scheduler runs.
+    world.installed = NEW
+    world.scheduler_runs[NEW] = True
+    world.run(["bootstrap", f"gui/{UID}", str(world.item().plist_path)])
+    assert update.scheduler_started(world.data)
+    world.run(["bootout", f"gui/{UID}/{world.label}"])
+    # The person follows the printed steps: reinstall the old version, then --rollback.
+    world.uv_exit[OLD] = 0
+    world.uv(update.install_command(OLD, Path(state.from_constraints)))
+    assert update.rollback(world.item(), world.seams(), world.say) == 1
+    assert world.restored == [], "no restore over what the new version's scheduler sent"
+    assert "a serve started its scheduler on this data directory" in world.text
+    assert not world.item().plist_path.exists()
+    stopped = world.state()
+    assert stopped is not None and stopped.phase == "stopped"
+
+
+def test_a_second_rollback_never_restores_again(world: World) -> None:
+    """A crash during the health wait after the restore: the restored version's serve may
+    be sending. Running --rollback again refuses."""
+    world.install_login_item()
+    world.serve_answers[NEW] = False
+    world.scheduler_runs[NEW] = False
+
+    class Crash(Exception):
+        pass
+
+    original = world.serve_version
+
+    def crash_on_old(base: str) -> str | None:
+        if world.running == OLD:
+            raise Crash
+        return original(base)
+
+    world.serve_version = crash_on_old  # type: ignore[method-assign]
+    with pytest.raises(Crash):
+        world.run_update()
+    assert world.restored == world.backups
+    state = world.state()
+    assert state is not None and state.restored, "the restore is recorded before serve starts"
+    world.serve_version = original  # type: ignore[method-assign]
+    assert update.rollback(world.item(), world.seams(), world.say) == 1
+    assert world.restored == world.backups, "restored once, never twice"
+    assert "already restored the backup" in world.text
+
+
+def test_the_restore_is_recorded_before_it_is_made(world: World) -> None:
+    world.install_login_item()
+    world.serve_answers[NEW] = False
+    world.scheduler_runs[NEW] = False
+    recorded: list[bool] = []
+    restore = world.restore
+
+    def recording(source: Path) -> list[str]:
+        state = world.state()
+        recorded.append(state is not None and state.restored)
+        return restore(source)
+
+    world.restore = recording  # type: ignore[method-assign]
+    assert world.run_update() == 1
+    assert recorded == [True]
+
+
+def test_a_marker_from_another_version_stops_the_rollback(world: World) -> None:
+    world.install_login_item()
+    world.serve_answers[NEW] = False
+    world.scheduler_runs[NEW] = False
+    original = world._start_agent
+
+    def another_serve_marks() -> None:
+        original()
+        if world.installed == NEW:
+            update.mark_scheduler_starting("9.9.9", world.data)
+
+    world._start_agent = another_serve_marks  # type: ignore[method-assign]
+    assert world.run_update() == 1
+    assert world.restored == [] and world.installed == NEW
+    assert "may have sent messages" in world.text
+
+
+def test_a_serve_that_wont_stop_after_a_failed_check_stops_and_explains(world: World) -> None:
+    world.install_login_item()
+    world.serve_answers[NEW] = False
+    world.scheduler_runs[NEW] = False
+    original = world._start_agent
+
+    def stubborn() -> None:
+        original()
+        if world.installed == NEW:
+            world.lock.stays_held = True
+
+    world._start_agent = stubborn  # type: ignore[method-assign]
+    assert world.run_update() == 1
+    assert "its serve wouldn't stop" in world.text
+    assert [call[-2] for call in world.uv_calls] == [f"netkeep=={NEW}"], "no reinstall"
+    assert world.restored == []
+    state = world.state()
+    assert state is not None and state.phase == "stopped"
+
+
+def test_rollback_runs_only_on_the_old_version(world: World) -> None:
+    world.install_login_item()
+    world.installed = NEW
+    update.write_state(
+        update.UpdateState(
+            OLD, NEW, "a", "b", str(world.backup()), True, "rolling-back", new_version_ran=True
+        ),
+        world.data,
+    )
+    assert update.rollback(world.item(), world.seams(), world.say) == 1
+    assert f"but the rollback reinstalled {OLD}" in world.text
+    assert world.restored == []
+
+
+def test_the_lock_is_held_across_every_install(world: World) -> None:
+    world.install_login_item()
+    world.uv_exit[NEW] = 1
+    assert world.run_update() == 1
+    assert world.uv_locked == [True, True]
+    (world.tmp / "second").mkdir()
+    world2 = World(world.tmp / "second")
+    world2.install_login_item()
+    world2.serve_answers[NEW] = False
+    world2.scheduler_runs[NEW] = False
+    assert world2.run_update() == 1
+    assert world2.uv_locked == [True, True], "the old version's reinstall holds the lock too"
+    assert world2.lock.holder == AGENT_PID
+
+
+def test_finish_accepts_an_install_it_couldnt_record(world: World) -> None:
+    """uv finished, but writing "finishing" failed: the new version still finishes."""
+    world.install_login_item()
+    update.write_state(update.UpdateState(OLD, NEW, "a", "b", None, True, "installing"), world.data)
+    world.run(["bootout", f"gui/{UID}/{world.label}"])
+    world.installed = NEW
+    assert update.finish(world.item(), world.seams(), world.say) == 0
+    assert world.running == NEW
+
+
+def test_a_state_write_failure_aborts_cleanly(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world.install_login_item()
+
+    def refuse(_state: update.UpdateState, _data: Path | None = None) -> None:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(update, "write_state", refuse)
+    assert world.run_update() == 1
+    assert "could not record the update" in world.text
+    assert "No space left on device" in world.text
+    assert world.uv_calls == []
+    assert world.running == OLD, "the login item is started again"
+    assert world.lock.holder == AGENT_PID
+
+
+def test_state_and_marker_are_written_durably(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each write fsyncs the file before the rename and the folder after it."""
+    events: list[str] = []
+    real_fsync, real_replace = os.fsync, Path.replace
+
+    def fsync(fd: int) -> None:
+        events.append("fsync-dir" if os.path.isdir(f"/dev/fd/{fd}") else "fsync-file")
+        real_fsync(fd)
+
+    def replace(self: Path, target: Path) -> Path:
+        events.append(f"rename {Path(target).name}")
+        return real_replace(self, target)
+
+    monkeypatch.setattr("os.fsync", fsync)
+    monkeypatch.setattr(Path, "replace", replace)
+    update.write_state(update.UpdateState(OLD, NEW, "a", "b", None, True, "finishing"), tmp_path)
+    assert events[-3:] == ["fsync-file", f"rename {update.STATE_FILE}", "fsync-dir"]
+    events.clear()
+    update.mark_scheduler_starting(NEW, tmp_path)
+    assert events == ["fsync-file", f"rename {update.SCHEDULER_MARKER}", "fsync-dir"]
+
+
+async def test_a_marker_that_cant_be_written_stops_serve(
+    app: FastAPI, bare_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data = Path(os.environ["NETKEEP_DATA"])
+    update.write_state(
+        update.UpdateState(OLD, __version__, "a", "b", None, True, "finishing"), data
+    )
+    started: list[bool] = []
+
+    def scheduler(*_args: Any, **_kwargs: Any) -> Any:
+        started.append(True)
+        raise AssertionError("the scheduler started without its marker")
+
+    def unwritable(_path: Path, _text: str) -> None:
+        raise OSError(30, "Read-only file system")
+
+    monkeypatch.setattr("netkeep.web.app.start_serve_scheduler", scheduler)
+    monkeypatch.setattr(update, "_write_durably", unwritable)
+    served = create_app(engine=bare_engine, extractor=ServeExtractor(executor=_no_executor))
+    with pytest.raises(OSError, match="Read-only file system"):
+        async with served.router.lifespan_context(served):
+            pass
+    assert started == []
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"from_version": "1.2.0; rm -rf"},
+        {"to_version": "latest"},
+        {"phase": "anything"},
+        {"login_item_was_on": "yes"},
+        {"surprise": 1},
+    ],
+)
+def test_read_state_is_strict(tmp_path: Path, change: dict[str, object]) -> None:
+    update.write_state(update.UpdateState(OLD, NEW, "a", "b", None, True, "finishing"), tmp_path)
+    path = update.update_dir(tmp_path) / update.STATE_FILE
+    raw = json.loads(path.read_text())
+    path.write_text(json.dumps(raw | change))
+    with pytest.raises(update.UpdateError, match="isn't an update netkeep knows"):
+        update.read_state(tmp_path)
+
+
+def test_check_validates_its_version(world: World) -> None:
+    assert update.check(world.seams(), world.say, version="junk") == 1
+    assert "--version takes X.Y.Z" in world.text
+    assert world.fetched == []
+
+
+def test_a_bad_port_is_an_update_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    connections = _Connections({})
+    monkeypatch.setattr("netkeep.services.update.http.client.HTTPSConnection", connections)
+    with pytest.raises(update.UpdateError, match="only HTTPS from GitHub"):
+        update.https_get("https://github.com:99999/x", max_bytes=10)
+    assert connections.opened == []
+
+
+def test_a_slow_download_runs_out_of_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A server that drips the body one byte at a time can't hold the download."""
+    now = [0.0]
+
+    class Drip(_Response):
+        def read(self, limit: int) -> bytes:
+            now[0] += 50.0
+            return b"x"
+
+    connections = _Connections({"github.com": Drip(200)})
+    monkeypatch.setattr("netkeep.services.update.http.client.HTTPSConnection", connections)
+    with pytest.raises(update.UpdateError, match="longer than 120 s"):
+        update.https_get("https://github.com/x", max_bytes=1000, clock=lambda: now[0])

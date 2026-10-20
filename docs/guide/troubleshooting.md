@@ -113,10 +113,12 @@ Setup prints a note when the login item can't use uv's `~/.local/bin/netkeep` sh
 | "this netkeep runs from a checkout" | `netkeep update` replaces only an installer or `uv tool install` install. | Run `git pull`, then `make install`. |
 | "... holds the serve lock, and it isn't the login item's serve" | You started `netkeep serve` yourself, or a `netkeep restore` is running. | Stop that `serve` (Ctrl+C in its terminal), or wait for the restore, then run `netkeep update` again. |
 | "constraints.txt has SHA-256 ..., but its SHA256SUMS says ..." | A download didn't match its release's checksum. Nothing was installed. | Run it again later. If it keeps happening, [report it](reporting-a-problem.md). |
-| "HTTP 404" for the version you have | Your version has no GitHub release to roll back to, such as a build from a checkout. | Install a release with the installer in the README. |
 | "Rolled back: netkeep X is running again" | The new version failed before its scheduler started, so netkeep put back the version and the database you had. | Look in `<data>/logs/serve.err.log` for why, and [report it](reporting-a-problem.md). |
-| "The update stopped without rolling back" | The new version failed after its scheduler started, so it may have sent messages. Its login item is off. | See below. |
-| "an update from X to Y didn't finish" | An earlier update stopped and left `<data>/update/state.json`. | Once netkeep runs the way you want, delete that file and run `netkeep update` again. |
+| "The update stopped without rolling back" | A `serve` started its scheduler on this data directory during the update, so it may have sent messages; or the new version's `serve` wouldn't stop. Its login item is off. | See below. |
+| "an update from X to Y didn't finish (installing)" | netkeep stopped while `uv` was installing the new version, for example in a crash or a power cut. | Run `netkeep version`. If it prints the new version, run `netkeep update --finish`. Otherwise reinstall the version you had with its kept constraints: `uv tool install --python 3.12 --managed-python -c <data>/update/constraints-X.txt netkeep==X --reinstall`. Then run `netkeep login-item on`, check netkeep works, and delete `<data>/update/state.json`. Nothing was restored, and the new version never ran. |
+| "an update from X to Y didn't finish (rolling-back)" | The old version's reinstall failed during a rollback. | Run the `uv tool install` command it printed, then `netkeep update --rollback`. It restores the backup only if no `serve` has started its scheduler since; otherwise it stops and explains. |
+| "an update from X to Y didn't finish (stopped)" | An earlier update stopped and explained why. | Follow what it printed (below). Once netkeep runs the way you want, delete `<data>/update/state.json` and run `netkeep update` again. |
+| "this rollback already restored the backup" | `netkeep update --rollback` ran a second time. It never restores twice, because the restored version may have sent since. | Run `netkeep login-item on`, check netkeep works, then delete `<data>/update/state.json`. |
 
 When the update stops without rolling back, you have two choices:
 
