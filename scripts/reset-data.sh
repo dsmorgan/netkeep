@@ -31,6 +31,9 @@ Options:
   --list           List the archives, newest first. Changes nothing.
   --restore FILE   Put an archive back. FILE is a name from --list or any path.
                    The database in place is archived first, so this is reversible.
+                   The restore itself is \`netkeep restore FILE\`: it holds the serve
+                   lock, checks the migration, turns Settings-page LinkedIn
+                   auto-send off, and runs db upgrade.
   --yes            Skip the confirmation prompt.
   --dry-run        Print what would happen; change nothing.
   --help           This text.
@@ -110,6 +113,16 @@ fi
 
 db="$data_dir/$DB_NAME"
 archives="$data_dir/$ARCHIVES_DIRNAME"
+
+# The netkeep that --restore hands the restore to: this checkout's venv, else the one
+# on PATH. Empty when there is none.
+repo=$(cd "$(dirname "$0")/.." && pwd -P)
+netkeep_bin=
+if [ -x "$repo/.venv/bin/netkeep" ]; then
+  netkeep_bin="$repo/.venv/bin/netkeep"
+elif command -v netkeep >/dev/null 2>&1; then
+  netkeep_bin=$(command -v netkeep)
+fi
 
 run() {
   if [ "$dry_run" = yes ]; then
@@ -438,6 +451,10 @@ case $mode in
     esac
     [ -f "$source" ] || die "$source: no such file"
     require_tools
+    # One restore path (#700): netkeep restore does the write, so a restore from here
+    # gets the same serve lock, migration check, auto-send clear (#598) and db upgrade
+    # as one from the CLI. A plain cp skipped all four.
+    [ -n "$netkeep_bin" ] || die "netkeep is needed to restore; run make install first"
     verified "$source" || die "$source did not pass SQLite's quick_check; not restoring it"
     refuse_if_in_use
     target=$(archive_path)
@@ -449,12 +466,17 @@ case $mode in
     refuse_if_in_use
     if [ -f "$db" ]; then
       archive_db
+    else
+      # Only stray sidecars: a -wal left next to the new file could be replayed onto it.
+      remove_db
     fi
-    remove_db
-    run mkdir -p "$data_dir"
-    run cp -- "$source" "$db"
-    printf 'restored %s\n' "$db"
-    printf '\nStart the server; it migrates the restored database to head:\n'
+    if [ "$dry_run" = yes ]; then
+      printf '  would: NETKEEP_DATA=%s %s restore %s\n' "$data_dir" "$netkeep_bin" "$source"
+      exit 0
+    fi
+    NETKEEP_DATA=$data_dir "$netkeep_bin" restore "$source" ||
+      die "netkeep restore failed; see above"
+    printf '\nStart the server:\n'
     printf '  make serve\n'
     ;;
 esac
