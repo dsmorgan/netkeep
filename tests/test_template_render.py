@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import inspect
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import jinja2
 import pytest
 from jinja2 import nodes
-from jinja2.exceptions import SecurityError
+from jinja2.exceptions import FilterArgumentError, SecurityError
 from time_limit import Stopwatch, scaled
 
 from netkeep.campaigns import render as render_module
@@ -354,7 +354,7 @@ def test_render_fills_every_kind_of_field() -> None:
         contact={"first_name": "Bo", "company": "Fixture Co", "connected_year": 2019},
         campaign_name="First 100",
         step_number=2,
-        previous_send_date=datetime(2026, 9, 19, 23, 30, tzinfo=UTC),
+        previous_send_date=date(2026, 9, 19),
         personal_line="Congrats on the move.",
     )
     rendered = render(
@@ -461,10 +461,23 @@ def test_ago_phrasing(days: int, words: str) -> None:
     assert ago(TODAY - timedelta(days=days), today=TODAY) == words
 
 
-def test_ago_counts_utc_days_for_a_datetime() -> None:
-    # 20:30 in New York on the 24th is 00:30 on the 25th in UTC: one day before the 26th.
-    evening = datetime(2026, 9, 24, 20, 30, tzinfo=ZoneInfo("America/New_York"))
-    assert ago(evening, today=TODAY) == "yesterday"
+@pytest.mark.parametrize(
+    "sent",
+    [
+        # 20:30 in New York on the 24th: its UTC day is the 25th, its local day the 24th.
+        datetime(2026, 9, 24, 20, 30, tzinfo=ZoneInfo("America/New_York")),
+        datetime(2026, 9, 24, 20, 30),
+    ],
+    ids=["aware", "naive"],
+)
+def test_ago_refuses_a_datetime(sent: datetime) -> None:
+    """#709: a datetime has no one calendar day, and its UTC day was the bug, so the
+    filter and the merge values both refuse it; a caller passes the local date."""
+    with pytest.raises(FilterArgumentError, match="ago needs a date, not datetime"):
+        ago(sent, today=TODAY)
+    with pytest.raises(TypeError, match="not a datetime"):
+        MergeValues(contact={}, previous_send_date=sent)
+    assert ago(date(2026, 9, 24), today=TODAY) == "2 days ago"
 
 
 def test_ago_of_nothing_is_empty_and_of_a_non_date_is_an_error() -> None:
