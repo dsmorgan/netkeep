@@ -124,13 +124,12 @@ from netkeep.linkedin.pacing import (
     plan_enrichment,
     scroll_back_to_top,
 )
+
+# LINKEDIN_ORIGIN: where a production profile visit goes, still importable from here.
+from netkeep.linkedin.strict_origin import LINKEDIN_ORIGIN as LINKEDIN_ORIGIN
 from netkeep.linkedin.voyager import ContactInfo, ProfileDetails
 
 log = logging.getLogger(__name__)
-
-#: Where a production profile visit goes. A caller passes another origin only for
-#: the loopback replica (:mod:`netkeep.linkedin.rehearse` refuses anything else).
-LINKEDIN_ORIGIN: Final = "https://www.linkedin.com"
 
 
 class StopReason(enum.StrEnum):

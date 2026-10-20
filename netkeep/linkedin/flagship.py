@@ -51,13 +51,10 @@ from datetime import date
 from typing import Final
 
 from netkeep.linkedin.flight import FlightPayload, element_props, parse_flight
+from netkeep.linkedin.strict_origin import LINKEDIN_ORIGIN as LINKEDIN_ORIGIN
 from netkeep.linkedin.voyager import ConnectionSummary, RouteChanged
 
 # --- constants, captured 2026-09-24 (#149) ------------------------------------------
-
-#: The only origin a live read runs against. Fixed, never configurable; the loopback
-#: exception in :mod:`netkeep.linkedin.page_connections` exists for the smoke suite.
-LINKEDIN_ORIGIN: Final = "https://www.linkedin.com"
 
 #: The connections page a person opens. Navigated to, never fetched.
 CONNECTIONS_PAGE_PATH: Final = "/mynetwork/invite-connect/connections/"  # captured 2026-09-24

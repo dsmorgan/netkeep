@@ -9,9 +9,20 @@ host a real browser would actually reach.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from netkeep.linkedin.strict_origin import NotAStrictOrigin, Origin, parse_strict_origin
+from netkeep.linkedin import enrich, flagship
+from netkeep.linkedin.strict_origin import (
+    LINKEDIN_ORIGIN,
+    NotAStrictOrigin,
+    Origin,
+    parse_strict_origin,
+    require_page_origin,
+    trim_path,
+    url_path,
+)
 
 # --- the attack this module exists to close -----------------------------------
 
@@ -133,3 +144,50 @@ def test_an_ipv6_loopback_round_trips_with_its_brackets() -> None:
 def test_hostname_is_lowercased_the_way_urlsplit_already_does() -> None:
     origin = parse_strict_origin("HTTP://WWW.LINKEDIN.COM")
     assert origin.host == "www.linkedin.com"
+
+
+# --- the page readers' shared guard (#698) ----------------------------------------------
+
+
+def test_the_page_guard_keeps_linkedin_and_loopback_only() -> None:
+    reader = "the test reader"
+    assert require_page_origin("https://www.linkedin.com/", reader=reader) is LINKEDIN_ORIGIN
+    assert require_page_origin("http://127.0.0.1:4000", reader=reader) == "http://127.0.0.1:4000"
+    assert require_page_origin("https://[::1]:9", reader=reader) == "https://[::1]:9"
+    assert require_page_origin("http://localhost:8", reader=reader) == "http://localhost:8"
+    for refused in (
+        "https://linkedin.com",
+        "http://www.linkedin.com",
+        "https://www.linkedin.com.elsewhere.example.test",
+        "ftp://127.0.0.1",
+        "http://10.0.0.1",
+    ):
+        with pytest.raises(ValueError, match=f"{reader} opens .* never"):
+            require_page_origin(refused, reader=reader)
+    for malformed in ("https://www.linkedin.com/in/x", "http://www.linkedin.com\\@127.0.0.1"):
+        with pytest.raises(ValueError, match=f"is not an origin {reader} may open"):
+            require_page_origin(malformed, reader=reader)
+
+
+def test_linkedin_origin_has_one_definition() -> None:
+    """``enrich`` and ``flagship`` re-export the one constant rather than spelling it."""
+    assert LINKEDIN_ORIGIN == "https://www.linkedin.com"
+    assert enrich.LINKEDIN_ORIGIN is LINKEDIN_ORIGIN is flagship.LINKEDIN_ORIGIN
+    for module in (enrich, flagship):
+        source = Path(module.__file__ or "").read_text(encoding="utf-8")
+        assert '"https://www.linkedin.com"' not in source, module.__name__
+
+
+@pytest.mark.parametrize(
+    ("value", "trimmed", "path"),
+    [
+        ("/a/b/", "/a/b", "/a/b"),
+        ("/", "/", "/"),
+        ("", "", ""),
+        ("https://h.test/x/?q=1", None, "/x"),
+    ],
+)
+def test_the_path_trims_one_slash(value: str, trimmed: str | None, path: str) -> None:
+    if trimmed is not None:
+        assert trim_path(value) == trimmed
+    assert url_path(value) == path

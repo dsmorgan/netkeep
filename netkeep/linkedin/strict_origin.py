@@ -32,12 +32,27 @@ and the caller then compares the *rebuilt* origin (:meth:`Origin.__str__`, canon
 ``scheme://host[:port]``) against a fixed pattern -- never the original string, which
 could still carry a spelling ``urlsplit`` and a browser would read alike but that a
 human skimming a diff would not notice matches.
+
+**The page readers' guard.** The four ``page_*`` modules each read LinkedIn (or, for a
+test or a rehearsal, this machine's loopback) and nothing else. They share
+:data:`LINKEDIN_ORIGIN`, :data:`NAVIGATION_LOOPBACK_HOSTS` and
+:func:`require_page_origin` from here, so the rule is written once (#698). The
+navigation-target set is deliberately not the CDP-host check's set: one says where a
+tab may be sent, the other which Chrome netkeep may attach to.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Final
 from urllib.parse import urlsplit
+
+#: LinkedIn's one origin, as :meth:`Origin.__str__` rebuilds it.
+LINKEDIN_ORIGIN: Final = "https://www.linkedin.com"
+
+#: The loopback hosts a page reader may navigate a tab to instead of LinkedIn: the
+#: smoke replica, a rehearsal, a test. Navigation targets only, never a CDP host.
+NAVIGATION_LOOPBACK_HOSTS: Final[frozenset[str]] = frozenset({"127.0.0.1", "::1", "localhost"})
 
 #: Characters a bare origin never legitimately contains. Every ASCII control
 #: character (0x00-0x1F), space (0x20), and DEL (0x7F) -- a browser's own URL
@@ -115,3 +130,35 @@ def parse_strict_origin(value: str) -> Origin:
     if not hostname:
         raise NotAStrictOrigin(f"{value!r} has no host")
     return Origin(scheme=split.scheme, host=hostname, port=port)
+
+
+def require_page_origin(origin: str, *, reader: str) -> str:
+    """:data:`LINKEDIN_ORIGIN`, or this machine's loopback, else raise ``ValueError``.
+
+    ``origin`` must be a strict origin (:func:`parse_strict_origin`). LinkedIn's comes
+    back as the constant itself; a loopback one (``http`` or ``https``, a host in
+    :data:`NAVIGATION_LOOPBACK_HOSTS`) comes back rebuilt. ``reader`` names what reads
+    it, for the message: "the inbox", "the prefill".
+    """
+    try:
+        parsed = parse_strict_origin(origin)
+    except NotAStrictOrigin as exc:
+        raise ValueError(f"{origin!r} is not an origin {reader} may open") from exc
+    if str(parsed) == LINKEDIN_ORIGIN:
+        return LINKEDIN_ORIGIN
+    if parsed.scheme in ("http", "https") and parsed.host in NAVIGATION_LOOPBACK_HOSTS:
+        return str(parsed)
+    raise ValueError(
+        f"{reader} opens {LINKEDIN_ORIGIN!r}, or this machine's own loopback for tests,"
+        f" never {origin!r}"
+    )
+
+
+def trim_path(path: str) -> str:
+    """``path`` without one trailing ``/``; ``/`` itself stays."""
+    return path[:-1] if len(path) > 1 and path.endswith("/") else path
+
+
+def url_path(url: str) -> str:
+    """The trimmed path of an absolute ``url``, or of a bare path given as is."""
+    return trim_path(urlsplit(url).path if "://" in url else url)
