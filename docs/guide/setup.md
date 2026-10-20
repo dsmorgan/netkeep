@@ -38,6 +38,16 @@ make build-ui
 
 From a checkout, run the commands below as `.venv/bin/netkeep`, or activate the environment first with `source .venv/bin/activate`. To start `serve` when you log in, see [Run at login](../../README.md#run-at-login-macos).
 
+### What netkeep setup does
+
+`netkeep setup` runs three steps and prints each one as it ends:
+
+1. It turns on the login item, the same one as the **Start netkeep when I log in** switch in Settings, pointing at the installed `netkeep` (`~/.local/bin/netkeep` for a uv tool install). From a checkout, it points at `.venv/bin/netkeep` and says so.
+2. It waits for `serve` to answer on <http://127.0.0.1:8000>.
+3. It opens the first-run page in netkeep's Chrome: the UI's window and LinkedIn's sign-in page.
+
+Run it again whenever you like: it says what's already done and changes nothing that's right. It uses the data directory every netkeep command uses, and never moves it. `netkeep setup --remove` turns the login item off and keeps your data. If a step fails, see [netkeep setup stops at a step](troubleshooting.md#netkeep-setup-stops-at-a-step).
+
 ## 2. Gmail
 
 Follow [Gmail setup](../gmail-setup.md). In short: on **Settings**, under **Gmail**, the setup guide walks you through creating your own Google Cloud project and OAuth client, one step at a time, and ends with connecting your mailbox. Then, on the **Gmail** page, **Check now** runs a first check of the mailbox for replies.

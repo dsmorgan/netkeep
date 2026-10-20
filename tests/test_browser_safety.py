@@ -1507,7 +1507,7 @@ CHROME_ARGV_FUNCTION = "chrome_argv"
 #: under web/ belongs here: a route reaches the launcher as a ChromeSpawner on app.state.
 CHROME_SPAWN_IMPORTERS = frozenset(
     {
-        Path("netkeep/cli.py"),  # `netkeep open`
+        Path("netkeep/cli.py"),  # `netkeep open` and `netkeep setup`
         Path("netkeep/worker.py"),  # serve's wiring: app.state.chrome_launcher
     }
 )
@@ -1905,6 +1905,9 @@ LAUNCH_REACHES = {
     (PACKAGE / "cli.py", "", "ChromeLauncher"): 1,
     (PACKAGE / "cli.py", "_open_launcher", "ChromeLauncher"): 2,
     (PACKAGE / "cli.py", "open_command", "_open_launcher"): 1,
+    # `netkeep setup` (#684): the first-run button's equivalent after install, which opens
+    # the first-run page through netkeep open's launcher once.
+    (PACKAGE / "cli.py", "setup_command.open_first_run", "_open_launcher"): 1,
     # The button's route: its import, then its one call.
     (PACKAGE / "web" / "api" / "linkedin.py", "", "submit_launch"): 1,
     (PACKAGE / "web" / "api" / "linkedin.py", "start_browser", "submit_launch"): 1,
@@ -1920,7 +1923,7 @@ LAUNCH_REACHES = {
 }
 #: The files that hold a launcher: the reaches above, the launcher's module and its two
 #: importers. Every ``.start`` in them is listed, so a held launcher started anywhere
-#: but ``submit_launch`` and ``netkeep open`` fails the pin below.
+#: but ``submit_launch``, ``netkeep open`` and ``netkeep setup`` fails the pin below.
 LAUNCHER_FILES = (
     PACKAGE / "chrome_spawn.py",
     PACKAGE / "cli.py",
@@ -1929,9 +1932,11 @@ LAUNCHER_FILES = (
     PACKAGE / "worker.py",
 )
 LAUNCHER_STARTS = {
-    # The two launches: the shared submit's task, and `netkeep open`.
+    # The three launches: the shared submit's task, `netkeep open`, and `netkeep setup`'s
+    # first-run page (#684).
     (PACKAGE / "services" / "chrome_launch.py", "submit_launch.run_launch"): 1,
     (PACKAGE / "cli.py", "open_command"): 1,
+    (PACKAGE / "cli.py", "setup_command.open_first_run"): 1,
     # Not a launcher: a lost answer's ``start`` field, ``message_check.start()`` (a run
     # record), and the sending window's start time.
     (PACKAGE / "cli.py", "_run_lines"): 1,
@@ -1989,7 +1994,7 @@ def test_only_the_button_and_the_startup_setting_reach_a_launch() -> None:
         "the reaches of a Chrome launch changed.\n"
         f"  now:      {sorted((str(p.name), f, n, c) for (p, f, n), c in found.items())}\n"
         f"  expected: {sorted((str(p.name), f, n, c) for (p, f, n), c in LAUNCH_REACHES.items())}\n"
-        "Only you trigger a spawn: a button, netkeep open, or a setting you turn on"
+        "Only you trigger a spawn: a button, netkeep open or setup, or a setting you turn on"
         " (ADR 0012, rule 5). A run never starts Chrome."
     )
 
@@ -2085,8 +2090,8 @@ def launcher_hold_problems(sources: dict[Path, str]) -> list[str]:
     ``ChromeLauncher(...)`` is built only as the value of a ``return``, in
     ``serve_chrome_launcher`` and ``_open_launcher``; ``serve_chrome_launcher(...)`` is
     only assigned to ``app.state.chrome_launcher``; and ``_open_launcher(...)`` is only
-    the receiver of the one ``.start()`` in ``netkeep open``. So a launcher is never
-    bound to a local, kept under another attribute, or handed elsewhere."""
+    the receiver of a ``.start()``, in ``netkeep open`` and ``netkeep setup``. So a
+    launcher is never bound to a local, kept under another attribute, or handed elsewhere."""
     allowed = {
         (PACKAGE / "worker.py", "serve_chrome_launcher"),
         (PACKAGE / "cli.py", "_open_launcher"),

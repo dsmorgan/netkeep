@@ -104,6 +104,7 @@ from netkeep.services import (
     message_check,
     message_id_check,
     outside_responses,
+    post_install,
     restart,
     route_breaker,
     run_diagnostics,
@@ -119,6 +120,7 @@ from netkeep.services import (
 from netkeep.services import campaigns as campaign_service
 from netkeep.services import config_adopt as config_adopt_service
 from netkeep.services import mailboxes as mailbox_service
+from netkeep.services import posture as posture_service
 from netkeep.services import sending_hours as sending_hours_service
 from netkeep.services.backup import (
     BACKUPS_DIRNAME,
@@ -131,7 +133,7 @@ from netkeep.services.backup import (
     restore_backup,
 )
 from netkeep.services.browser_launch import cdp_port, chrome_launch_command, remote_host_note
-from netkeep.services.chrome_launch import PortProbe, UiFront
+from netkeep.services.chrome_launch import LaunchResult, PortProbe, UiFront
 from netkeep.services.events import EventBus
 from netkeep.services.linkedin_accounts import (
     account_id_for,
@@ -518,6 +520,78 @@ def _open_launcher(cdp_url: str, base: str, key: str) -> ChromeLauncher:
         run_holds_browser=runs.any_browser_lock_held,
         pid_alive=pid_alive,
     )
+
+
+@app.command("setup")
+def setup_command(
+    ctx: typer.Context,
+    remove: Annotated[
+        bool,
+        typer.Option(
+            "--remove",
+            help="Turn the login item off instead. Your data, logs and Keychain items stay.",
+        ),
+    ] = False,
+    wait: Annotated[
+        float,
+        typer.Option(
+            "--wait",
+            min=0,
+            help="Seconds to wait for netkeep serve to answer after the login item starts it.",
+        ),
+    ] = post_install.SERVE_WAIT_S,
+) -> None:
+    """Set netkeep up after installing it: turn on the login item, wait for netkeep serve
+    to answer, and open the first-run page in netkeep's Chrome.
+
+    The login item is the same one as the Settings switch and `netkeep login-item on`. It
+    runs the installed netkeep (under uv tool install, uv's ~/.local/bin/netkeep), with
+    the data directory in use. Run again, it says what's already done and changes nothing
+    that's right. While netkeep's Chrome is running, it opens no other window. It never
+    chooses or moves the data directory.
+
+    With --remove, it turns the login item off and leaves all data where it is."""
+    state = ctx.ensure_object(CliState)
+    item = login_item.LoginItem()
+    if remove:
+        raise typer.Exit(code=post_install.remove(item, typer.echo))
+    settings = _file_settings_or_exit(state)
+
+    def base_url(host: str | None, port: int | None) -> str:
+        return local_api_key.base_url(
+            host or settings.web.host, settings.web.port if port is None else port
+        )
+
+    def open_first_run(base: str) -> LaunchResult:
+        """The first-run page (#684): setup is the first-run button's equivalent, so it
+        is the one caller outside the route that passes ``first_run``."""
+        try:
+            key = local_api_key.stored_key()
+        except keychain.KeychainUnavailable as exc:
+            raise post_install.StepFailed(
+                f"the Keychain refused the local API key ({exc}), so no link can be made.",
+                "Unlock your login keychain (Keychain Access), or allow netkeep when macOS"
+                " asks, then run netkeep setup again.",
+            ) from exc
+        # The address in force (#597), read now that serve has made the database.
+        cdp_url = _load_settings_or_exit(state).linkedin.cdp_url
+        return asyncio.run(_open_launcher(cdp_url, base, key).start(first_run=True))
+
+    shim = login_item.tool_shim(Path(sys.prefix), Path(sys.executable).parent / "netkeep")
+    seams = post_install.Seams(
+        base_url=base_url,
+        open_first_run=open_first_run,
+        chrome_pid=posture_service.netkeep_chrome_pid,
+        serve_answers=post_install.serve_answers,
+    )
+    code = post_install.run(
+        item,
+        seams,
+        typer.echo,
+        tool_install=shim is not None and shim == item.executable,
+        wait_s=wait,
+    )
+    raise typer.Exit(code=code)
 
 
 #: What `netkeep open` says when the Keychain refuses (#618 review): no link can be

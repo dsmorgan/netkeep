@@ -13,7 +13,7 @@ import ast
 import shlex
 import sys
 import types
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -620,35 +620,89 @@ async def test_without_the_pid_match_the_check_would_take_any_pid(
 PACKAGE = Path(chrome_spawn.__file__).resolve().parent
 
 
-def _first_run_keywords() -> dict[str, list[str]]:
-    """Every ``first_run=`` keyword in the package, by file, as source text."""
-    found: dict[str, list[str]] = {}
-    for path in sorted(PACKAGE.rglob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call):
-                for keyword in node.keywords:
-                    if keyword.arg == "first_run":
-                        rel = str(path.relative_to(PACKAGE.parent))
-                        found.setdefault(rel, []).append(ast.unparse(keyword.value))
+def _package_sources() -> dict[str, str]:
+    return {
+        str(path.relative_to(PACKAGE.parent)): path.read_text(encoding="utf-8")
+        for path in sorted(PACKAGE.rglob("*.py"))
+    }
+
+
+def _first_run_keywords(sources: dict[str, str]) -> dict[tuple[str, str], list[str]]:
+    """Every ``first_run=`` keyword in ``sources``, by file and enclosing function, as
+    source text."""
+    found: dict[tuple[str, str], list[str]] = {}
+    for rel, source in sources.items():
+        tree = ast.parse(source)
+        for function, call in _calls_by_function(tree):
+            for keyword in call.keywords:
+                if keyword.arg == "first_run":
+                    found.setdefault((rel, function), []).append(ast.unparse(keyword.value))
     return found
 
 
-def test_only_the_routes_first_run_flag_reaches_the_launcher() -> None:
-    """``netkeep open`` and ``serve``'s start at startup (#599) never pass ``first_run``;
-    the route passes the body's flag, which only setup's first-run button sets, and
-    nothing passes a literal True."""
-    assert _first_run_keywords() == {
-        "netkeep/chrome_spawn.py": ["first_run"],  # launch() into its ChromeLaunch
-        "netkeep/services/chrome_launch.py": ["first_run"],  # submit_launch() into start()
-        "netkeep/web/api/linkedin.py": ["body.first_run"],  # the body's flag
-    }
-    users = [
-        str(path.relative_to(PACKAGE.parent))
-        for path in sorted(PACKAGE.rglob("*.py"))
-        if "LINKEDIN_SIGNIN_URL" in path.read_text(encoding="utf-8")
-    ]
+def _calls_by_function(tree: ast.AST) -> Iterator[tuple[str, ast.Call]]:
+    """Each call in ``tree`` with the dotted name of the function (or class) it's in."""
+    scopes = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+
+    def walk(node: ast.AST, where: str) -> Iterator[tuple[str, ast.Call]]:
+        for child in ast.iter_child_nodes(node):
+            inner = f"{where}.{child.name}".lstrip(".") if isinstance(child, scopes) else where
+            if isinstance(child, ast.Call):
+                yield where, child
+            yield from walk(child, inner)
+
+    return walk(tree, "")
+
+
+#: Who passes ``first_run``, and what. ``netkeep setup`` (#684) passes a literal True: it
+#: is the first-run button's equivalent after install, so it opens the same first-run
+#: page, once, after its login item's ``serve`` answers. No one else does: ``netkeep
+#: open`` and ``serve``'s start at startup (#599) never pass it.
+FIRST_RUN_KEYWORDS = {
+    ("netkeep/chrome_spawn.py", "ChromeLauncher.start"): ["first_run"],  # into its ChromeLaunch
+    ("netkeep/services/chrome_launch.py", "submit_launch.run_launch"): ["first_run"],
+    ("netkeep/web/api/linkedin.py", "start_browser"): ["body.first_run"],  # the body's flag
+    ("netkeep/cli.py", "setup_command.open_first_run"): ["True"],  # netkeep setup
+}
+
+
+def test_only_the_route_and_setup_pass_first_run_to_the_launcher() -> None:
+    """The route passes the body's flag, which only setup's first-run button sets, and
+    ``netkeep setup`` passes True; nothing else passes it at all."""
+    assert _first_run_keywords(_package_sources()) == FIRST_RUN_KEYWORDS
+    users = [rel for rel, source in _package_sources().items() if "LINKEDIN_SIGNIN_URL" in source]
     assert users == ["netkeep/chrome_spawn.py"]
+
+
+@pytest.mark.parametrize(
+    ("rel", "anchor", "line"),
+    [
+        # `netkeep open` opening the first-run page too.
+        (
+            "netkeep/cli.py",
+            "        launched = asyncio.run(_open_launcher(cdp_url, base, key).start())\n",
+            "        asyncio.run(_open_launcher(cdp_url, base, key).start(first_run=True))\n",
+        ),
+        # serve's start at startup passing it.
+        (
+            "netkeep/worker.py",
+            "    holder = profile_lock_pid(",
+            "    submit_launch(tasks, bus, launcher, user_id=0, first_run=True)\n",
+        ),
+        # A second first-run launch in setup itself.
+        (
+            "netkeep/cli.py",
+            "        return asyncio.run("
+            "_open_launcher(cdp_url, base, key).start(first_run=True))\n",
+            "        asyncio.run(_open_launcher(cdp_url, base, key).start(first_run=True))\n",
+        ),
+    ],
+)
+def test_the_first_run_pin_catches_a_planted_caller(rel: str, anchor: str, line: str) -> None:
+    sources = _package_sources()
+    assert sources[rel].count(anchor) == 1, anchor
+    sources[rel] = sources[rel].replace(anchor, line + anchor, 1)
+    assert _first_run_keywords(sources) != FIRST_RUN_KEYWORDS
 
 
 # --- the settle: success only when the profile's holder is the one expected ----------------

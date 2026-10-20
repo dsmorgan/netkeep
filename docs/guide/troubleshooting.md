@@ -87,6 +87,23 @@ Each warning starts with the protection it belongs to. These are the ones you're
 | **Arm to send** says "no netkeep test draft was found in the Drafts of … at the last check" | Make a test draft from a campaign's review (**Send a test of step 1**) while the mailbox is armed for drafts, then **Check now**. The arm steps say "netkeep found its own draft." when it's found. |
 | A step's email went out as a draft | The mailbox is armed for drafts only. Send the draft yourself, or **Arm to send**. |
 
+## netkeep setup stops at a step
+
+`netkeep setup` runs three steps and stops at the first one that fails, with a line that starts "to fix it:". It exits nonzero, so the installer stops there too. Fix the problem, then run `netkeep setup` again: it skips what's already done.
+
+| Step that failed | What you see | What to do |
+|---|---|---|
+| 1. The login item | "Run at login uses launchd, which only macOS has." | On Linux, run netkeep in its container instead. |
+| 1. The login item | "can't find the installed netkeep command" | Install netkeep with the installer in the README, then run `netkeep setup` again. |
+| 1. The login item | "launchctl ... failed" | `netkeep login-item status` shows where it stands. Nothing is left half-installed. |
+| 2. Waiting for serve | "netkeep serve didn't answer ... within 60 s" | Look in `<data>/logs/serve.err.log` for why it didn't start, for example another program on port 8000. A slow first start can take longer: run `netkeep setup --wait 180`. |
+| 3. The first-run page | "Another Chrome holds netkeep's debugging port" | Quit that Chrome, then run `netkeep setup` again. |
+| 3. The first-run page | "the Keychain refused the local API key" | Unlock your login keychain, or allow netkeep when macOS asks. |
+
+Setup prints a note when it runs from a checkout's `.venv` instead of a uv tool install: the login item then runs that checkout's `netkeep`, and stops working if you move or delete the folder. When netkeep's Chrome is already running, step 3 opens no other window; run `netkeep open` to bring up the UI.
+
+`netkeep setup --remove` turns the login item off. Your data directory, logs and Keychain items stay.
+
 ## Run at login does nothing
 
 Turning on **Start netkeep when I log in** while netkeep is running only registers the login agent. Nothing changes until your next login: netkeep never starts a second copy next to the one you are using. The card's state says where you are:
