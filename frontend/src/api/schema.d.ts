@@ -14522,7 +14522,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The run is not committed, or rolling it back is refused: a contact it created has a campaign message, a merge drew in a contact it created, a later run wrote over it, or contacts it created have gained things since (unless force) */
+            /** @description The run is not committed, or rolling it back is refused: a contact it created has a campaign message, a merge drew in a contact it created or enriched, a later run wrote over it, or contacts it created have gained things since (unless force) */
             409: {
                 headers: {
                     [name: string]: unknown;

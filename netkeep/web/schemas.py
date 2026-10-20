@@ -1299,7 +1299,8 @@ RollbackRefusalCode = Literal[
 ``created_contacts_messaged``: a contact the run created has a campaign
 message, which is never deleted (#242); the run cannot be rolled back, and
 ``force`` does not change that.
-``merged``: a merge has drawn in a contact the run created; undo the merge.
+``merged``: a merge has drawn in a contact the run created, or folded
+another contact into one the run added child rows to (#702); undo the merge.
 ``superseded``: a later run wrote over fields this one wrote; roll back
 ``run_ids`` first, newest first. ``created_contacts_changed``: contacts the run
 created have gained what ``acquired`` counts; roll back with ``force`` to

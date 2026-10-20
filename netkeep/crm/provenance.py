@@ -208,7 +208,7 @@ def revert_to_synced(contact: Contact, field: str) -> None:
     synced = (contact.synced_values or {}).get(field)
     if synced is None:
         raise ValueError(f"{field} has no synced value to revert to")
-    setattr(contact, field, _column_value(field, synced["value"]))
+    setattr(contact, field, column_value(field, synced["value"]))
     _set_source(contact, field, ContactSource(synced["source"]))
 
 
@@ -228,7 +228,7 @@ def overridden_fields(contact: Contact) -> list[str]:
         for field in PROVENANCE_ORDER
         if sources.get(field) == ContactSource.MANUAL.value
         and field in synced
-        and getattr(contact, field) != _column_value(field, synced[field]["value"])
+        and getattr(contact, field) != column_value(field, synced[field]["value"])
     ]
 
 
@@ -240,8 +240,12 @@ def _set_source(contact: Contact, field: str, source: ContactSource) -> None:
         sources[field] = source.value
 
 
-def _column_value(field: str, raw: str | None) -> str | date | None:
-    """A ledger value as the column stores it: a date parsed, an empty name ``''``."""
+def column_value(field: str, raw: str | None) -> str | date | None:
+    """A stored value back as the column holds it: a date parsed, an empty name ``''``.
+
+    For the ledger here, and for the "before" values an import run records
+    (:func:`netkeep.crm.import_runs.rollback`).
+    """
     column = inspect(Contact).columns[field]
     if raw is None:
         return None if column.nullable else ""  # names are '' when unknown, never NULL

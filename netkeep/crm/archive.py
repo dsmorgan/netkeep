@@ -422,12 +422,16 @@ def import_archive(
             _import_positions(session, user, archive.positions(member), when, report)
     written = _Interactions(session, user)
     profile_name = archive.owner_name()
+    # The first table's owner is every later table's too (#702): a foreign
+    # messages-shaped member (#74) read on its own would detect its own owner and
+    # attribute its traffic as if that were the user.
+    owner: Owner | str | None = owner_public_id
     for member in archive.members:
         if member.kind is ArchiveKind.MESSAGES:
             _note_unfamiliar_messages(member.name, report)
-            _import_messages(
-                archive.messages(member), owner_public_id, profile_name, written, report
-            )
+            found = _import_messages(archive.messages(member), owner, profile_name, written, report)
+            if owner is None:
+                owner = found
     for member in archive.members:
         if member.kind is ArchiveKind.INVITATIONS:
             _import_invitations(archive.invitations(member), written, report)
@@ -640,13 +644,14 @@ def _incoming_contact(row: ConnectionRow, observed_at: datetime) -> IncomingCont
 
 def _import_messages(
     rows: Iterable[MessageRow],
-    owner_public_id: str | None,
+    owner: Owner | str | None,
     profile_name: str | None,
     written: _Interactions,
     report: ArchiveImport,
-) -> None:
+) -> Owner | None:
+    """Import one messages table; the owner it was read as, or ``None`` when none was found."""
     counts = report.messages
-    threads = group(rows, owner=owner_public_id, profile_name=profile_name)
+    threads = group(rows, owner=owner, profile_name=profile_name)
     counts.rows += threads.rows
     counts.undated += threads.undated_rows
     counts.conversations += threads.total_conversations
@@ -654,7 +659,7 @@ def _import_messages(
     counts.group_threads += threads.skipped_for("group")
     counts.no_owner += threads.skipped_for("no_owner")
     if threads.owner is None:
-        return
+        return None
     _note_owner(threads.owner, report)
     for conversation in threads.conversations:
         contact_id = written.contact_for(conversation.counterpart_public_id)
@@ -674,6 +679,7 @@ def _import_messages(
                     counts.inbound += 1
             else:
                 counts.already_present += 1
+    return threads.owner
 
 
 def _note_unfamiliar_messages(name: str, report: ArchiveImport) -> None:
@@ -696,9 +702,8 @@ def _note_unfamiliar_messages(name: str, report: ArchiveImport) -> None:
 
 
 def _note_owner(owner: Owner, report: ArchiveImport) -> None:
-    if report.owner_public_id is not None and report.owner_public_id != owner.public_id:
-        log.warning("archive: message tables disagree on the owner; keeping the first")
-        return
+    if report.owner_public_id is not None:
+        return  # every table after the first is read as the first one's owner
     report.owner_public_id = owner.public_id
     report.owner_by = owner.by
 
