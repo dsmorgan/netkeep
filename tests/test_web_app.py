@@ -45,6 +45,7 @@ API_PATHS = {
     "/api/v1/dashboard/next-fires",
     "/api/v1/dashboard/changed-jobs",
     "/api/v1/dashboard/inbound",
+    "/api/v1/dashboard/metrics",
     "/api/v1/do-not-send",
     "/api/v1/do-not-send/{entry_id}",
     "/api/v1/contacts/bulk",

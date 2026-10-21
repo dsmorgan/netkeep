@@ -6,6 +6,7 @@ it keeps running while this module is skipped for an empty registry.
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 import factories
@@ -24,6 +25,7 @@ from netkeep.linkedin.classify import Outcome
 from netkeep.models import (
     Campaign,
     Contact,
+    ContactSource,
     ContactTag,
     InteractionKind,
     ListKind,
@@ -367,6 +369,32 @@ async def test_inbound_this_week_is_isolated(running_app: FastAPI) -> None:
 
     assert (await _get(running_app, a_id, "/dashboard/inbound"))["count"] == 1
     assert (await _get(running_app, b_id, "/dashboard/inbound"))["count"] == 0
+
+
+async def test_dashboard_metrics_are_isolated(running_app: FastAPI) -> None:
+    """``GET /dashboard/metrics`` is a record of counts, not a list, so it is not in
+    ``REGISTRY``; every number in it is one user's own (#738)."""
+    factory: sessionmaker[Session] = running_app.state.session_factory
+    with session_scope(factory, write=True) as session:
+        a = User(kind=UserKind.HOSTED, display_name="A")
+        b = User(kind=UserKind.HOSTED, display_name="B")
+        session.add_all([a, b])
+        session.flush()
+        campaign = factories.make_campaign(session, a)
+        enrollment = factories.make_enrollment(
+            session,
+            campaign,
+            factories.make_contact(session, a, source=ContactSource.SYNC),
+            replied_at=utcnow(),
+        )
+        factories.make_message(session, enrollment, sent_at=utcnow() - timedelta(minutes=1))
+        a_id, b_id = a.id, b.id
+
+    a_body = await _get(running_app, a_id, "/dashboard/metrics")
+    b_body = await _get(running_app, b_id, "/dashboard/metrics")
+    assert (a_body["sent"], a_body["replies"], a_body["new_contacts"]["linkedin"]) == (1, 1, 1)
+    assert (b_body["sent"], b_body["replies"], b_body["new_contacts"]["total"]) == (0, 0, 0)
+    assert sum(bucket["sent"] for bucket in b_body["series"]) == 0
 
 
 async def test_gmail_activity_is_isolated(running_app: FastAPI) -> None:
