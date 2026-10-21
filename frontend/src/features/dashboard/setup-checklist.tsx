@@ -221,7 +221,7 @@ function Group({
         <button
           type="button"
           aria-expanded={!folded}
-          aria-controls={panel}
+          aria-controls={folded ? undefined : panel}
           onClick={onFold}
           className="flex w-full items-center gap-2.5 rounded-control px-0.5 py-1 text-left text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
@@ -244,7 +244,10 @@ function Group({
               <p className="px-0.5 pt-0.5 text-[12.5px] text-muted-foreground">
                 {CONNECT_SUBTITLE}
               </p>
-              <div className="mt-1.5 grid items-start gap-2.5 @min-[700px]:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)]">
+              <div
+                data-testid="setup-tracks"
+                className="mt-1.5 grid grid-cols-1 items-start gap-2.5 @min-[700px]:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)]"
+              >
                 {group.tracked.map((track) => (
                   <div
                     key={track.title}

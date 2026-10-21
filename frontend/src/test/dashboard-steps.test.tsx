@@ -210,6 +210,21 @@ describe('the setup checklist', () => {
     )
   })
 
+  it('opens the default row again after a skip', async () => {
+    serve(setupBody(false))
+    await renderApp('/')
+    await pane()
+    openRow('chrome')
+    expect(toggle('import')).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(within(row('chrome')).getByRole('button', { name: 'Skip Sign in to LinkedIn' }))
+    await waitFor(() =>
+      expect(toggle('chrome')).toHaveAccessibleName(/Sign in to LinkedIn, Skipped/),
+    )
+    // Back to the step to do now, 2, not the row that was skipped.
+    expect(toggle('import')).toHaveAttribute('aria-expanded', 'true')
+    expect(toggle('chrome')).toHaveAttribute('aria-expanded', 'false')
+  })
+
   it('offers nothing on a step skipped with 4, and only Undo skip on a waiting step skipped', async () => {
     serve(
       setupBody(false, {
@@ -266,9 +281,13 @@ describe('the setup checklist', () => {
     expect(account).toHaveAttribute('aria-expanded', 'false')
     expect(account).toHaveTextContent('✓ Done')
     expect(document.querySelector('[data-step="about_you"]')).toBeNull()
+    // A folded heading controls no panel, since none is in the DOM.
+    expect(account).not.toHaveAttribute('aria-controls')
 
     fireEvent.click(account)
     expect(account).toHaveAttribute('aria-expanded', 'true')
+    const panel = document.getElementById(account.getAttribute('aria-controls') ?? '')
+    expect(panel).toContainElement(row('about_you'))
     expect(row('about_you')).toBeInTheDocument()
 
     const reach = groupButton(/^Start reaching out/)
@@ -288,6 +307,12 @@ describe('the setup checklist', () => {
     expect(
       screen.getByText(/^Connect both to use everything netkeep does: Gmail sends email/),
     ).toHaveTextContent(/A campaign needs at least one\.$/)
+    // One column that can shrink below 700 px, so the tracks fit a phone-width pane;
+    // two side by side above it. jsdom can't measure, so the classes are the contract.
+    expect(screen.getByTestId('setup-tracks')).toHaveClass(
+      'grid-cols-1',
+      '@min-[700px]:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)]',
+    )
     const gmail = document.querySelector<HTMLElement>('[data-track="Gmail"]')!
     const linkedin = document.querySelector<HTMLElement>('[data-track="LinkedIn"]')!
     expect(
