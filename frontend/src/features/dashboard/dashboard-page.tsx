@@ -1,31 +1,21 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { Link } from '@tanstack/react-router'
+import { useEffect, useState } from 'react'
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { listsQuery } from '@/features/crm/api'
+import { toneClasses } from '@/components/ui/tone'
+import { attentionQuery } from '@/features/attention/api'
 import { useEventStreamStatus } from '@/features/events/event-stream-context'
 import { useServerEvent } from '@/features/events/use-server-event'
 import { linkedinKeys } from '@/features/linkedin/api'
 import { LinkedInStepsSection } from '@/features/linkedin-steps/linkedin-steps-section'
 import { cn } from '@/lib/utils'
 
-import { openImportsQuery, statsQuery } from './api'
-import {
-  BrowserHealthCard,
-  BudgetHeatCard,
-  ChangedJobsCard,
-  NextLinkedInRunCard,
-  NextSendsCard,
-  RepliesCard,
-} from './glance-cards'
+import { ChangedJobsCard, CampaignsCard, ComingUpCard, RepliesCard } from './glance-cards'
 import { LiveRunCard } from './live-run-card'
-import { MailboxCard } from './mailbox-card'
-import { setupQuery } from './setup-api'
-import { SetupStepCard } from './setup-step-card'
-import { buildSetupSteps } from './setup-steps'
+import { NEEDS_YOU_ID, needsYouCount, needsYouText, type Problem } from './status'
+import { ProblemList, StatusChips } from './status-chips'
+import { useDashboardStatus } from './use-dashboard-status'
 import { StepsFlow } from './steps-flow'
-import { defaultTab, storeTab, storedTab, type DashboardTab } from './steps-layout'
 
 /**
  * A LinkedIn run starting or ending moves the schedule, the last run, the
@@ -41,155 +31,154 @@ function useLinkedInRefresh(): void {
   useServerEvent('run.finished', refresh)
 }
 
+/** The current time, moved on each minute, for the header's eyebrow. */
+function useMinute(): Date {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
+  return now
+}
+
+/** "Tuesday, October 20 · 2:05 PM", in the reader's own locale and zone. */
+function eyebrowText(now: Date): string {
+  const day = now.toLocaleDateString(undefined, {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  })
+  const time = now.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  return `${day} · ${time}`
+}
+
 /**
- * The dashboard: two tabs (#667). **Steps** is the setup flow from `GET /setup`;
- * **Overview** is the dashboard as it was. Steps opens until every required step is
- * done or skipped, then Overview; a pick is remembered in this browser.
+ * The dashboard, one page (#739), top to bottom: a header saying how many things need
+ * you, the status chips, the metric tiles' slot (#740 fills it), the setup map, and
+ * the detail: Needs you, Running now, Coming up, Campaigns and Changed jobs.
+ *
+ * The top bar holds the page's `<h1>`, "Dashboard", so the header here is the line
+ * under it. Every region reads its own queries and has its own loading and error
+ * states, so one failed read never blanks the page.
  */
 export function DashboardPage() {
-  const setup = useQuery(setupQuery)
-  const [picked, setPicked] = useState<DashboardTab | null>(storedTab)
+  const { chips, problems } = useDashboardStatus()
+  const attention = useQuery(attentionQuery)
+  const now = useMinute()
+  useLinkedInRefresh()
 
-  if (picked === null && setup.isPending) {
-    return (
-      <p role="status" className="text-muted-foreground">
-        Checking your setup…
-      </p>
-    )
-  }
-
-  const tab = defaultTab(picked, setup.data, setup.isError)
   return (
-    <Tabs
-      value={tab}
-      onValueChange={(value: DashboardTab) => {
-        setPicked(value)
-        storeTab(value)
-      }}
-      className="gap-4"
-    >
-      <TabsList aria-label="Dashboard">
-        <TabsTrigger value="steps">Steps</TabsTrigger>
-        <TabsTrigger value="overview">Overview</TabsTrigger>
-      </TabsList>
-      <TabsContent value="steps" className="max-w-6xl">
+    <div className="flex max-w-6xl flex-col gap-4">
+      <header data-region="header" className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div className="flex flex-col gap-0.5">
+            <span className="nk-eyebrow">{eyebrowText(now)}</span>
+            <p data-testid="needs-you-line">
+              {needsYouText(needsYouCount(problems, attention.data))}
+            </p>
+          </div>
+          <LiveUpdates />
+        </div>
+        <StatusChips chips={chips} />
+      </header>
+
+      {/* The metric tiles' place; #740 fills it. Hidden while empty. */}
+      <section aria-label="Metrics" data-region="metrics" className="empty:hidden" />
+
+      <section
+        aria-labelledby="setup-map-heading"
+        data-region="setup"
+        className="flex flex-col gap-2"
+      >
+        <h2
+          id="setup-map-heading"
+          className="font-heading text-card-title font-bold tracking-heading"
+        >
+          Setup
+        </h2>
         <StepsFlow />
-      </TabsContent>
-      <TabsContent value="overview">
-        <OverviewPanel />
-      </TabsContent>
-    </Tabs>
+      </section>
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+        <NeedsYou problems={problems} inbox={attention.data?.counts.inbox ?? 0} />
+        <div className="flex flex-col gap-4">
+          <section aria-label="Running now" data-region="running">
+            <LiveRunCard />
+          </section>
+          <div data-region="coming-up">
+            <ComingUpCard />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div data-region="campaigns">
+          <CampaignsCard />
+        </div>
+        <div data-region="changed-jobs">
+          <ChangedJobsCard />
+        </div>
+      </div>
+    </div>
   )
 }
 
 /**
- * The Overview tab: at a glance, what happens next and whether anything is
- * unhealthy (P3-12, `glance-cards.tsx`); below it, not a set of scaffold cards, but the setup path — import,
- * review, triage, build a list, export — with each step's real count and the
- * control that advances it (issue #115, spec 10.1, 14.3).
- *
- * `contacts/stats` is the one query every step's state is gated on: without
- * it nothing here is knowable, so its failure is the page's failure, shown
- * the same way the old scaffold's "backend unreachable" card was. The
- * draft-imports and lists queries feed one step each; a failure in either
- * degrades that one step (`setup-steps.ts` says how) rather than the page.
+ * Needs you: a tinted pane, most urgent first. What stopped comes first, with its fix,
+ * then the unhandled Inbox items, the replies, and the LinkedIn steps waiting for you.
  */
-function OverviewPanel() {
-  const stats = useQuery(statsQuery)
-  const openImports = useQuery(openImportsQuery)
-  const lists = useQuery(listsQuery)
-  const stream = useEventStreamStatus()
-  useLinkedInRefresh()
-
-  if (stats.isPending) {
-    return (
-      <p role="status" className="text-muted-foreground">
-        Checking your setup…
-      </p>
-    )
-  }
-
-  if (stats.isError) {
-    return (
-      <Card size="sm" tone="bad" className="max-w-xl" role="alert">
-        <CardHeader>
-          <CardTitle level={2}>Backend unreachable</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p>
-            Start it with <code className="font-mono">make dev</code>. The setup path needs it to
-            say where you are.
-          </p>
-        </CardContent>
-      </Card>
-    )
-  }
-
-  const hasContacts = stats.data.total > 0
-  const steps = buildSetupSteps({
-    stats: stats.data,
-    openImports: openImports.data,
-    openImportsPending: openImports.isPending,
-    openImportsUnavailable: openImports.isError,
-    lists: lists.data,
-    listsUnavailable: lists.isError,
-  })
-
+function NeedsYou({ problems, inbox }: { problems: Problem[]; inbox: number }) {
   return (
-    <div className="flex max-w-3xl flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-muted-foreground">What happens next, and anything that needs you.</p>
-        <span className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span
-            aria-hidden="true"
-            className={cn(
-              'size-2 rounded-full',
-              stream === 'connected' ? 'bg-ok' : 'bg-muted-foreground/50',
-            )}
-          />
-          <span role="status">
-            Live updates {stream === 'connected' ? 'connected' : 'disconnected'}
-          </span>
-        </span>
-      </div>
-
-      {!hasContacts && (
-        <Card size="sm" tone="accent">
-          <CardHeader>
-            <CardTitle level={2}>Start here</CardTitle>
-            <CardDescription>
-              Nothing is imported yet. Bring in a CSV or your LinkedIn archive first — every other
-              step needs contacts to work with.
-            </CardDescription>
-          </CardHeader>
-        </Card>
+    <section
+      id={NEEDS_YOU_ID}
+      aria-labelledby="needs-you-heading"
+      data-region="needs-you"
+      className={cn(
+        'nk-glass flex scroll-mt-4 flex-col gap-3 p-(--space-card-sm)',
+        toneClasses('accent'),
       )}
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2
+          id="needs-you-heading"
+          className="font-heading text-card-title font-bold tracking-heading"
+        >
+          Needs you
+        </h2>
+        <span className="text-xs text-muted-foreground">Most urgent first</span>
+      </div>
+      <ProblemList problems={problems} />
+      {inbox > 0 && (
+        <p className="flex flex-wrap items-center gap-2 text-sm">
+          <span>
+            <span className="font-medium tabular-nums">{inbox}</span> unhandled in the Inbox.
+          </span>
+          <Link to="/inbox" className="text-accent-ink underline-offset-2 hover:underline">
+            Open the Inbox
+          </Link>
+        </p>
+      )}
+      <RepliesCard level={3} />
+      <LinkedInStepsSection level={3} />
+    </section>
+  )
+}
 
-      <section aria-label="At a glance" className="grid gap-3 sm:grid-cols-2">
-        <div className="sm:col-span-2">
-          <LiveRunCard />
-        </div>
-        <div className="flex flex-col gap-3 sm:col-span-2">
-          <LinkedInStepsSection />
-        </div>
-        <NextSendsCard />
-        <NextLinkedInRunCard />
-        <BrowserHealthCard />
-        <MailboxCard />
-        <BudgetHeatCard />
-        <RepliesCard />
-        <div className="sm:col-span-2">
-          <ChangedJobsCard />
-        </div>
-      </section>
-
-      <ol aria-label="Setup path" className="flex flex-col gap-3">
-        {steps.map((step, index) => (
-          <li key={step.key}>
-            <SetupStepCard step={step} index={index + 1} />
-          </li>
-        ))}
-      </ol>
-    </div>
+/** Whether the page gets live updates, as a small dot and a word. */
+function LiveUpdates() {
+  const stream = useEventStreamStatus()
+  return (
+    <span className="flex items-center gap-2 text-sm text-muted-foreground">
+      <span
+        aria-hidden="true"
+        className={cn(
+          'size-2 rounded-full',
+          stream === 'connected' ? 'bg-ok' : 'bg-muted-foreground/50',
+        )}
+      />
+      <span role="status">
+        Live updates {stream === 'connected' ? 'connected' : 'disconnected'}
+      </span>
+    </span>
   )
 }

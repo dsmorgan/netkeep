@@ -17,34 +17,76 @@ import {
 import type { CountKey, FlagKey } from '@/features/attention/api'
 
 /**
- * Primary navigation, in the order of the pages table in spec section 14.3.
+ * Primary navigation, in groups (#739): the Dashboard on its own, then People,
+ * Outreach, Sources and System. Each group's links are in the order the person works
+ * through them.
  *
  * `count` names the item's number badge in `GET /attention` and `flag` its amber dot
  * (#508); each sits on the page that lists the item. `countTo` is where the badge
  * sends you while it shows, when that is not the item's own page: draft imports are
  * listed on the import history, not the upload page.
  */
-export const NAV_ITEMS = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard, count: 'dashboard', flag: 'dashboard' },
-  { to: '/contacts', label: 'Contacts', icon: Users },
-  { to: '/triage', label: 'Triage', icon: ListChecks, count: 'triage' },
-  { to: '/lists', label: 'Lists', icon: List },
-  { to: '/imports', label: 'Imports', icon: Download, count: 'imports', countTo: '/imports/runs' },
-  { to: '/exports', label: 'Exports', icon: Upload },
-  { to: '/linkedin', label: 'LinkedIn', icon: Network, flag: 'linkedin' },
-  { to: '/gmail', label: 'Gmail', icon: Mail, flag: 'gmail' },
-  { to: '/templates', label: 'Templates', icon: FileText },
-  { to: '/campaigns', label: 'Campaigns', icon: Send },
-  { to: '/inbox', label: 'Inbox', icon: Inbox, count: 'inbox' },
-  { to: '/settings', label: 'Settings', icon: Settings, flag: 'settings' },
+export const NAV_GROUPS = [
+  {
+    label: null,
+    items: [
+      { to: '/', label: 'Dashboard', icon: LayoutDashboard, count: 'dashboard', flag: 'dashboard' },
+    ],
+  },
+  {
+    label: 'People',
+    items: [
+      { to: '/contacts', label: 'Contacts', icon: Users },
+      { to: '/triage', label: 'Triage', icon: ListChecks, count: 'triage' },
+      { to: '/lists', label: 'Lists', icon: List },
+    ],
+  },
+  {
+    label: 'Outreach',
+    items: [
+      { to: '/campaigns', label: 'Campaigns', icon: Send },
+      { to: '/templates', label: 'Templates', icon: FileText },
+      { to: '/inbox', label: 'Inbox', icon: Inbox, count: 'inbox' },
+    ],
+  },
+  {
+    label: 'Sources',
+    items: [
+      { to: '/linkedin', label: 'LinkedIn', icon: Network, flag: 'linkedin' },
+      { to: '/gmail', label: 'Gmail', icon: Mail, flag: 'gmail' },
+      {
+        to: '/imports',
+        label: 'Imports',
+        icon: Download,
+        count: 'imports',
+        countTo: '/imports/runs',
+      },
+      { to: '/exports', label: 'Exports', icon: Upload },
+    ],
+  },
+  {
+    label: 'System',
+    items: [{ to: '/settings', label: 'Settings', icon: Settings, flag: 'settings' }],
+  },
 ] as const satisfies ReadonlyArray<{
-  to: string
-  label: string
-  icon: LucideIcon
-  count?: CountKey
-  flag?: FlagKey
-  countTo?: string
+  /** The group's heading in the sidebar; null for the Dashboard, which stands alone. */
+  label: string | null
+  items: ReadonlyArray<{
+    to: string
+    label: string
+    icon: LucideIcon
+    count?: CountKey
+    flag?: FlagKey
+    countTo?: string
+  }>
 }>
+
+type GroupItem = (typeof NAV_GROUPS)[number]['items'][number]
+
+/** Every nav item, in sidebar order. */
+export const NAV_ITEMS: readonly GroupItem[] = NAV_GROUPS.flatMap(
+  (group): readonly GroupItem[] => group.items,
+)
 
 export type NavItem = (typeof NAV_ITEMS)[number]
 

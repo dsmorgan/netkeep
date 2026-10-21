@@ -1,6 +1,6 @@
 /**
  * `GET /api/v1/setup` (#651): where first-run setup stands, one step per box on the
- * Steps tab, with skip and un-skip. The server decides every state and the gating
+ * setup map, with skip and un-skip. The server decides every state and the gating
  * between steps; nothing here recomputes either.
  */
 import { queryOptions } from '@tanstack/react-query'

@@ -1,8 +1,8 @@
 /**
  * The localStorage keys' rename from `netkeeper.*` to `netkeep.*` (#661).
  *
- * Every key the UI keeps (the theme, the dashboard tab, the contacts columns, the
- * Chrome banner) moved with the rename. On load, each old key is read once, written
+ * Every key the UI keeps (the theme, the contacts columns, the Chrome banner) moved
+ * with the rename. On load, each old key is read once, written
  * under its new name unless that already holds a value, and removed, so a choice made
  * before the rename survives it. Blocked storage leaves things as they are.
  */

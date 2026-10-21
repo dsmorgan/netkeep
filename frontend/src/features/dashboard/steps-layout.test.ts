@@ -1,17 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import { GRAPH, step } from './steps-fixtures'
-import {
-  BOX_TONE,
-  TAB_STORAGE_KEY,
-  boxLook,
-  defaultTab,
-  layoutSteps,
-  needsText,
-  stateLabel,
-  storeTab,
-  storedTab,
-} from './steps-layout'
+import { BOX_TONE, boxLook, layoutSteps, needsText, stateLabel } from './steps-layout'
 
 describe('layoutSteps', () => {
   it('puts each step one column past its deepest prerequisite', () => {
@@ -104,44 +94,6 @@ describe('box looks', () => {
     expect(stateLabel(step('a', { state: 'todo', next: true }))).toBe('Next')
     expect(stateLabel(step('a', { state: 'todo' }))).toBe('To do')
     expect(stateLabel(step('a', { state: 'in_progress' }))).toBe('In progress')
-  })
-})
-
-describe('the default tab', () => {
-  afterEach(() => {
-    window.localStorage.clear()
-    vi.restoreAllMocks()
-  })
-
-  it('opens Steps until setup is complete, then Overview', () => {
-    expect(defaultTab(null, { complete: false }, false)).toBe('steps')
-    expect(defaultTab(null, { complete: true }, false)).toBe('overview')
-  })
-
-  it('keeps the last pick whatever setup says', () => {
-    expect(defaultTab('overview', { complete: false }, false)).toBe('overview')
-    expect(defaultTab('steps', { complete: true }, false)).toBe('steps')
-  })
-
-  it('opens Overview when setup cannot be read', () => {
-    expect(defaultTab(null, undefined, true)).toBe('overview')
-  })
-
-  it('remembers the pick in this browser, and shrugs off storage that refuses', () => {
-    expect(storedTab()).toBeNull()
-    storeTab('overview')
-    expect(window.localStorage.getItem(TAB_STORAGE_KEY)).toBe('overview')
-    expect(storedTab()).toBe('overview')
-    window.localStorage.setItem(TAB_STORAGE_KEY, 'something else')
-    expect(storedTab()).toBeNull()
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-      throw new Error('denied')
-    })
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new Error('denied')
-    })
-    expect(storedTab()).toBeNull()
-    expect(() => storeTab('steps')).not.toThrow()
   })
 })
 

@@ -1,48 +1,10 @@
 /**
- * The Steps tab's pure parts: where each box sits in the flow diagram, which tab the
- * dashboard opens on, and how each box looks. Kept apart from the components so the
- * logic is tested without rendering.
+ * The setup map's pure parts: where each box sits in the flow diagram and how each box
+ * looks. Kept apart from the components so the logic is tested without rendering.
  */
 import type { Tone } from '@/components/ui/tone'
 
-import type { Setup, SetupStep } from './setup-api'
-
-export type DashboardTab = 'steps' | 'overview'
-
-export const TAB_STORAGE_KEY = 'netkeep.dashboard.tab'
-
-/** The tab picked last in this browser, or null. Storage can be missing or refuse. */
-export function storedTab(): DashboardTab | null {
-  try {
-    const value = window.localStorage.getItem(TAB_STORAGE_KEY)
-    return value === 'steps' || value === 'overview' ? value : null
-  } catch {
-    return null
-  }
-}
-
-export function storeTab(tab: DashboardTab): void {
-  try {
-    window.localStorage.setItem(TAB_STORAGE_KEY, tab)
-  } catch {
-    // A browser that refuses storage just doesn't remember the pick.
-  }
-}
-
-/**
- * The tab to open: the person's last pick, else Steps until every required step is
- * done or skipped (`complete`), then Overview. When setup can't be read (another
- * account, the backend down), Overview, which says what it can on its own.
- */
-export function defaultTab(
-  picked: DashboardTab | null,
-  setup: Pick<Setup, 'complete'> | undefined,
-  failed: boolean,
-): DashboardTab {
-  if (picked !== null) return picked
-  if (failed || setup === undefined) return 'overview'
-  return setup.complete ? 'overview' : 'steps'
-}
+import type { SetupStep } from './setup-api'
 
 export interface Placed {
   step: SetupStep

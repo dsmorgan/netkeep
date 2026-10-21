@@ -1,13 +1,13 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link, useRouterState } from '@tanstack/react-router'
 import { X } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useId, useRef, type ReactNode } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { attentionQuery, type Attention } from '@/features/attention/api'
 import { cn } from '@/lib/utils'
 
-import { NAV_ITEMS, navStateText, type NavItem } from './nav'
+import { NAV_GROUPS, navStateText, type NavItem } from './nav'
 import { NavBadge } from './nav-badge'
 import { ThemeSwitch } from './theme-switch'
 
@@ -105,20 +105,41 @@ export function Sidebar({ id, open, onClose }: SidebarProps) {
         aria-label="Primary"
         className="flex min-h-0 flex-1 flex-col gap-px overflow-y-auto p-2"
       >
-        {NAV_ITEMS.map((item) => (
-          <NavLink
-            key={item.to}
-            item={item}
-            attention={attention.data}
-            pathname={pathname}
-            onFollow={() => onClose(false)}
-          />
+        {NAV_GROUPS.map((group) => (
+          <NavGroup key={group.label ?? 'top'} label={group.label}>
+            {group.items.map((item) => (
+              <NavLink
+                key={item.to}
+                item={item}
+                attention={attention.data}
+                pathname={pathname}
+                onFollow={() => onClose(false)}
+              />
+            ))}
+          </NavGroup>
         ))}
       </nav>
       <div data-testid="sidebar-footer" className="shrink-0 border-t border-sidebar-border p-3">
         <ThemeSwitch />
       </div>
     </aside>
+  )
+}
+
+/**
+ * One group of links under its small heading (#739), as a labelled group so a screen
+ * reader hears "People, group" on entering it. The Dashboard's group has no label.
+ */
+function NavGroup({ label, children }: { label: string | null; children: ReactNode }) {
+  const id = useId()
+  if (label === null) return <div className="flex flex-col gap-px">{children}</div>
+  return (
+    <div role="group" aria-labelledby={id} className="mt-3 flex flex-col gap-px">
+      <span id={id} className="nk-eyebrow px-2 pb-1 text-sidebar-foreground/70">
+        {label}
+      </span>
+      {children}
+    </div>
   )
 }
 

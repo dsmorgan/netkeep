@@ -2,11 +2,13 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import type { Tone } from '@/components/ui/tone'
-import { budgetQuery, heatQuery, scheduleQuery, statusQuery } from '@/features/linkedin/api'
+import { CampaignStatusBadge } from '@/features/campaigns/badges'
+import { campaignsQuery } from '@/features/campaigns/api'
+import { countsText } from '@/features/campaigns/format'
+import { scheduleQuery } from '@/features/linkedin/api'
 import {
   autoSendCheckWhen,
   autoSendStepText,
@@ -14,44 +16,39 @@ import {
   type AutoSendOutlook,
 } from '@/features/linkedin-steps/format'
 import { SchedulePause } from '@/features/linkedin/schedule-pause'
-import { StartChrome } from '@/features/linkedin/start-chrome'
-import { RUN_STATUS_CLASSES, formatWhen, stopReasonLabel } from '@/features/linkedin/fields'
-import {
-  RUN_KIND_LABELS,
-  runKindLabel,
-  RUN_STATUS_LABELS,
-  type BudgetStatus,
-  type Run,
-  type RunKind,
-} from '@/features/linkedin/types'
-import { cn } from '@/lib/utils'
+import { formatWhen } from '@/features/linkedin/fields'
+import { RUN_KIND_LABELS, type RunKind } from '@/features/linkedin/types'
 
-import { changedJobsQuery, inboundQuery, lastRunQuery, nextFiresQuery, type NextFire } from './api'
+import { changedJobsQuery, inboundQuery, nextFiresQuery, type NextFire } from './api'
 
 /**
- * The dashboard's "at a glance" cards (P3-12): what happens next, and whether
- * anything is unhealthy. Each card reads the one endpoint that already owns its
- * answer — the LinkedIn cards the same `/linkedin/*` queries the LinkedIn page
- * uses, so the two pages share one cache and cannot disagree — and each has its
- * own loading, error, and empty state, so one failing read never hides the rest.
+ * The dashboard's detail cards (P3-12, regrouped in #739): what happens next, the
+ * campaigns, replies and changed jobs. Each card reads the one endpoint that already
+ * owns its answer (the schedule the same `/linkedin/schedule` query the LinkedIn page
+ * uses, so the two pages share one cache and cannot disagree), and each has its own
+ * loading, error, and empty state, so one failing read never hides the rest. Whether
+ * anything is unhealthy is the status chips' job (`status-chips.tsx`).
  */
 
 function GlanceCard({
   title,
   description,
   tone,
+  level = 2,
   children,
 }: {
   title: string
   description?: ReactNode
   /** Tints the card when it holds something that needs you (#606). */
   tone?: Tone
+  /** 3 inside a dashboard region with a heading of its own, such as Needs you. */
+  level?: 2 | 3
   children: ReactNode
 }) {
   return (
     <Card size="sm" tone={tone}>
       <CardHeader>
-        <CardTitle level={2}>{title}</CardTitle>
+        <CardTitle level={level}>{title}</CardTitle>
         {description !== undefined && <CardDescription>{description}</CardDescription>}
       </CardHeader>
       <CardContent className="flex flex-col gap-2 text-sm">{children}</CardContent>
@@ -123,160 +120,162 @@ const dashboardScheduleQuery = { ...scheduleQuery, refetchInterval: 60_000 }
 
 // --- what happens next ------------------------------------------------------------------
 
-/** The next campaign steps the minute tick will consider (`next_action_at`, spec 11.4). */
-export function NextSendsCard() {
+/** The auto-send check's row in the schedule: its kind, which no other job has. */
+const AUTO_SEND_CHECK = 'auto_send'
+
+/** One row of Coming up: a campaign send, a scheduled LinkedIn job, or the auto-send check. */
+type Upcoming =
+  | { kind: 'send'; at: string; fire: NextFire }
+  | { kind: 'job'; at: string; job: string }
+  | { kind: 'check'; at: string; check: AutoSendOutlook }
+
+/**
+ * What happens next, soonest first, as one timeline (#739): the campaign steps the
+ * minute tick will consider (`next_action_at`, spec 11.4) and the scheduled LinkedIn
+ * runs, from the scheduler's persisted due times (`GET /linkedin/schedule`), with the
+ * auto-send check among them while auto-send is on.
+ *
+ * Unarmed, no LinkedIn run fires however soon a due time is, so the card says that
+ * instead of listing times that will not happen. Paused (#324), it says that instead,
+ * with the control to unpause; armed and running, it offers the pause. Each source has
+ * its own failure line, so a broken schedule never hides the sends.
+ */
+export function ComingUpCard() {
   const fires = useQuery(nextFiresQuery)
-  // When the next auto-send check sends an auto-send step, or why it waits.
   const schedule = useQuery(dashboardScheduleQuery)
   const outlook = schedule.data?.auto_send ?? null
   const autoSendOn = outlook?.on === true
   const fetchedAt = new Date(fires.dataUpdatedAt)
 
-  return (
-    <GlanceCard title="Next campaign sends">
-      {fires.isPending ? (
+  if (fires.isPending || schedule.isPending) {
+    return (
+      <GlanceCard title="Coming up">
         <Checking />
-      ) : fires.isError ? (
-        <Failed what="Upcoming sends" />
-      ) : fires.data.items.length === 0 ? (
-        <Muted>Nothing is scheduled to send.</Muted>
-      ) : (
-        <>
-          <ol className="flex flex-col gap-1.5">
-            {fires.data.items.map((fire) => (
-              <li key={fire.enrollment_id} className="flex flex-col">
-                <span>
-                  <span className="font-medium tabular-nums">
-                    {dueText(fire.due, fires.dataUpdatedAt)}
-                  </span>
-                  {' — '}
-                  <Link
-                    to="/contacts/$contactId"
-                    params={{ contactId: String(fire.contact_id) }}
-                    className="underline-offset-2 hover:underline"
-                  >
-                    {fire.contact_name || 'Unnamed contact'}
-                  </Link>
-                </span>
-                <span className="text-xs text-muted-foreground">{stepText(fire, autoSendOn)}</span>
-                {autoSendOn && fire.auto_send === true && (
-                  <span className="text-xs text-muted-foreground">
-                    {autoSendStepText(outlook, fire, fetchedAt)}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ol>
-          <More shown={fires.data.items.length} total={fires.data.total} />
-        </>
-      )}
-    </GlanceCard>
-  )
-}
+      </GlanceCard>
+    )
+  }
 
-/**
- * The next scheduled LinkedIn run, from the scheduler's persisted due times
- * (`GET /linkedin/schedule`). Unarmed, nothing fires however soon a due time
- * is, so the card says that instead of showing a time that will not happen.
- * Paused (#324), it says that instead, with the control to unpause; armed and
- * running, it offers the pause.
- */
-export function NextLinkedInRunCard() {
-  const schedule = useQuery(dashboardScheduleQuery)
+  const plan = schedule.data
+  // Jobs fire only while the schedule is armed and not paused.
+  const firing = plan !== undefined && plan.armed && !plan.paused
+  const check = firing && autoSendOn ? outlook : null
+  const rows: Upcoming[] = [
+    ...(fires.data?.items ?? []).map((fire): Upcoming => ({ kind: 'send', at: fire.due, fire })),
+    ...(firing ? plan.jobs : []).flatMap((job): Upcoming[] =>
+      job.next_due === null ? [] : [{ kind: 'job', at: job.next_due, job: job.kind }],
+    ),
+  ]
+  // An overdue check runs once in the scheduler's catch-up window, not at its old time.
+  const checkAt = check === null ? null : check.catch_up ? check.checked_at : check.next_fire
+  if (check !== null && checkAt !== null) rows.push({ kind: 'check', at: checkAt, check })
+  rows.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())
 
   return (
-    <GlanceCard title="Next LinkedIn run">
-      {schedule.isPending ? (
-        <Checking />
-      ) : schedule.isError ? (
-        <Failed what="The LinkedIn schedule" />
-      ) : !schedule.data.armed ? (
+    <GlanceCard title="Coming up">
+      {fires.isError && <Failed what="Upcoming sends" />}
+      {schedule.isError && <Failed what="The LinkedIn schedule" />}
+      {plan !== undefined && !plan.armed && (
         <>
           <Muted>
             Scheduled runs are off. Nothing visits LinkedIn on its own until you arm them.
           </Muted>
           <div>
-            <Button size="sm" variant="outline" render={<Link to="/linkedin" />}>
+            <Button size="sm" variant="outline" render={<Link to="/linkedin" hash="schedule" />}>
               Open LinkedIn
             </Button>
           </div>
-          {/* Disarmed and paused are separate switches: both say so, and either can be undone. */}
-          {schedule.data.paused && <SchedulePause schedule={schedule.data} />}
-        </>
-      ) : schedule.data.paused ? (
-        <SchedulePause schedule={schedule.data} />
-      ) : (
-        <>
-          <LinkedInJobs
-            jobs={schedule.data.jobs}
-            schedulerRunning={schedule.data.scheduler_running}
-            autoSend={schedule.data.auto_send ?? null}
-          />
-          <SchedulePause schedule={schedule.data} />
         </>
       )}
-    </GlanceCard>
-  )
-}
-
-/** The auto-send check's row in the schedule: its kind, which no other job has. */
-const AUTO_SEND_CHECK = 'auto_send'
-
-function LinkedInJobs({
-  jobs,
-  schedulerRunning,
-  autoSend,
-}: {
-  jobs: { kind: string; next_due: string | null }[]
-  schedulerRunning: boolean
-  autoSend: AutoSendOutlook | null
-}) {
-  // With auto-send on, its check is a row like any job's, with what it would do under it.
-  const check = autoSend?.on === true ? autoSend : null
-  // An overdue check runs once in the scheduler's catch-up window, not at its old time.
-  const checkAt = check === null ? null : check.catch_up ? check.checked_at : check.next_fire
-  const rows = check === null ? jobs : [...jobs, { kind: AUTO_SEND_CHECK, next_due: checkAt }]
-  const due = rows
-    .filter((job): job is { kind: string; next_due: string } => job.next_due !== null)
-    .sort((a, b) => a.next_due.localeCompare(b.next_due))
-
-  return (
-    <>
-      {!schedulerRunning && (
+      {firing && !plan.scheduler_running && (
         <p role="alert" className="text-destructive">
-          No scheduler is running in this process, so nothing below will fire.
+          No scheduler is running in this process, so no LinkedIn run below will fire.
         </p>
       )}
-      {due.length === 0 ? (
-        <Muted>No run is scheduled yet.</Muted>
+      {rows.length === 0 ? (
+        <Muted>Nothing is scheduled.</Muted>
       ) : (
-        <ol className="flex flex-col gap-1">
-          {due.map((job) =>
-            job.kind === AUTO_SEND_CHECK && check !== null ? (
-              <li key={job.kind} className="flex flex-col">
-                <span>
-                  <span className="font-medium tabular-nums">{formatWhen(job.next_due)}</span>
-                  {' — '}
-                  Auto-send check
-                </span>
-                <span className="text-xs text-muted-foreground">{autoSendCheckText(check)}</span>
-              </li>
-            ) : (
-              <li key={job.kind}>
-                <span className="font-medium tabular-nums">{formatWhen(job.next_due)}</span>
-                {' — '}
-                {kindLabel(job.kind)}
-              </li>
-            ),
-          )}
+        <ol className="flex flex-col gap-1.5">
+          {rows.map((row) => (
+            <UpcomingRow
+              key={rowKey(row)}
+              row={row}
+              outlook={outlook}
+              autoSendOn={autoSendOn}
+              fetchedAt={fetchedAt}
+            />
+          ))}
         </ol>
       )}
+      {fires.isSuccess && <More shown={fires.data.items.length} total={fires.data.total} />}
       {check !== null && check.next_fire === null && (
         <p>
           Auto-send check: <span className="text-muted-foreground">{autoSendCheckText(check)}</span>
         </p>
       )}
-    </>
+      {/* Disarmed and paused are separate switches: both say so, and either can be undone. */}
+      {plan !== undefined && (plan.armed || plan.paused) && <SchedulePause schedule={plan} />}
+    </GlanceCard>
+  )
+}
+
+function rowKey(row: Upcoming): string {
+  if (row.kind === 'send') return `send-${row.fire.enrollment_id}`
+  return row.kind === 'job' ? `job-${row.job}` : AUTO_SEND_CHECK
+}
+
+function UpcomingRow({
+  row,
+  outlook,
+  autoSendOn,
+  fetchedAt,
+}: {
+  row: Upcoming
+  outlook: AutoSendOutlook | null
+  autoSendOn: boolean
+  fetchedAt: Date
+}) {
+  if (row.kind === 'job') {
+    return (
+      <li>
+        <span className="font-medium tabular-nums">{formatWhen(row.at)}</span>
+        {' — '}
+        {kindLabel(row.job)}
+      </li>
+    )
+  }
+  if (row.kind === 'check') {
+    return (
+      <li className="flex flex-col">
+        <span>
+          <span className="font-medium tabular-nums">{formatWhen(row.at)}</span>
+          {' — '}
+          Auto-send check
+        </span>
+        <span className="text-xs text-muted-foreground">{autoSendCheckText(row.check)}</span>
+      </li>
+    )
+  }
+  const fire = row.fire
+  return (
+    <li className="flex flex-col">
+      <span>
+        <span className="font-medium tabular-nums">{dueText(fire.due, fetchedAt.getTime())}</span>
+        {' — '}
+        <Link
+          to="/contacts/$contactId"
+          params={{ contactId: String(fire.contact_id) }}
+          className="underline-offset-2 hover:underline"
+        >
+          {fire.contact_name || 'Unnamed contact'}
+        </Link>
+      </span>
+      <span className="text-xs text-muted-foreground">{stepText(fire, autoSendOn)}</span>
+      {autoSendOn && fire.auto_send === true && (
+        <span className="text-xs text-muted-foreground">
+          {autoSendStepText(outlook, fire, fetchedAt)}
+        </span>
+      )}
+    </li>
   )
 }
 
@@ -288,149 +287,58 @@ function autoSendCheckText(outlook: AutoSendOutlook): string {
   return `${autoSendWaitText(outlook) ?? 'It sends the oldest due auto-send step.'}${overdue}`
 }
 
-// --- is anything unhealthy --------------------------------------------------------------
+// --- campaigns ----------------------------------------------------------------------------
+
+/** How many campaigns the card lists before it says how many more there are. */
+const CAMPAIGNS_SHOWN = 5
 
 /**
- * The browser side's health: the session flag and how the last run ended.
- *
- * "No flag" is not "the session is healthy": nothing here checks the live
- * session (a request handler never touches the browser), and a session nobody
- * has checked is #282's to show. So the card says only what it knows.
+ * The campaigns that are not archived (`GET /campaigns`, the list page's own query),
+ * newest first: each one's name, status and who is enrolled, linked to its page.
  */
-export function BrowserHealthCard() {
-  const status = useQuery(statusQuery)
-  const runs = useQuery(lastRunQuery)
+export function CampaignsCard() {
+  const campaigns = useQuery(campaignsQuery)
 
   return (
-    <GlanceCard title="LinkedIn browser">
-      {status.isPending ? (
+    <GlanceCard title="Campaigns">
+      {campaigns.isPending ? (
         <Checking />
-      ) : status.isError ? (
-        <Failed what="The session flag" />
-      ) : status.data.session_flag === 'checkpoint' ? (
-        <p role="alert" className="text-destructive">
-          LinkedIn asked for a checkpoint. No run touches the browser until it is cleared.
-        </p>
-      ) : status.data.session_flag !== null ? (
-        <p role="alert" className="text-destructive">
-          Logged out of LinkedIn. No run touches the browser until you log in and run{' '}
-          <code className="font-mono text-xs">netkeep preflight</code>.
-        </p>
+      ) : campaigns.isError ? (
+        <Failed what="Campaigns" />
+      ) : campaigns.data.length === 0 ? (
+        <Muted>No campaigns yet.</Muted>
       ) : (
-        <Muted>No session flag is raised.</Muted>
+        <>
+          <ul className="flex flex-col gap-1.5">
+            {campaigns.data.slice(0, CAMPAIGNS_SHOWN).map((campaign) => (
+              <li key={campaign.id} className="flex flex-col">
+                <span className="flex flex-wrap items-center gap-2">
+                  <Link
+                    to="/campaigns/$campaignId"
+                    params={{ campaignId: String(campaign.id) }}
+                    className="font-medium underline-offset-2 hover:underline"
+                  >
+                    {campaign.name}
+                  </Link>
+                  <CampaignStatusBadge status={campaign.status} />
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {countsText(campaign.enrollments)}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <More
+            shown={Math.min(campaigns.data.length, CAMPAIGNS_SHOWN)}
+            total={campaigns.data.length}
+          />
+        </>
       )}
-      {runs.isPending ? (
-        <Checking />
-      ) : runs.isError ? (
-        <Failed what="The last run" />
-      ) : runs.data.items[0] === undefined ? (
-        <Muted>No LinkedIn run yet.</Muted>
-      ) : (
-        <LastRun run={runs.data.items[0]} />
-      )}
-      <StartChrome compact />
-      {(status.data?.session_flag ?? null) !== null && (
-        <div>
-          <Button size="sm" variant="outline" render={<Link to="/linkedin" />}>
-            Open LinkedIn
-          </Button>
-        </div>
-      )}
-    </GlanceCard>
-  )
-}
-
-function LastRun({ run }: { run: Run }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex flex-wrap items-center gap-2">
-        <span>Last run: {runKindLabel(run)}</span>
-        <Badge className={cn(RUN_STATUS_CLASSES[run.status])}>
-          {RUN_STATUS_LABELS[run.status]}
-        </Badge>
+      <div>
+        <Button size="sm" variant="ghost" render={<Link to="/campaigns" />}>
+          All campaigns
+        </Button>
       </div>
-      <span className="text-xs text-muted-foreground">
-        {run.status === 'running'
-          ? `Started ${formatWhen(run.started_at)}`
-          : `Ended ${formatWhen(run.completed_at ?? run.started_at)}`}
-        {run.stop_reason !== null && ` · ${stopReasonLabel(run)}`}
-      </span>
-    </div>
-  )
-}
-
-/**
- * Why the weekly cap, not today's allowance, sets what is left (#286), or null
- * when it does not. Today's allowance is what heat leaves minus what is spent;
- * the weekly cap limits when it leaves less, or nothing at all (then tomorrow
- * does not bring more either).
- */
-function weeklyCapReason(status: BudgetStatus): string | null {
-  const visits = status.profile_visits_today
-  const weekLeft = visits.week_left
-  if (weekLeft === null) return null
-  const dayLeft = Math.max(visits.after_heat - visits.spent_today, 0)
-  if (weekLeft > 0 && weekLeft >= dayLeft) return null
-  const week = status.budgets.find((row) => row.action === 'profile_visits')?.week ?? null
-  const used = week === null ? '' : ` (${week.count} of ${week.limit})`
-  return weekLeft === 0
-    ? `Weekly cap reached${used}.`
-    : `Limited by the weekly cap: ${weekLeft} left this week${used}.`
-}
-
-/**
- * Today's profile-visit budget and heat (spec 9.6, 9.7), as the LinkedIn page
- * shows them in full: `/linkedin/budget` and `/linkedin/heat` do the math.
- */
-export function BudgetHeatCard() {
-  const budget = useQuery(budgetQuery)
-  const heat = useQuery(heatQuery)
-
-  return (
-    <GlanceCard title="Budget and heat">
-      {budget.isPending ? (
-        <Checking />
-      ) : budget.isError ? (
-        <Failed what="Today's budget" />
-      ) : (
-        <p>
-          <span className="font-medium tabular-nums">
-            {budget.data.profile_visits_today.remaining}
-          </span>{' '}
-          profile visits left today
-          <span className="text-muted-foreground">
-            {' '}
-            ({budget.data.profile_visits_today.spent_today} spent of{' '}
-            {budget.data.profile_visits_today.after_heat})
-          </span>
-        </p>
-      )}
-      {budget.isSuccess && weeklyCapReason(budget.data) !== null && (
-        <Muted>{weeklyCapReason(budget.data)}</Muted>
-      )}
-      {heat.isPending ? (
-        <Checking />
-      ) : heat.isError ? (
-        <Failed what="Heat" />
-      ) : heat.data.tripped ? (
-        <p role="alert" className="text-destructive">
-          Heat is over its threshold, so runs are skipped
-          {heat.data.resumes_at !== null ? ` until ${formatWhen(heat.data.resumes_at)}` : ''}.
-        </p>
-      ) : (
-        <p className="flex items-center gap-2">
-          <span aria-hidden="true" className="size-2 rounded-full bg-ok" />
-          <span>
-            Heat {heat.data.score.toFixed(2)} of {heat.data.threshold.toFixed(2)}
-            {heat.data.multiplier > 1 && (
-              <span className="text-muted-foreground">
-                {' '}
-                · pacing slowed {heat.data.multiplier.toFixed(2)}×
-              </span>
-            )}
-          </span>
-        </p>
-      )}
     </GlanceCard>
   )
 }
@@ -442,12 +350,13 @@ export function BudgetHeatCard() {
  * so plainly, and shows the one count that does exist — inbound messages
  * logged in the last seven days — under its own name rather than as replies.
  */
-export function RepliesCard() {
+export function RepliesCard({ level }: { level?: 2 | 3 }) {
   const inbound = useQuery(inboundQuery)
 
   return (
     <GlanceCard
       title="Replies this week"
+      level={level}
       tone={inbound.data !== undefined && inbound.data.count > 0 ? 'ok' : undefined}
     >
       {inbound.isPending ? (

@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 
 import { meQuery } from '@/api/queries'
+import { SectionAnchor } from '@/components/layout/section-anchor'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
 import { AboutYouSection } from './about-you-section'
@@ -13,6 +14,10 @@ import { PostureSection } from './posture-section'
 import { SendingHoursSection } from './sending-hours-section'
 import { SupportSection } from './support-section'
 
+/**
+ * Settings, one card per section. Each section has an anchor a link can name, such as
+ * `/settings#gmail` (#739); the config groups take theirs from `GROUPS`.
+ */
 export function SettingsPage({ gmail = {} }: { gmail?: GmailOutcome }) {
   const me = useQuery(meQuery)
 
@@ -33,23 +38,39 @@ export function SettingsPage({ gmail = {} }: { gmail?: GmailOutcome }) {
         </CardHeader>
       </Card>
 
-      <GmailSection outcome={gmail} />
+      <SectionAnchor id="gmail">
+        <GmailSection outcome={gmail} />
+      </SectionAnchor>
 
-      <SendingHoursSection />
+      <SectionAnchor id="sending-hours">
+        <SendingHoursSection />
+      </SectionAnchor>
 
-      <AboutYouSection />
+      <SectionAnchor id="about-you">
+        <AboutYouSection />
+      </SectionAnchor>
 
       <ConfigSections />
 
-      <BackupsSection />
+      <SectionAnchor id="backups">
+        <BackupsSection />
+      </SectionAnchor>
 
-      <LoginItemSection />
+      <SectionAnchor id="login-item">
+        <LoginItemSection />
+      </SectionAnchor>
 
-      <DoNotSendSection />
+      <SectionAnchor id="do-not-send">
+        <DoNotSendSection />
+      </SectionAnchor>
 
-      <PostureSection />
+      <SectionAnchor id="posture">
+        <PostureSection />
+      </SectionAnchor>
 
-      <SupportSection />
+      <SectionAnchor id="support">
+        <SupportSection />
+      </SectionAnchor>
 
       <Card size="sm">
         <CardHeader>

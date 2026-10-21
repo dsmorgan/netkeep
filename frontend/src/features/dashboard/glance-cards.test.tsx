@@ -15,14 +15,7 @@ import { formatWhen } from '@/features/linkedin/fields'
 import { autoSendOutlook } from '@/features/linkedin/test-support'
 import { jsonResponse, mockFetch } from '@/test/fetch'
 
-import {
-  BrowserHealthCard,
-  BudgetHeatCard,
-  ChangedJobsCard,
-  NextLinkedInRunCard,
-  NextSendsCard,
-  RepliesCard,
-} from './glance-cards'
+import { CampaignsCard, ChangedJobsCard, ComingUpCard, RepliesCard } from './glance-cards'
 
 type Route = () => Response | Promise<Response>
 
@@ -61,6 +54,16 @@ function renderCard(Card: () => ReactNode, routes: Record<string, Route>) {
         getParentRoute: () => root,
         path: '/linkedin',
         component: () => <p>LinkedIn page</p>,
+      }),
+      createRoute({
+        getParentRoute: () => root,
+        path: '/campaigns',
+        component: () => <p>Campaigns page</p>,
+      }),
+      createRoute({
+        getParentRoute: () => root,
+        path: '/campaigns/$campaignId',
+        component: () => <p>Campaign page</p>,
       }),
     ]),
     history: createMemoryHistory({ initialEntries: ['/'] }),
@@ -110,96 +113,44 @@ const SCHEDULE = '/api/v1/linkedin/schedule'
 function scheduleWith(overrides: Record<string, unknown> = {}) {
   return { armed: true, armed_at: null, scheduler_running: true, jobs: [], ...overrides }
 }
-const STATUS = '/api/v1/linkedin/status'
-const RUNS = '/api/v1/linkedin/runs'
-const BUDGET = '/api/v1/linkedin/budget'
-const HEAT = '/api/v1/linkedin/heat'
+// --- coming up: campaign sends ----------------------------------------------------------
 
-function linkedinStatus(overrides: Record<string, unknown> = {}) {
-  return {
-    session_flag: null,
-    session_flagged_at: null,
-    heat_tripped: false,
-    armed: true,
-    running_run_id: null,
-    can_start_runs: true,
-    ...overrides,
-  }
+const FIRES = '/api/v1/dashboard/next-fires'
+
+/** Scheduled runs off, so a send test reads only its sends. */
+const UNARMED = json(scheduleWith({ armed: false }))
+const NO_SENDS = json({ items: [], total: 0 })
+
+/**
+ * Coming up against both its reads, each defaulting to an answer with nothing in it,
+ * so a test names only the one it is about.
+ */
+function renderComingUp(routes: Record<string, Route>) {
+  return renderCard(ComingUpCard, { [FIRES]: NO_SENDS, [SCHEDULE]: UNARMED, ...routes })
 }
 
-function run(overrides: Record<string, unknown> = {}) {
-  return {
-    id: 5,
-    kind: 'connections_incremental',
-    status: 'completed',
-    trigger: 'scheduled',
-    started_at: '2026-09-26T10:00:00Z',
-    completed_at: '2026-09-26T10:05:00Z',
-    stop_reason: null,
-    stop_reason_text: null,
-    cancel_requested_at: null,
-    max_visits: null,
-    resume_of_id: null,
-    browser_mode: 'attach',
-    progress: null,
-    counts: null,
-    notes: null,
-    ...overrides,
-  }
-}
-
-function budget(overrides: Record<string, unknown> = {}) {
-  return {
-    budgets: [],
-    profile_visits_today: {
-      ramp: 20,
-      after_weekend: 20,
-      after_heat: 16,
-      spent_today: 4,
-      week_left: 80,
-      remaining: 12,
-      ...overrides,
-    },
-  }
-}
-
-function heat(overrides: Record<string, unknown> = {}) {
-  return {
-    score: 0.5,
-    threshold: 5,
-    multiplier: 1,
-    tripped: false,
-    last_raised_at: null,
-    cleared_at: null,
-    resumes_at: null,
-    ...overrides,
-  }
-}
-
-// --- next campaign sends -----------------------------------------------------------------
-
-describe('NextSendsCard', () => {
-  const PATH = '/api/v1/dashboard/next-fires'
+describe('ComingUpCard: campaign sends', () => {
+  const PATH = FIRES
 
   it('announces that it is checking', async () => {
-    renderCard(NextSendsCard, { [PATH]: never })
-    expect((await card('Next campaign sends')).getByRole('status')).toHaveTextContent('Checking')
+    renderComingUp({ [PATH]: never })
+    expect((await card('Coming up')).getByRole('status')).toHaveTextContent('Checking')
   })
 
   it('says so when nothing is scheduled', async () => {
-    renderCard(NextSendsCard, { [PATH]: json({ items: [], total: 0 }) })
-    const body = await card('Next campaign sends')
-    expect(await body.findByText('Nothing is scheduled to send.')).toBeInTheDocument()
+    renderComingUp({ [PATH]: json({ items: [], total: 0 }) })
+    const body = await card('Coming up')
+    expect(await body.findByText('Nothing is scheduled.')).toBeInTheDocument()
   })
 
   it('shows a failure as an alert, not a crash', async () => {
-    renderCard(NextSendsCard, { [PATH]: broken })
-    const body = await card('Next campaign sends')
+    renderComingUp({ [PATH]: broken })
+    const body = await card('Coming up')
     expect(await body.findByRole('alert')).toHaveTextContent('Upcoming sends could not be loaded.')
   })
 
   it('lists each send with its time, contact link, campaign, and step', async () => {
-    renderCard(NextSendsCard, {
+    renderComingUp({
       [PATH]: json({
         items: [
           fire({ enrollment_id: 1, due: PAST, contact_id: 41, contact_name: 'Ada Example' }),
@@ -209,7 +160,7 @@ describe('NextSendsCard', () => {
         total: 5,
       }),
     })
-    const body = await card('Next campaign sends')
+    const body = await card('Coming up')
     const items = await body.findAllByRole('listitem')
     expect(items).toHaveLength(3)
     expect(items[0]).toHaveTextContent('due now')
@@ -228,7 +179,7 @@ describe('NextSendsCard', () => {
 
   it('says an auto-send step sends on its own, and when', async () => {
     const outlook = autoSendOutlook({ enrollment_id: 3 })
-    renderCard(NextSendsCard, {
+    renderComingUp({
       [PATH]: json({
         items: [
           fire({
@@ -243,7 +194,7 @@ describe('NextSendsCard', () => {
       }),
       [SCHEDULE]: json(scheduleWith({ auto_send: outlook })),
     })
-    const body = await card('Next campaign sends')
+    const body = await card('Coming up')
     expect(await body.findByText(/LinkedIn, sends on its own/)).toBeInTheDocument()
     expect(
       await body.findByText(
@@ -255,7 +206,7 @@ describe('NextSendsCard', () => {
 
   it('says why an auto-send step waits', async () => {
     const until = '2099-01-03T00:00:00Z'
-    renderCard(NextSendsCard, {
+    renderComingUp({
       [PATH]: json({
         items: [fire({ due: PAST, channel: 'linkedin', ready_to_prefill: true, auto_send: true })],
         total: 1,
@@ -264,7 +215,7 @@ describe('NextSendsCard', () => {
         scheduleWith({ auto_send: autoSendOutlook({ wait: 'budget_spent', until }) }),
       ),
     })
-    const body = await card('Next campaign sends')
+    const body = await card('Coming up')
     expect(
       await body.findByText(
         `Sends on its own, but waits. Today's auto-send budget is spent. It resets at ${formatWhen(until)}.`,
@@ -273,22 +224,22 @@ describe('NextSendsCard', () => {
   })
 
   it('keeps ready to prefill for an auto-send step while auto-send is off', async () => {
-    renderCard(NextSendsCard, {
+    renderComingUp({
       [PATH]: json({
         items: [fire({ due: PAST, channel: 'linkedin', ready_to_prefill: true, auto_send: true })],
         total: 1,
       }),
       [SCHEDULE]: json(scheduleWith()),
     })
-    const body = await card('Next campaign sends')
+    const body = await card('Coming up')
     expect(await body.findByText(/LinkedIn, ready to prefill/)).toBeInTheDocument()
     expect(body.queryByText(/sends on its own/i)).not.toBeInTheDocument()
   })
 })
 
-// --- next LinkedIn run -------------------------------------------------------------------
+// --- coming up: scheduled LinkedIn runs -------------------------------------------------
 
-describe('NextLinkedInRunCard', () => {
+describe('ComingUpCard: scheduled LinkedIn runs', () => {
   function schedule(overrides: Record<string, unknown> = {}) {
     return {
       armed: true,
@@ -304,39 +255,42 @@ describe('NextLinkedInRunCard', () => {
   }
 
   it('announces that it is checking', async () => {
-    renderCard(NextLinkedInRunCard, { [SCHEDULE]: never })
-    expect((await card('Next LinkedIn run')).getByRole('status')).toHaveTextContent('Checking')
+    renderComingUp({ [SCHEDULE]: never })
+    expect((await card('Coming up')).getByRole('status')).toHaveTextContent('Checking')
   })
 
   it('says scheduled runs are off rather than showing a time that will not fire', async () => {
-    renderCard(NextLinkedInRunCard, { [SCHEDULE]: json(schedule({ armed: false })) })
-    const body = await card('Next LinkedIn run')
+    renderComingUp({ [SCHEDULE]: json(schedule({ armed: false })) })
+    const body = await card('Coming up')
     expect(await body.findByText(/Scheduled runs are off/)).toBeInTheDocument()
     expect(body.queryByText(/2099/)).not.toBeInTheDocument()
-    expect(body.getByRole('link', { name: 'Open LinkedIn' })).toHaveAttribute('href', '/linkedin')
+    expect(body.getByRole('link', { name: 'Open LinkedIn' })).toHaveAttribute(
+      'href',
+      '/linkedin#schedule',
+    )
   })
 
   it('says so when armed but nothing is scheduled yet', async () => {
-    renderCard(NextLinkedInRunCard, {
+    renderComingUp({
       [SCHEDULE]: json(
         schedule({ jobs: [{ kind: 'enrich', interval_hours: 24, next_due: null }] }),
       ),
     })
-    const body = await card('Next LinkedIn run')
-    expect(await body.findByText('No run is scheduled yet.')).toBeInTheDocument()
+    const body = await card('Coming up')
+    expect(await body.findByText('Nothing is scheduled.')).toBeInTheDocument()
   })
 
   it('shows a failure as an alert', async () => {
-    renderCard(NextLinkedInRunCard, { [SCHEDULE]: broken })
-    const body = await card('Next LinkedIn run')
+    renderComingUp({ [SCHEDULE]: broken })
+    const body = await card('Coming up')
     expect(await body.findByRole('alert')).toHaveTextContent(
       'The LinkedIn schedule could not be loaded.',
     )
   })
 
   it('lists the due runs soonest first, leaving out a kind with no due time', async () => {
-    renderCard(NextLinkedInRunCard, { [SCHEDULE]: json(schedule()) })
-    const body = await card('Next LinkedIn run')
+    renderComingUp({ [SCHEDULE]: json(schedule()) })
+    const body = await card('Coming up')
     const items = await body.findAllByRole('listitem')
     expect(items.map((item) => item.textContent)).toEqual([
       expect.stringContaining('Incremental connections sync'),
@@ -346,16 +300,16 @@ describe('NextLinkedInRunCard', () => {
   })
 
   it('warns when no scheduler runs in this process', async () => {
-    renderCard(NextLinkedInRunCard, {
+    renderComingUp({
       [SCHEDULE]: json(schedule({ scheduler_running: false })),
     })
-    const body = await card('Next LinkedIn run')
+    const body = await card('Coming up')
     expect(await body.findByRole('alert')).toHaveTextContent('No scheduler is running')
   })
 
   it('says the schedule is paused instead of showing times that will not fire (#324)', async () => {
     let paused = true
-    const { seen } = renderCard(NextLinkedInRunCard, {
+    const { seen } = renderComingUp({
       [SCHEDULE]: () =>
         jsonResponse(
           schedule(paused ? { paused: true, paused_at: '2026-09-21T08:00:00Z' } : { paused }),
@@ -365,7 +319,7 @@ describe('NextLinkedInRunCard', () => {
         return jsonResponse(schedule({ paused: false, paused_at: null }))
       },
     })
-    const body = await card('Next LinkedIn run')
+    const body = await card('Coming up')
     expect(await body.findByText(/no new scheduled run starts/)).toBeInTheDocument()
     expect(body.getByText(/nothing skipped is replayed/)).toBeInTheDocument()
     expect(body.queryByText(/2099/)).not.toBeInTheDocument()
@@ -377,23 +331,26 @@ describe('NextLinkedInRunCard', () => {
   })
 
   it('says both when the schedule is disarmed and paused (#324)', async () => {
-    renderCard(NextLinkedInRunCard, {
+    renderComingUp({
       [SCHEDULE]: json(schedule({ armed: false, paused: true, paused_at: '2026-09-21T08:00:00Z' })),
     })
-    const body = await card('Next LinkedIn run')
+    const body = await card('Coming up')
     expect(await body.findByText(/Scheduled runs are off/)).toBeInTheDocument()
-    expect(body.getByRole('link', { name: 'Open LinkedIn' })).toHaveAttribute('href', '/linkedin')
+    expect(body.getByRole('link', { name: 'Open LinkedIn' })).toHaveAttribute(
+      'href',
+      '/linkedin#schedule',
+    )
     expect(body.getByText(/no new scheduled run starts/)).toBeInTheDocument()
     expect(body.getByRole('button', { name: 'Unpause schedule' })).toBeInTheDocument()
     expect(body.queryByText(/2099/)).not.toBeInTheDocument()
   })
 
   it('offers to pause an armed schedule (#324)', async () => {
-    const { seen } = renderCard(NextLinkedInRunCard, {
+    const { seen } = renderComingUp({
       [SCHEDULE]: json(schedule({ paused: false, paused_at: null })),
       [`${SCHEDULE}/pause`]: json(schedule({ paused: true, paused_at: '2026-09-21T08:00:00Z' })),
     })
-    const body = await card('Next LinkedIn run')
+    const body = await card('Coming up')
     fireEvent.click(await body.findByRole('button', { name: 'Pause schedule' }))
     expect(await body.findByText(/no new scheduled run starts/)).toBeInTheDocument()
     expect(seen).toContain(`${SCHEDULE}/pause`)
@@ -401,8 +358,8 @@ describe('NextLinkedInRunCard', () => {
 
   it('lists the auto-send check with its time and what it would do', async () => {
     const outlook = autoSendOutlook({ next_fire: '2099-02-01T09:00:00Z' })
-    renderCard(NextLinkedInRunCard, { [SCHEDULE]: json(schedule({ auto_send: outlook })) })
-    const body = await card('Next LinkedIn run')
+    renderComingUp({ [SCHEDULE]: json(schedule({ auto_send: outlook })) })
+    const body = await card('Coming up')
     const items = await body.findAllByRole('listitem')
     expect(items.map((item) => item.textContent)).toEqual([
       expect.stringContaining('Incremental connections sync'),
@@ -416,8 +373,8 @@ describe('NextLinkedInRunCard', () => {
   it('says in plain words why the auto-send check would send nothing', async () => {
     const until = '2099-02-01T10:00:00Z'
     const outlook = autoSendOutlook({ next_fire: '2099-02-01T09:00:00Z', wait: 'heat', until })
-    renderCard(NextLinkedInRunCard, { [SCHEDULE]: json(schedule({ auto_send: outlook })) })
-    const body = await card('Next LinkedIn run')
+    renderComingUp({ [SCHEDULE]: json(schedule({ auto_send: outlook })) })
+    const body = await card('Coming up')
     expect(
       await body.findByText(`Heat is at or over its threshold. It cools by ${formatWhen(until)}.`),
     ).toBeInTheDocument()
@@ -430,8 +387,8 @@ describe('NextLinkedInRunCard', () => {
       checked_at: '2099-02-01T09:05:00Z',
       catch_up_latest: '2099-02-01T09:20:00Z',
     })
-    renderCard(NextLinkedInRunCard, { [SCHEDULE]: json(schedule({ auto_send: outlook })) })
-    const body = await card('Next LinkedIn run')
+    renderComingUp({ [SCHEDULE]: json(schedule({ auto_send: outlook })) })
+    const body = await card('Coming up')
     const row = (await body.findAllByRole('listitem')).find((item) =>
       item.textContent?.includes('Auto-send check'),
     )
@@ -441,240 +398,134 @@ describe('NextLinkedInRunCard', () => {
   })
 
   it('reads nothing when the outlook is unavailable', async () => {
-    renderCard(NextLinkedInRunCard, { [SCHEDULE]: json(schedule({ auto_send: null })) })
-    const body = await card('Next LinkedIn run')
+    renderComingUp({ [SCHEDULE]: json(schedule({ auto_send: null })) })
+    const body = await card('Coming up')
     await body.findAllByRole('listitem')
     expect(body.queryByText(/Auto-send check/)).not.toBeInTheDocument()
   })
 
   it('says when the auto-send check is not scheduled yet', async () => {
     const outlook = autoSendOutlook({ next_fire: null, wait: 'not_scheduled' })
-    renderCard(NextLinkedInRunCard, { [SCHEDULE]: json(schedule({ auto_send: outlook })) })
-    const body = await card('Next LinkedIn run')
+    renderComingUp({ [SCHEDULE]: json(schedule({ auto_send: outlook })) })
+    const body = await card('Coming up')
     expect(await body.findByText(/isn't scheduled yet/)).toBeInTheDocument()
   })
 
   it('leaves the auto-send check out while auto-send is off', async () => {
-    renderCard(NextLinkedInRunCard, {
+    renderComingUp({
       [SCHEDULE]: json(
         schedule({ auto_send: autoSendOutlook({ on: false, wait: 'auto_send_off' }) }),
       ),
     })
-    const body = await card('Next LinkedIn run')
+    const body = await card('Coming up')
     await body.findAllByRole('listitem')
     expect(body.queryByText(/Auto-send check/)).not.toBeInTheDocument()
   })
 })
 
-// --- browser health ----------------------------------------------------------------------
+// --- coming up: one timeline ----------------------------------------------------------
 
-describe('BrowserHealthCard', () => {
-  it('announces that it is checking', async () => {
-    renderCard(BrowserHealthCard, { [STATUS]: never, [RUNS]: never })
-    const body = await card('LinkedIn browser')
-    expect(body.getAllByRole('status')).toHaveLength(2)
-  })
+describe('ComingUpCard: one timeline', () => {
+  const jobs = [
+    { kind: 'connections_incremental', interval_hours: 24, next_due: '2099-01-01T09:00:00Z' },
+    { kind: 'enrich', interval_hours: 24, next_due: '2099-01-03T09:00:00Z' },
+  ]
 
-  it('says only what it knows when there is no flag and no run yet', async () => {
-    const { seen } = renderCard(BrowserHealthCard, {
-      [STATUS]: json(linkedinStatus()),
-      [RUNS]: json({ items: [], total: 0 }),
-    })
-    const body = await card('LinkedIn browser')
-    expect(await body.findByText('No session flag is raised.')).toBeInTheDocument()
-    expect(await body.findByText('No LinkedIn run yet.')).toBeInTheDocument()
-    // "No flag" is never dressed up as "healthy": nothing here checked the live session (#282).
-    expect(body.queryByText(/healthy/i)).not.toBeInTheDocument()
-    expect(seen).toContain('/api/v1/linkedin/runs?limit=1&offset=0')
-  })
-
-  it('shows each failure as an alert', async () => {
-    renderCard(BrowserHealthCard, { [STATUS]: broken, [RUNS]: broken })
-    const body = await card('LinkedIn browser')
-    expect(await body.findByText('The session flag could not be loaded.')).toHaveAttribute(
-      'role',
-      'alert',
-    )
-    expect(await body.findByText('The last run could not be loaded.')).toHaveAttribute(
-      'role',
-      'alert',
-    )
-  })
-
-  it('shows how the last run ended', async () => {
-    renderCard(BrowserHealthCard, {
-      [STATUS]: json(linkedinStatus()),
-      [RUNS]: json({
-        items: [run({ kind: 'enrich', status: 'aborted', stop_reason: 'budget spent' })],
-        total: 9,
+  it('puts the sends and the LinkedIn runs in one list, soonest first (#739)', async () => {
+    renderComingUp({
+      [FIRES]: json({
+        items: [
+          fire({ enrollment_id: 1, due: '2099-01-02T09:00:00Z', contact_name: 'Ada Example' }),
+          fire({ enrollment_id: 2, due: '2099-01-04T09:00:00Z', contact_name: 'Bo Example' }),
+        ],
+        total: 2,
       }),
+      [SCHEDULE]: json(scheduleWith({ jobs })),
     })
-    const body = await card('LinkedIn browser')
-    expect(await body.findByText('Last run: Enrichment')).toBeInTheDocument()
-    expect(body.getByText('Aborted')).toBeInTheDocument()
-    expect(body.getByText(/Ended .* · budget spent/)).toBeInTheDocument()
+    const body = await card('Coming up')
+    const items = await body.findAllByRole('listitem')
+    expect(items.map((item) => item.textContent)).toEqual([
+      expect.stringContaining('Incremental connections sync'),
+      expect.stringContaining('Ada Example'),
+      expect.stringContaining('Enrichment'),
+      expect.stringContaining('Bo Example'),
+    ])
   })
 
-  it('raises a checkpoint flag as an alert with the way to the LinkedIn page', async () => {
-    renderCard(BrowserHealthCard, {
-      [STATUS]: json(
-        linkedinStatus({ session_flag: 'checkpoint', session_flagged_at: '2026-09-26T09:00:00Z' }),
-      ),
-      [RUNS]: json({ items: [run({ status: 'failed' })], total: 1 }),
+  it('still lists the sends while the schedule is paused, and none of its runs', async () => {
+    renderComingUp({
+      [FIRES]: json({ items: [fire({ contact_name: 'Ada Example' })], total: 1 }),
+      [SCHEDULE]: json(scheduleWith({ jobs, paused: true, paused_at: '2026-09-21T08:00:00Z' })),
     })
-    const body = await card('LinkedIn browser')
-    expect(await body.findByRole('alert')).toHaveTextContent('LinkedIn asked for a checkpoint')
-    expect(body.getByRole('link', { name: 'Open LinkedIn' })).toHaveAttribute('href', '/linkedin')
+    const body = await card('Coming up')
+    const items = await body.findAllByRole('listitem')
+    expect(items).toHaveLength(1)
+    expect(items[0]).toHaveTextContent('Ada Example')
+    expect(body.getByRole('button', { name: 'Unpause schedule' })).toBeInTheDocument()
   })
 
-  it('raises a logged-out flag with its own advice', async () => {
-    renderCard(BrowserHealthCard, {
-      [STATUS]: json(linkedinStatus({ session_flag: 'logged_out' })),
-      [RUNS]: json({ items: [], total: 0 }),
-    })
-    const body = await card('LinkedIn browser')
-    expect(await body.findByRole('alert')).toHaveTextContent('Logged out of LinkedIn')
-    expect(body.getByRole('alert')).toHaveTextContent('netkeep preflight')
+  it('keeps the runs when the sends fail, and says which read failed', async () => {
+    renderComingUp({ [FIRES]: broken, [SCHEDULE]: json(scheduleWith({ jobs })) })
+    const body = await card('Coming up')
+    expect(await body.findByRole('alert')).toHaveTextContent('Upcoming sends could not be loaded.')
+    expect(body.getAllByRole('listitem')).toHaveLength(2)
   })
 })
 
-// --- budget and heat ---------------------------------------------------------------------
+// --- campaigns ---------------------------------------------------------------------------
 
-describe('BudgetHeatCard', () => {
+describe('CampaignsCard', () => {
+  const PATH = '/api/v1/campaigns'
+  const campaign = (overrides: Record<string, unknown> = {}) => ({
+    id: 3,
+    name: 'Autumn hello',
+    status: 'active',
+    steps: 2,
+    enrollments: { active: 4, replied: 1 },
+    mailbox_id: null,
+    created_at: '2026-09-01T12:00:00Z',
+    next_action_at: null,
+    ...overrides,
+  })
+
   it('announces that it is checking', async () => {
-    renderCard(BudgetHeatCard, { [BUDGET]: never, [HEAT]: never })
-    expect((await card('Budget and heat')).getAllByRole('status')).toHaveLength(2)
+    renderCard(CampaignsCard, { [PATH]: never })
+    expect((await card('Campaigns')).getByRole('status')).toHaveTextContent('Checking')
   })
 
-  it('reads plainly with nothing spent and no heat', async () => {
-    renderCard(BudgetHeatCard, {
-      [BUDGET]: json(budget({ spent_today: 0, remaining: 16 })),
-      [HEAT]: json(heat({ score: 0 })),
+  it('says so when there are none, and links to the campaigns page', async () => {
+    renderCard(CampaignsCard, { [PATH]: json([]) })
+    const body = await card('Campaigns')
+    expect(await body.findByText('No campaigns yet.')).toBeInTheDocument()
+    expect(body.getByRole('link', { name: 'All campaigns' })).toHaveAttribute('href', '/campaigns')
+  })
+
+  it('shows a failure as an alert', async () => {
+    renderCard(CampaignsCard, { [PATH]: broken })
+    const body = await card('Campaigns')
+    expect(await body.findByRole('alert')).toHaveTextContent('Campaigns could not be loaded.')
+  })
+
+  it('links each campaign to its page, with its status and who is enrolled', async () => {
+    renderCard(CampaignsCard, {
+      [PATH]: json([
+        campaign(),
+        campaign({ id: 4, name: 'Founders check-in', status: 'reviewing', enrollments: {} }),
+        ...[5, 6, 7, 8].map((id) => campaign({ id, name: `Campaign ${id}` })),
+      ]),
     })
-    const body = await card('Budget and heat')
-    expect(await body.findByText(/profile visits left today/)).toHaveTextContent(
-      '16 profile visits left today (0 spent of 16)',
+    const body = await card('Campaigns')
+    const items = await body.findAllByRole('listitem')
+    expect(items).toHaveLength(5)
+    expect(within(items[0]!).getByRole('link', { name: 'Autumn hello' })).toHaveAttribute(
+      'href',
+      '/campaigns/3',
     )
-    expect(await body.findByText(/Heat 0.00 of 5.00/)).toBeInTheDocument()
-    expect(body.queryByRole('alert')).not.toBeInTheDocument()
-  })
-
-  it('shows each failure as an alert', async () => {
-    renderCard(BudgetHeatCard, { [BUDGET]: broken, [HEAT]: broken })
-    const body = await card('Budget and heat')
-    expect(await body.findByText("Today's budget could not be loaded.")).toBeInTheDocument()
-    expect(await body.findByText('Heat could not be loaded.')).toBeInTheDocument()
-  })
-
-  it('shows what is left, and a slowed pace while warm', async () => {
-    renderCard(BudgetHeatCard, {
-      [BUDGET]: json(budget()),
-      [HEAT]: json(heat({ score: 2.5, multiplier: 1.5 })),
-    })
-    const body = await card('Budget and heat')
-    expect(await body.findByText(/profile visits left today/)).toHaveTextContent(
-      '12 profile visits left today (4 spent of 16)',
-    )
-    expect(await body.findByText(/pacing slowed 1.50×/)).toBeInTheDocument()
-  })
-
-  it('says when the weekly cap is what leaves nothing today (#286)', async () => {
-    renderCard(BudgetHeatCard, {
-      [BUDGET]: json({
-        ...budget({ spent_today: 2, after_heat: 10, week_left: 0, remaining: 0 }),
-        budgets: [
-          {
-            action: 'profile_visits',
-            day: { count: 2, limit: 10, remaining: 8 },
-            week: { count: 300, limit: 300, remaining: 0 },
-          },
-        ],
-      }),
-      [HEAT]: json(heat()),
-    })
-    const body = await card('Budget and heat')
-    expect(await body.findByText(/profile visits left today/)).toHaveTextContent(
-      '0 profile visits left today (2 spent of 10)',
-    )
-    expect(body.getByText('Weekly cap reached (300 of 300).')).toBeInTheDocument()
-  })
-
-  it('says when the weekly cap leaves less than today allows', async () => {
-    renderCard(BudgetHeatCard, {
-      [BUDGET]: json({
-        ...budget({ spent_today: 2, after_heat: 10, week_left: 3, remaining: 3 }),
-        budgets: [
-          {
-            action: 'profile_visits',
-            day: { count: 2, limit: 10, remaining: 8 },
-            week: { count: 297, limit: 300, remaining: 3 },
-          },
-        ],
-      }),
-      [HEAT]: json(heat()),
-    })
-    const body = await card('Budget and heat')
-    expect(
-      await body.findByText('Limited by the weekly cap: 3 left this week (297 of 300).'),
-    ).toBeInTheDocument()
-  })
-
-  it('says the cap is limiting, not reached, with one visit left this week', async () => {
-    renderCard(BudgetHeatCard, {
-      [BUDGET]: json({
-        ...budget({ spent_today: 2, after_heat: 10, week_left: 1, remaining: 1 }),
-        budgets: [
-          {
-            action: 'profile_visits',
-            day: { count: 2, limit: 10, remaining: 8 },
-            week: { count: 299, limit: 300, remaining: 1 },
-          },
-        ],
-      }),
-      [HEAT]: json(heat()),
-    })
-    const body = await card('Budget and heat')
-    expect(
-      await body.findByText('Limited by the weekly cap: 1 left this week (299 of 300).'),
-    ).toBeInTheDocument()
-    expect(body.queryByText(/Weekly cap reached/)).not.toBeInTheDocument()
-  })
-
-  it('gives no weekly reason when the week leaves exactly what today allows', async () => {
-    // A tie: both caps leave the same number, so today's allowance is named and the
-    // week is not (#286 review). Only a week that leaves less, or none, gets a reason.
-    renderCard(BudgetHeatCard, {
-      [BUDGET]: json(budget({ spent_today: 4, after_heat: 16, week_left: 12, remaining: 12 })),
-      [HEAT]: json(heat()),
-    })
-    const body = await card('Budget and heat')
-    expect(await body.findByText(/profile visits left today/)).toHaveTextContent(
-      '12 profile visits left today (4 spent of 16)',
-    )
-    expect(body.queryByText(/weekly cap/i)).not.toBeInTheDocument()
-  })
-
-  it('gives no weekly reason when today is the limit', async () => {
-    renderCard(BudgetHeatCard, {
-      [BUDGET]: json(budget({ spent_today: 16, week_left: 80, remaining: 0 })),
-      [HEAT]: json(heat()),
-    })
-    const body = await card('Budget and heat')
-    expect(await body.findByText(/profile visits left today/)).toHaveTextContent(
-      '0 profile visits left today (16 spent of 16)',
-    )
-    expect(body.queryByText(/weekly cap/i)).not.toBeInTheDocument()
-  })
-
-  it('raises tripped heat as an alert with when runs resume', async () => {
-    renderCard(BudgetHeatCard, {
-      [BUDGET]: json(budget()),
-      [HEAT]: json(heat({ score: 6, tripped: true, resumes_at: FUTURE })),
-    })
-    const body = await card('Budget and heat')
-    expect(await body.findByRole('alert')).toHaveTextContent(
-      /over its threshold, so runs are skipped until .*2099/,
-    )
+    expect(items[0]).toHaveTextContent('Active')
+    expect(items[0]).toHaveTextContent('4 active, 1 replied')
+    expect(items[1]).toHaveTextContent('Reviewing')
+    expect(items[1]).toHaveTextContent('nobody enrolled')
+    expect(body.getByText('and 1 more')).toBeInTheDocument()
   })
 })
 
@@ -689,19 +540,19 @@ describe('RepliesCard', () => {
   })
 
   it('announces that it is checking', async () => {
-    renderCard(RepliesCard, { [PATH]: never })
+    renderCard(() => <RepliesCard />, { [PATH]: never })
     expect((await card('Replies this week')).getByRole('status')).toHaveTextContent('Checking')
   })
 
   it('says reply detection is not set up, and that nothing came in', async () => {
-    renderCard(RepliesCard, { [PATH]: json(inbound(0)) })
+    renderCard(() => <RepliesCard />, { [PATH]: json(inbound(0)) })
     const body = await card('Replies this week')
     expect(await body.findByText(/Reply detection is not set up yet/)).toBeInTheDocument()
     expect(body.getByText('No inbound messages logged in the last 7 days.')).toBeInTheDocument()
   })
 
   it('shows a failure as an alert', async () => {
-    renderCard(RepliesCard, { [PATH]: broken })
+    renderCard(() => <RepliesCard />, { [PATH]: broken })
     const body = await card('Replies this week')
     expect(await body.findByRole('alert')).toHaveTextContent(
       'Inbound messages could not be loaded.',
@@ -709,7 +560,7 @@ describe('RepliesCard', () => {
   })
 
   it('counts inbound messages under their own name, never as replies', async () => {
-    renderCard(RepliesCard, { [PATH]: json(inbound(3)) })
+    renderCard(() => <RepliesCard />, { [PATH]: json(inbound(3)) })
     const body = await card('Replies this week')
     expect(await body.findByText(/inbound messages \(email and LinkedIn\)/)).toHaveTextContent(
       '3 inbound messages (email and LinkedIn) logged in the last 7 days.',
@@ -724,19 +575,19 @@ describe('RepliesCard', () => {
       .closest('[data-slot="card"]')
 
   it('is tinted green when inbound messages came in', async () => {
-    renderCard(RepliesCard, { [PATH]: json(inbound(3)) })
+    renderCard(() => <RepliesCard />, { [PATH]: json(inbound(3)) })
     await screen.findByText(/inbound messages \(email and LinkedIn\)/)
     expect(repliesCard()).toHaveAttribute('data-tone', 'ok')
   })
 
   it('stays plain when nothing came in', async () => {
-    renderCard(RepliesCard, { [PATH]: json(inbound(0)) })
+    renderCard(() => <RepliesCard />, { [PATH]: json(inbound(0)) })
     await screen.findByText('No inbound messages logged in the last 7 days.')
     expect(repliesCard()).not.toHaveAttribute('data-tone')
   })
 
   it('stays plain when the count could not be loaded', async () => {
-    renderCard(RepliesCard, { [PATH]: broken })
+    renderCard(() => <RepliesCard />, { [PATH]: broken })
     await screen.findByText('Inbound messages could not be loaded.')
     expect(repliesCard()).not.toHaveAttribute('data-tone')
   })

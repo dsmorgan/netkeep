@@ -22,7 +22,7 @@ import {
 } from './steps-layout'
 
 /**
- * The Steps tab (#667): the setup flow as a diagram, one box per step, with an arrow
+ * The setup map (#667): the setup flow as a diagram, one box per step, with an arrow
  * from each prerequisite. Every state comes from `GET /setup` (#651); a box links to
  * the page that does its step and never starts anything there.
  *

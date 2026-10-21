@@ -1,9 +1,8 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import type { Setup, SetupStep } from '@/features/dashboard/setup-api'
 import { GRAPH } from '@/features/dashboard/steps-fixtures'
-import { TAB_STORAGE_KEY } from '@/features/dashboard/steps-layout'
 
 import { jsonResponse, mockFetch } from './fetch'
 import { renderApp } from './render'
@@ -27,7 +26,7 @@ function setupBody(complete = false, states = STATES): Setup {
   }
 }
 
-/** Serves `/setup` (and its skip), and 404s the Overview's reads, which these tests don't open. */
+/** Serves `/setup` (and its skip), and 404s the dashboard's other reads, which these tests don't read. */
 function serve(setup: Setup | null) {
   const calls: { method: string; path: string }[] = []
   mockFetch((request) => {
@@ -59,48 +58,7 @@ function box(key: string): HTMLElement {
   return item
 }
 
-afterEach(() => {
-  window.localStorage.clear()
-})
-
-describe('dashboard tabs', () => {
-  it('opens on Steps while setup is incomplete', async () => {
-    serve(setupBody(false))
-    await renderApp('/')
-    const steps = await screen.findByRole('tab', { name: 'Steps' })
-    await waitFor(() => expect(steps).toHaveAttribute('aria-selected', 'true'))
-    expect(await screen.findByRole('list', { name: 'Setup steps' })).toBeInTheDocument()
-  })
-
-  it('opens on Overview once setup is complete', async () => {
-    serve(setupBody(true))
-    await renderApp('/')
-    const overview = await screen.findByRole('tab', { name: 'Overview' })
-    await waitFor(() => expect(overview).toHaveAttribute('aria-selected', 'true'))
-    expect(screen.queryByRole('list', { name: 'Setup steps' })).not.toBeInTheDocument()
-  })
-
-  it('opens on Overview when setup cannot be read', async () => {
-    serve(null)
-    await renderApp('/')
-    const overview = await screen.findByRole('tab', { name: 'Overview' })
-    await waitFor(() => expect(overview).toHaveAttribute('aria-selected', 'true'))
-  })
-
-  it('remembers the last pick in this browser', async () => {
-    serve(setupBody(false))
-    window.localStorage.setItem(TAB_STORAGE_KEY, 'overview')
-    const first = await renderApp('/')
-    const overview = await screen.findByRole('tab', { name: 'Overview' })
-    expect(overview).toHaveAttribute('aria-selected', 'true')
-    fireEvent.click(screen.getByRole('tab', { name: 'Steps' }))
-    await screen.findByRole('list', { name: 'Setup steps' })
-    expect(window.localStorage.getItem(TAB_STORAGE_KEY)).toBe('steps')
-    first.unmount()
-  })
-})
-
-describe('the Steps flow', () => {
+describe('the setup map', () => {
   it('gives every box its state look, its reason and a link to its page', async () => {
     serve(setupBody(false))
     await renderApp('/')

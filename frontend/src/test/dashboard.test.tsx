@@ -1,457 +1,371 @@
-import { screen, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { GRAPH } from '@/features/dashboard/steps-fixtures'
+import { navigation } from '@/features/mailboxes/api'
+import { mailbox } from '@/features/mailboxes/test-support'
+
+import { FakeEventSource, resetFakeEventSource } from './fake-event-source'
 import { jsonResponse, mockFetch } from './fetch'
 import { renderApp } from './render'
 
-/** A stats response with every count at its default; override only what a test cares about. */
-function statsBody(overrides: Record<string, number> = {}) {
+/** The tab key the two-tab dashboard (#667) kept; the one page ignores it (#739). */
+const OLD_TAB_KEY = 'netkeep.dashboard.tab'
+
+function attention(overrides: Record<string, unknown> = {}) {
   return {
-    total: 0,
-    met: 0,
-    not_met: 0,
-    skipped: 0,
-    untriaged: 0,
-    archived: 0,
-    merged_away: 0,
-    with_email: 0,
-    with_phone: 0,
-    tagged: 0,
-    tagged_by_rule: 0,
+    checked_at: '2026-10-20T12:00:00Z',
+    counts: { inbox: 0, dashboard: 0, waiting: 0, try_again: 0, triage: 0, imports: 0 },
+    flags: { dashboard: null, gmail: null, linkedin: null, settings: null },
+    activity: { state: 'idle', label: '', run_id: null, run_kind: null },
+    title_total: 0,
     ...overrides,
   }
 }
 
-function draftRun(id: number) {
+function linkedinStatus(overrides: Record<string, unknown> = {}) {
   return {
-    id,
-    filename: 'contacts.csv',
-    preset: 'nine-column',
-    mapping: {},
-    source_kind: 'csv',
-    status: 'draft',
-    total_rows: 8,
-    candidate_count: 1,
-    matched_count: 3,
-    created_count: 4,
-    skipped_count: 0,
-    created_at: '2026-01-01T00:00:00Z',
-    updated_at: '2026-01-01T00:00:00Z',
-    committed_at: null,
-    rolled_back_at: null,
-  }
-}
-
-/**
- * `GET /api/v1/lists` on a real server: `ensure_validated_list` seeds this
- * smart list at every start (`netkeep/web/app.py`), before any contact
- * exists (PR #129 review, finding 1), marked `builtin` (#133). A fake that defaults `lists` to `[]` renders a state
- * the server only reaches if the user deletes the seeded list, which is
- * exactly what hid "build a list" reading "Done" for nobody having built one.
- */
-function seededValidatedList() {
-  return {
-    id: 1,
-    name: 'Validated',
-    kind: 'smart',
-    filter: { where: { op: 'eq', field: 'met', value: 'met' }, include_archived: false },
-    member_count: 0,
-    builtin: true,
-  }
-}
-
-/** A promise a test resolves on its own schedule, to hold a query in `isPending`. */
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((res) => {
-    resolve = res
-  })
-  return { promise, resolve }
-}
-
-/** The at-a-glance cards' reads on a fresh install (`glance-cards.test.tsx` covers their states). */
-const GLANCE_EMPTY: Record<string, unknown> = {
-  '/api/v1/dashboard/next-fires': { items: [], total: 0 },
-  '/api/v1/dashboard/changed-jobs': { items: [], total: 0, days: 30 },
-  '/api/v1/dashboard/inbound': {
-    count: 0,
-    since: '2026-09-20T12:00:00Z',
-    reply_detection: false,
-  },
-  '/api/v1/linkedin/schedule': { armed: false, armed_at: null, scheduler_running: true, jobs: [] },
-  '/api/v1/linkedin/status': {
     session_flag: null,
     session_flagged_at: null,
     heat_tripped: false,
-    armed: false,
+    armed: true,
+    schedule_paused: false,
     running_run_id: null,
     can_start_runs: true,
-  },
-  '/api/v1/linkedin/runs': { items: [], total: 0 },
-  '/api/v1/linkedin/budget': {
-    budgets: [],
-    profile_visits_today: {
-      ramp: 10,
-      after_weekend: 10,
-      after_heat: 10,
-      spent_today: 0,
-      week_left: null,
-      remaining: 10,
+    ...overrides,
+  }
+}
+
+/** Every read the dashboard makes, answered with a quiet, healthy install. */
+function quiet(): Record<string, unknown> {
+  return {
+    '/api/v1/health': { status: 'ok', version: '0.0.1-test' },
+    '/api/v1/setup': {
+      complete: false,
+      steps: GRAPH.map((step) => ({ ...step, title: `Step ${step.key}`, reason: 'Waits.' })),
     },
-  },
-  '/api/v1/linkedin/heat': {
-    score: 0,
-    threshold: 5,
-    multiplier: 1,
-    tripped: false,
-    last_raised_at: null,
-    cleared_at: null,
-    resumes_at: null,
-  },
+    '/api/v1/attention': attention(),
+    '/api/v1/mailboxes': [mailbox({ arm: 'send', armed_at: '2026-09-21T12:00:00Z' })],
+    '/api/v1/linkedin/status': linkedinStatus(),
+    '/api/v1/linkedin/runs': { items: [], total: 0 },
+    '/api/v1/linkedin/schedule': {
+      armed: true,
+      armed_at: '2026-09-20T12:00:00Z',
+      paused: false,
+      paused_at: null,
+      scheduler_running: true,
+      jobs: [],
+    },
+    '/api/v1/linkedin/budget': {
+      budgets: [{ action: 'li_prefills', day: { count: 13, limit: 15, remaining: 2 }, week: null }],
+      profile_visits_today: {
+        ramp: 10,
+        after_weekend: 10,
+        after_heat: 10,
+        spent_today: 0,
+        week_left: null,
+        remaining: 10,
+      },
+      profile_view_notice: 'Enrichment can show up in Who viewed your profile.',
+      risk_warning: null,
+    },
+    '/api/v1/linkedin/heat': {
+      score: 0.5,
+      threshold: 5,
+      multiplier: 1,
+      tripped: false,
+      last_raised_at: null,
+      cleared_at: null,
+      resumes_at: null,
+    },
+    '/api/v1/dashboard/next-fires': { items: [], total: 0 },
+    '/api/v1/dashboard/changed-jobs': { items: [], total: 0, days: 30 },
+    '/api/v1/dashboard/inbound': {
+      count: 0,
+      since: '2026-10-13T12:00:00Z',
+      reply_detection: false,
+    },
+    '/api/v1/campaigns': [],
+    '/api/v1/campaigns/linkedin/ready': { items: [], total: 0, try_again: [] },
+    '/api/v1/campaigns/linkedin/waiting': { items: [], total: 0 },
+    '/api/v1/campaigns/linkedin/options': { auto_send: false },
+  }
 }
 
-/** Routes the queries the dashboard makes; anything else answers 404. */
-function serveDashboard({
-  stats,
-  drafts = { items: [], total: 0 },
-  lists = [seededValidatedList()],
-  mailboxes = [],
-}: {
-  stats: ReturnType<typeof statsBody>
-  drafts?: { items: ReturnType<typeof draftRun>[]; total: number }
-  lists?: unknown[]
-  mailboxes?: unknown[]
-}) {
-  const seen: Request[] = []
-  mockFetch((request) => {
-    seen.push(request)
-    const url = new URL(request.url)
-    if (url.pathname === '/api/v1/health')
-      return jsonResponse({ status: 'ok', version: '0.0.1-test' })
-    if (url.pathname === '/api/v1/contacts/stats') return jsonResponse(stats)
-    if (url.pathname === '/api/v1/imports' && url.searchParams.get('status') === 'draft') {
-      return jsonResponse(drafts)
-    }
-    if (url.pathname === '/api/v1/lists') return jsonResponse(lists)
-    if (url.pathname === '/api/v1/mailboxes') return jsonResponse(mailboxes)
-    const glance = GLANCE_EMPTY[url.pathname]
-    if (glance !== undefined) return jsonResponse(glance)
-    return new Response('not found', { status: 404 })
+type Answer = unknown | ((request: Request) => Response | Promise<Response>)
+
+/** Serves `quiet()` with `overrides` on top; anything else answers 404. */
+function serve(overrides: Record<string, Answer> = {}) {
+  const calls: { method: string; path: string; body: string }[] = []
+  const routes: Record<string, Answer> = { ...quiet(), ...overrides }
+  mockFetch(async (request) => {
+    const { pathname } = new URL(request.url)
+    const body = request.method === 'GET' ? '' : await request.clone().text()
+    calls.push({ method: request.method, path: pathname, body })
+    const answer = routes[`${request.method} ${pathname}`] ?? routes[pathname]
+    if (answer === undefined) return new Response('not found', { status: 404 })
+    return typeof answer === 'function'
+      ? (answer as (request: Request) => Response | Promise<Response>)(request)
+      : jsonResponse(answer)
   })
-  return seen
+  return calls
 }
 
-/**
- * Every field a person can see for each rendered step, read from the DOM
- * structurally rather than by scattered `getByText`s. PR #129's review found
- * five mutations — a step's title blanked, or its route repointed to another
- * step's screen — that left both suites green, because only the import
- * step's title, detail, badge, and href were ever asserted together. This
- * reads all five rows as one table, in order, so a wrong title or a swapped
- * destination on any step fails a single assertion.
- */
-function renderedSteps() {
-  const setupPath = within(screen.getByRole('list', { name: 'Setup path' }))
-  return setupPath.getAllByRole('listitem').map((li) => {
-    const title = li.querySelector('[data-slot="card-title"]')?.textContent?.trim() ?? null
-    const detail = li.querySelector('[data-slot="card-description"]')?.textContent?.trim() ?? null
-    const badge = li.querySelector('[data-slot="badge"]')?.textContent?.trim() ?? null
-    const link = li.querySelector('a')
-    return {
-      title,
-      detail,
-      badge,
-      href: link?.getAttribute('href') ?? null,
-      cta: link?.textContent?.trim() ?? null,
-    }
-  })
+function chips() {
+  return within(screen.getByRole('list', { name: 'Status' }))
 }
 
-describe('dashboard: a fresh install with nothing imported', () => {
-  it('gives every setup step a real heading, so a screen reader can move between them', async () => {
-    serveDashboard({ stats: statsBody() })
-    await renderApp('/')
-    const main = within(screen.getByRole('main'))
-    await main.findByText('Start here')
-
-    const headings = main.getAllByRole('heading', { level: 2 }).map((node) => node.textContent)
-    expect(headings).toEqual([
-      'Start here',
-      'Live LinkedIn run',
-      'LinkedIn queue',
-      'Waiting for you',
-      'Next campaign sends',
-      'Next LinkedIn run',
-      'LinkedIn browser',
-      'Mailbox',
-      'Budget and heat',
-      'Replies this week',
-      'Changed jobs',
-      '1. Import your data',
-      '2. Review what was tagged by a rule',
-      '3. Triage',
-      '4. Build a list',
-      '5. Export',
-    ])
-  })
-
-  it('says exactly what to do first, and renders all five real steps correctly', async () => {
-    serveDashboard({ stats: statsBody() })
-    await renderApp('/')
-    const main = within(screen.getByRole('main'))
-
-    expect(await main.findByText('Start here')).toBeInTheDocument()
-    expect(main.getByText(/bring in a csv or your linkedin archive first/i)).toBeInTheDocument()
-
-    expect(renderedSteps()).toEqual([
-      {
-        title: '1. Import your data',
-        detail: 'Nothing imported yet',
-        badge: 'Not started',
-        href: '/imports',
-        cta: 'Import contacts',
-      },
-      {
-        title: '2. Review what was tagged by a rule',
-        detail: 'Nothing tagged yet',
-        badge: 'Not started',
-        href: '/lists?tab=tags',
-        cta: 'Review tags',
-      },
-      {
-        title: '3. Triage',
-        detail: 'Nothing to triage yet',
-        badge: 'Not started',
-        href: '/triage',
-        cta: 'Continue triage',
-      },
-      // The seeded "Validated" list is present from server start, before any
-      // contact exists — so this step never gets a "Not started" badge (or a
-      // "Done" one), only the honest count.
-      {
-        title: '4. Build a list',
-        detail: '1 list',
-        badge: null,
-        href: '/lists',
-        cta: 'Open lists',
-      },
-      {
-        title: '5. Export',
-        detail: 'Nothing to export yet',
-        badge: 'Not started',
-        href: '/exports',
-        cta: 'Export contacts',
-      },
-    ])
-  })
+beforeEach(() => {
+  vi.stubGlobal('EventSource', FakeEventSource)
 })
 
-describe('dashboard: an account with contacts', () => {
-  it('shows every step its real count, state, title, and destination, from the API alone', async () => {
-    // `tagged: 5` (any source) but `tagged_by_rule: 4` — one of the five was
-    // hand-applied, not the rules. The step must report the rule-only count.
-    const seen = serveDashboard({
-      stats: statsBody({
-        total: 10,
-        met: 5,
-        not_met: 2,
-        untriaged: 3,
-        tagged: 5,
-        tagged_by_rule: 4,
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+  resetFakeEventSource()
+  window.localStorage.clear()
+})
+
+describe('dashboard: one page (#739)', () => {
+  it('lays out the header, chips, metrics slot, setup map and details, in that order', async () => {
+    serve()
+    await renderApp('/')
+    await screen.findByRole('list', { name: 'Setup steps' })
+
+    const main = screen.getByRole('main')
+    const regions = [...main.querySelectorAll('[data-region]')].map((node) =>
+      node.getAttribute('data-region'),
+    )
+    expect(regions).toEqual([
+      'header',
+      'metrics',
+      'setup',
+      'needs-you',
+      'running',
+      'coming-up',
+      'campaigns',
+      'changed-jobs',
+    ])
+    // The chips sit in the header, under the line about what needs you.
+    const header = main.querySelector('[data-region="header"]') as HTMLElement
+    expect(within(header).getByRole('list', { name: 'Status' })).toBeInTheDocument()
+    expect(within(header).getByTestId('needs-you-line')).toHaveTextContent(
+      'Nothing needs you right now.',
+    )
+  })
+
+  it('has no tabs, and ignores the tab the old dashboard remembered', async () => {
+    window.localStorage.setItem(OLD_TAB_KEY, 'overview')
+    serve()
+    await renderApp('/')
+
+    // Both of what were two tabs show at once: the setup map and the detail.
+    expect(await screen.findByRole('list', { name: 'Setup steps' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Needs you' })).toBeInTheDocument()
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument()
+    // Nothing writes the key back.
+    expect(window.localStorage.getItem(OLD_TAB_KEY)).toBe('overview')
+  })
+
+  it('leaves an empty, labelled slot for the metric tiles, with no numbers in it', async () => {
+    serve()
+    await renderApp('/')
+    const slot = screen
+      .getByRole('main')
+      .querySelector('[data-region="metrics"]') as HTMLElement | null
+    expect(slot).not.toBeNull()
+    expect(slot).toHaveAttribute('aria-label', 'Metrics')
+    expect(slot).toBeEmptyDOMElement()
+  })
+
+  it('dates the header and says how many things need you', async () => {
+    serve({
+      '/api/v1/attention': attention({
+        counts: { inbox: 2, dashboard: 1, waiting: 1, try_again: 0, triage: 9, imports: 0 },
       }),
-      lists: [
-        seededValidatedList(),
-        { id: 2, name: 'First 100', kind: 'static', member_count: 12 },
-      ],
+      '/api/v1/linkedin/heat': { ...(quiet()['/api/v1/linkedin/heat'] as object), tripped: true },
     })
     await renderApp('/')
-    const main = within(screen.getByRole('main'))
-    await main.findByText('10 contacts imported')
+    const header = screen.getByRole('main').querySelector('[data-region="header"]') as HTMLElement
+    // A problem, a LinkedIn step waiting, and two unhandled Inbox items.
+    await waitFor(() =>
+      expect(within(header).getByTestId('needs-you-line')).toHaveTextContent('4 things need you.'),
+    )
+    const weekday = new Date().toLocaleDateString(undefined, { weekday: 'long' })
+    expect(within(header).getByText(new RegExp(`^${weekday}, .+ · .+`))).toBeInTheDocument()
+  })
 
-    expect(renderedSteps()).toEqual([
-      {
-        title: '1. Import your data',
-        detail: '10 contacts imported',
-        badge: 'Done',
-        href: '/imports',
-        cta: 'Import contacts',
+  it('keeps the live updates indicator, which reads disconnected before the stream opens', async () => {
+    serve()
+    await renderApp('/')
+    expect(
+      await within(screen.getByRole('main')).findByText('Live updates disconnected'),
+    ).toBeInTheDocument()
+  })
+})
+
+describe('dashboard: the status chips', () => {
+  it('links each chip to the page or section that fixes it, in order', async () => {
+    serve({
+      '/api/v1/linkedin/status': linkedinStatus({ running_run_id: 9 }),
+      '/api/v1/linkedin/runs': {
+        items: [{ id: 9, kind: 'enrich', status: 'running', trigger: 'manual' }],
+        total: 1,
       },
-      // Real count, but no badge: tagged_by_rule > 0 (split from tagged, any
-      // source, by the stats lane — #129 review round 2) says the rules ran,
-      // not that the person reviewed what they did, and this step's own title
-      // asks them to — so it reads the same as export, not "Done" (round 3).
-      // 4, not 5: the hand-applied tag doesn't count either way.
-      {
-        title: '2. Review what was tagged by a rule',
-        detail: '4 contacts tagged by a rule',
-        badge: null,
-        href: '/lists?tab=tags',
-        cta: 'Review tags',
-      },
-      {
-        title: '3. Triage',
-        detail: '7 of 10 triaged',
-        badge: 'In progress',
-        href: '/triage',
-        cta: 'Continue triage',
-      },
-      {
-        title: '4. Build a list',
-        detail: '2 lists',
-        badge: null,
-        href: '/lists',
-        cta: 'Open lists',
-      },
-      {
-        title: '5. Export',
-        detail: 'Not tracked — export runs whenever you like',
-        badge: null,
-        href: '/exports',
-        cta: 'Export contacts',
-      },
+      '/api/v1/linkedin/heat': { ...(quiet()['/api/v1/linkedin/heat'] as object), tripped: true },
+    })
+    await renderApp('/')
+    await chips().findByRole('link', { name: 'Enrichment running' })
+
+    expect(
+      chips()
+        .getAllByRole('link')
+        .map((link) => [link.textContent, link.getAttribute('href')]),
+    ).toEqual([
+      ['Gmail sending', '/gmail'],
+      ['No LinkedIn session flag', '/linkedin#session'],
+      ['Enrichment running', '/linkedin#runs'],
+      ['Scheduled runs armed', '/linkedin#schedule'],
+      ['2 of 15 prefills left', '/settings#linkedin-budget'],
+      ['1 problem', '/#needs-you'],
     ])
-
-    // The setup path replaces the scaffold; there is no separate "current user" card here
-    // (spec 14.3: it is settings' own, via the raw /me payload).
-    expect(main.queryByText('Current user')).not.toBeInTheDocument()
-
-    // The CSRF marker (spec 14.2) rides on every request this page makes.
-    expect(seen.length).toBeGreaterThanOrEqual(3)
-    for (const request of seen) {
-      expect(request.headers.get('X-Netkeep-Client')).toBe('1')
-    }
   })
 
-  it('does not let a hand-applied tag read as automatic progress', async () => {
-    // Three contacts tagged by hand, none by a rule: `tagged: 3`, `tagged_by_rule: 0`.
-    serveDashboard({ stats: statsBody({ total: 10, tagged: 3, tagged_by_rule: 0 }) })
+  it('shows no running chip and no problems chip while neither applies', async () => {
+    serve()
     await renderApp('/')
-    const main = within(screen.getByRole('main'))
-    await main.findByText('10 contacts imported')
-
-    const reviewRow = renderedSteps()[1]
-    expect(reviewRow).toEqual({
-      title: '2. Review what was tagged by a rule',
-      detail: 'Nothing tagged yet',
-      badge: 'Not started',
-      href: '/lists?tab=tags',
-      cta: 'Run auto-tag rules',
-    })
+    await chips().findByRole('link', { name: 'Scheduled runs armed' })
+    expect(chips().getAllByRole('link')).toHaveLength(4)
+    expect(chips().queryByRole('link', { name: /running|problem/ })).not.toBeInTheDocument()
   })
 
-  it('does not tell a big auto-tagging import "Done" before anyone has opened the app', async () => {
-    // The sharp case from setup-steps.ts's module doc: a 200-contact import
-    // that auto-tags 150 is a fact about the rules, not that the person has
-    // reviewed anything.
-    serveDashboard({ stats: statsBody({ total: 200, tagged_by_rule: 150 }) })
+  it('tints a chip with its state', async () => {
+    serve({ '/api/v1/linkedin/status': linkedinStatus({ session_flag: 'checkpoint' }) })
     await renderApp('/')
-    const main = within(screen.getByRole('main'))
-    await main.findByText('150 contacts tagged by a rule')
-
-    expect(renderedSteps()[1]).toMatchObject({
-      detail: '150 contacts tagged by a rule',
-      badge: null,
-    })
+    const session = await chips().findByRole('link', { name: 'LinkedIn checkpoint' })
+    expect(session.closest('li')).toHaveAttribute('data-tone', 'bad')
+    expect(chips().getByRole('link', { name: 'Gmail sending' }).closest('li')).toHaveAttribute(
+      'data-tone',
+      'ok',
+    )
   })
 
-  it('offers to resume an open draft instead of claiming the import step is done', async () => {
-    serveDashboard({
-      stats: statsBody({ total: 5 }),
-      drafts: { items: [draftRun(42)], total: 1 },
-    })
-    await renderApp('/')
-    const main = within(screen.getByRole('main'))
-
-    expect(await main.findByText('1 draft import waiting to be finished')).toBeInTheDocument()
-    const resume = main.getByRole('link', { name: 'Continue this import' })
-    expect(resume).toHaveAttribute('href', '/imports?run=42')
-  })
-
-  it('restores the coverage the deleted scaffold cards took with them: health version and live status', async () => {
-    serveDashboard({ stats: statsBody({ total: 3 }) })
-    await renderApp('/')
-    const banner = within(screen.getByRole('banner'))
-    const main = within(screen.getByRole('main'))
-
-    // The old "Backend" card asserted the version; the shell's own health dot
-    // (`components/layout/backend-health.tsx`) is the only place left that does.
-    expect(await banner.findByText('Backend ok · 0.0.1-test')).toBeInTheDocument()
-
-    // The old "Event stream" card asserted "Disconnected"; jsdom's EventSource
-    // never connects, so the inline indicator that replaced the card reads the
-    // same way here.
-    expect(await main.findByText('Live updates disconnected')).toBeInTheDocument()
-  })
-})
-
-describe('dashboard: while a query is still in flight', () => {
-  it('announces the checking state to assistive tech', async () => {
-    const statsGate = deferred<Response>()
-    mockFetch((request) => {
-      const url = new URL(request.url)
-      if (url.pathname === '/api/v1/health')
-        return jsonResponse({ status: 'ok', version: '0.0.1-test' })
-      if (url.pathname === '/api/v1/contacts/stats') return statsGate.promise
-      return new Response('not found', { status: 404 })
-    })
-    await renderApp('/')
-    const main = within(screen.getByRole('main'))
-
-    // role="status" (#129 review round 3) so a screen reader hears the page is
-    // working before it has anything else to say — the `role="alert"` sibling
-    // for the error case was already asserted; this had not been.
-    expect(main.getByRole('status')).toHaveTextContent('Checking your setup…')
-
-    statsGate.resolve(jsonResponse(statsBody()))
-    expect(await main.findByText('Start here')).toBeInTheDocument()
-  })
-
-  it('does not render "Done" for the import step while the drafts query is still answering', async () => {
-    // Verified against the real timing this guards: a 400ms-delayed drafts
-    // response reproduced the flash before `openImportsPending` existed
-    // (#129 review round 3). This uses a controlled promise instead of a
-    // real delay so the test is exact and instant rather than timing-based.
-    const draftsGate = deferred<Response>()
-    mockFetch((request) => {
-      const url = new URL(request.url)
-      if (url.pathname === '/api/v1/health')
-        return jsonResponse({ status: 'ok', version: '0.0.1-test' })
-      if (url.pathname === '/api/v1/contacts/stats') return jsonResponse(statsBody({ total: 5 }))
-      if (url.pathname === '/api/v1/imports' && url.searchParams.get('status') === 'draft') {
-        return draftsGate.promise
-      }
-      if (url.pathname === '/api/v1/lists') return jsonResponse([seededValidatedList()])
-      return new Response('not found', { status: 404 })
-    })
-    await renderApp('/')
-    const main = within(screen.getByRole('main'))
-
-    await main.findByText('5 contacts imported; checking for open imports…')
-    const [importRowBefore] = renderedSteps()
-    expect(importRowBefore?.badge).toBeNull()
-
-    draftsGate.resolve(jsonResponse({ items: [], total: 0 }))
-    await main.findByText('5 contacts imported')
-    const [importRowAfter] = renderedSteps()
-    expect(importRowAfter?.badge).toBe('Done')
-  })
-})
-
-describe('dashboard: the backend is unreachable', () => {
-  it('shows a plain unreachable state, not a crash, announced to assistive tech', async () => {
+  it('says it could not check, chip by chip, when the backend is unreachable', async () => {
     // The default handler rejects every fetch (src/test/fetch.ts).
     await renderApp('/')
-    const main = within(screen.getByRole('main'))
+    expect(await chips().findByRole('link', { name: 'Gmail: couldn’t check' })).toHaveAttribute(
+      'href',
+      '/settings#gmail',
+    )
+    expect(chips().getByRole('link', { name: 'LinkedIn: couldn’t check' })).toBeInTheDocument()
+    // The rest of the page still renders, each region with its own failure.
+    expect(await screen.findByText('Setup couldn’t be read')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Needs you' })).toBeInTheDocument()
+  })
 
-    expect(await main.findByText('Backend unreachable')).toBeInTheDocument()
-    expect(main.getByText(/make dev/)).toBeInTheDocument()
-    expect(within(screen.getByRole('banner')).getByText('Backend unreachable')).toBeInTheDocument()
+  it('reads the mailbox list while the Keychain is locked, never the mailbox status', async () => {
+    const calls = serve({
+      '/api/v1/mailboxes/status': () => jsonResponse({ detail: 'the Keychain is locked' }, 503),
+    })
+    await renderApp('/')
+    await chips().findByRole('link', { name: 'Gmail sending' })
+    expect(calls.some((call) => call.path === '/api/v1/mailboxes/status')).toBe(false)
+  })
 
-    // role="alert" so a screen reader announces the failure without the user
-    // having to go looking for it (#129 review, finding 8).
-    expect(screen.getByRole('alert')).toHaveTextContent('Backend unreachable')
+  it('changes the Gmail chip on the mailbox.status server event, without a reload', async () => {
+    let rows = [mailbox({ arm: 'send', armed_at: '2026-09-21T12:00:00Z' })]
+    serve({ '/api/v1/mailboxes': () => jsonResponse(rows) })
+    await renderApp('/')
+    await chips().findByRole('link', { name: 'Gmail sending' })
 
-    // Nothing from the setup path renders on top of a count nobody could read.
-    expect(main.queryByText('Import your data')).not.toBeInTheDocument()
+    rows = [mailbox({ status: 'reauth_required', status_reason: 'invalid_grant' })]
+    act(() => {
+      FakeEventSource.instances.at(-1)?.emit('mailbox.status', {
+        mailbox_id: 3,
+        status: 'reauth_required',
+        reason: 'invalid_grant',
+      })
+    })
+    expect(
+      await chips().findByRole('link', { name: 'Gmail needs re-authorizing' }),
+    ).toBeInTheDocument()
+  })
+})
+
+describe('dashboard: Needs you', () => {
+  function needsYou() {
+    return within(screen.getByRole('region', { name: 'Needs you' }))
+  }
+
+  it('holds the problems first, then the replies and the LinkedIn steps', async () => {
+    serve({
+      '/api/v1/linkedin/status': linkedinStatus({ session_flag: 'logged_out' }),
+      '/api/v1/attention': attention({
+        counts: { inbox: 2, dashboard: 0, waiting: 0, try_again: 0, triage: 0, imports: 0 },
+      }),
+    })
+    await renderApp('/')
+    const problems = await needsYou().findByRole('list', { name: 'Problems' })
+    const problem = within(problems).getByRole('listitem')
+    expect(problem).toHaveTextContent('Logged out of LinkedIn')
+    expect(within(problem).getByRole('link', { name: 'See the fix' })).toHaveAttribute(
+      'href',
+      '/linkedin#session',
+    )
+    expect(needsYou().getByRole('link', { name: 'Open the Inbox' })).toHaveAttribute(
+      'href',
+      '/inbox',
+    )
+
+    const headings = needsYou()
+      .getAllByRole('heading')
+      .map((heading) => [heading.tagName, heading.textContent])
+    expect(headings).toEqual([
+      ['H2', 'Needs you'],
+      ['H3', 'Logged out of LinkedIn'],
+      ['H3', 'Replies this week'],
+      ['H3', 'LinkedIn queue'],
+      ['H3', 'Waiting for you'],
+    ])
+    // The pane is tinted, as everything that needs you is.
+    expect(screen.getByRole('region', { name: 'Needs you' })).toHaveClass('nk-tint')
+  })
+
+  it('re-authorizes a signed-out mailbox on Google’s page', async () => {
+    const assign = vi.spyOn(navigation, 'assign').mockImplementation(() => {})
+    const calls = serve({
+      '/api/v1/mailboxes': [mailbox({ status: 'reauth_required' })],
+      'POST /api/v1/mailboxes/oauth/start': {
+        authorization_url: 'https://accounts.example/auth?x=1',
+      },
+    })
+    await renderApp('/')
+    fireEvent.click(await needsYou().findByRole('button', { name: 'Re-authorize' }))
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('https://accounts.example/auth?x=1'))
+    const start = calls.find((call) => call.path === '/api/v1/mailboxes/oauth/start')
+    expect(JSON.parse(start?.body ?? '{}')).toEqual({ mailbox_id: 3 })
+    expect(needsYou().getByRole('link', { name: 'Settings' })).toHaveAttribute(
+      'href',
+      '/settings#gmail',
+    )
+  })
+
+  it('says so when re-authorizing fails', async () => {
+    serve({
+      '/api/v1/mailboxes': [mailbox({ status: 'reauth_required' })],
+      'POST /api/v1/mailboxes/oauth/start': () => jsonResponse({ detail: 'Google refused' }, 500),
+    })
+    await renderApp('/')
+    fireEvent.click(await needsYou().findByRole('button', { name: 'Re-authorize' }))
+    expect(await needsYou().findByText('Google refused')).toBeInTheDocument()
+  })
+
+  it('starts nothing on its own: every request it makes is a read', async () => {
+    const calls = serve()
+    await renderApp('/')
+    await screen.findByRole('list', { name: 'Setup steps' })
+    await chips().findByRole('link', { name: 'Scheduled runs armed' })
+    expect(calls.filter((call) => call.method !== 'GET')).toEqual([])
   })
 })

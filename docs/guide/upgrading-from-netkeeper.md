@@ -14,7 +14,7 @@ The GitHub repository is now `github.com/dsmorgan/netkeep`, and GitHub redirects
 | The login item | `fun.tnkr.netkeeper` | `fun.tnkr.netkeep` | Replaced. On stays on, starting at your next login; off stays off. The old plist is removed. |
 | Environment variables | `NETKEEPER_*` | `NETKEEP_*` | The old names still work for one release, with a warning. The new name wins when both are set. |
 | The browser's cookie | `netkeeper_session_<port>` | `netkeep_session_<port>` | The old one still connects for one release, and the UI sets the new one beside it. |
-| The UI's saved choices | `netkeeper.*` in the browser | `netkeep.*` | Moved the first time the UI loads: the theme, the dashboard tab, the contacts columns, the Chrome banner. |
+| The UI's saved choices | `netkeeper.*` in the browser | `netkeep.*` | Moved the first time the UI loads: the theme, the contacts columns, the Chrome banner. |
 | Log file | `logs/netkeeper.log` | `logs/netkeep.log` | New records go to the new file. Old files stay in `logs/`. |
 | Backups | `backups/netkeeper-<time>.sqlite3` | `backups/netkeep-<time>.sqlite3` | Old backups still list, restore and prune. |
 

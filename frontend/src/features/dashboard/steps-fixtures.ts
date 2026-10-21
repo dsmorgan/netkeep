@@ -1,6 +1,6 @@
 import type { SetupStep } from './setup-api'
 
-/** Invented setup steps for the Steps tab's tests. */
+/** Invented setup steps for the setup map's tests. */
 export function step(key: string, overrides: Partial<SetupStep> = {}): SetupStep {
   return {
     key,
