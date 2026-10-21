@@ -916,10 +916,11 @@ ALLOWED_DYNAMIC_ACCESS: dict[tuple[Path, str, str], int] = {
     (PACKAGE / "web" / "app.py", "discover_routers", ".import_module"): 1,
     # Not the primitives: Jinja's Environment.globals (cleared, so a template sees no
     # globals), the template walker's own `getattr` method for a Getattr node, and the
-    # Flight payload's `modules` field.
+    # Flight payload's `modules` field (read by is_whole and its #530 report).
     (PACKAGE / "campaigns" / "render.py", "_environment", ".globals"): 1,
     (PACKAGE / "campaigns" / "render.py", "_Walker.walk", COMPUTED_GETATTR): 1,
     (PACKAGE / "linkedin" / "flight.py", "is_whole", ".modules"): 1,
+    (PACKAGE / "linkedin" / "flight.py", "whole_check", ".modules"): 1,
     # A module constant names the attribute: the scope guard's marker and the read-only
     # route marker.
     (PACKAGE / "scoping.py", "install_scope_guard", COMPUTED_GETATTR): 1,

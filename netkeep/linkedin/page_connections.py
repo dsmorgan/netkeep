@@ -136,7 +136,7 @@ from netkeep.linkedin.flagship import (
     parse_pagination_request,
     rehydration_payload,
 )
-from netkeep.linkedin.flight import is_whole, parse_flight
+from netkeep.linkedin.flight import is_whole, parse_flight, why_not_whole
 from netkeep.linkedin.observe import (
     FAILURE_REDIRECT,
     FAILURE_UNREADABLE,
@@ -731,14 +731,18 @@ class PageConnections:
         except Exception as exc:
             whole = False
             check = f"no ({type(exc).__name__})"
+        # #530: which rule the copy broke, as counts in fixed words, never its content.
+        why = ""
         if not whole:
             self._rescued_not_whole += 1
+            why = f"; why: {why_not_whole(pending.streamed, endpoint=self.endpoint)}"
         log.info(
             "connections: the page's answer for start %d was read from the copy streamed"
-            " as it arrived (%d bytes); nothing was lost; whole by flight check: %s",
+            " as it arrived (%d bytes); nothing was lost; whole by flight check: %s%s",
             pending.start,
             len(pending.streamed),
             check,
+            why,
         )
         self._last_bytes = len(pending.streamed)
         self._take(chunk)

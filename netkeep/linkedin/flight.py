@@ -180,6 +180,100 @@ def is_whole(payload: FlightPayload, *, endpoint: str) -> bool:
     return reached == set(payload.rows) | payload.streams
 
 
+@dataclass(slots=True)
+class _StreamFaults:
+    """The two stream rules :func:`parse_flight` raises for, counted instead."""
+
+    late_chunks: int = 0
+    empty_id_streams: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class WholeCheck:
+    """Which of :func:`is_whole`'s rules a copy breaks, as counts only (#530).
+
+    For the log: no row id, no value, no text -- a payload is a person's data. Each
+    field counts one rule: ``root_missing`` (1 when row ``0`` is not held),
+    ``unclosed_streams`` (started, never closed), ``unreached_rows`` (model rows the
+    root does not reach), ``unreferenced_streams`` (streams it does not reach),
+    ``dangling_references`` (ids reached that name nothing held), ``late_chunks``
+    (chunks after their stream's close) and ``empty_id_streams`` (stream starts with no
+    id). The last two :func:`parse_flight` refuses outright.
+    """
+
+    root_missing: int = 0
+    unclosed_streams: int = 0
+    unreached_rows: int = 0
+    unreferenced_streams: int = 0
+    dangling_references: int = 0
+    late_chunks: int = 0
+    empty_id_streams: int = 0
+
+    def describe(self) -> str:
+        """The counts in fixed words, for a log line."""
+        return (
+            f"root missing {self.root_missing}, unclosed streams {self.unclosed_streams},"
+            f" unreached rows {self.unreached_rows},"
+            f" unreferenced streams {self.unreferenced_streams},"
+            f" dangling references {self.dangling_references},"
+            f" late chunks {self.late_chunks}, empty-id streams {self.empty_id_streams}"
+        )
+
+
+def whole_check(body: bytes | str, *, endpoint: str) -> WholeCheck:
+    """Count which of :func:`is_whole`'s rules ``body`` breaks, for the log only (#530).
+
+    A report, never a gate: callers decide with :func:`is_whole`, whose verdict this
+    does not change. It walks the whole copy rather than stopping at the first broken
+    rule, and counts the two stream rules :func:`parse_flight` raises for. Raises
+    :class:`RouteChanged` for a body that does not parse for any other reason.
+    """
+    faults = _StreamFaults()
+    payload = _parse(body, endpoint, faults)
+    reached: set[str] = set()
+    dangling: set[str] = set()
+    stack = [ROOT_ROW] if ROOT_ROW in payload.rows else []
+    reached.update(stack)
+    while stack:
+        row_id = stack.pop()
+        held = payload.chunks.get(row_id, ()) if row_id in payload.streams else ()
+        for value in (payload.rows[row_id],) if row_id in payload.rows else held:
+            for node in payload.walk(value, follow=False, endpoint=endpoint):
+                if not isinstance(node, str):
+                    continue
+                match = _ROW_MARKER.fullmatch(node)
+                if match is None:
+                    continue
+                row = match.group(1)
+                if row in payload.rows or row in payload.streams:
+                    if row not in reached:
+                        reached.add(row)
+                        stack.append(row)
+                elif row not in payload.modules and row not in payload.texts:
+                    dangling.add(row)
+    return WholeCheck(
+        root_missing=int(ROOT_ROW not in payload.rows),
+        unclosed_streams=len(payload.streams - payload.closed),
+        unreached_rows=len(set(payload.rows) - reached),
+        unreferenced_streams=len(payload.streams - reached),
+        dangling_references=len(dangling),
+        late_chunks=faults.late_chunks,
+        empty_id_streams=faults.empty_id_streams,
+    )
+
+
+def why_not_whole(body: bytes | str, *, endpoint: str) -> str:
+    """:func:`whole_check`'s counts in fixed words, or why there are none; never raises.
+
+    Only a log line reads it, so no exception from the count reaches its caller, and
+    one is named by its type alone, never its message.
+    """
+    try:
+        return whole_check(body, endpoint=endpoint).describe()
+    except Exception as exc:
+        return f"not counted ({type(exc).__name__})"
+
+
 def is_element(node: object) -> bool:
     """Whether ``node`` is a rendered element: ``["$", type, key, props]`` with dict props."""
     return (
@@ -210,6 +304,16 @@ def parse_flight(body: bytes | str, *, endpoint: str) -> FlightPayload:
     row whose id names a stream already started is that stream's next chunk, not a
     second row of that id; one after the stream's ``C`` row, or a stream start with no
     id, is :class:`RouteChanged` too.
+    """
+    return _parse(body, endpoint, None)
+
+
+def _parse(body: bytes | str, endpoint: str, faults: _StreamFaults | None) -> FlightPayload:
+    """:func:`parse_flight`; with ``faults``, two stream rules are counted, not raised.
+
+    Only :func:`whole_check` passes ``faults``: a late chunk is kept as a chunk and a
+    stream start with no id starts a stream of id ``""``, so the rest of the copy can
+    still be counted. Every other rule raises as it does for :func:`parse_flight`.
     """
     data = body.encode("utf-8") if isinstance(body, str) else body
     if not data.strip():
@@ -258,7 +362,11 @@ def parse_flight(body: bytes | str, *, endpoint: str) -> FlightPayload:
                 raise RouteChanged(endpoint, f"row {line}: a model row that is not JSON")
             if row_id in streams:
                 if row_id in closed:
-                    raise RouteChanged(endpoint, f"row {line}: a stream's chunk after its close")
+                    if faults is None:
+                        raise RouteChanged(
+                            endpoint, f"row {line}: a stream's chunk after its close"
+                        )
+                    faults.late_chunks += 1
                 chunks[row_id].append(_json(value, endpoint, line))
                 continue
             _mark(seen, row_id, endpoint, line)
@@ -270,7 +378,9 @@ def parse_flight(body: bytes | str, *, endpoint: str) -> FlightPayload:
             raise RouteChanged(endpoint, f"row {line}: the server sent an error row")
         elif tag in ("R", "X"):
             if not row_id:
-                raise RouteChanged(endpoint, f"row {line}: a stream start with no row id")
+                if faults is None:
+                    raise RouteChanged(endpoint, f"row {line}: a stream start with no row id")
+                faults.empty_id_streams += 1
             # A start is marked like a row: a second start, or a model row of that id
             # sent before it, is a row id seen twice.
             _mark(seen, row_id, endpoint, line)

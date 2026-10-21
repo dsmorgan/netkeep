@@ -65,7 +65,7 @@ from netkeep.linkedin.enrich import (
 )
 from netkeep.linkedin.flagship import CONTACT_DETAILS_SCREEN_ID, NAVIGATION_PATH
 from netkeep.linkedin.flagship_profile import COMPONENT_PATH
-from netkeep.linkedin.flight import is_whole, parse_flight
+from netkeep.linkedin.flight import WholeCheck, is_whole, parse_flight, whole_check
 from netkeep.linkedin.observe import (
     ObservationFailed,
     ObservationLimits,
@@ -1440,6 +1440,15 @@ async def test_a_lost_lazy_card_without_a_whole_copy_is_still_skipped(
     assert "read a lazy card from the copy" not in caplog.text
     not_whole = "the streamed copy of a lost answer is not whole; not used"
     assert (not_whole in caplog.text) is (how != "none")
+    # #530: the line says which rule failed, by counts alone, never the copy's text.
+    why = {
+        "half": "(why: not counted (RouteChanged))",
+        "rows": "dangling references 1,",
+        "orphan": "unreached rows 1,",
+    }
+    assert how == "none" or why[how] in caplog.text
+    for secret in (PRIYA.first, PRIYA.last, PRIYA.slug, "Staff Engineer", "Fictional", "stray"):
+        assert secret not in caplog.text, secret
 
 
 @pytest.mark.parametrize("body", ["card", "overlay"])
@@ -1452,6 +1461,7 @@ def test_every_row_cut_of_a_fixture_parses_or_not_but_is_never_whole(body: str) 
         else contact_info_payload(PRIYA, emails=["priya.fake@example.test"])
     )
     assert is_whole(parse_flight(whole, endpoint="test"), endpoint="test")
+    assert whole_check(whole, endpoint="test") == WholeCheck()
     for ordered in (whole, streamed_copy(whole, "reordered")):
         assert ordered is not None
         lines = ordered.splitlines(keepends=True)
@@ -1462,6 +1472,8 @@ def test_every_row_cut_of_a_fixture_parses_or_not_but_is_never_whole(body: str) 
             except RouteChanged:
                 continue
             assert not is_whole(payload, endpoint="test"), (body, cut)
+            # #530: the report finds a broken rule wherever is_whole says no.
+            assert whole_check(prefix, endpoint="test") != WholeCheck(), (body, cut)
 
 
 async def test_a_cut_overlay_copy_before_its_email_row_is_never_read() -> None:
