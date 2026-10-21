@@ -6,6 +6,7 @@
 import { queryOptions } from '@tanstack/react-query'
 
 import { api } from '@/api/client'
+import { detailMessage } from '@/api/errors'
 import type { components } from '@/api/schema'
 
 export type Setup = components['schemas']['SetupOut']
@@ -28,14 +29,21 @@ export const setupQuery = queryOptions({
   retry: false,
 })
 
-/** Skip a step, or clear its skip. Answers the whole setup, as `GET` does. */
+/**
+ * Skip a step, or clear its skip. Answers the whole setup, as `GET` does. A refusal
+ * (409: a step that can't be skipped, or the second of Gmail and LinkedIn) throws the
+ * server's own sentence, so the page says why.
+ */
 export async function setSkipped({ key, skipped }: { key: string; skipped: boolean }) {
   const params = { params: { path: { key } } }
-  const { data, response } = skipped
+  const { data, error, response } = skipped
     ? await api.POST('/api/v1/setup/steps/{key}/skip', params)
     : await api.DELETE('/api/v1/setup/steps/{key}/skip', params)
   if (data === undefined) {
-    throw new Error(`${skipped ? 'Skipping' : 'Un-skipping'} the step failed (${response.status})`)
+    throw new Error(
+      detailMessage(error) ??
+        `${skipped ? 'Skipping' : 'Undoing the skip of'} the step failed (${response.status})`,
+    )
   }
   return data
 }

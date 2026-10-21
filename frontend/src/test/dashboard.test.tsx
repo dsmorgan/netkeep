@@ -78,6 +78,18 @@ function quiet(): Record<string, unknown> {
       cleared_at: null,
       resumes_at: null,
     },
+    '/api/v1/dashboard/metrics': {
+      window: '7d',
+      start: '2026-10-14',
+      end: '2026-10-20',
+      sent: 0,
+      replies: 0,
+      reply_rate: null,
+      bounced: 0,
+      changed_jobs: 0,
+      new_contacts: { total: 0, linkedin: 0, imported: 0 },
+      series: [],
+    },
     '/api/v1/dashboard/next-fires': { items: [], total: 0 },
     '/api/v1/dashboard/changed-jobs': { items: [], total: 0, days: 30 },
     '/api/v1/dashboard/inbound': {
@@ -168,15 +180,16 @@ describe('dashboard: one page (#739)', () => {
     expect(window.localStorage.getItem(OLD_TAB_KEY)).toBe('overview')
   })
 
-  it('leaves an empty, labelled slot for the metric tiles, with no numbers in it', async () => {
+  it('fills the metrics region with the tiles, under its window heading', async () => {
     serve()
     await renderApp('/')
-    const slot = screen
+    const region = screen
       .getByRole('main')
       .querySelector('[data-region="metrics"]') as HTMLElement | null
-    expect(slot).not.toBeNull()
-    expect(slot).toHaveAttribute('aria-label', 'Metrics')
-    expect(slot).toBeEmptyDOMElement()
+    expect(region).not.toBeNull()
+    expect(region).toHaveAccessibleName('Last 7 days')
+    const tiles = await within(region as HTMLElement).findByRole('list', { name: 'Metrics' })
+    expect(within(tiles).getAllByRole('listitem')).toHaveLength(5)
   })
 
   it('dates the header and says how many things need you', async () => {
