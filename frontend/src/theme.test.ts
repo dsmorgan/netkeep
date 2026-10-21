@@ -414,6 +414,16 @@ describe.each(CONTRAST_MODES)('the theme with %s', (_, __, choice, os) => {
     expect(worst(colorOf(tokens, 'ring'), surfaces)).toBeGreaterThanOrEqual(3)
   })
 
+  // The setup map's done box (#740): its number chip is a solid `bg-ok-ink` with
+  // `text-card`, on the page and inside the box's own ok tint, which darkens or lightens
+  // the ink.
+  it.each([
+    ['on the page', tokens],
+    ['inside an ok tint', withTint],
+  ] as const)('keeps card text on a solid ok-ink chip %s at WCAG AA', (_, where) => {
+    expect(contrast(colorOf(where, 'card'), colorOf(where, 'ok-ink'))).toBeGreaterThanOrEqual(4.5)
+  })
+
   describe.each(Object.keys(TONES) as (keyof typeof TONES)[])('a %s-tinted pane', (tone) => {
     const surfaces = [
       ...tintPanes(tokens, tone, 'tint-mix'),

@@ -124,9 +124,12 @@ function Tile({ tile, metrics }: { tile: TileDef; metrics: DashboardMetrics }) {
         )}
       </span>
       <Sparkline values={metrics.series.map(tile.point)} />
-      <span className="flex justify-between gap-2 text-[11.5px] text-muted-foreground">
-        <span>{rangeText(metrics.start, metrics.end, metrics.window)}</span>
-        {detail !== undefined && <span>{detail}</span>}
+      {/* Each part keeps to one line; in a narrow tile the detail moves under the dates. */}
+      <span className="flex flex-wrap justify-between gap-x-2 text-[11.5px] text-muted-foreground">
+        <span className="whitespace-nowrap">
+          {rangeText(metrics.start, metrics.end, metrics.window)}
+        </span>
+        {detail !== undefined && <span className="whitespace-nowrap">{detail}</span>}
       </span>
     </li>
   )
