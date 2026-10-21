@@ -141,7 +141,7 @@ def test_the_graph_is_pinned() -> None:
 
 
 def test_the_numbers_titles_tracks_and_skippable_are_pinned(db: Db) -> None:
-    """The setup map numbers every step 1 to 11 and draws Gmail and LinkedIn as tracks."""
+    """The setup checklist numbers every step 1 to 11 and shows Gmail and LinkedIn as tracks."""
     rows = [
         (row.number, row.key.value, row.title, row.group, row.skippable)
         for row in db.states().values()
