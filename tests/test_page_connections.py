@@ -1194,6 +1194,19 @@ async def test_a_rescued_copy_the_flight_check_finds_not_whole_is_counted_not_re
     assert out.result.rescued_not_whole == 1 and out.urns == _visible(people, hide)
     assert "start 40 was read from the copy streamed" in caplog.text
     assert "nothing was lost; whole by flight check: no" in caplog.text
+    # #530: the line says which rule failed, by counts alone.
+    assert "; why: root missing 0, unclosed streams 0, unreached rows 1," in caplog.text
+    assert "unreferenced streams 0, dangling references 0, late chunks 0," in caplog.text
+    _assert_no_copy_text(caplog.text, people)
+
+
+def _assert_no_copy_text(text: str, people: Sequence[Person]) -> None:
+    """No name, slug or URN of anyone in the copy, and none of its row text, in ``text``."""
+    for person in people:
+        for secret in (person.first, person.last, person.slug, person.urn):
+            assert secret not in text, secret
+    for secret in ("stray", "ConnectionCard", "$L", "fff:"):
+        assert secret not in text, secret
 
 
 async def test_a_flight_check_that_raises_never_aborts_the_rescue(

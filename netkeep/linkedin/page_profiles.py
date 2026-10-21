@@ -140,7 +140,7 @@ from netkeep.linkedin.flagship_profile import (
     profile_slug,
     same_slug,
 )
-from netkeep.linkedin.flight import is_whole, parse_flight
+from netkeep.linkedin.flight import is_whole, parse_flight, why_not_whole
 from netkeep.linkedin.observe import (
     FAILURE_REDIRECT,
     FAILURE_UNREADABLE,
@@ -1037,7 +1037,11 @@ def _whole_copy(response: ObservedResponse, *, endpoint: str) -> bytes | None:
     except RouteChanged:
         whole = False
     if not whole:
-        log.info("enrichment: the streamed copy of a lost answer is not whole; not used")
+        # #530: which rule the copy broke, as counts in fixed words, never its content.
+        log.info(
+            "enrichment: the streamed copy of a lost answer is not whole; not used (why: %s)",
+            why_not_whole(streamed, endpoint=endpoint),
+        )
         return None
     return streamed
 

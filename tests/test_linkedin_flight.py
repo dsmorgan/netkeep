@@ -270,3 +270,64 @@ def test_the_root_row_and_the_markers_are_pinned() -> None:
     assert flight.ROOT_ROW == "0"
     for text in ("$undefined", "$Sreact.suspense", "$-0", "$NaN", "$Infinity", "$D2026", "$n12"):
         assert flight._ROW_MARKER.fullmatch(text) is None
+
+
+# --- #530: which rule a copy breaks, as counts only ---------------------------------------
+
+_SECRET = b"Quorbelle Fictionary fake-530-slug"
+
+
+@pytest.mark.parametrize(
+    ("body", "rule"),
+    [
+        (b'5:{"a":"' + _SECRET + b'"}\n', "root_missing"),
+        (b'0:{"x":"$R9"}\n9:R\n9:{"a":"' + _SECRET + b'"}\n', "unclosed_streams"),
+        (b'0:{"a":1}\nfff:{"stray":"' + _SECRET + b'"}\n', "unreached_rows"),
+        (b'0:{"a":1}\n5:R\n5:{"x":"' + _SECRET + b'"}\n5:C\n', "unreferenced_streams"),
+        (b'0:{"a":"$L5","b":"' + _SECRET + b'"}\n', "dangling_references"),
+        (
+            b'9:R\n9:{"a":1}\n9:C\n9:{"late":"' + _SECRET + b'"}\n0:{"x":"$R9"}\n',
+            "late_chunks",
+        ),
+        (b':R\n:{"a":"' + _SECRET + b'"}\n:C\n0:{"x":1}\n', "empty_id_streams"),
+    ],
+)
+def test_whole_check_names_the_rule_a_copy_breaks(body: bytes, rule: str) -> None:
+    """#530: each rule :func:`is_whole` holds a copy to is counted on its own, and the
+    count's words carry no row id, value or text of the copy."""
+    check = flight.whole_check(body, endpoint=E)
+    assert getattr(check, rule) == 1
+    counts = {name: getattr(check, name) for name in flight.WholeCheck.__slots__}
+    # A copy with no root reaches no row; an idless stream is one nothing can name.
+    also = {"root_missing": "unreached_rows", "empty_id_streams": "unreferenced_streams"}
+    assert {name for name, count in counts.items() if count} <= {rule, also.get(rule, rule)}
+    words = flight.why_not_whole(body, endpoint=E)
+    assert f"{rule.replace('_', ' ').replace('empty id', 'empty-id')} 1" in words
+    for secret in (*_SECRET.decode().split(), "fff", "$R9", "$L5", "stray"):
+        assert secret not in words, secret
+
+
+def test_whole_check_counts_every_break_not_just_the_first() -> None:
+    body = b'0:{"a":"$L5","b":"$L6"}\n7:{"x":1}\n8:{"y":2}\n'
+    check = flight.whole_check(body, endpoint=E)
+    assert (check.dangling_references, check.unreached_rows) == (2, 2)
+
+
+def test_whole_check_finds_nothing_in_a_whole_copy() -> None:
+    body = b'9:R\n9:{"chunk":"$L7"}\n9:C\n7:{"leaf":1}\n0:["$","div",null,{"c":"$R9"}]\n'
+    assert _whole(body)
+    assert flight.whole_check(body, endpoint=E) == flight.WholeCheck()
+
+
+def test_why_not_whole_names_an_unreadable_copy_by_type_only() -> None:
+    body = b'0:{"a":' + _SECRET + b"\n"
+    assert flight.why_not_whole(body, endpoint=E) == "not counted (RouteChanged)"
+
+
+def test_whole_check_leaves_parse_flight_strict() -> None:
+    """Counting the two stream rules is the report's alone: :func:`parse_flight`
+    still refuses a late chunk and an idless stream start."""
+    for body in (b'9:R\n9:C\n9:{"late":1}\n0:{"x":"$R9"}\n', b':R\n0:{"x":1}\n'):
+        flight.whole_check(body, endpoint=E)
+        with pytest.raises(RouteChanged):
+            parse_flight(body, endpoint=E)
