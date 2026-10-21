@@ -8980,6 +8980,7 @@ export interface components {
         };
         /** SetupStepOut */
         SetupStepOut: {
+            group: components["schemas"]["StepGroup"] | null;
             /** Key */
             key: string;
             /** Needs */
@@ -8988,10 +8989,14 @@ export interface components {
             needs_any: string[];
             /** Next */
             next: boolean;
+            /** Number */
+            number: number;
             /** Optional */
             optional: boolean;
             /** Reason */
             reason: string;
+            /** Skippable */
+            skippable: boolean;
             /** Skipped */
             skipped: boolean;
             state: components["schemas"]["StepState"];
@@ -9147,6 +9152,12 @@ export interface components {
          * @enum {string}
          */
         StepCondition: "always" | "no_reply";
+        /**
+         * StepGroup
+         * @description The two parallel tracks: a campaign reaches people by one or both.
+         * @enum {string}
+         */
+        StepGroup: "gmail" | "linkedin";
         /**
          * StepIn
          * @description One step. Left out, a field takes spec 11.2's default: the first step at once and
@@ -16984,6 +16995,13 @@ export interface operations {
             };
             /** @description No setup step has that key */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description That step can't be skipped now */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

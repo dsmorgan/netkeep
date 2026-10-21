@@ -1,4 +1,4 @@
-"""Where first-run setup stands: the ordered steps, their state and what gates them (#651, #667).
+"""Where first-run setup stands: the steps, their state and what gates them (#651, #667, #737).
 
 One answer to "where is this person in setup?", for the dashboard's Steps tab. Every
 state is read from what netkeep already stores or can see without a probe: the
@@ -22,12 +22,22 @@ enforces, or one the spec makes a person's rule:
 - Arming scheduled runs is a person's decision after a supervised run (P2-10, CP4), so
   it waits for the first sync.
 
+**Numbers and tracks.** Steps are numbered 1 to 11 in order, and a reason that names
+another step names it by number. Connect Gmail is the Gmail track; signing in to
+LinkedIn (4) and the steps after it (5 to 7) are the LinkedIn track.
+
 **Precedence.** ``done`` wins over everything: a step that is skipped and later done
-reads done. ``blocked`` comes next, so a skip never hides that a prerequisite is
-missing. Then ``skipped``, then ``in_progress`` or ``todo``. A skip is per user, in one
+reads done. Then a skipped LinkedIn track: while step 4 reads skipped, steps 5 to 7
+read skipped too ("Skipped with 4."), not blocked, so a Gmail-only setup can complete.
+``blocked`` comes next, so a skip never hides that a prerequisite is missing. Then
+``skipped``, then ``in_progress`` or ``todo``. A skip is per user, in one
 ``settings_kv`` row (:data:`SKIPPED_KEY`), and changes neither ``done`` nor ``blocked``:
 a dependent of a skipped step stays blocked. ``skipped`` on a step says whether the
 person skipped it, whatever its state, so the page can offer to un-skip.
+
+**Skip rules.** About you and Import contacts can't be skipped: everything after them
+uses them. Gmail and LinkedIn can't both be skipped: a campaign needs one of them. A
+stored skip of a step that can't be skipped (from before #737) is ignored.
 
 **Next.** Every step in progress is next, and so is the first step in order that is
 to do and not skipped: the step or steps to do now.
@@ -81,7 +91,7 @@ class StepState(enum.StrEnum):
 
 
 class StepKey(enum.StrEnum):
-    """The steps, in the order the page lists them."""
+    """The steps, in the order the page lists and numbers them."""
 
     ABOUT_YOU = "about_you"
     IMPORT = "import"
@@ -89,11 +99,18 @@ class StepKey(enum.StrEnum):
     CHROME = "chrome"
     FIRST_SYNC = "first_sync"
     FIRST_INBOX = "first_inbox"
+    ARM_SCHEDULE = "arm_schedule"
     TRIAGE = "triage"
     BUILD_LIST = "build_list"
     CAMPAIGN = "campaign"
-    ARM_SCHEDULE = "arm_schedule"
     LOGIN_ITEM = "login_item"
+
+
+class StepGroup(enum.StrEnum):
+    """The two parallel tracks: a campaign reaches people by one or both."""
+
+    GMAIL = "gmail"
+    LINKEDIN = "linkedin"
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,16 +122,36 @@ class StepDef:
     needs: tuple[StepKey, ...] = ()
     needs_any: tuple[StepKey, ...] = ()
     optional: bool = False
+    group: StepGroup | None = None
+    skippable: bool = True
 
 
-#: The graph. Each edge is justified in the module docstring.
+_LINKEDIN = StepGroup.LINKEDIN
+
+#: The graph, in order: a step's number is its place here. Each edge is justified in the
+#: module docstring.
 STEPS: Final[tuple[StepDef, ...]] = (
-    StepDef(StepKey.ABOUT_YOU, "About you", "/settings"),
-    StepDef(StepKey.IMPORT, "Import contacts", "/imports"),
-    StepDef(StepKey.GMAIL, "Connect Gmail", "/settings"),
-    StepDef(StepKey.CHROME, "Start netkeep's Chrome and sign in to LinkedIn", "/linkedin"),
-    StepDef(StepKey.FIRST_SYNC, "First LinkedIn sync", "/linkedin", needs=(StepKey.CHROME,)),
-    StepDef(StepKey.FIRST_INBOX, "First inbox read", "/linkedin", needs=(StepKey.CHROME,)),
+    StepDef(StepKey.ABOUT_YOU, "About you", "/settings", skippable=False),
+    StepDef(StepKey.IMPORT, "Import contacts", "/imports", skippable=False),
+    StepDef(StepKey.GMAIL, "Connect Gmail", "/settings", group=StepGroup.GMAIL),
+    StepDef(StepKey.CHROME, "Sign in to LinkedIn", "/linkedin", group=_LINKEDIN),
+    StepDef(
+        StepKey.FIRST_SYNC, "First sync", "/linkedin", needs=(StepKey.CHROME,), group=_LINKEDIN
+    ),
+    StepDef(
+        StepKey.FIRST_INBOX,
+        "First inbox read",
+        "/linkedin",
+        needs=(StepKey.CHROME,),
+        group=_LINKEDIN,
+    ),
+    StepDef(
+        StepKey.ARM_SCHEDULE,
+        "Schedule runs",
+        "/linkedin",
+        needs=(StepKey.FIRST_SYNC,),
+        group=_LINKEDIN,
+    ),
     StepDef(StepKey.TRIAGE, "Triage", "/triage", needs=(StepKey.IMPORT,)),
     StepDef(StepKey.BUILD_LIST, "Build a list", "/lists", needs=(StepKey.IMPORT,)),
     StepDef(
@@ -124,20 +161,29 @@ STEPS: Final[tuple[StepDef, ...]] = (
         needs=(StepKey.IMPORT,),
         needs_any=(StepKey.GMAIL, StepKey.CHROME),
     ),
-    StepDef(StepKey.ARM_SCHEDULE, "Arm scheduled runs", "/linkedin", needs=(StepKey.FIRST_SYNC,)),
-    StepDef(StepKey.LOGIN_ITEM, "Run at login", "/settings", optional=True),
+    StepDef(StepKey.LOGIN_ITEM, "Run at login (optional)", "/settings", optional=True),
 )
 
 _TITLES: Final = {step.key: step.title for step in STEPS}
+_NUMBERS: Final = {step.key: number for number, step in enumerate(STEPS, start=1)}
+_UNSKIPPABLE: Final = frozenset(step.key for step in STEPS if not step.skippable)
+#: A campaign needs one of these, so they can't both be skipped.
+_CHANNELS: Final = frozenset({StepKey.GMAIL, StepKey.CHROME})
+BOTH_CHANNELS_SKIPPED: Final = "A campaign needs Gmail or LinkedIn. Undo the other skip first."
 
 
 class UnknownStep(LookupError):
     """No setup step has that key."""
 
 
+class SkipRefused(ValueError):
+    """That step can't be skipped, or not while the other channel is skipped."""
+
+
 @dataclass(frozen=True, slots=True)
 class Step:
     key: StepKey
+    number: int
     title: str
     state: StepState
     reason: str
@@ -146,6 +192,8 @@ class Step:
     needs: tuple[StepKey, ...] = ()
     needs_any: tuple[StepKey, ...] = ()
     optional: bool = False
+    group: StepGroup | None = None
+    skippable: bool = True
     skipped: bool = False
     """The person skipped it, whatever ``state`` says."""
     next: bool = False
@@ -173,17 +221,27 @@ class _Raw:
 
 
 def skipped_keys(session: Session, user: User) -> frozenset[StepKey]:
-    """The steps ``user`` skipped. A stored key no step has any more is ignored."""
+    """The steps ``user`` skipped. A stored key no step has any more, or one for a step
+    that can't be skipped, is ignored."""
     stored = get_setting(session, user, SKIPPED_KEY)
     if not isinstance(stored, list):
         return frozenset()
-    known = {key.value: key for key in StepKey}
+    known = {key.value: key for key in StepKey if key not in _UNSKIPPABLE}
     return frozenset(known[value] for value in stored if isinstance(value, str) and value in known)
 
 
 def skip(session: Session, user: User, key: str) -> None:
-    """Mark step ``key`` skipped for ``user``. Needs a writer session."""
-    _store(session, user, skipped_keys(session, user) | {_key(key)})
+    """Mark step ``key`` skipped for ``user``. Needs a writer session.
+
+    Raises :class:`SkipRefused` for a step that can't be skipped, and for the second of
+    Gmail and LinkedIn."""
+    step = _key(key)
+    if step in _UNSKIPPABLE:
+        raise SkipRefused(f"{_TITLES[step]} can't be skipped: the steps after it need it.")
+    skipped = skipped_keys(session, user)
+    if step in _CHANNELS and (_CHANNELS - {step}) <= skipped:
+        raise SkipRefused(BOTH_CHANNELS_SKIPPED)
+    _store(session, user, skipped | {step})
 
 
 def unskip(session: Session, user: User, key: str) -> None:
@@ -207,13 +265,22 @@ def steps(session: Session, user: User, readings: Readings) -> list[Step]:
     raw = _raw_states(session, user, readings)
     skipped = skipped_keys(session, user)
     done = {key for key, value in raw.items() if value.state is StepState.DONE}
+    # Step 4 reads skipped: the steps after it on the LinkedIn track go with it.
+    linkedin_skipped = StepKey.CHROME in skipped and StepKey.CHROME not in done
     out: list[Step] = []
     for definition in STEPS:
         own = raw[definition.key]
         state, reason = own.state, own.reason
         if state is not StepState.DONE:
             missing = _missing(definition, done)
-            if missing:
+            if (
+                linkedin_skipped
+                and definition.group is StepGroup.LINKEDIN
+                and definition.key is not StepKey.CHROME
+            ):
+                state = StepState.SKIPPED
+                reason = f"Skipped with {_NUMBERS[StepKey.CHROME]}."
+            elif missing:
                 state = StepState.BLOCKED
                 reason = _waits_for(definition, missing)
             elif definition.key in skipped:
@@ -222,6 +289,7 @@ def steps(session: Session, user: User, readings: Readings) -> list[Step]:
         out.append(
             Step(
                 key=definition.key,
+                number=_NUMBERS[definition.key],
                 title=definition.title,
                 state=state,
                 reason=reason,
@@ -229,6 +297,8 @@ def steps(session: Session, user: User, readings: Readings) -> list[Step]:
                 needs=definition.needs,
                 needs_any=definition.needs_any,
                 optional=definition.optional,
+                group=definition.group,
+                skippable=definition.skippable,
                 skipped=definition.key in skipped,
             )
         )
@@ -236,8 +306,11 @@ def steps(session: Session, user: User, readings: Readings) -> list[Step]:
 
 
 def complete(rows: Sequence[Step]) -> bool:
-    """Every step that isn't optional is done or skipped."""
-    return all(row.optional or row.state is StepState.DONE or row.skipped for row in rows)
+    """Every step that isn't optional is done or skipped: by the person, or with step 4."""
+    return all(
+        row.optional or row.state in (StepState.DONE, StepState.SKIPPED) or row.skipped
+        for row in rows
+    )
 
 
 def _missing(definition: StepDef, done: set[StepKey]) -> tuple[StepKey, ...]:
@@ -249,14 +322,15 @@ def _missing(definition: StepDef, done: set[StepKey]) -> tuple[StepKey, ...]:
 
 
 def _waits_for(definition: StepDef, missing: Sequence[StepKey]) -> str:
-    all_of = [_TITLES[key] for key in missing if key in definition.needs]
-    any_of = [_TITLES[key] for key in missing if key not in definition.needs]
+    """By number: "Waits for 4.", "Waits for 3 or 4.", "Waits for 2, and 3 or 4."."""
+    all_of = [str(_NUMBERS[key]) for key in missing if key in definition.needs]
+    any_of = [str(_NUMBERS[key]) for key in missing if key not in definition.needs]
     parts = []
     if all_of:
         parts.append(" and ".join(all_of))
     if any_of:
-        parts.append("one of " + " or ".join(any_of))
-    return f"Waits for {' and '.join(parts)}."
+        parts.append(" or ".join(any_of))
+    return f"Waits for {', and '.join(parts)}."
 
 
 def _mark_next(rows: list[Step]) -> list[Step]:

@@ -1,9 +1,10 @@
-"""``/setup``: where first-run setup stands, for the dashboard's Steps tab (#651, #667).
+"""``/setup``: where first-run setup stands, for the dashboard's Steps tab (#651, #667, #737).
 
 - ``GET /setup`` answers the ordered steps, each with its state, what it waits for,
   a plain reason and the page that handles it.
 - ``POST /setup/steps/{key}/skip`` and ``DELETE /setup/steps/{key}/skip`` skip and
-  un-skip a step, per user. A skip changes neither ``done`` nor ``blocked``.
+  un-skip a step, per user. A skip changes neither ``done`` nor ``blocked``. Skipping
+  About you or Import contacts, or the second of Gmail and LinkedIn, answers 409.
 
 Every state is a read of netkeep's database, Chrome's profile lock file, and the login
 item's plist and ``launchctl print`` / ``print-disabled`` (read-only, the same status
@@ -32,10 +33,13 @@ router = APIRouter(prefix="/setup", tags=["setup"])
 Responses = dict[int | str, dict[str, Any]]
 OWNER_ONLY: Responses = {403: {"description": "Only the local owner account reads setup"}}
 NOT_FOUND: Responses = {404: {"description": "No setup step has that key"}}
+REFUSED: Responses = {409: {"description": "That step can't be skipped now"}}
 
 
 class SetupStepOut(BaseModel):
     key: str
+    number: int
+    """1 to 11, in order. A ``reason`` that names another step uses its number."""
     title: str
     state: service.StepState
     """``done``, ``in_progress``, ``todo``, ``blocked`` (a prerequisite isn't done) or
@@ -51,6 +55,10 @@ class SetupStepOut(BaseModel):
     target: str
     """The UI route that handles the step."""
     optional: bool
+    group: service.StepGroup | None
+    """``gmail`` or ``linkedin`` for a step on one of the two channel tracks, else null."""
+    skippable: bool
+    """False for About you and Import contacts, which the steps after them need."""
     skipped: bool
     """The person skipped it, whatever ``state`` says."""
 
@@ -93,6 +101,7 @@ def _out(request: Request, session: SessionDep, user: User) -> SetupOut:
         steps=[
             SetupStepOut(
                 key=step.key.value,
+                number=step.number,
                 title=step.title,
                 state=step.state,
                 next=step.next,
@@ -101,6 +110,8 @@ def _out(request: Request, session: SessionDep, user: User) -> SetupOut:
                 reason=step.reason,
                 target=step.target,
                 optional=step.optional,
+                group=step.group,
+                skippable=step.skippable,
                 skipped=step.skipped,
             )
             for step in steps
@@ -115,7 +126,9 @@ def get_setup(request: Request, session: SessionDep, owner: Owner) -> SetupOut:
 
 
 @router.post(
-    "/steps/{key}/skip", operation_id="skip_setup_step", responses={**OWNER_ONLY, **NOT_FOUND}
+    "/steps/{key}/skip",
+    operation_id="skip_setup_step",
+    responses={**OWNER_ONLY, **NOT_FOUND, **REFUSED},
 )
 def skip_setup_step(key: str, request: Request, session: SessionDep, owner: Owner) -> SetupOut:
     """Skip a step. It stays listed as a reminder; done and blocked still win."""
@@ -123,6 +136,8 @@ def skip_setup_step(key: str, request: Request, session: SessionDep, owner: Owne
         service.skip(session, owner, key)
     except service.UnknownStep as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except service.SkipRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _out(request, session, owner)
 
 

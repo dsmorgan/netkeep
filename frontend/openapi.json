@@ -13863,6 +13863,16 @@
       },
       "SetupStepOut": {
         "properties": {
+          "group": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepGroup"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "key": {
             "title": "Key",
             "type": "string"
@@ -13885,6 +13895,10 @@
             "title": "Next",
             "type": "boolean"
           },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
           "optional": {
             "title": "Optional",
             "type": "boolean"
@@ -13892,6 +13906,10 @@
           "reason": {
             "title": "Reason",
             "type": "string"
+          },
+          "skippable": {
+            "title": "Skippable",
+            "type": "boolean"
           },
           "skipped": {
             "title": "Skipped",
@@ -13911,6 +13929,7 @@
         },
         "required": [
           "key",
+          "number",
           "title",
           "state",
           "next",
@@ -13919,6 +13938,8 @@
           "reason",
           "target",
           "optional",
+          "group",
+          "skippable",
           "skipped"
         ],
         "title": "SetupStepOut",
@@ -14284,6 +14305,15 @@
           "no_reply"
         ],
         "title": "StepCondition",
+        "type": "string"
+      },
+      "StepGroup": {
+        "description": "The two parallel tracks: a campaign reaches people by one or both.",
+        "enum": [
+          "gmail",
+          "linkedin"
+        ],
+        "title": "StepGroup",
         "type": "string"
       },
       "StepIn": {
@@ -25391,6 +25421,9 @@
           },
           "404": {
             "description": "No setup step has that key"
+          },
+          "409": {
+            "description": "That step can't be skipped now"
           },
           "422": {
             "content": {
