@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils'
 import { ChangedJobsCard, CampaignsCard, ComingUpCard, RepliesCard } from './glance-cards'
 import { LiveRunCard } from './live-run-card'
 import { MetricTiles } from './metric-tiles'
-import { SetupMap } from './setup-map'
+import { SetupChecklist } from './setup-checklist'
 import { NEEDS_YOU_ID, needsYouCount, needsYouText, type Problem } from './status'
 import { ProblemList, StatusChips } from './status-chips'
 import { useDashboardStatus } from './use-dashboard-status'
@@ -55,7 +55,7 @@ function eyebrowText(now: Date): string {
 
 /**
  * The dashboard, one page (#739), top to bottom: a header saying how many things need
- * you, the status chips, the metric tiles and the setup map (#740), and
+ * you, the status chips, the metric tiles (#740), the setup checklist (#747), and
  * the detail: Needs you, Running now, Coming up, Campaigns and Changed jobs.
  *
  * The top bar holds the page's `<h1>`, "Dashboard", so the header here is the line
@@ -85,7 +85,7 @@ export function DashboardPage() {
 
       <MetricTiles />
 
-      <SetupMap />
+      <SetupChecklist />
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <NeedsYou problems={problems} inbox={attention.data?.counts.inbox ?? 0} />

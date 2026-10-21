@@ -6,27 +6,22 @@ You use one Chrome for netkeep: **netkeep's Chrome**, a Chrome with its own prof
 
 The UI is at <http://127.0.0.1:8000>. `netkeep setup` opens it for you the first time; otherwise, open it yourself in Chrome. The UI requires Chrome.
 
-## The setup map
+## The setup checklist
 
-The Dashboard shows your setup as a map under **Setup**, with a numbered box for each step:
+The Dashboard shows your setup as a checklist under **Set up netkeep**, with a row for each step, in four groups:
 
-1. About you
-2. Import contacts
-3. Connect Gmail
-4. Sign in to LinkedIn
-5. First sync
-6. First inbox read
-7. Schedule runs
-8. Triage
-9. Build a list
-10. Create a campaign
-11. Run at login (optional)
+- **Your account:** 1. About you, 2. Import contacts
+- **Connect at least one:** 3. Connect Gmail, and 4. Sign in to LinkedIn, 5. First sync, 6. First inbox read, 7. Schedule runs
+- **Start reaching out:** 8. Triage, 9. Build a list, 10. Create a campaign
+- **Optional:** 11. Run at login
 
-Steps 3 to 7 are two tracks, Gmail (3) and LinkedIn (4 to 7). Do one track or both: a campaign needs at least one. A green box is done, the tinted box is the one to do now, and a dimmed box is waiting for a step its arrow comes from; its line says which, by number ("Waits for 2."). Each box's button opens the page where you do that step, at the right section.
+Steps 3 to 7 are two tracks, Gmail (3) and LinkedIn (4 to 7), side by side. Do one track or both: a campaign needs at least one. The header counts every step that's done or skipped, the optional one too, and names the next step.
 
-**Skip** marks a step you don't plan to do, and **Undo skip** brings it back. You can't skip 1 or 2, because every later step uses them, and you can't skip both Gmail and LinkedIn; the map says why if you try. Skipping 4 also skips 5 to 7. Once every required step is done or skipped, the map folds to one line, **Setup is complete**, and **Show the steps** opens it again.
+Each row shows the step's number (a check once it's done, struck through if skipped), its title and a short line on where it stands. A waiting step's line says which step it waits for, by number ("Waits for 2."). Choose a row to open it: it says what the step does and has its buttons. **Start**, **Continue** or **Open** goes to the page where you do that step, at the right section; a waiting step's **Start** stays off until the step it waits for is done. The step to do next is open when you arrive. Choose a group's heading to fold or unfold it; a group whose steps are all done or skipped starts folded and says **✓ Done**.
 
-The guide's sections below follow the work in the order it takes you, which isn't quite the map's order: you request your LinkedIn export first because it takes a while to arrive.
+**Skip** marks a step you don't plan to do, and **Undo skip** brings it back. You can't skip 1 or 2, because every later step uses them, and you can't skip both Gmail and LinkedIn; the checklist says why if you try. Skipping 4 also skips 5 to 7. Once every required step is done or skipped, the checklist folds to one line, **Setup is complete**, and **Show the steps** opens it again.
+
+The guide's sections below follow the work in the order it takes you, which isn't quite the checklist's order: you request your LinkedIn export first because it takes a while to arrive.
 
 ## 1. Install
 

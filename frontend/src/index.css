@@ -397,6 +397,10 @@
   .nk-tint.nk-tray {
     --tint: var(--tray-mix);
   }
+  /* A tinted row inside a pane (the setup checklist's open row): the rim, no sheets beneath. */
+  .nk-tint.nk-flat {
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--tone) 35%, var(--border));
+  }
   /* A tinted pane's heading takes its state color, mixed toward the ink. */
   .nk-tint :is(h2, h3, [data-slot='card-title']) {
     color: color-mix(in oklab, var(--tone) 45%, var(--foreground));
@@ -453,23 +457,6 @@
     text-transform: uppercase;
     font-weight: 700;
     color: var(--muted-foreground);
-  }
-
-  /* The setup map's connector into the step to do now: an accent dash that moves along it. */
-  .nk-wire-next {
-    stroke-dasharray: 6 4;
-    animation: nk-flow 1.1s linear infinite;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .nk-wire-next {
-      animation: none;
-    }
-  }
-}
-
-@keyframes nk-flow {
-  to {
-    stroke-dashoffset: -10;
   }
 }
 

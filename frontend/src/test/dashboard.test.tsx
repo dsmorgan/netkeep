@@ -139,10 +139,10 @@ afterEach(() => {
 })
 
 describe('dashboard: one page (#739)', () => {
-  it('lays out the header, chips, metrics slot, setup map and details, in that order', async () => {
+  it('lays out the header, chips, metrics slot, setup checklist and details, in that order', async () => {
     serve()
     await renderApp('/')
-    await screen.findByRole('list', { name: 'Setup steps' })
+    await screen.findByTestId('setup-progress')
 
     const main = screen.getByRole('main')
     const regions = [...main.querySelectorAll('[data-region]')].map((node) =>
@@ -171,8 +171,8 @@ describe('dashboard: one page (#739)', () => {
     serve()
     await renderApp('/')
 
-    // Both of what were two tabs show at once: the setup map and the detail.
-    expect(await screen.findByRole('list', { name: 'Setup steps' })).toBeInTheDocument()
+    // Both of what were two tabs show at once: the setup checklist and the detail.
+    expect(await screen.findByTestId('setup-progress')).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Needs you' })).toBeInTheDocument()
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
     expect(screen.queryByRole('tab')).not.toBeInTheDocument()
@@ -377,7 +377,7 @@ describe('dashboard: Needs you', () => {
   it('starts nothing on its own: every request it makes is a read', async () => {
     const calls = serve()
     await renderApp('/')
-    await screen.findByRole('list', { name: 'Setup steps' })
+    await screen.findByTestId('setup-progress')
     await chips().findByRole('link', { name: 'Scheduled runs armed' })
     expect(calls.filter((call) => call.method !== 'GET')).toEqual([])
   })

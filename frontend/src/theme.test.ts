@@ -414,9 +414,9 @@ describe.each(CONTRAST_MODES)('the theme with %s', (_, __, choice, os) => {
     expect(worst(colorOf(tokens, 'ring'), surfaces)).toBeGreaterThanOrEqual(3)
   })
 
-  // The setup map's done box (#740): its number chip is a solid `bg-ok-ink` with
-  // `text-card`, on the page and inside the box's own ok tint, which darkens or lightens
-  // the ink.
+  // The setup checklist's done mark (#740, #747): a solid `bg-ok-ink` circle with a
+  // `text-card` check, on the page and inside an open done row's ok tint, which darkens
+  // or lightens the ink.
   it.each([
     ['on the page', tokens],
     ['inside an ok tint', withTint],

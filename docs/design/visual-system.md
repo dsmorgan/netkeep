@@ -31,7 +31,7 @@ The sidebar footer has an Auto, Light and Dark switch (#666). It's in the sideba
 ## Materials
 
 - **`nk-glass`** is a pane. `Card` has it by default, and so do the shell banners and the triage panes.
-- **`nk-tint nk-tone-<tone>`** tints a pane. Pass `tone` to `Card` (`accent`, `ok`, `warn` or `bad`), or call `toneClasses(tone)` from `components/ui/tone.ts` for a surface that is not a `Card`. `tray` lightens the tint for a list to read through, such as Waiting for you.
+- **`nk-tint nk-tone-<tone>`** tints a pane. Pass `tone` to `Card` (`accent`, `ok`, `warn` or `bad`), or call `toneClasses(tone)` from `components/ui/tone.ts` for a surface that is not a `Card`. `tray` lightens the tint for a list to read through, such as Waiting for you. Add `nk-flat` for a tinted row inside a pane, such as the setup checklist's open row: it keeps the rim and drops the two sheets, which would fall on the row below.
 - Inside a tint, the heading and the `-ink` colors (and `--destructive`, which aliases `--bad-ink` and so is restated there) mix 45% of the state color into the ink, muted text leans 45% toward the ink, and the `-soft` tints become inner glass. Use `bg-bad-soft` behind red text, never `bg-destructive/N`; a test enforces it.
 
 Tone only what needs the person: the live run (accent, amber while paused), the send tray, replies (ok), a stopped session or mailbox (bad).
