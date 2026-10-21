@@ -9,6 +9,7 @@
  * and again, with its fix, at the top of Needs you.
  */
 import type { Attention } from '@/features/attention/api'
+import { formatWhen } from '@/features/linkedin/fields'
 import type { BudgetStatus, Heat, LinkedInStatus, Run, Schedule } from '@/features/linkedin/types'
 import { runKindLabel } from '@/features/linkedin/types'
 import { reasonText, type Mailbox } from '@/features/mailboxes/api'
@@ -111,7 +112,10 @@ export function buildProblems(reads: StatusReads): Problem[] {
       to: '/linkedin',
       hash: 'heat',
       title: 'LinkedIn heat is over its threshold',
-      detail: 'Scheduled LinkedIn runs are skipped until it cools.',
+      detail:
+        heat.resumes_at === null
+          ? 'Scheduled LinkedIn runs are skipped until it cools.'
+          : `Scheduled LinkedIn runs are skipped until ${formatWhen(heat.resumes_at)}.`,
       cta: 'See heat',
     })
   }
