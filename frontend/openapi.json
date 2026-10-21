@@ -4882,6 +4882,75 @@
         "title": "CreatedInteractionOut",
         "type": "object"
       },
+      "DashboardMetricsOut": {
+        "description": "The dashboard's five numbers over a rolling window that ends today (#738).\n\nThe definitions are on ``GET /dashboard/metrics``.",
+        "properties": {
+          "bounced": {
+            "title": "Bounced",
+            "type": "integer"
+          },
+          "changed_jobs": {
+            "title": "Changed Jobs",
+            "type": "integer"
+          },
+          "end": {
+            "format": "date",
+            "title": "End",
+            "type": "string"
+          },
+          "new_contacts": {
+            "$ref": "#/components/schemas/NewContactsOut"
+          },
+          "replies": {
+            "title": "Replies",
+            "type": "integer"
+          },
+          "reply_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply Rate"
+          },
+          "sent": {
+            "title": "Sent",
+            "type": "integer"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/MetricsBucketOut"
+            },
+            "title": "Series",
+            "type": "array"
+          },
+          "start": {
+            "format": "date",
+            "title": "Start",
+            "type": "string"
+          },
+          "window": {
+            "$ref": "#/components/schemas/MetricsWindow"
+          }
+        },
+        "required": [
+          "window",
+          "start",
+          "end",
+          "sent",
+          "replies",
+          "reply_rate",
+          "bounced",
+          "changed_jobs",
+          "new_contacts",
+          "series"
+        ],
+        "title": "DashboardMetricsOut",
+        "type": "object"
+      },
       "DaySendsOut": {
         "properties": {
           "date": {
@@ -10697,6 +10766,56 @@
         "title": "MetSource",
         "type": "string"
       },
+      "MetricsBucketOut": {
+        "description": "One day (``7d``, ``30d``) or one month (``1y``) of the dashboard metrics.",
+        "properties": {
+          "bounced": {
+            "title": "Bounced",
+            "type": "integer"
+          },
+          "changed_jobs": {
+            "title": "Changed Jobs",
+            "type": "integer"
+          },
+          "new_contacts": {
+            "title": "New Contacts",
+            "type": "integer"
+          },
+          "replies": {
+            "title": "Replies",
+            "type": "integer"
+          },
+          "sent": {
+            "title": "Sent",
+            "type": "integer"
+          },
+          "start": {
+            "format": "date",
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "sent",
+          "replies",
+          "bounced",
+          "changed_jobs",
+          "new_contacts"
+        ],
+        "title": "MetricsBucketOut",
+        "type": "object"
+      },
+      "MetricsWindow": {
+        "description": "A metrics window: the last 7 or 30 local days, or the last 12 local months, each\nincluding today.",
+        "enum": [
+          "7d",
+          "30d",
+          "1y"
+        ],
+        "title": "MetricsWindow",
+        "type": "string"
+      },
       "MissingOut": {
         "properties": {
           "detail": {
@@ -11040,6 +11159,30 @@
           "value"
         ],
         "title": "Neq",
+        "type": "object"
+      },
+      "NewContactsOut": {
+        "description": "Contacts created in the window, by first source: ``linkedin`` is a LinkedIn\nsync; ``imported`` is everything else (an archive or CSV import, or by hand).",
+        "properties": {
+          "imported": {
+            "title": "Imported",
+            "type": "integer"
+          },
+          "linkedin": {
+            "title": "Linkedin",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "linkedin",
+          "imported"
+        ],
+        "title": "NewContactsOut",
         "type": "object"
       },
       "NextFireOut": {
@@ -21480,6 +21623,49 @@
           }
         },
         "summary": "Get Inbound",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/api/v1/dashboard/metrics": {
+      "get": {
+        "description": "Five numbers over a rolling window that ends today, with a series (#738).\n\n``window`` is ``7d`` or ``30d`` (the last 7 or 30 local days, including today, one\nbucket per day) or ``1y`` (the last 12 months, including this one, one bucket per\nmonth). Days and months are the user's configured time zone's. Nothing compares\nwith an earlier period.\n\n- ``sent``: outbound campaign messages, email and LinkedIn, that went out (status\n  ``sent`` or ``bounced``), by ``sent_at``. Test sends are not counted.\n- ``replies``: enrollments whose first response (``replied_at``: a reply either\n  poll found, an opt-out, or a response recorded from outside netkeep) falls in\n  the window. An enrollment counts once.\n- ``reply_rate``: ``replies / sent``, or null when nothing was sent. A reply can\n  answer a message sent before the window, so the rate can pass 1.\n- ``bounced``: outbound messages marked bounced, by ``bounced_at``.\n- ``changed_jobs``: contacts whose title or company a sync's profile visit saw\n  change in the window: the contacts the changed-jobs card lists (live, not\n  do-not-contact). Once each in the total and in each bucket it changed in.\n- ``new_contacts``: contacts created in the window, less merged-away duplicates.\n  ``linkedin`` were added by a LinkedIn sync; ``imported`` by an archive or CSV\n  import, or by hand.\n\nAnything dated after now is left out. Read-only.",
+        "operationId": "get_dashboard_metrics",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/MetricsWindow",
+              "default": "7d"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardMetricsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Metrics",
         "tags": [
           "dashboard"
         ]

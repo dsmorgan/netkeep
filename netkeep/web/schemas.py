@@ -62,6 +62,7 @@ from netkeep.models import (
 )
 from netkeep.models.imports import FILENAME_MAX_LENGTH, PRESET_NAME_MAX_LENGTH
 from netkeep.services.attention import ActivityState
+from netkeep.services.dashboard import MetricsWindow
 from netkeep.services.message_id_check import ArmNextStep, MessageIdWait
 from netkeep.services.tasks import TaskStatus
 
@@ -2692,6 +2693,44 @@ class InboundOut(BaseModel):
     count: int
     since: datetime
     reply_detection: bool
+
+
+class MetricsBucketOut(BaseModel):
+    """One day (``7d``, ``30d``) or one month (``1y``) of the dashboard metrics."""
+
+    start: date
+    """The bucket's first local day: the day itself, or the first of its month."""
+    sent: int
+    replies: int
+    bounced: int
+    changed_jobs: int
+    new_contacts: int
+
+
+class NewContactsOut(BaseModel):
+    """Contacts created in the window, by first source: ``linkedin`` is a LinkedIn
+    sync; ``imported`` is everything else (an archive or CSV import, or by hand)."""
+
+    total: int
+    linkedin: int
+    imported: int
+
+
+class DashboardMetricsOut(BaseModel):
+    """The dashboard's five numbers over a rolling window that ends today (#738).
+
+    The definitions are on ``GET /dashboard/metrics``."""
+
+    window: MetricsWindow
+    start: date
+    end: date
+    sent: int
+    replies: int
+    reply_rate: float | None
+    bounced: int
+    changed_jobs: int
+    new_contacts: NewContactsOut
+    series: list[MetricsBucketOut]
 
 
 class AttentionCountsOut(BaseModel):

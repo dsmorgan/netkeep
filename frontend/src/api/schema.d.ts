@@ -1617,6 +1617,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/dashboard/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Metrics
+         * @description Five numbers over a rolling window that ends today, with a series (#738).
+         *
+         *     ``window`` is ``7d`` or ``30d`` (the last 7 or 30 local days, including today, one
+         *     bucket per day) or ``1y`` (the last 12 months, including this one, one bucket per
+         *     month). Days and months are the user's configured time zone's. Nothing compares
+         *     with an earlier period.
+         *
+         *     - ``sent``: outbound campaign messages, email and LinkedIn, that went out (status
+         *       ``sent`` or ``bounced``), by ``sent_at``. Test sends are not counted.
+         *     - ``replies``: enrollments whose first response (``replied_at``: a reply either
+         *       poll found, an opt-out, or a response recorded from outside netkeep) falls in
+         *       the window. An enrollment counts once.
+         *     - ``reply_rate``: ``replies / sent``, or null when nothing was sent. A reply can
+         *       answer a message sent before the window, so the rate can pass 1.
+         *     - ``bounced``: outbound messages marked bounced, by ``bounced_at``.
+         *     - ``changed_jobs``: contacts whose title or company a sync's profile visit saw
+         *       change in the window: the contacts the changed-jobs card lists (live, not
+         *       do-not-contact). Once each in the total and in each bucket it changed in.
+         *     - ``new_contacts``: contacts created in the window, less merged-away duplicates.
+         *       ``linkedin`` were added by a LinkedIn sync; ``imported`` by an archive or CSV
+         *       import, or by hand.
+         *
+         *     Anything dated after now is left out. Read-only.
+         */
+        get: operations["get_dashboard_metrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/dashboard/next-fires": {
         parameters: {
             query?: never;
@@ -5776,6 +5818,38 @@ export interface components {
              */
             updated_at: string;
         };
+        /**
+         * DashboardMetricsOut
+         * @description The dashboard's five numbers over a rolling window that ends today (#738).
+         *
+         *     The definitions are on ``GET /dashboard/metrics``.
+         */
+        DashboardMetricsOut: {
+            /** Bounced */
+            bounced: number;
+            /** Changed Jobs */
+            changed_jobs: number;
+            /**
+             * End
+             * Format: date
+             */
+            end: string;
+            new_contacts: components["schemas"]["NewContactsOut"];
+            /** Replies */
+            replies: number;
+            /** Reply Rate */
+            reply_rate: number | null;
+            /** Sent */
+            sent: number;
+            /** Series */
+            series: components["schemas"]["MetricsBucketOut"][];
+            /**
+             * Start
+             * Format: date
+             */
+            start: string;
+            window: components["schemas"]["MetricsWindow"];
+        };
         /** DaySendsOut */
         DaySendsOut: {
             /**
@@ -7682,6 +7756,34 @@ export interface components {
          * @enum {string}
          */
         MetSource: "manual" | "automatic";
+        /**
+         * MetricsBucketOut
+         * @description One day (``7d``, ``30d``) or one month (``1y``) of the dashboard metrics.
+         */
+        MetricsBucketOut: {
+            /** Bounced */
+            bounced: number;
+            /** Changed Jobs */
+            changed_jobs: number;
+            /** New Contacts */
+            new_contacts: number;
+            /** Replies */
+            replies: number;
+            /** Sent */
+            sent: number;
+            /**
+             * Start
+             * Format: date
+             */
+            start: string;
+        };
+        /**
+         * MetricsWindow
+         * @description A metrics window: the last 7 or 30 local days, or the last 12 local months, each
+         *     including today.
+         * @enum {string}
+         */
+        MetricsWindow: "7d" | "30d" | "1y";
         /** MissingOut */
         MissingOut: {
             /** Detail */
@@ -7814,6 +7916,19 @@ export interface components {
             op: "neq";
             /** Value */
             value: string | number | boolean;
+        };
+        /**
+         * NewContactsOut
+         * @description Contacts created in the window, by first source: ``linkedin`` is a LinkedIn
+         *     sync; ``imported`` is everything else (an archive or CSV import, or by hand).
+         */
+        NewContactsOut: {
+            /** Imported */
+            imported: number;
+            /** Linkedin */
+            linkedin: number;
+            /** Total */
+            total: number;
         };
         /**
          * NextFireOut
@@ -13746,6 +13861,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InboundOut"];
+                };
+            };
+        };
+    };
+    get_dashboard_metrics: {
+        parameters: {
+            query?: {
+                window?: components["schemas"]["MetricsWindow"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardMetricsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
