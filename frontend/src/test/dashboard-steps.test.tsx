@@ -160,6 +160,54 @@ describe('the setup map', () => {
     )
   })
 
+  it('offers nothing on a step skipped with 4, and only Undo skip on a waiting step skipped', async () => {
+    serve(
+      setupBody(false, {
+        ...STATES,
+        chrome: { state: 'skipped', skipped: true, reason: 'Skipped. Start netkeep’s Chrome.' },
+        first_sync: { state: 'skipped', skipped: false, reason: 'Skipped with 4.' },
+        campaign: { state: 'blocked', skipped: true, reason: 'Waits for 3 or 4.' },
+      }),
+    )
+    await renderApp('/')
+    await screen.findByRole('list', { name: 'Setup steps' })
+
+    // Skipped with 4: it says so, and its skip is undone at 4, not here.
+    expect(pane('first_sync')).toHaveAttribute('data-look', 'skipped')
+    expect(within(box('first_sync')).getByText('Skipped')).toBeInTheDocument()
+    expect(within(box('first_sync')).getByText('Skipped with 4.')).toBeInTheDocument()
+    expect(within(box('first_sync')).queryByRole('button')).not.toBeInTheDocument()
+    expect(
+      within(box('chrome')).getByRole('button', { name: 'Undo skip of Sign in to LinkedIn' }),
+    ).toBeInTheDocument()
+
+    // Waiting and skipped: it still waits, and offers only to undo the skip.
+    expect(pane('campaign')).toHaveAttribute('data-look', 'waiting')
+    expect(within(box('campaign')).getByText('Waiting')).toBeInTheDocument()
+    expect(within(box('campaign')).getAllByRole('button')).toHaveLength(1)
+    expect(
+      within(box('campaign')).getByRole('button', { name: 'Undo skip of Create a campaign' }),
+    ).toBeInTheDocument()
+  })
+
+  it('keeps every box the same height: no state adds a border', async () => {
+    serve(setupBody(false))
+    await renderApp('/')
+    await screen.findByRole('list', { name: 'Setup steps' })
+    for (const key of ['about_you', 'import', 'gmail', 'first_sync', 'triage']) {
+      expect(pane(key)?.className).not.toMatch(/(^|\s)border(-\S+)?(\s|$)/)
+    }
+  })
+
+  it('shows step 11 without "(optional)", which its dashed border says, but still reads it', async () => {
+    serve(setupBody(false))
+    await renderApp('/')
+    await screen.findByRole('list', { name: 'Setup steps' })
+    const title = within(box('login_item')).getByRole('heading', { level: 3 })
+    expect(title).toHaveAccessibleName('Run at login (optional)')
+    expect(title.firstChild?.textContent).toBe('Run at login')
+  })
+
   it('says why the server refused a skip', async () => {
     const refusal = 'A campaign needs Gmail or LinkedIn. Undo the other skip first.'
     serve(setupBody(false), refusal)

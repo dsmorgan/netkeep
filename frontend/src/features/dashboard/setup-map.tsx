@@ -432,13 +432,15 @@ const BOX_CLASSES: Record<BoxLook, string> = {
   next: cn('nk-glass', toneClasses('accent')),
   todo: 'nk-glass',
   // No glass and no shadow, so the pane recedes; the text keeps the muted ink, which
-  // stays at 4.5:1 on the map's pane.
-  waiting: 'border border-border bg-transparent',
-  skipped: 'border border-border bg-transparent',
+  // stays at 4.5:1 on the map's pane. The rim is a ring, like the glass panes', not a
+  // border, so a box is the same height in every state and row 2's connectors run level.
+  waiting: 'bg-transparent ring-1 ring-border',
+  skipped: 'bg-transparent ring-1 ring-border',
 }
 
 const NUMBER_CLASSES: Record<BoxLook, string> = {
-  done: 'bg-ok text-card',
+  // `ok-ink`, not `ok`: card text on `ok` is 4.41:1 in light; `theme.test.ts` holds this pair.
+  done: 'bg-ok-ink text-card',
   next: 'bg-primary text-primary-foreground',
   todo: 'bg-muted text-muted-foreground',
   waiting: 'bg-muted text-muted-foreground',
@@ -451,6 +453,15 @@ const BADGE_CLASSES: Record<BoxLook, string> = {
   todo: 'bg-muted text-muted-foreground',
   waiting: 'bg-muted text-muted-foreground',
   skipped: 'bg-muted text-muted-foreground',
+}
+
+/**
+ * The title as the box shows it: "Run at login (optional)" loses its "(optional)", which
+ * a 140 px box would cut off and the dashed border already shows. A screen reader still
+ * hears it.
+ */
+function shownTitle(step: SetupStep): string {
+  return step.optional ? step.title.replace(/\s*\(optional\)$/i, '') : step.title
 }
 
 function StepBox({
@@ -502,7 +513,13 @@ function StepBox({
           look === 'skipped' && 'line-through',
         )}
       >
-        {step.title}
+        {shownTitle(step)}
+        {shownTitle(step) !== step.title && (
+          <>
+            {' '}
+            <span className="sr-only">(optional)</span>
+          </>
+        )}
       </h3>
       <p title={step.reason} className="truncate text-[11px] text-muted-foreground">
         {step.reason}

@@ -180,6 +180,25 @@ describe('routePoints', () => {
     ])
   })
 
+  it('turns a join at one x when its sources end at different edges', () => {
+    const nodes = rects()
+    // 5 is wider than 6, so its right edge (788) passes 6's (748).
+    nodes.first_sync = { ...nodes.first_sync, width: 180 }
+    const sync = routePoints(wire('first_sync', 'arm_schedule'), nodes, 978)
+    const inbox = routePoints(wire('first_inbox', 'arm_schedule'), nodes, 978)
+    // Halfway from the farther right edge (788) to 7's left edge (804), for both.
+    expect(sync.slice(-3)).toEqual([
+      [796, 190],
+      [796, 240],
+      [803, 240],
+    ])
+    expect(inbox.slice(-3)).toEqual([
+      [796, 290],
+      [796, 240],
+      [803, 240],
+    ])
+  })
+
   it('takes a fan-out’s stem to its nearest target when the targets don’t line up', () => {
     const nodes = rects()
     nodes.chrome = { ...nodes.chrome, left: 500 }
