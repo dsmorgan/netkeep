@@ -1,4 +1,5 @@
-"""``/setup`` (#651, #667): each step's state from stored data, the gating, skips, auth."""
+"""``/setup`` (#651, #667, #737): each step's state from stored data, the gating, skips,
+the numbers and tracks, auth."""
 
 from __future__ import annotations
 
@@ -113,28 +114,51 @@ def _finish_everything(session: Session, user: User) -> None:
 
 
 def test_the_graph_is_pinned() -> None:
-    graph = {
-        step.key.value: (
+    graph = [
+        (
+            step.key.value,
             [k.value for k in step.needs],
             [k.value for k in step.needs_any],
             step.optional,
         )
         for step in service.STEPS
-    }
-    assert graph == {
-        "about_you": ([], [], False),
-        "import": ([], [], False),
-        "gmail": ([], [], False),
-        "chrome": ([], [], False),
-        "first_sync": (["chrome"], [], False),
-        "first_inbox": (["chrome"], [], False),
-        "triage": (["import"], [], False),
-        "build_list": (["import"], [], False),
-        "campaign": (["import"], ["gmail", "chrome"], False),
-        "arm_schedule": (["first_sync"], [], False),
-        "login_item": ([], [], True),
-    }
+    ]
+    assert graph == [
+        ("about_you", [], [], False),
+        ("import", [], [], False),
+        ("gmail", [], [], False),
+        ("chrome", [], [], False),
+        ("first_sync", ["chrome"], [], False),
+        ("first_inbox", ["chrome"], [], False),
+        ("arm_schedule", ["first_sync"], [], False),
+        ("triage", ["import"], [], False),
+        ("build_list", ["import"], [], False),
+        ("campaign", ["import"], ["gmail", "chrome"], False),
+        ("login_item", [], [], True),
+    ]
+    assert [key.value for key in K] == [step[0] for step in graph]
     assert service.SKIPPED_KEY == "setup.skipped"
+
+
+def test_the_numbers_titles_tracks_and_skippable_are_pinned(db: Db) -> None:
+    """The setup map numbers every step 1 to 11 and draws Gmail and LinkedIn as tracks."""
+    rows = [
+        (row.number, row.key.value, row.title, row.group, row.skippable)
+        for row in db.states().values()
+    ]
+    assert rows == [
+        (1, "about_you", "About you", None, False),
+        (2, "import", "Import contacts", None, False),
+        (3, "gmail", "Connect Gmail", "gmail", True),
+        (4, "chrome", "Sign in to LinkedIn", "linkedin", True),
+        (5, "first_sync", "First sync", "linkedin", True),
+        (6, "first_inbox", "First inbox read", "linkedin", True),
+        (7, "arm_schedule", "Schedule runs", "linkedin", True),
+        (8, "triage", "Triage", None, True),
+        (9, "build_list", "Build a list", None, True),
+        (10, "campaign", "Create a campaign", None, True),
+        (11, "login_item", "Run at login (optional)", None, True),
+    ]
 
 
 def test_every_target_is_a_page() -> None:
@@ -168,13 +192,9 @@ def test_a_fresh_install(db: Db) -> None:
     }
     # Only the first step to do is next on a fresh install.
     assert [key for key, row in steps.items() if row.next] == [K.ABOUT_YOU]
-    assert steps[K.FIRST_SYNC].reason == (
-        "Waits for Start netkeep's Chrome and sign in to LinkedIn."
-    )
-    assert steps[K.CAMPAIGN].reason == (
-        "Waits for Import contacts and one of Connect Gmail or Start netkeep's Chrome"
-        " and sign in to LinkedIn."
-    )
+    assert steps[K.FIRST_SYNC].reason == "Waits for 4."
+    assert steps[K.ARM_SCHEDULE].reason == "Waits for 5."
+    assert steps[K.CAMPAIGN].reason == "Waits for 2, and 3 or 4."
     assert all(row.reason for row in steps.values())
     assert not service.complete(list(steps.values()))
 
@@ -357,7 +377,8 @@ def test_a_draft_campaign_is_in_progress(db: Db) -> None:
 def test_a_campaign_needs_one_channel_not_both(db: Db) -> None:
     with db.writer() as (session, user):
         factories.make_contact(session, user)
-    assert db.states()[K.CAMPAIGN].state is S.BLOCKED
+    campaign = db.states()[K.CAMPAIGN]
+    assert (campaign.state, campaign.reason) == (S.BLOCKED, "Waits for 3 or 4.")
     with db.writer() as (session, user):
         record_session_evidence(session, user, logged_in=True, source="preflight", now=NOW)
     assert db.states()[K.CAMPAIGN].state is S.TODO
@@ -428,10 +449,12 @@ def test_the_login_item_unsupported_or_unreadable(db: Db, tmp_path: Path) -> Non
 def test_next_skips_over_a_skipped_step(db: Db) -> None:
     """The first step that isn't done is skipped, so the next one to do is next."""
     with db.writer() as (session, user):
-        service.skip(session, user, "about_you")
+        update_self_contact(session, user, {"first_name": "Quorbelle"})
+        factories.make_contact(session, user)
+        service.skip(session, user, "gmail")
     steps = db.states()
-    assert (steps[K.ABOUT_YOU].state, steps[K.ABOUT_YOU].next) == (S.SKIPPED, False)
-    assert [key for key, row in steps.items() if row.next] == [K.IMPORT]
+    assert (steps[K.GMAIL].state, steps[K.GMAIL].next) == (S.SKIPPED, False)
+    assert [key for key, row in steps.items() if row.next] == [K.CHROME]
 
 
 # --- skips ---------------------------------------------------------------------------------
@@ -443,32 +466,131 @@ def test_a_skip_persists_and_changes_neither_done_nor_blocked(
     with db.writer() as (session, user):
         service.skip(session, user, "gmail")
         service.skip(session, user, "first_sync")
-        service.skip(session, user, "about_you")
-        update_self_contact(session, user, {"first_name": "Quorbelle"})
+        service.skip(session, user, "build_list")
+        create_list(session, user, "Old colleagues", ListKind.STATIC)
     steps = db.states()
     assert (steps[K.GMAIL].state, steps[K.GMAIL].skipped) == (S.SKIPPED, True)
     assert steps[K.GMAIL].reason.startswith("Skipped. ")
     assert (steps[K.FIRST_SYNC].state, steps[K.FIRST_SYNC].skipped) == (S.BLOCKED, True)
-    assert (steps[K.ABOUT_YOU].state, steps[K.ABOUT_YOU].skipped) == (S.DONE, True)
+    assert (steps[K.BUILD_LIST].state, steps[K.BUILD_LIST].skipped) == (S.DONE, True)
     # A skipped step is not next, and skipping Gmail doesn't satisfy a campaign's channel.
     assert not steps[K.GMAIL].next
     assert steps[K.CAMPAIGN].state is S.BLOCKED
     with db.writer() as (session, user):
         service.unskip(session, user, "gmail")
-        assert get_setting(session, user, "setup.skipped") == ["about_you", "first_sync"]
+        assert get_setting(session, user, "setup.skipped") == ["first_sync", "build_list"]
     assert db.states()[K.GMAIL].state is S.TODO
 
 
-def test_skipping_every_required_step_completes_setup(db: Db) -> None:
-    """Blocked steps count once skipped, so a person who skips everything reaches Overview;
-    the optional login item never holds it back."""
+def test_skipping_every_step_it_can_completes_setup(db: Db) -> None:
+    """Skipped steps count, so a person with contacts and a mailbox who skips the rest
+    reaches Overview; the optional login item never holds it back."""
     with db.writer() as (session, user):
+        update_self_contact(session, user, {"first_name": "Quorbelle"})
+        factories.make_contact(session, user)
+        make_mailbox(session, user)
         for definition in service.STEPS:
-            if not definition.optional:
+            if definition.skippable and definition.key not in (K.GMAIL, K.LOGIN_ITEM):
                 service.skip(session, user, definition.key.value)
+    steps = db.states()
+    assert service.complete(list(steps.values()))
+    assert {key for key, row in steps.items() if row.state is S.DONE} == {
+        K.ABOUT_YOU,
+        K.IMPORT,
+        K.GMAIL,
+    }
+    assert steps[K.LOGIN_ITEM].state is S.TODO
+
+
+@pytest.mark.parametrize("key", ["about_you", "import"])
+def test_about_you_and_import_cant_be_skipped(db: Db, key: str) -> None:
+    with db.writer() as (session, user):
+        with pytest.raises(service.SkipRefused, match="can't be skipped"):
+            service.skip(session, user, key)
+        assert get_setting(session, user, "setup.skipped") is None
+
+
+@pytest.mark.parametrize(("first", "second"), [("gmail", "chrome"), ("chrome", "gmail")])
+def test_gmail_and_linkedin_cant_both_be_skipped(db: Db, first: str, second: str) -> None:
+    with db.writer() as (session, user):
+        service.skip(session, user, first)
+        with pytest.raises(service.SkipRefused) as refused:
+            service.skip(session, user, second)
+        assert str(refused.value) == (
+            "A campaign needs Gmail or LinkedIn. Undo the other skip first."
+        )
+        assert get_setting(session, user, "setup.skipped") == [first]
+        # Skipping the same one again is fine; undoing it frees the other.
+        service.skip(session, user, first)
+        service.unskip(session, user, first)
+        service.skip(session, user, second)
+        assert get_setting(session, user, "setup.skipped") == [second]
+
+
+def test_skipping_linkedin_skips_its_track(db: Db) -> None:
+    """Steps 5 to 7 read skipped with 4, not blocked, and the rest of the graph is unchanged."""
+    with db.writer() as (session, user):
+        factories.make_contact(session, user)
+        service.skip(session, user, "chrome")
+    steps = db.states()
+    assert (steps[K.CHROME].state, steps[K.CHROME].skipped) == (S.SKIPPED, True)
+    for key in (K.FIRST_SYNC, K.FIRST_INBOX, K.ARM_SCHEDULE):
+        assert (steps[key].state, steps[key].reason) == (S.SKIPPED, "Skipped with 4.")
+        assert not steps[key].skipped
+        assert not steps[key].next
+    # A skip is not a channel: the campaign still waits for one of them done.
+    assert (steps[K.CAMPAIGN].state, steps[K.CAMPAIGN].reason) == (S.BLOCKED, "Waits for 3 or 4.")
+    with db.writer() as (session, user):
+        service.unskip(session, user, "chrome")
+    assert db.states()[K.FIRST_SYNC].state is S.BLOCKED
+
+
+def test_a_done_linkedin_step_wins_over_skipping_the_track(db: Db) -> None:
+    """A sync that ran reads done; once 4 itself is done, the skip no longer carries."""
+    with db.writer() as (session, user):
+        _run(session, user, SyncRunKind.INBOX, SyncRunStatus.COMPLETED)
+        service.skip(session, user, "chrome")
+    steps = db.states()
+    assert steps[K.FIRST_INBOX].state is S.DONE
+    # The inbox read is LinkedIn sign-in evidence, so 4 is done and 5 and 7 are not skipped.
+    assert steps[K.CHROME].state is S.DONE
+    assert steps[K.FIRST_SYNC].state is S.TODO
+    assert steps[K.ARM_SCHEDULE].state is S.BLOCKED
+
+
+def _finish_shared_steps(session: Session, user: User) -> None:
+    update_self_contact(session, user, {"first_name": "Quorbelle", "last_name": "Fictionary"})
+    factories.make_contact(session, user, met=ContactMet.MET)
+    create_list(session, user, "Old colleagues", ListKind.STATIC)
+    factories.make_campaign(session, user, status=CampaignStatus.ACTIVE)
+
+
+def test_a_gmail_only_setup_completes(db: Db) -> None:
+    with db.writer() as (session, user):
+        _finish_shared_steps(session, user)
+        make_mailbox(session, user)
+        service.skip(session, user, "chrome")
     rows = list(db.states().values())
     assert service.complete(rows)
-    assert {row.state for row in rows if not row.optional} == {S.SKIPPED, S.BLOCKED}
+    assert {row.key for row in rows if row.state is S.SKIPPED} == {
+        K.CHROME,
+        K.FIRST_SYNC,
+        K.FIRST_INBOX,
+        K.ARM_SCHEDULE,
+    }
+
+
+def test_a_linkedin_only_setup_completes(db: Db) -> None:
+    with db.writer() as (session, user):
+        _finish_shared_steps(session, user)
+        record_session_evidence(session, user, logged_in=True, source="preflight", now=NOW)
+        _run(session, user, SyncRunKind.CONNECTIONS_FULL, SyncRunStatus.COMPLETED)
+        _run(session, user, SyncRunKind.INBOX, SyncRunStatus.COMPLETED)
+        arm_scheduled_runs(session, user, now=NOW)
+        service.skip(session, user, "gmail")
+    rows = list(db.states().values())
+    assert service.complete(rows)
+    assert {row.key for row in rows if row.state is S.SKIPPED} == {K.GMAIL}
 
 
 def test_an_unknown_stored_key_is_ignored(db: Db) -> None:
@@ -477,6 +599,17 @@ def test_an_unknown_stored_key_is_ignored(db: Db) -> None:
         assert service.skipped_keys(session, user) == {K.GMAIL}
         with pytest.raises(service.UnknownStep):
             service.skip(session, user, "renamed_step")
+
+
+def test_a_stored_skip_of_a_step_that_cant_be_skipped_is_ignored(db: Db) -> None:
+    """Left over from before #737, when About you and Import could be skipped."""
+    with db.writer() as (session, user):
+        set_setting(session, user, "setup.skipped", ["about_you", "import", "gmail"])
+        assert service.skipped_keys(session, user) == {K.GMAIL}
+    steps = db.states()
+    assert (steps[K.ABOUT_YOU].state, steps[K.ABOUT_YOU].skipped) == (S.TODO, False)
+    assert (steps[K.IMPORT].state, steps[K.IMPORT].skipped) == (S.TODO, False)
+    assert not service.complete(list(steps.values()))
 
 
 # --- the endpoint --------------------------------------------------------------------------
@@ -498,6 +631,7 @@ async def test_get_setup(running_app: FastAPI, client: httpx.AsyncClient, tmp_pa
     first = steps[0]
     assert set(first) == {
         "key",
+        "number",
         "title",
         "state",
         "next",
@@ -506,12 +640,19 @@ async def test_get_setup(running_app: FastAPI, client: httpx.AsyncClient, tmp_pa
         "reason",
         "target",
         "optional",
+        "group",
+        "skippable",
         "skipped",
     }
+    assert [step["number"] for step in steps] == list(range(1, 12))
+    assert (first["group"], first["skippable"]) == (None, False)
     campaign = next(step for step in steps if step["key"] == "campaign")
     assert campaign["needs"] == ["import"]
     assert campaign["needs_any"] == ["gmail", "chrome"]
     assert campaign["state"] == "blocked"
+    assert campaign["reason"] == "Waits for 2, and 3 or 4."
+    chrome = next(step for step in steps if step["key"] == "chrome")
+    assert (chrome["number"], chrome["group"], chrome["skippable"]) == (4, "linkedin", True)
 
 
 async def test_skip_and_unskip_over_http(
@@ -529,6 +670,25 @@ async def test_skip_and_unskip_over_http(
     assert (item["state"], item["skipped"]) == ("todo", False)
     missing = await client.post(f"{URL}/steps/nothing_here/skip", headers=CSRF)
     assert missing.status_code == 404
+
+
+async def test_a_refused_skip_answers_409(
+    running_app: FastAPI, client: httpx.AsyncClient, tmp_path: Path
+) -> None:
+    _install_login_item(running_app, tmp_path)
+    refused = await client.post(f"{URL}/steps/import/skip", headers=CSRF)
+    assert refused.status_code == 409
+    assert (
+        refused.json()["detail"] == "Import contacts can't be skipped: the steps after it need it."
+    )
+    assert (await client.post(f"{URL}/steps/gmail/skip", headers=CSRF)).status_code == 200
+    second = await client.post(f"{URL}/steps/chrome/skip", headers=CSRF)
+    assert second.status_code == 409
+    assert second.json()["detail"] == (
+        "A campaign needs Gmail or LinkedIn. Undo the other skip first."
+    )
+    chrome = next(s for s in (await client.get(URL)).json()["steps"] if s["key"] == "chrome")
+    assert chrome["skipped"] is False
 
 
 async def test_a_skip_without_the_csrf_header_is_refused(
