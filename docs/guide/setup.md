@@ -6,9 +6,27 @@ You use one Chrome for netkeep: **netkeep's Chrome**, a Chrome with its own prof
 
 The UI is at <http://127.0.0.1:8000>. `netkeep setup` opens it for you the first time; otherwise, open it yourself in Chrome. The UI requires Chrome.
 
-## The Steps tab
+## The setup map
 
-The dashboard opens on **Steps** until setup is done: a diagram with a box for each step and an arrow from each step that has to come first. A green box is done, a highlighted box is the one to do now, and a faded box waits for the step its arrow comes from. Each box says in one line why, and links to the page where you do it. **Skip** marks a step you don't plan to do; it stays on the diagram, and **Un-skip** brings it back. Once every required step is done or skipped, the dashboard opens on **Overview**, and it remembers the tab you pick last.
+The Dashboard shows your setup as a map under **Setup**, with a numbered box for each step:
+
+1. About you
+2. Import contacts
+3. Connect Gmail
+4. Sign in to LinkedIn
+5. First sync
+6. First inbox read
+7. Schedule runs
+8. Triage
+9. Build a list
+10. Create a campaign
+11. Run at login (optional)
+
+Steps 3 to 7 are two tracks, Gmail (3) and LinkedIn (4 to 7). Do one track or both: a campaign needs at least one. A green box is done, the tinted box is the one to do now, and a dimmed box is waiting for a step its arrow comes from; its line says which, by number ("Waits for 2."). Each box's button opens the page where you do that step, at the right section.
+
+**Skip** marks a step you don't plan to do, and **Undo skip** brings it back. You can't skip 1 or 2, because every later step uses them, and you can't skip both Gmail and LinkedIn; the map says why if you try. Skipping 4 also skips 5 to 7. Once every required step is done or skipped, the map folds to one line, **Setup is complete**, and **Show the steps** opens it again.
+
+The guide's sections below follow the work in the order it takes you, which isn't quite the map's order: you request your LinkedIn export first because it takes a while to arrive.
 
 ## 1. Install
 

@@ -2,32 +2,38 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import type { Setup, SetupStep } from '@/features/dashboard/setup-api'
+import { WIRES } from '@/features/dashboard/setup-map-layout'
 import { GRAPH } from '@/features/dashboard/steps-fixtures'
 
 import { jsonResponse, mockFetch } from './fetch'
 import { renderApp } from './render'
 
+/** Partway through: 1 done, 2 in progress, Gmail skipped, LinkedIn next, the rest waiting. */
 const STATES: Record<string, Partial<SetupStep>> = {
   about_you: { state: 'done', reason: 'Your details are set for test sends.' },
   import: { state: 'in_progress', next: true, reason: '1 draft import waiting to be finished.' },
   gmail: { state: 'skipped', skipped: true, reason: 'Skipped. Set up your Google Cloud project.' },
   chrome: { state: 'todo', next: true, reason: 'Start netkeep’s Chrome.' },
-  first_sync: { state: 'blocked', reason: 'Waits for chrome.' },
+  first_sync: { state: 'blocked', reason: 'Waits for 4.' },
+  login_item: { state: 'todo', reason: 'Not turned on.' },
 }
 
 function setupBody(complete = false, states = STATES): Setup {
   return {
     complete,
-    steps: GRAPH.map((step) => ({
+    // Shuffled: the page orders the boxes by number, not by the answer's order.
+    steps: [...GRAPH].reverse().map((step) => ({
       ...step,
-      title: `Step ${step.key}`,
-      ...(states[step.key] ?? { state: 'blocked', reason: 'Waits for something.' }),
+      ...(states[step.key] ?? { state: 'blocked', reason: 'Waits for 2.' }),
     })),
   }
 }
 
-/** Serves `/setup` (and its skip), and 404s the dashboard's other reads, which these tests don't read. */
-function serve(setup: Setup | null) {
+/**
+ * Serves `/setup` and its skip, and 404s the dashboard's other reads, which these tests
+ * don't read. `refuse` answers a skip with that 409 sentence instead.
+ */
+function serve(setup: Setup | null, refuse?: string) {
   const calls: { method: string; path: string }[] = []
   mockFetch((request) => {
     const url = new URL(request.url)
@@ -37,6 +43,7 @@ function serve(setup: Setup | null) {
     if (url.pathname === '/api/v1/setup' && setup !== null) return jsonResponse(setup)
     const skip = /^\/api\/v1\/setup\/steps\/(\w+)\/skip$/.exec(url.pathname)
     if (skip !== null && setup !== null) {
+      if (refuse !== undefined) return jsonResponse({ detail: refuse }, 409)
       const skipped = request.method === 'POST'
       return jsonResponse({
         ...setup,
@@ -58,71 +65,141 @@ function box(key: string): HTMLElement {
   return item
 }
 
+const pane = (key: string) => box(key).querySelector('[data-look]')
+
 describe('the setup map', () => {
-  it('gives every box its state look, its reason and a link to its page', async () => {
+  it('lists the boxes in number order, each with its number, state, reason and link', async () => {
     serve(setupBody(false))
     await renderApp('/')
     const list = await screen.findByRole('list', { name: 'Setup steps' })
-    expect(within(list).getAllByRole('listitem')).toHaveLength(GRAPH.length)
+    const items = within(list).getAllByRole('listitem')
+    expect(items.map((item) => item.getAttribute('data-step'))).toEqual(
+      GRAPH.map((step) => step.key),
+    )
+    // Each box says its number to a screen reader, and its title is a heading.
+    expect(items[2]).toHaveTextContent(/^Step 3/)
+    expect(within(list).getAllByRole('heading', { level: 3 })).toHaveLength(GRAPH.length)
 
-    const look = (key: string) => box(key).querySelector('[data-slot="card"]')
-    expect(look('about_you')).toHaveAttribute('data-look', 'done')
-    expect(look('about_you')).toHaveAttribute('data-tone', 'ok')
-    expect(look('import')).toHaveAttribute('data-look', 'next')
-    expect(look('import')).toHaveAttribute('data-tone', 'accent')
-    expect(look('chrome')).toHaveAttribute('data-look', 'next')
-    expect(look('gmail')).toHaveAttribute('data-look', 'skipped')
-    expect(look('first_sync')).toHaveAttribute('data-look', 'waiting')
-    expect(look('first_sync')).not.toHaveAttribute('data-tone')
+    expect(pane('about_you')).toHaveAttribute('data-look', 'done')
+    expect(pane('about_you')).toHaveAttribute('data-tone', 'ok')
+    expect(pane('about_you')).toHaveClass('nk-tint', 'nk-tone-ok')
+    expect(pane('import')).toHaveAttribute('data-look', 'next')
+    expect(pane('import')).toHaveAttribute('data-tone', 'accent')
+    expect(pane('chrome')).toHaveAttribute('data-look', 'next')
+    expect(pane('gmail')).toHaveAttribute('data-look', 'skipped')
+    expect(pane('first_sync')).toHaveAttribute('data-look', 'waiting')
+    expect(pane('first_sync')).not.toHaveAttribute('data-tone')
+    // Only the optional step has a dashed border.
+    expect(pane('login_item')).toHaveAttribute('data-optional', 'true')
+    expect(pane('triage')).not.toHaveAttribute('data-optional')
 
     expect(within(box('import')).getByText('In progress')).toBeInTheDocument()
     expect(within(box('chrome')).getByText('Next')).toBeInTheDocument()
-    expect(within(box('first_sync')).getByText('Not ready')).toBeInTheDocument()
+    expect(within(box('first_sync')).getByText('Waiting')).toBeInTheDocument()
     expect(within(box('gmail')).getByText('Skipped')).toBeInTheDocument()
-    expect(
-      within(box('import')).getByText('1 draft import waiting to be finished.'),
-    ).toBeInTheDocument()
+    expect(within(box('first_sync')).getByText('Waits for 4.')).toBeInTheDocument()
 
-    // A box that waits says so once, in its reason, not again as a "Needs" line.
-    expect(within(box('first_sync')).queryByText(/^Needs/)).not.toBeInTheDocument()
+    // Each link opens its page at the step's section.
+    const link = (key: string) => within(box(key)).getByRole('link')
+    expect(link('about_you')).toHaveAccessibleName('Open About you')
+    expect(link('about_you')).toHaveAttribute('href', '/settings#about-you')
+    expect(link('import')).toHaveAccessibleName('Continue Import contacts')
+    expect(link('import')).toHaveAttribute('href', '/imports')
+    expect(link('chrome')).toHaveAccessibleName('Start Sign in to LinkedIn')
+    expect(link('chrome')).toHaveAttribute('href', '/linkedin#session')
+    expect(link('gmail')).toHaveAttribute('href', '/settings#gmail')
+    expect(link('first_sync')).toHaveAttribute('href', '/linkedin#connections')
+    expect(link('first_inbox')).toHaveAttribute('href', '/linkedin#inbox')
+    expect(link('arm_schedule')).toHaveAttribute('href', '/linkedin#schedule')
+    expect(link('triage')).toHaveAttribute('href', '/triage')
+    expect(link('build_list').getAttribute('href')).toMatch(/^\/lists/)
+    expect(link('campaign')).toHaveAttribute('href', '/campaigns')
+    expect(link('login_item')).toHaveAttribute('href', '/settings#login-item')
 
-    const href = (key: string) => within(box(key)).getByRole('link').getAttribute('href')
-    expect(href('import')).toBe('/imports')
-    expect(href('chrome')).toBe('/linkedin')
-    expect(href('triage')).toBe('/triage')
-    expect(href('build_list')).toBe('/lists')
-    expect(href('campaign')).toBe('/campaigns')
-    expect(href('about_you')).toBe('/settings')
+    expect(screen.getByTestId('setup-progress')).toHaveTextContent(
+      '2 of 10 required steps done or skipped · next: 2 Import contacts',
+    )
   })
 
-  it('reads in diagram order, prerequisites first, with the arrows hidden from screen readers', async () => {
+  it('draws the connectors in a hidden SVG, lit by state', async () => {
     serve(setupBody(false))
     await renderApp('/')
-    const list = await screen.findByRole('list', { name: 'Setup steps' })
-    const order = within(list)
-      .getAllByRole('listitem')
-      .map((item) => item.getAttribute('data-step'))
-    expect(order.indexOf('chrome')).toBeLessThan(order.indexOf('first_sync'))
-    expect(order.indexOf('first_sync')).toBeLessThan(order.indexOf('arm_schedule'))
-    expect(screen.getByTestId('steps-arrows')).toHaveAttribute('aria-hidden', 'true')
-    // Every box is a heading a screen reader can move to.
-    expect(within(list).getAllByRole('heading', { level: 3 })).toHaveLength(GRAPH.length)
+    await screen.findByRole('list', { name: 'Setup steps' })
+    const svg = screen.getByTestId('setup-wires')
+    expect(svg).toHaveAttribute('aria-hidden', 'true')
+    const wire = (name: string) => svg.querySelector(`[data-wire="${name}"]`)
+    expect(svg.querySelectorAll('path[data-wire]')).toHaveLength(WIRES.length)
+    expect(wire('start-about_you')).toHaveAttribute('data-look', 'done')
+    expect(wire('about_you-import')).toHaveAttribute('data-look', 'next')
+    expect(wire('about_you-import')).toHaveClass('nk-wire-next')
+    expect(wire('chrome-first_sync')).toHaveAttribute('data-look', 'base')
+    expect(wire('gmail-triage')?.getAttribute('d')).toMatch(/^M/)
+    // The groups and the end pills are drawing, not content.
+    expect(document.querySelector('[data-group="Gmail"]')).toHaveAttribute('aria-hidden', 'true')
+    expect(document.querySelector('[data-end="Ready"]')).toHaveAttribute('aria-hidden', 'true')
   })
 
-  it('skips and un-skips through the API, and offers no skip on a done step', async () => {
+  it('offers Skip and Undo skip only where the step can be skipped, through the API', async () => {
     const calls = serve(setupBody(false))
     await renderApp('/')
     await screen.findByRole('list', { name: 'Setup steps' })
+    // 1 and 2 can't be skipped, and a waiting step has nothing to skip yet.
     expect(within(box('about_you')).queryByRole('button')).not.toBeInTheDocument()
+    expect(within(box('import')).queryByRole('button')).not.toBeInTheDocument()
+    expect(within(box('first_sync')).queryByRole('button')).not.toBeInTheDocument()
 
-    fireEvent.click(within(box('chrome')).getByRole('button', { name: 'Skip Step chrome' }))
+    fireEvent.click(within(box('chrome')).getByRole('button', { name: 'Skip Sign in to LinkedIn' }))
     await waitFor(() => expect(within(box('chrome')).getByText('Skipped')).toBeInTheDocument())
     expect(calls).toContainEqual({ method: 'POST', path: '/api/v1/setup/steps/chrome/skip' })
 
-    fireEvent.click(within(box('gmail')).getByRole('button', { name: 'Un-skip Step gmail' }))
+    fireEvent.click(
+      within(box('gmail')).getByRole('button', { name: 'Undo skip of Connect Gmail' }),
+    )
     await waitFor(() =>
       expect(calls).toContainEqual({ method: 'DELETE', path: '/api/v1/setup/steps/gmail/skip' }),
     )
+  })
+
+  it('says why the server refused a skip', async () => {
+    const refusal = 'A campaign needs Gmail or LinkedIn. Undo the other skip first.'
+    serve(setupBody(false), refusal)
+    await renderApp('/')
+    await screen.findByRole('list', { name: 'Setup steps' })
+    fireEvent.click(within(box('chrome')).getByRole('button', { name: 'Skip Sign in to LinkedIn' }))
+    const region = screen.getByRole('region', { name: 'Setup' })
+    expect(await within(region).findByRole('alert')).toHaveTextContent(refusal)
+    expect(screen.queryByText(/failed \(409\)/)).not.toBeInTheDocument()
+  })
+
+  it('folds to one line once setup is complete, and shows the steps on request', async () => {
+    const done = Object.fromEntries(GRAPH.map((step) => [step.key, { state: 'done' as const }]))
+    serve(setupBody(true, done))
+    await renderApp('/')
+    const region = await screen.findByRole('region', { name: 'Setup is complete' })
+    expect(within(region).queryByRole('list', { name: 'Setup steps' })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('setup-wires')).not.toBeInTheDocument()
+
+    fireEvent.click(within(region).getByRole('button', { name: 'Show the steps' }))
+    expect(within(region).getByRole('list', { name: 'Setup steps' })).toBeInTheDocument()
+    expect(document.querySelector('[data-wire="login_item-ready"]')).toHaveAttribute(
+      'data-look',
+      'done',
+    )
+
+    fireEvent.click(within(region).getByRole('button', { name: 'Hide the steps' }))
+    expect(within(region).queryByRole('list', { name: 'Setup steps' })).not.toBeInTheDocument()
+  })
+
+  it('lists steps it has no place for without the map', async () => {
+    const setup = setupBody(false)
+    serve({
+      ...setup,
+      steps: [...setup.steps, { ...GRAPH[0]!, key: 'newer_step', number: 12, title: 'Newer' }],
+    })
+    await renderApp('/')
+    const list = await screen.findByRole('list', { name: 'Setup steps' })
+    expect(within(list).getAllByRole('listitem')).toHaveLength(GRAPH.length + 1)
+    expect(screen.queryByTestId('setup-wires')).not.toBeInTheDocument()
   })
 
   it('starts nothing: every request it makes is a read of setup or a skip', async () => {

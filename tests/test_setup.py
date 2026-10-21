@@ -534,6 +534,10 @@ def test_skipping_linkedin_skips_its_track(db: Db) -> None:
         service.skip(session, user, "chrome")
     steps = db.states()
     assert (steps[K.CHROME].state, steps[K.CHROME].skipped) == (S.SKIPPED, True)
+    # Step 4 keeps its own reason; only the steps after it read "Skipped with 4.".
+    assert steps[K.CHROME].reason == (
+        "Skipped. Start netkeep's Chrome from the LinkedIn page and sign in to LinkedIn there."
+    )
     for key in (K.FIRST_SYNC, K.FIRST_INBOX, K.ARM_SCHEDULE):
         assert (steps[key].state, steps[key].reason) == (S.SKIPPED, "Skipped with 4.")
         assert not steps[key].skipped
