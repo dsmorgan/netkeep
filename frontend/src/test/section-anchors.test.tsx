@@ -1,4 +1,4 @@
-import { act, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { GROUPS } from '@/features/settings/config-fields'
@@ -142,6 +142,63 @@ describe('section anchors (#739)', () => {
     const heading = await screen.findByRole('heading', { level: 2, name: 'LinkedIn budgets' })
     await waitFor(() => expect(heading).toHaveFocus())
     expect(scrolled).toContain(document.getElementById('linkedin-budget'))
+  })
+
+  it('scrolls and focuses again when you follow the link you are already on', async () => {
+    serve()
+    const { router } = await renderApp('/settings#gmail')
+    const heading = screen.getByRole('heading', { level: 2, name: 'Gmail' })
+    await waitFor(() => expect(heading).toHaveFocus())
+
+    heading.blur()
+    scrolled = []
+    await act(() => router.navigate({ to: '/settings', hash: 'gmail' }))
+    await waitFor(() => expect(heading).toHaveFocus())
+    expect(scrolled).toContain(document.getElementById('gmail'))
+  })
+
+  it('moves focus to Needs you on every click of the Problems chip', async () => {
+    serve({
+      '/api/v1/linkedin/heat': () =>
+        jsonResponse({
+          score: 6,
+          threshold: 5,
+          multiplier: 1,
+          tripped: true,
+          last_raised_at: null,
+          cleared_at: null,
+          resumes_at: null,
+        }),
+    })
+    await renderApp('/')
+    const chip = await screen.findByRole('link', { name: '1 problem' })
+    const heading = screen.getByRole('heading', { level: 2, name: 'Needs you' })
+
+    fireEvent.click(chip)
+    await waitFor(() => expect(heading).toHaveFocus())
+
+    // Scroll back up to the chips, and click the same chip again.
+    chip.focus()
+    scrolled = []
+    fireEvent.click(chip)
+    await waitFor(() => expect(heading).toHaveFocus())
+    expect(scrolled).toContain(document.getElementById('needs-you'))
+  })
+
+  it('stops waiting for a section when you leave its page', async () => {
+    serve()
+    const { router } = await renderApp('/settings#not-yet')
+    await act(() => router.navigate({ to: '/linkedin' }))
+
+    // The section turns up after you left: it must not pull focus or scroll.
+    const late = document.createElement('section')
+    late.id = 'not-yet'
+    late.innerHTML = '<h2>Not yet</h2>'
+    document.body.append(late)
+    await act(() => Promise.resolve())
+    expect(late.querySelector('h2')).not.toHaveFocus()
+    expect(scrolled).not.toContain(late)
+    late.remove()
   })
 
   it('leaves focus alone on a page link without a hash', async () => {

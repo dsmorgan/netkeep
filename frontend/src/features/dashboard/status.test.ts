@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { Attention } from '@/features/attention/api'
+import { formatWhen } from '@/features/linkedin/fields'
 import type { BudgetStatus, Heat, LinkedInStatus, Run, Schedule } from '@/features/linkedin/types'
 import { mailbox } from '@/features/mailboxes/test-support'
 
@@ -298,6 +299,16 @@ describe('buildProblems', () => {
     // The reason Google gave, in words.
     expect(problems[1]?.detail).toMatch(/revoked, or the consent screen is still in Testing/)
     expect(problems[3]?.detail).toBe('The send breaker tripped.')
+  })
+
+  it('says when tripped heat lets scheduled runs resume, when the heat read knows', () => {
+    const resumesAt = '2099-01-02T15:40:00Z'
+    const [problem] = buildProblems(reads({ heat: ok({ ...heat(true), resumes_at: resumesAt }) }))
+    expect(problem?.detail).toBe(
+      `Scheduled LinkedIn runs are skipped until ${formatWhen(resumesAt)}.`,
+    )
+    const [unknown] = buildProblems(reads({ heat: ok(heat(true)) }))
+    expect(unknown?.detail).toBe('Scheduled LinkedIn runs are skipped until it cools.')
   })
 
   it('says a logged-out session has its own fix', () => {
