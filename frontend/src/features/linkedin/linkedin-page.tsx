@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 
+import { SectionAnchor } from '@/components/layout/section-anchor'
+
 import { statusQuery } from './api'
 import { BrowserCard } from './browser-card'
 import { BudgetPanel, HeatPanel } from './budget-heat-panels'
@@ -22,6 +24,10 @@ function message(error: unknown): string {
  * instructions, preflight results, runs with live progress and stop, budget
  * and heat, pins, and the session banner. Everything on it updates over the
  * app's one shared SSE connection (`useRunEvents`) — no reload, no poll.
+ *
+ * Each card has an anchor a link can name (#739): `session` (the browser and its
+ * session), `connections` (start a run, a connections sync among them), `inbox`,
+ * `schedule`, `runs`, `budget`, `heat` and `pins`.
  */
 export function LinkedInPage() {
   const status = useQuery(statusQuery)
@@ -53,24 +59,34 @@ export function LinkedInPage() {
       {status.isSuccess && <SessionBanner status={status.data} />}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <ScheduleCard />
-        <BrowserCard />
+        <SectionAnchor id="schedule">
+          <ScheduleCard />
+        </SectionAnchor>
+        <SectionAnchor id="session">
+          <BrowserCard />
+        </SectionAnchor>
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <BudgetPanel />
-        <HeatPanel />
+        <SectionAnchor id="budget">
+          <BudgetPanel />
+        </SectionAnchor>
+        <SectionAnchor id="heat">
+          <HeatPanel />
+        </SectionAnchor>
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <div className="flex flex-col gap-4">
-          <RunsPanel
-            selectedRunId={selectedRunId}
-            onSelect={(runId) => {
-              scrollToDetail.current = true
-              setSelectedRunId(runId)
-            }}
-          />
+          <SectionAnchor id="runs">
+            <RunsPanel
+              selectedRunId={selectedRunId}
+              onSelect={(runId) => {
+                scrollToDetail.current = true
+                setSelectedRunId(runId)
+              }}
+            />
+          </SectionAnchor>
           {selectedRunId !== null && (
             <div ref={detail}>
               <RunDetail runId={selectedRunId} onResumed={setSelectedRunId} />
@@ -78,9 +94,15 @@ export function LinkedInPage() {
           )}
         </div>
         <div className="flex flex-col gap-4">
-          <StartRunCard onStarted={setSelectedRunId} />
-          <InboxCheckCard onStarted={setSelectedRunId} />
-          <PinsPanel />
+          <SectionAnchor id="connections">
+            <StartRunCard onStarted={setSelectedRunId} />
+          </SectionAnchor>
+          <SectionAnchor id="inbox">
+            <InboxCheckCard onStarted={setSelectedRunId} />
+          </SectionAnchor>
+          <SectionAnchor id="pins">
+            <PinsPanel />
+          </SectionAnchor>
         </div>
       </div>
     </div>

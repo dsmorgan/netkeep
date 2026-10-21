@@ -14,35 +14,47 @@ export type Draft = string | boolean | [string, string]
 const CLOCK = /^([01][0-9]|2[0-3]):[0-5][0-9]$/
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 
-export const GROUPS: { id: ConfigField['group']; title: string; description: string }[] = [
+/** The config cards, in page order. `anchor` is the card's id, for links like `/settings#linkedin-budget`. */
+export const GROUPS: {
+  id: ConfigField['group']
+  anchor: string
+  title: string
+  description: string
+}[] = [
   {
     id: 'linkedin_budgets',
+    anchor: 'linkedin-budget',
     title: 'LinkedIn budgets',
     description:
       'How much netkeep may do on LinkedIn each day. Each budget has a hard maximum this page never goes past.',
   },
   {
     id: 'linkedin_hours',
+    anchor: 'linkedin-hours',
     title: 'LinkedIn active hours',
     description: 'When netkeep may use LinkedIn, and how much less it does on weekends.',
   },
   {
     id: 'linkedin_runs',
+    anchor: 'linkedin-runs',
     title: 'LinkedIn runs',
     description: 'How syncs and enrichment treat your contacts, and where netkeep finds Chrome.',
   },
   {
     id: 'campaigns',
+    anchor: 'campaign-defaults',
     title: 'Campaign defaults',
     description: 'Caps and spacing for campaign email, and what new campaigns start with.',
   },
   {
     id: 'backup',
+    anchor: 'backup-schedule',
     title: 'Backups',
     description: 'Whether netkeep serve backs up the database each night, and how many to keep.',
   },
   {
     id: 'logs',
+    anchor: 'logs',
     title: 'Logs',
     description:
       'netkeep serve and every command write one log file, which starts over at a set size and keeps a few old files.',

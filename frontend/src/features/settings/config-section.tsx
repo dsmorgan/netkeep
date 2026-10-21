@@ -53,7 +53,7 @@ export function ConfigSections() {
         const fields = current.data.fields.filter((f) => f.group === group.id)
         if (fields.length === 0) return null
         return (
-          <Card size="sm" key={group.id}>
+          <Card size="sm" key={group.id} id={group.anchor} className="scroll-mt-4">
             <CardHeader>
               <h2 className="font-heading text-sm leading-snug font-bold">{group.title}</h2>
               <CardDescription>

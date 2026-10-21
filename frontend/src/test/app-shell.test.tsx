@@ -8,15 +8,21 @@ const EXPECTED_HREFS = [
   '/contacts',
   '/triage',
   '/lists',
-  '/imports',
-  '/exports',
+  '/campaigns',
+  '/templates',
+  '/inbox',
   '/linkedin',
   '/gmail',
-  '/templates',
-  '/campaigns',
-  '/inbox',
+  '/imports',
+  '/exports',
   '/settings',
 ]
+
+/** A group's name, from the element its `aria-labelledby` points at. */
+function groupName(group: HTMLElement): string {
+  const id = group.getAttribute('aria-labelledby') ?? ''
+  return document.getElementById(id)?.textContent ?? ''
+}
 
 describe('app shell', () => {
   it('renders the twelve navigation links from spec 14.3, in order', async () => {
@@ -27,6 +33,27 @@ describe('app shell', () => {
 
     expect(links).toHaveLength(12)
     expect(links.map((link) => link.getAttribute('href'))).toEqual(EXPECTED_HREFS)
+  })
+
+  it('groups the links under People, Outreach, Sources and System, the Dashboard alone (#739)', async () => {
+    await renderApp('/')
+
+    const nav = screen.getByRole('navigation', { name: 'Primary' })
+    const groups = within(nav).getAllByRole('group')
+    const hrefs = (group: HTMLElement) =>
+      within(group)
+        .getAllByRole('link')
+        .map((link) => link.getAttribute('href'))
+
+    expect(groups.map((group) => [groupName(group), hrefs(group)])).toEqual([
+      ['People', ['/contacts', '/triage', '/lists']],
+      ['Outreach', ['/campaigns', '/templates', '/inbox']],
+      ['Sources', ['/linkedin', '/gmail', '/imports', '/exports']],
+      ['System', ['/settings']],
+    ])
+    // The Dashboard sits above the groups, in none of them.
+    const dashboard = within(nav).getByRole('link', { name: 'Dashboard' })
+    expect(groups.some((group) => group.contains(dashboard))).toBe(false)
   })
 
   it('has the theme switch in the sidebar, Auto by default (#666)', async () => {

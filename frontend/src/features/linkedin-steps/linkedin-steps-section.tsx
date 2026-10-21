@@ -24,7 +24,7 @@
  */
 import { Link } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, type ComponentProps } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -98,15 +98,34 @@ import {
 import { FirstPollNote } from './first-poll-note'
 import { usePrefillRun, useRunGoing, type PrefillRun } from './use-prefill-run'
 
-/** The queue and the waiting list together: one campaign's when `campaignId` is given. */
-export function LinkedInStepsSection({ campaignId }: { campaignId?: number }) {
+/** A card's heading level: 3 under a region with a heading of its own, such as Needs you. */
+type Level = 2 | 3
+
+/**
+ * The queue and the waiting list together: one campaign's when `campaignId` is given.
+ * `level` is the cards' heading level (2 on a page of cards, 3 inside the dashboard's
+ * Needs you), and the queue's own subheading goes one below it.
+ */
+export function LinkedInStepsSection({
+  campaignId,
+  level = 2,
+}: {
+  campaignId?: number
+  level?: Level
+}) {
   const run = usePrefillRun()
   return (
     <>
-      <LinkedInQueueCard campaignId={campaignId} run={run} />
-      <WaitingForYouCard campaignId={campaignId} />
+      <LinkedInQueueCard campaignId={campaignId} run={run} level={level} />
+      <WaitingForYouCard campaignId={campaignId} level={level} />
     </>
   )
+}
+
+/** A heading one level below its card's title. */
+function Subheading({ level, ...props }: ComponentProps<'h3'> & { level: Level }) {
+  const Heading = level === 2 ? 'h3' : 'h4'
+  return <Heading {...props} />
 }
 
 function useInvalidateSteps() {
@@ -184,7 +203,15 @@ function AutoSendBadge() {
   )
 }
 
-export function LinkedInQueueCard({ campaignId, run }: { campaignId?: number; run: PrefillRun }) {
+export function LinkedInQueueCard({
+  campaignId,
+  run,
+  level = 2,
+}: {
+  campaignId?: number
+  run: PrefillRun
+  level?: Level
+}) {
   const ready = useQuery(readyQuery(campaignId ?? null))
   const options = useQuery(stepOptionsQuery)
   const autoSendOn = options.data?.auto_send === true
@@ -226,7 +253,7 @@ export function LinkedInQueueCard({ campaignId, run }: { campaignId?: number; ru
   return (
     <Card>
       <CardHeader>
-        <CardTitle level={2}>LinkedIn queue</CardTitle>
+        <CardTitle level={level}>LinkedIn queue</CardTitle>
         <CardDescription>
           Due LinkedIn steps. Each row says whether it waits for you to prefill it or sends on its
           own. When you prefill one, watch Chrome, and then click Send yourself.
@@ -267,7 +294,9 @@ export function LinkedInQueueCard({ campaignId, run }: { campaignId?: number; ru
 
         {retries.length > 0 && (
           <section aria-label="Try again" className="flex flex-col gap-1">
-            <h3 className="font-medium">Typed nothing last time</h3>
+            <Subheading level={level} className="font-medium">
+              Typed nothing last time
+            </Subheading>
             <p className="text-muted-foreground">{TRY_AGAIN_NOTE}</p>
             <ul aria-label="Try again" className="flex flex-col">
               {retries.map((item) => (
@@ -643,7 +672,13 @@ const STATE_TEXT: Record<WaitingState, string> = {
   partly_typed: PARTLY_TYPED,
 }
 
-export function WaitingForYouCard({ campaignId }: { campaignId?: number }) {
+export function WaitingForYouCard({
+  campaignId,
+  level = 2,
+}: {
+  campaignId?: number
+  level?: Level
+}) {
   const waiting = useQuery(waitingQuery(campaignId ?? null))
   const now = new Date(useNow(30_000))
   const items = waiting.data?.items ?? []
@@ -651,7 +686,7 @@ export function WaitingForYouCard({ campaignId }: { campaignId?: number }) {
     // The send tray: tinted while messages wait for you to send them.
     <Card tone={items.length > 0 ? 'accent' : undefined} tray>
       <CardHeader>
-        <CardTitle level={2}>Waiting for you</CardTitle>
+        <CardTitle level={level}>Waiting for you</CardTitle>
         <CardDescription>
           LinkedIn messages typed in Chrome for you to send, or to discard.
         </CardDescription>
