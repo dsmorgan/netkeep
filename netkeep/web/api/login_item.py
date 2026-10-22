@@ -38,8 +38,8 @@ class LauncherOut(BaseModel):
 
     supported: bool
     state: str
-    """One of "Not built", "Built", "Points at a different netkeep" or "Another app is in
-    the way"."""
+    """One of "Not built", "Built", "Points at a different netkeep", "Another app is in
+    the way", or "Couldn't check: <why>" when ``~/Applications`` can't be read."""
     exists: bool
     """This data directory's launcher is there (an app that isn't netkeep's doesn't count)."""
     path: str

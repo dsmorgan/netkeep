@@ -260,6 +260,87 @@ def test_a_plist_without_those_settings_exports_none(
     assert "NETKEEP_KEYCHAIN_SERVICE" not in text and "NETKEEP_CONFIG" not in text
 
 
+def _write_agent_plist(item: LoginItem, environment: dict[str, object]) -> None:
+    """The login item's plist, by hand, with these ``EnvironmentVariables``."""
+    item.plist_path.parent.mkdir(parents=True, exist_ok=True)
+    item.plist_path.write_bytes(
+        plistlib.dumps(
+            {
+                "Label": item.label,
+                "ProgramArguments": [str(item.executable), "serve"],
+                "EnvironmentVariables": environment,
+            }
+        )
+    )
+
+
+def _exports(script: str) -> list[str]:
+    return [line for line in script.splitlines() if line.startswith("export ")]
+
+
+def test_only_the_two_named_settings_come_from_the_plist(
+    box: Box, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Whatever else the plist carries, the script exports its own data directory, the
+    fixed stderr level, and only the plist's Keychain service and config."""
+    for name in (keychain.SERVICE_ENV, paths.CONFIG_ENV):
+        monkeypatch.delenv(name, raising=False)
+    item = make_item(FakeLaunchctl(), tmp_path, box.data)
+    config = tmp_path / "plist-conf" / "config.toml"
+    _write_agent_plist(
+        item,
+        {
+            keychain.SERVICE_ENV: "from-plist",
+            paths.CONFIG_ENV: str(config),
+            "PATH": "/tmp/evil-bin:/usr/bin",
+            "DYLD_INSERT_LIBRARIES": "/tmp/evil.dylib",
+            paths.DATA_ENV: str(tmp_path / "another-data"),
+            "NETKEEP_LOG_STDERR_LEVEL": "DEBUG",
+        },
+    )
+    script = Launcher.for_login_item(item, applications_dir=box.applications).render_script()
+    assert _exports(script) == [
+        f"export NETKEEP_DATA='{box.data.resolve()}'",
+        "export NETKEEP_LOG_STDERR_LEVEL=WARNING",
+        "export NETKEEP_KEYCHAIN_SERVICE='from-plist'",
+        f"export NETKEEP_CONFIG='{config.resolve()}'",
+    ]
+    for leaked in ("evil", "DYLD", "PATH=", "another-data", "DEBUG"):
+        assert leaked not in script
+
+
+def test_a_non_string_plist_value_is_dropped_and_the_script_still_builds(
+    box: Box, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name in (keychain.SERVICE_ENV, paths.CONFIG_ENV):
+        monkeypatch.delenv(name, raising=False)
+    item = make_item(FakeLaunchctl(), tmp_path, box.data)
+    _write_agent_plist(item, {keychain.SERVICE_ENV: "from-plist", paths.CONFIG_ENV: 42})
+    assert item.plist_environment() == {keychain.SERVICE_ENV: "from-plist"}
+    launcher = Launcher.for_login_item(item, applications_dir=box.applications)
+    assert _exports(launcher.render_script())[2:] == [
+        "export NETKEEP_KEYCHAIN_SERVICE='from-plist'"
+    ]
+
+
+def test_a_malformed_plist_counts_as_none_and_the_launcher_still_builds(
+    box: Box, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cut-short XML plist raises expat's error, not plistlib's: it reads as no plist,
+    so the builder's environment is used, and nothing raises on the way."""
+    monkeypatch.setenv(keychain.SERVICE_ENV, "from-shell")
+    item = make_item(FakeLaunchctl(), tmp_path, box.data)
+    item.plist_path.parent.mkdir(parents=True, exist_ok=True)
+    item.plist_path.write_text('<?xml version="1.0"?>\n<plist version="1.0"><dict><key>Label')
+    assert item.plist_environment() is None
+    launcher = Launcher.for_login_item(item, applications_dir=box.applications)
+    assert "export NETKEEP_KEYCHAIN_SERVICE='from-shell'" in _exports(launcher.render_script())
+    assert launcher_app.refresh(launcher, build=True) == (
+        f"Built {launcher.path}: it opens netkeep with {item.executable}."
+    )
+    assert item.status().installed  # status reads the same file without raising
+
+
 def test_a_rebuild_replaces_the_bundle_whole(box: Box) -> None:
     launcher = box.launcher()
     launcher.build()
