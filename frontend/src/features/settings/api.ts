@@ -275,6 +275,14 @@ export async function repairLoginItem(): Promise<LoginItem> {
   return data
 }
 
+/** Build or rebuild the launcher app in ~/Applications (#754), replacing this data
+ * directory's old one whole. */
+export async function buildLauncherApp(): Promise<LoginItem> {
+  const { data, error, response } = await api.POST('/api/v1/login-item/launcher')
+  if (data === undefined) throw failure(error, response, 'POST /login-item/launcher')
+  return data
+}
+
 export type SupportLevels = components['schemas']['SupportLevelsOut']
 export type SupportLevel = components['schemas']['SupportLevelOut']
 export type SupportLevelName = SupportLevel['level']

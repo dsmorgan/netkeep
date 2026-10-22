@@ -127,6 +127,7 @@ def test_the_read_only_routes_are_the_ones_that_only_read() -> None:
         "inspect_import_file",  # parses a CSV and stores nothing (#627)
         "set_login_item",  # writes a launchd plist, never a row
         "repair_login_item",  # rewrites a launchd plist, never a row
+        "build_launcher_app",  # writes the launcher app in ~/Applications, never a row
     }
 
 

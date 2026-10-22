@@ -24,15 +24,36 @@ const OFF: LoginItem = {
   log_path: '/data/logs/netkeep.log',
   points_elsewhere: null,
   legacy: false,
+  launcher: {
+    supported: true,
+    state: 'Not built',
+    exists: false,
+    path: '/Users/x/Applications/netkeep.app',
+    runs: null,
+  },
 }
 
 function renderSection(initial: LoginItem, onPut?: (enabled: boolean) => Response) {
   const puts: boolean[] = []
   const repairs: boolean[] = []
+  const builds: boolean[] = []
   mockFetch(async (request) => {
     const { pathname } = new URL(request.url)
     if (!pathname.startsWith('/api/v1/login-item'))
       return jsonResponse({ detail: 'unexpected' }, 500)
+    if (pathname === '/api/v1/login-item/launcher') {
+      builds.push(true)
+      return jsonResponse({
+        ...initial,
+        launcher: {
+          ...initial.launcher,
+          state: 'Built',
+          exists: true,
+          runs: '/Users/x/.local/bin/netkeep',
+        },
+        message: 'Built /Users/x/Applications/netkeep.app: it opens netkeep.',
+      })
+    }
     if (pathname === '/api/v1/login-item/repair') {
       repairs.push(true)
       return jsonResponse({
@@ -59,10 +80,30 @@ function renderSection(initial: LoginItem, onPut?: (enabled: boolean) => Respons
       <LoginItemSection />
     </QueryClientProvider>,
   )
-  return { puts, repairs }
+  return { puts, repairs, builds }
 }
 
 describe('LoginItemSection', () => {
+  it('shows the launcher app and builds it', async () => {
+    const { builds, puts } = renderSection(OFF)
+    expect(await screen.findByText('Not built')).toBeInTheDocument()
+    expect(screen.getByText('/Users/x/Applications/netkeep.app')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Build' }))
+    await waitFor(() => expect(builds).toEqual([true]))
+    expect(
+      await screen.findByText('Built /Users/x/Applications/netkeep.app: it opens netkeep.'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('/Users/x/.local/bin/netkeep')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Rebuild' })).toBeInTheDocument()
+    expect(puts).toEqual([])
+  })
+
+  it('hides the launcher app off macOS', async () => {
+    renderSection({ ...OFF, launcher: { ...OFF.launcher, supported: false } })
+    await screen.findByRole('checkbox', { name: 'Start netkeep when I log in' })
+    expect(screen.queryByText('Launcher app')).not.toBeInTheDocument()
+  })
+
   it('shows the state the server read and turns it on', async () => {
     const { puts } = renderSection(OFF)
     const box = await screen.findByRole('checkbox', { name: 'Start netkeep when I log in' })

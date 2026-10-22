@@ -105,6 +105,7 @@ API_PATHS = {
     "/api/v1/backups",
     "/api/v1/login-item",
     "/api/v1/login-item/repair",
+    "/api/v1/login-item/launcher",
     "/api/v1/autotag-rules/{rule_id}",
     "/api/v1/autotag-rules/{rule_id}/run",
     "/api/v1/autotag-rules/reorder",

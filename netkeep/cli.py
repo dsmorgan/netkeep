@@ -99,6 +99,7 @@ from netkeep.services import (
     field_changes,
     history_scan,
     keychain,
+    launcher_app,
     linkedin_steps,
     local_api_key,
     login_item,
@@ -555,6 +556,14 @@ def open_command(
             help="Only print the link: don't start netkeep's Chrome or open a window in it.",
         ),
     ] = False,
+    launcher: Annotated[
+        bool,
+        typer.Option(
+            "--launcher",
+            hidden=True,
+            help="The launcher app's step (#754): start the login item if serve is down.",
+        ),
+    ] = False,
 ) -> None:
     """Open netkeep's UI in netkeep's Chrome, starting that Chrome if it's down.
 
@@ -573,6 +582,8 @@ def open_command(
     `netkeep serve`. The UI's connect page shows the exact command.
     """
     state = ctx.ensure_object(CliState)
+    if launcher:
+        raise typer.Exit(code=_open_from_launcher(state))
     settings = _file_settings_or_exit(state)
     base = base_url or local_api_key.base_url(
         settings.web.host, settings.web.port if port is None else port
@@ -601,6 +612,44 @@ def open_command(
     typer.echo(f"  {link}")
     if launched is not None and not launched.reached_chrome:
         raise typer.Exit(code=1)
+
+
+def _open_from_launcher(state: CliState) -> int:
+    """``netkeep open --launcher``, which the launcher app runs (#754). With no terminal to
+    read, it prints only what goes wrong, for the app's dialog to show.
+
+    It finds ``serve`` where setup does (the login item's ``--host`` and ``--port``, else
+    the config's). When nothing answers there, it starts the login item and waits for
+    ``/health`` (:func:`launcher_app.reach_serve`), then opens the UI's window in
+    netkeep's Chrome, as ``netkeep open`` does. It prints no connect link."""
+    settings = _file_settings_or_exit(state)
+    item = login_item.LoginItem()
+    host, port = item.serve_address()
+    base = local_api_key.base_url(
+        host or settings.web.host, settings.web.port if port is None else port
+    )
+    seams = launcher_app.ServeSeams(
+        answers=post_install.serve_answers,
+        lock_held=lambda: serve_lock.state().held,
+    )
+    problem = launcher_app.reach_serve(item, base, seams, wait_s=post_install.SERVE_WAIT_S)
+    if problem is not None:
+        typer.echo(problem)
+        return 1
+    try:
+        key = local_api_key.stored_key()
+    except keychain.KeychainUnavailable as exc:
+        typer.echo(
+            "netkeep can't open its window: the Keychain refused the local API key. Unlock"
+            f" your login keychain, or allow netkeep when macOS asks. (The Keychain said: {exc})"
+        )
+        return 1
+    cdp_url = _load_settings_or_exit(state).linkedin.cdp_url
+    launched = asyncio.run(_open_launcher(cdp_url, base, key).start())
+    if launched.reached_chrome:
+        return 0
+    typer.echo(f"netkeep's Chrome: {launched.message}.")
+    return 1
 
 
 def _open_launcher(cdp_url: str, base: str, key: str) -> ChromeLauncher:
@@ -633,7 +682,10 @@ def setup_command(
         bool,
         typer.Option(
             "--remove",
-            help="Turn the login item off instead. Your data, logs and Keychain items stay.",
+            help=(
+                "Turn the login item off and remove the launcher app instead. Your data, logs"
+                " and Keychain items stay."
+            ),
         ),
     ] = False,
     wait: Annotated[
@@ -645,8 +697,9 @@ def setup_command(
         ),
     ] = post_install.SERVE_WAIT_S,
 ) -> None:
-    """Set netkeep up after installing it: turn on the login item, wait for netkeep serve
-    to answer, and open the first-run page in netkeep's Chrome.
+    """Set netkeep up after installing it: turn on the login item, add netkeep to your
+    Applications folder, wait for netkeep serve to answer, and open the first-run page in
+    netkeep's Chrome.
 
     The login item is the same one as the Settings switch and `netkeep login-item on`. It
     runs the installed netkeep (under uv tool install, uv's ~/.local/bin/netkeep), with
@@ -654,11 +707,17 @@ def setup_command(
     that's right. While netkeep's Chrome is running, it opens no other window. It never
     chooses or moves the data directory.
 
-    With --remove, it turns the login item off and leaves all data where it is."""
+    The launcher app, ~/Applications/netkeep.app, opens netkeep from the Dock, Spotlight
+    or Launchpad: it starts the login item if netkeep serve isn't running, then opens
+    the window netkeep open does. Run again, setup rewrites it whole.
+
+    With --remove, it turns the login item off, removes the launcher app, and leaves all
+    data where it is."""
     state = ctx.ensure_object(CliState)
     item = login_item.LoginItem()
+    launcher = launcher_app.Launcher.for_login_item(item)
     if remove:
-        raise typer.Exit(code=post_install.remove(item, typer.echo))
+        raise typer.Exit(code=post_install.remove(item, launcher, typer.echo))
     settings = _file_settings_or_exit(state)
 
     def base_url(host: str | None, port: int | None) -> str:
@@ -690,6 +749,7 @@ def setup_command(
     )
     code = post_install.run(
         item,
+        launcher,
         seams,
         typer.echo,
         tool_install=shim is not None and shim == item.executable,
@@ -769,6 +829,9 @@ def update_command(
         restore=restore,
         tool_install=update_service.running_from_tool_install(),
         current_version=__version__,
+        launcher=lambda build: launcher_app.refresh(
+            launcher_app.Launcher.for_login_item(login_item.LoginItem()), build=build
+        ),
     )
     if check:
         try:

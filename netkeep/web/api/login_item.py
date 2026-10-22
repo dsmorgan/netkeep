@@ -6,8 +6,10 @@
 - ``POST /login-item/repair`` rewrites the plist for the installed ``netkeep`` and adopts
   an agent the removed install script left. It works when this server is that agent,
   which a switch off-and-on cannot.
+- ``POST /login-item/launcher`` builds or rebuilds the launcher app,
+  ``~/Applications/netkeep.app`` (#754); every reply says whether it exists.
 
-This writes outside the data directory (``~/Library/LaunchAgents``) and is not a
+This writes outside the data directory (``~/Library/LaunchAgents``, ``~/Applications``) and is not a
 LinkedIn safety change. The agent belongs to the machine's user, not to a netkeep
 user, so only the local owner account may read or change it (403 for any other, as
 with ``/backups``). Turning it on here never starts a second ``serve``: this process
@@ -23,11 +25,27 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from netkeep.models import User
+from netkeep.services.launcher_app import Launcher, LauncherError
+from netkeep.services.launcher_app import Status as LauncherStatus
 from netkeep.services.login_item import LoginItem, LoginItemError, Status
 from netkeep.services.users import local_owner
 from netkeep.web.deps import CurrentUser, SessionDep, read_only
 
 router = APIRouter(tags=["login-item"])
+
+
+class LauncherOut(BaseModel):
+    """The launcher app (#754): an icon in ``~/Applications`` that opens netkeep."""
+
+    supported: bool
+    state: str
+    """One of "Not built", "Built", "Points at a different netkeep" or "Another app is in
+    the way"."""
+    exists: bool
+    """This data directory's launcher is there (an app that isn't netkeep's doesn't count)."""
+    path: str
+    runs: str | None
+    """The ``netkeep`` its script runs; null when it isn't there."""
 
 
 class LoginItemOut(BaseModel):
@@ -54,11 +72,22 @@ class LoginItemOut(BaseModel):
     legacy: bool
     """An agent the removed install script wrote serves this data directory, and cannot
     start now that its wrapper script is gone: Repair adopts it."""
+    launcher: LauncherOut
     message: str | None = None
     """What a change did, such as "starts at your next login, not now"; null on a read."""
 
 
-def _out(status: Status, message: str | None = None) -> LoginItemOut:
+def _launcher_out(status: LauncherStatus) -> LauncherOut:
+    return LauncherOut(
+        supported=status.supported,
+        state=status.state.value,
+        exists=status.exists and status.ours,
+        path=str(status.path),
+        runs=status.runs,
+    )
+
+
+def _out(status: Status, launcher: Launcher, message: str | None = None) -> LoginItemOut:
     return LoginItemOut(
         supported=status.supported,
         unsupported_reason=status.reason,
@@ -71,6 +100,7 @@ def _out(status: Status, message: str | None = None) -> LoginItemOut:
         log_path=str(status.log_path),
         points_elsewhere=status.plist_executable if status.stale else None,
         legacy=status.legacy,
+        launcher=_launcher_out(launcher.status()),
         message=message,
     )
 
@@ -97,10 +127,17 @@ def _item(request: Request) -> LoginItem:
     return item if item is not None else LoginItem()
 
 
+def _launcher_app(request: Request, item: LoginItem) -> Launcher:
+    """The app's launcher; tests put a fake one on ``app.state``."""
+    launcher: Launcher | None = getattr(request.app.state, "launcher_app", None)
+    return launcher if launcher is not None else Launcher.for_login_item(item)
+
+
 @router.get("/login-item", operation_id="get_login_item")
 def get_login_item(request: Request, owner: Owner) -> LoginItemOut:
     """Whether netkeep starts at login, from the plist and launchctl."""
-    return _out(_item(request).status())
+    item = _item(request)
+    return _out(item.status(), _launcher_app(request, item))
 
 
 @router.put(
@@ -123,7 +160,7 @@ def put_login_item(request: Request, owner: Owner, body: LoginItemIn) -> LoginIt
         )
     except LoginItemError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return _out(outcome.status, outcome.message)
+    return _out(outcome.status, _launcher_app(request, item), outcome.message)
 
 
 @router.post(
@@ -137,8 +174,32 @@ def put_login_item(request: Request, owner: Owner, body: LoginItemIn) -> LoginIt
 @read_only  # it writes a plist, never a row
 def repair_login_item(request: Request, owner: Owner) -> LoginItemOut:
     """Rewrite the plist for this netkeep and adopt an old script's agent."""
+    item = _item(request)
     try:
-        outcome = _item(request).enable(serving_here=True, keep_arguments=True)
+        outcome = item.enable(serving_here=True, keep_arguments=True)
     except LoginItemError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return _out(outcome.status, outcome.message)
+    return _out(outcome.status, _launcher_app(request, item), outcome.message)
+
+
+@router.post(
+    "/login-item/launcher",
+    operation_id="build_launcher_app",
+    responses={
+        403: {"description": "Only the local owner account manages the login item"},
+        409: {
+            "description": "Not macOS, or the launcher can't be written: the reason is in detail"
+        },
+    },
+)
+@read_only  # it writes files in ~/Applications, never a row
+def build_launcher_app(request: Request, owner: Owner) -> LoginItemOut:
+    """Build or rebuild the launcher app in ~/Applications, replacing this data
+    directory's old one whole."""
+    item = _item(request)
+    launcher = _launcher_app(request, item)
+    try:
+        message = launcher.build()
+    except (LauncherError, OSError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _out(item.status(), launcher, message)

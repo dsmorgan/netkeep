@@ -402,6 +402,9 @@ class Seams:
     current_version: str
     sleep: Callable[[float], None] = time.sleep
     clock: Callable[[], float] = time.monotonic
+    launcher: Callable[[bool], str | None] = lambda _build: None
+    """Rebuild the launcher app (#754) when it exists, or build it when told to (the login
+    item was on); what it did, or ``None`` when it did nothing. Raises nothing."""
 
 
 CHECKOUT_REFUSAL: Final = (
@@ -710,6 +713,7 @@ def finish(item: LoginItem, seams: Seams, say: Say) -> int:
     say(f"netkeep update --finish: netkeep {state.to_version} is installed")
     if not state.login_item_was_on:
         clear_state(data)
+        _rebuild_launcher(seams, say, build=False)
         say("Done. The login item was off, so netkeep serve isn't started.")
         say("Start it with: netkeep serve")
         return 0
@@ -718,6 +722,7 @@ def finish(item: LoginItem, seams: Seams, say: Say) -> int:
     failure = _start_and_check(item, seams, say, state.to_version)
     if failure is None:
         clear_state(data)
+        _rebuild_launcher(seams, say, build=True)
         say(f"Done: netkeep {state.to_version} is running from the login item.")
         return 0
     say(f"   failed: {failure}")
@@ -731,6 +736,15 @@ def finish(item: LoginItem, seams: Seams, say: Say) -> int:
         return _stop_and_explain(item, say, state, SERVE_WOULDNT_STOP)
     say(f"netkeep {state.to_version} failed before its scheduler started, so it sent nothing.")
     return _reinstall_old_and_rollback(item, seams, say, state, held)
+
+
+def _rebuild_launcher(seams: Seams, say: Say, *, build: bool) -> None:
+    """The launcher app runs the installed ``netkeep`` by its absolute path, so the new
+    version rewrites it: always when it exists, and when the login item was on, also when
+    it doesn't yet (an install from before #754)."""
+    done = seams.launcher(build)
+    if done is not None:
+        say(f"Launcher app: {done}")
 
 
 def _start_and_check(item: LoginItem, seams: Seams, say: Say, version: str) -> str | None:

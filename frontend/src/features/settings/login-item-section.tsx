@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 
-import { loginItemQuery, repairLoginItem, setLoginItem } from './api'
+import { buildLauncherApp, loginItemQuery, repairLoginItem, setLoginItem } from './api'
 
 /** The check steps, on the project's site, since the app serves no docs of its own. */
 export const LOGIN_ITEM_TROUBLESHOOTING_URL =
@@ -22,6 +22,9 @@ function message(error: unknown): string {
  * not a remembered flag, and it is disabled with the reason off macOS. Turning it on
  * while this server runs registers the agent for the next login rather than starting a
  * second copy; the answer's message says so.
+ *
+ * Below it, the launcher app (#754): whether `~/Applications/netkeep.app` exists and which
+ * netkeep it runs, with a button that builds or rebuilds it.
  */
 export function LoginItemSection() {
   const id = useId()
@@ -33,6 +36,10 @@ export function LoginItemSection() {
   })
   const repair = useMutation({
     mutationFn: repairLoginItem,
+    onSuccess: (data) => queryClient.setQueryData(loginItemQuery.queryKey, data),
+  })
+  const build = useMutation({
+    mutationFn: buildLauncherApp,
     onSuccess: (data) => queryClient.setQueryData(loginItemQuery.queryKey, data),
   })
   const item = state.data
@@ -121,6 +128,39 @@ export function LoginItemSection() {
                 <br />
                 Log: <code className="font-mono text-xs break-all">{item.log_path}</code>
               </p>
+            )}
+            {item.launcher.supported && (
+              <div className="space-y-2 border-t pt-3">
+                <h3 className="font-heading font-bold">Launcher app</h3>
+                <p className="text-muted-foreground">
+                  An icon in your Applications folder that opens netkeep from the Dock, Spotlight or
+                  Launchpad, starting it first if it isn&apos;t running.
+                </p>
+                <p>
+                  Launcher: <strong>{item.launcher.state}</strong>
+                  <br />
+                  <code className="font-mono text-xs break-all">{item.launcher.path}</code>
+                </p>
+                {item.launcher.runs && (
+                  <p className="text-muted-foreground">
+                    It runs{' '}
+                    <code className="font-mono text-xs break-all">{item.launcher.runs}</code>.
+                  </p>
+                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={build.isPending}
+                  onClick={() => {
+                    build.reset()
+                    build.mutate()
+                  }}
+                >
+                  {build.isPending ? 'Building…' : item.launcher.exists ? 'Rebuild' : 'Build'}
+                </Button>
+                {build.isSuccess && build.data.message && <p role="status">{build.data.message}</p>}
+                {build.isError && <p role="alert">{message(build.error)}</p>}
+              </div>
             )}
           </>
         )}

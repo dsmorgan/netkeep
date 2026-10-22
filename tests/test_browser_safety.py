@@ -2073,6 +2073,9 @@ LAUNCH_REACHES = {
     # `netkeep setup` (#684): the first-run button's equivalent after install, which opens
     # the first-run page through netkeep open's launcher once.
     (PACKAGE / "cli.py", "setup_command.open_first_run", "_open_launcher"): 1,
+    # The launcher app (#754): its icon runs `netkeep open --launcher`, which opens the UI's
+    # window through netkeep open's launcher once, after serve answers. You click it.
+    (PACKAGE / "cli.py", "_open_from_launcher", "_open_launcher"): 1,
     # The button's route: its import, then its one call.
     (PACKAGE / "web" / "api" / "linkedin.py", "", "submit_launch"): 1,
     (PACKAGE / "web" / "api" / "linkedin.py", "start_browser", "submit_launch"): 1,
@@ -2102,6 +2105,8 @@ LAUNCHER_STARTS = {
     (PACKAGE / "services" / "chrome_launch.py", "submit_launch.run_launch"): 1,
     (PACKAGE / "cli.py", "open_command"): 1,
     (PACKAGE / "cli.py", "setup_command.open_first_run"): 1,
+    # The launcher app's `netkeep open --launcher` (#754): the same start as netkeep open.
+    (PACKAGE / "cli.py", "_open_from_launcher"): 1,
     # Not a launcher: `netkeep update`'s first step, `services.update.start` (#685).
     (PACKAGE / "cli.py", "update_command"): 1,
     # Not a launcher: a lost answer's ``start`` field, ``message_check.start()`` (a run
