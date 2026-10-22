@@ -20,6 +20,7 @@ import {
 } from './contacts-fixtures'
 import { jsonResponse } from './fetch'
 import { renderApp } from './render'
+import { zIndexOf } from './stacking'
 
 type Schemas = components['schemas']
 type Detail = Schemas['ContactDetail']
@@ -202,6 +203,14 @@ describe('merge from the contact page', () => {
     expect(dialog).toHaveTextContent('3 campaign messages move')
     expect(dialog).toHaveTextContent(/A merge can.t be undone/)
     expect(sent(seen, '/api/v1/contacts/2/merge')).toHaveLength(0)
+    // The dialog and its backdrop paint above the page (#749). The shell's
+    // content column is `relative z-[1]`; under it, a card took the click
+    // meant for the dialog's Merge, so nothing merged and nothing said why.
+    const shell = zIndexOf(screen.getByTestId('shell-content'))
+    expect(zIndexOf(dialog)).toBeGreaterThan(shell)
+    const backdrop = dialog.parentElement?.querySelector(':scope > [role="presentation"][class]')
+    expect(backdrop).not.toBeNull()
+    expect(zIndexOf(backdrop as Element)).toBeGreaterThan(shell)
 
     const confirm = within(dialog).getByRole('button', { name: 'Merge' })
     await act(async () => {

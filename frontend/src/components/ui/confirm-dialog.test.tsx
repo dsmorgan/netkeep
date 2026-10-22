@@ -2,6 +2,8 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
+import { zIndexOf } from '@/test/stacking'
+
 import { ConfirmDialog } from './confirm-dialog'
 
 /** A minimal caller: opens the dialog, tracks confirm calls, never actually resolves. */
@@ -24,6 +26,18 @@ describe('ConfirmDialog', () => {
   it('shows the confirm label at rest', () => {
     render(<Harness onConfirm={vi.fn()} />)
     expect(screen.getByRole('button', { name: 'Do it' })).toBeInTheDocument()
+  })
+
+  it('paints its backdrop and popup on the overlay tier, above the shell (#749)', () => {
+    render(<Harness onConfirm={vi.fn()} />)
+    const popup = screen.getByRole('alertdialog')
+    const backdrop = popup.parentElement?.querySelector(':scope > [role="presentation"][class]')
+    expect(backdrop).not.toBeNull()
+    // z-50, as Dialog, Popover and Menu use. The shell's content column is
+    // `relative z-[1]` and the phone nav z-40; at `auto` a card on the page
+    // took the confirm button's click.
+    expect(zIndexOf(popup)).toBe(50)
+    expect(zIndexOf(backdrop as Element)).toBe(50)
   })
 
   it('never shows a caller-built pending label, only "Working…"', () => {

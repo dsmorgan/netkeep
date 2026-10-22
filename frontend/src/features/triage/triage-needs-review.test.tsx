@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest'
 
 import { contactDetail } from '@/test/contacts-fixtures'
 import { jsonResponse } from '@/test/fetch'
+import { zIndexOf } from '@/test/stacking'
 
 import { createFakeBackend } from './test-backend'
 import { currentName, renderTriage } from './test-render'
@@ -201,6 +202,8 @@ describe('a possible duplicate of a card contact (#363)', () => {
     const dialog = await screen.findByRole('alertdialog')
     expect(dialog).toHaveTextContent(/A merge can.t be undone/)
     expect(posted).not.toContain('/api/v1/contacts/2/merge')
+    // On the overlay tier, above the shell's `relative z-[1]` column (#749).
+    expect(zIndexOf(dialog)).toBe(50)
 
     await act(async () => {
       fireEvent.click(within(dialog).getByRole('button', { name: 'Merge' }))
