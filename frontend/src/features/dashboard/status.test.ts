@@ -4,7 +4,7 @@ import { formatWhen } from '@/features/linkedin/fields'
 import { mailbox } from '@/features/mailboxes/test-support'
 import { attention, heat, linkedinStatus, ok } from '@/features/system-status/test-support'
 
-import { buildProblems, needsYouCount, needsYouText, type StatusReads } from './status'
+import { buildProblems, needsYouCount, needsYouText, pickMailbox, type StatusReads } from './status'
 
 // --- fixtures (fake people only) ---------------------------------------------------------
 
@@ -20,6 +20,17 @@ function reads(overrides: Partial<StatusReads> = {}): StatusReads {
 }
 
 // --- the problems -------------------------------------------------------------------------
+
+describe('pickMailbox', () => {
+  it('reads the live mailbox, not a disabled one, when both are in the list', () => {
+    const live = mailbox({ id: 2, status: 'ok' })
+    expect(pickMailbox([mailbox({ id: 1, status: 'disabled' }), live])).toBe(live)
+    const newer = mailbox({ id: 2, status: 'disabled', updated_at: '2026-09-28T12:00:00Z' })
+    const older = mailbox({ id: 1, status: 'disabled', updated_at: '2026-09-20T12:00:00Z' })
+    expect(pickMailbox([older, newer])).toBe(newer)
+    expect(pickMailbox([])).toBeUndefined()
+  })
+})
 
 describe('buildProblems', () => {
   it('finds nothing when nothing stopped', () => {

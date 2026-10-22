@@ -13134,6 +13134,34 @@
         "title": "RunDiagnosticsOut",
         "type": "object"
       },
+      "RunInProgressOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SyncRunKind"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "label",
+          "started_at"
+        ],
+        "title": "RunInProgressOut",
+        "type": "object"
+      },
       "RunLostAnswerOut": {
         "description": "One answer a connections run lost (#200): the list offset, a fixed cause, and\nhow the run went on, ``None`` for a run recorded before that was kept.",
         "properties": {
@@ -14471,6 +14499,190 @@
         "title": "StartsWith",
         "type": "object"
       },
+      "StatusChipOut": {
+        "properties": {
+          "fact": {
+            "title": "Fact",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "page": {
+            "title": "Page",
+            "type": "string"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/StatusPartOut"
+            },
+            "title": "Parts",
+            "type": "array"
+          },
+          "system": {
+            "enum": [
+              "gmail",
+              "linkedin",
+              "netkeep"
+            ],
+            "title": "System",
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/StatusTargetOut"
+          },
+          "times": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/StatusTimeOut"
+            },
+            "title": "Times",
+            "type": "object"
+          },
+          "tone": {
+            "enum": [
+              "ok",
+              "off",
+              "busy",
+              "warn",
+              "bad"
+            ],
+            "title": "Tone",
+            "type": "string"
+          },
+          "word": {
+            "title": "Word",
+            "type": "string"
+          }
+        },
+        "required": [
+          "system",
+          "name",
+          "tone",
+          "word",
+          "fact",
+          "parts",
+          "target",
+          "page",
+          "times"
+        ],
+        "title": "StatusChipOut",
+        "type": "object"
+      },
+      "StatusPartOut": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "fact": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fact"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatusTargetOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tone": {
+            "enum": [
+              "ok",
+              "off",
+              "busy",
+              "warn",
+              "bad"
+            ],
+            "title": "Tone",
+            "type": "string"
+          },
+          "word": {
+            "title": "Word",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "tone",
+          "word",
+          "fact",
+          "detail",
+          "target"
+        ],
+        "title": "StatusPartOut",
+        "type": "object"
+      },
+      "StatusTargetOut": {
+        "description": "A page, and the section on it.",
+        "properties": {
+          "hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hash"
+          },
+          "to": {
+            "enum": [
+              "/",
+              "/gmail",
+              "/linkedin",
+              "/settings"
+            ],
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "to",
+          "hash"
+        ],
+        "title": "StatusTargetOut",
+        "type": "object"
+      },
+      "StatusTimeOut": {
+        "description": "A time a client writes into a ``{placeholder}``: ``ago`` (\"3 min ago\"), ``next``\n(\"in 7 min\", \"14:20\") or ``when`` (a date and time).",
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "style": {
+            "$ref": "#/components/schemas/TimeStyle"
+          }
+        },
+        "required": [
+          "at",
+          "style"
+        ],
+        "title": "StatusTimeOut",
+        "type": "object"
+      },
       "StepApproveIn": {
         "description": "The step ``fingerprint`` its review came with.",
         "properties": {
@@ -15037,6 +15249,65 @@
           "observed_at"
         ],
         "title": "SyncedValueOut",
+        "type": "object"
+      },
+      "SystemStatusOut": {
+        "properties": {
+          "campaign_sending": {
+            "title": "Campaign Sending",
+            "type": "boolean"
+          },
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "gmail": {
+            "$ref": "#/components/schemas/StatusChipOut"
+          },
+          "linkedin": {
+            "$ref": "#/components/schemas/StatusChipOut"
+          },
+          "linkedin_paused": {
+            "title": "Linkedin Paused",
+            "type": "boolean"
+          },
+          "linkedin_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunInProgressOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "netkeep": {
+            "$ref": "#/components/schemas/StatusChipOut"
+          },
+          "update_available": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Update Available"
+          }
+        },
+        "required": [
+          "checked_at",
+          "gmail",
+          "linkedin",
+          "netkeep",
+          "linkedin_paused",
+          "linkedin_run",
+          "campaign_sending",
+          "update_available"
+        ],
+        "title": "SystemStatusOut",
         "type": "object"
       },
       "TagAll": {
@@ -15663,6 +15934,16 @@
         ],
         "title": "TestSendOut",
         "type": "object"
+      },
+      "TimeStyle": {
+        "description": "How a client writes a time it fills into a placeholder.",
+        "enum": [
+          "ago",
+          "next",
+          "when"
+        ],
+        "title": "TimeStyle",
+        "type": "string"
       },
       "TimelineInteraction": {
         "properties": {
@@ -25901,6 +26182,28 @@
         "summary": "Get Logs",
         "tags": [
           "support"
+        ]
+      }
+    },
+    "/api/v1/system-status": {
+      "get": {
+        "description": "The Gmail, LinkedIn and netkeep chips, and what the menu bar's confirmations name.\nRead-only.",
+        "operationId": "get_system_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemStatusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get System Status",
+        "tags": [
+          "system-status"
         ]
       }
     },

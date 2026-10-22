@@ -2,16 +2,34 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ATTENTION_EVERY_MS } from '@/features/attention/api'
-import { CAMPAIGN_SENDING_MS } from '@/features/attention/use-campaign-sending'
-import { mailbox } from '@/features/mailboxes/test-support'
-import { check, pollStatus, run } from '@/features/system-status/test-support'
+import { BATCH_EVERY_MS } from '@/features/system-status/api'
+import {
+  gmailChip,
+  linkedinChip,
+  netkeepChip,
+  part,
+  serverStatus,
+} from '@/features/system-status/test-support'
 
 import { FakeEventSource, resetFakeEventSource } from './fake-event-source'
 import { jsonResponse } from './fetch'
-import { linkedinStatus, serve } from './install'
+import { serve } from './install'
 import { renderApp } from './render'
 
 const CHECK_NOW = '/api/v1/poll-status/gmail-replies/check-now'
+const STATUS = '/api/v1/system-status'
+
+/** The LinkedIn chip stopped by a session flag, as the server rolls it up. */
+function stopped(word: 'Logged out' | 'Checkpoint') {
+  return serverStatus({
+    linkedin: linkedinChip({
+      tone: 'bad',
+      word,
+      fact: 'runs stopped',
+      target: { to: '/linkedin', hash: 'session' },
+    }),
+  })
+}
 
 function bar() {
   return within(screen.getByRole('group', { name: 'System status' }))
@@ -70,7 +88,7 @@ describe('the top bar’s status chips (#751)', () => {
   })
 
   it('gives each tone its own icon shape', async () => {
-    serve({ '/api/v1/linkedin/status': linkedinStatus({ session_flag: 'logged_out' }) })
+    serve({ [STATUS]: stopped('Logged out') })
     await renderApp('/contacts')
     const linkedin = await chip('linkedin', 'bad')
     expect(linkedin.querySelector('[data-icon="bad"]')).not.toBeNull()
@@ -119,7 +137,7 @@ describe('the top bar’s status chips (#751)', () => {
   })
 
   it('makes the button primary, and the fix, when the chip needs you', async () => {
-    serve({ '/api/v1/linkedin/status': linkedinStatus({ session_flag: 'checkpoint' }) })
+    serve({ [STATUS]: stopped('Checkpoint') })
     const { router } = await renderApp('/contacts')
     fireEvent.click(await chip('linkedin', 'bad'))
     const dialog = await screen.findByRole('dialog')
@@ -178,12 +196,20 @@ describe('the top bar’s status chips (#751)', () => {
   })
 
   it('changes the Gmail chip on the mailbox.status server event, without a reload', async () => {
-    let rows = [mailbox({ arm: 'send', armed_at: '2026-09-21T12:00:00Z' })]
-    serve({ '/api/v1/mailboxes': () => jsonResponse(rows) })
+    let current = serverStatus()
+    serve({ [STATUS]: () => jsonResponse(current) })
     await renderApp('/contacts')
     await chip('gmail', 'ok')
 
-    rows = [mailbox({ status: 'reauth_required', status_reason: 'invalid_grant' })]
+    current = serverStatus({
+      gmail: gmailChip({
+        tone: 'bad',
+        word: 'Re-authorize',
+        fact: 'nothing sent or checked',
+        target: { to: '/settings', hash: 'gmail' },
+        page: 'Settings',
+      }),
+    })
     act(() => {
       FakeEventSource.instances.at(-1)?.emit('mailbox.status', {
         mailbox_id: 3,
@@ -201,18 +227,43 @@ describe('the top bar’s status chips (#751)', () => {
     ).toHaveAttribute('href', '/settings#gmail')
   })
 
+  it('refetches the roll-up after a change this tab makes', async () => {
+    const calls = serve({ [`POST ${CHECK_NOW}`]: jsonResponse({ already_requested: false }, 202) })
+    await renderApp('/contacts')
+    fireEvent.click(await chip('gmail', 'ok'))
+    const reads = () => calls.filter((call) => call.path === STATUS).length
+    await waitFor(() => expect(reads()).toBeGreaterThan(0))
+    const before = reads()
+    fireEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Check now' }),
+    )
+    await waitFor(() => expect(reads()).toBeGreaterThan(before))
+  })
+
   it('refetches LinkedIn when a run starts, spins while it runs, and moves its count', async () => {
-    let current = linkedinStatus()
-    let runs: unknown[] = []
-    serve({
-      '/api/v1/linkedin/status': () => jsonResponse(current),
-      '/api/v1/linkedin/runs': () => jsonResponse({ items: runs, total: runs.length }),
-    })
+    const started = new Date().toISOString()
+    const running = (fact: string) =>
+      serverStatus({
+        linkedin: linkedinChip({
+          tone: 'busy',
+          word: 'Enrichment running',
+          fact,
+          target: { to: '/linkedin', hash: 'runs' },
+          parts: [
+            part('running', 'busy', 'Enrichment running', `Enrichment · ${fact}`, {
+              label: 'Running',
+              fact,
+            }),
+          ],
+          times: { run_started: { at: started, style: 'ago' } },
+        }),
+      })
+    let current = serverStatus()
+    serve({ [STATUS]: () => jsonResponse(current) })
     await renderApp('/contacts')
     await chip('linkedin', 'ok')
 
-    current = linkedinStatus({ running_run_id: 9 })
-    runs = [run({ started_at: new Date().toISOString() })]
+    current = running('started {run_started}')
     act(() => FakeEventSource.instances.at(-1)?.emit('run.started', { run_id: 9 }))
     const linkedin = await chip('linkedin', 'busy')
     expect(linkedin.querySelector('[data-icon="busy"]')).toHaveClass(
@@ -223,6 +274,7 @@ describe('the top bar’s status chips (#751)', () => {
       expect(linkedin).toHaveTextContent('LinkedIn · Enrichment running, started just now'),
     )
 
+    current = running('12 of 50')
     act(() =>
       FakeEventSource.instances
         .at(-1)
@@ -234,14 +286,14 @@ describe('the top bar’s status chips (#751)', () => {
   })
 
   it('refetches the session flag as often as /attention, so a flag set outside a run shows', async () => {
-    let current = linkedinStatus()
-    serve({ '/api/v1/linkedin/status': () => jsonResponse(current) })
+    let current = serverStatus()
+    serve({ [STATUS]: () => jsonResponse(current) })
     vi.useFakeTimers({ shouldAdvanceTime: true })
     await renderApp('/contacts')
     await chip('linkedin', 'ok')
 
     // `netkeep preflight` found LinkedIn logged out; no event says so.
-    current = linkedinStatus({ session_flag: 'logged_out' })
+    current = stopped('Logged out')
     await act(async () => {
       await vi.advanceTimersByTimeAsync(ATTENTION_EVERY_MS + 1)
     })
@@ -249,25 +301,51 @@ describe('the top bar’s status chips (#751)', () => {
   })
 
   it('spins Gmail for a campaign send batch, then clears it', async () => {
-    serve()
+    let current = serverStatus()
+    serve({ [STATUS]: () => jsonResponse(current) })
     await renderApp('/contacts')
     await chip('gmail', 'ok')
 
     vi.useFakeTimers({ shouldAdvanceTime: true })
+    current = serverStatus({
+      gmail: gmailChip({
+        tone: 'busy',
+        word: 'Sending now',
+        fact: 'campaign batch',
+        parts: [
+          ...gmailChip().parts,
+          part('batch', 'busy', 'Sending now', 'A campaign send batch just ran', {
+            label: 'Campaign batch',
+            fact: 'campaign batch',
+          }),
+        ],
+      }),
+    })
     act(() => FakeEventSource.instances.at(-1)?.emit('campaign.tick', { sent: 1 }))
     expect(await chip('gmail', 'busy')).toHaveTextContent('Gmail · Sending now, campaign batch')
 
-    act(() => {
-      vi.advanceTimersByTime(CAMPAIGN_SENDING_MS + 1)
+    // The server shows the batch for 15 s; the chip reads again about then.
+    current = serverStatus()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(BATCH_EVERY_MS + 1)
     })
     await chip('gmail', 'ok')
   })
 
   it('warns on the netkeep chip when serve isn’t running the background checks', async () => {
     serve({
-      '/api/v1/poll-status': pollStatus({
-        background_running: false,
-        items: [check({ state: 'not_running', next_at: null })],
+      [STATUS]: serverStatus({
+        netkeep: netkeepChip({
+          parts: [
+            part(
+              'checks',
+              'warn',
+              'No background checks',
+              'netkeep serve isn’t running, so nothing is checked in the background',
+              { label: 'Background checks', fact: 'serve isn’t running' },
+            ),
+          ],
+        }),
       }),
     })
     await renderApp('/contacts')
@@ -279,8 +357,8 @@ describe('the top bar’s status chips (#751)', () => {
 
   it('keeps every page up when an answer can’t be read, and says so', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
-    // A proxy page or an older backend: a runs list with no items.
-    serve({ '/api/v1/linkedin/runs': {} })
+    // A proxy page or an older backend: an answer with no chips.
+    serve({ [STATUS]: {} })
     await renderApp('/contacts')
     expect(
       await screen.findByText('Status couldn’t be shown; trying again shortly'),

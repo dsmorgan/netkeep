@@ -3541,6 +3541,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/system-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get System Status
+         * @description The Gmail, LinkedIn and netkeep chips, and what the menu bar's confirmations name.
+         *     Read-only.
+         */
+        get: operations["get_system_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tags": {
         parameters: {
             query?: never;
@@ -8778,6 +8799,19 @@ export interface components {
             /** Unreadable Visits */
             unreadable_visits: components["schemas"]["RunVisitReasonOut"][];
         };
+        /** RunInProgressOut */
+        RunInProgressOut: {
+            /** Id */
+            id: number;
+            kind: components["schemas"]["SyncRunKind"];
+            /** Label */
+            label: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+        };
         /**
          * RunLostAnswerOut
          * @description One answer a connections run lost (#200): the list offset, a fixed cause, and
@@ -9291,6 +9325,79 @@ export interface components {
             /** Value */
             value: string;
         };
+        /** StatusChipOut */
+        StatusChipOut: {
+            /** Fact */
+            fact: string;
+            /** Name */
+            name: string;
+            /** Page */
+            page: string;
+            /** Parts */
+            parts: components["schemas"]["StatusPartOut"][];
+            /**
+             * System
+             * @enum {string}
+             */
+            system: "gmail" | "linkedin" | "netkeep";
+            target: components["schemas"]["StatusTargetOut"];
+            /** Times */
+            times: {
+                [key: string]: components["schemas"]["StatusTimeOut"];
+            };
+            /**
+             * Tone
+             * @enum {string}
+             */
+            tone: "ok" | "off" | "busy" | "warn" | "bad";
+            /** Word */
+            word: string;
+        };
+        /** StatusPartOut */
+        StatusPartOut: {
+            /** Detail */
+            detail: string;
+            /** Fact */
+            fact: string | null;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            target: components["schemas"]["StatusTargetOut"] | null;
+            /**
+             * Tone
+             * @enum {string}
+             */
+            tone: "ok" | "off" | "busy" | "warn" | "bad";
+            /** Word */
+            word: string;
+        };
+        /**
+         * StatusTargetOut
+         * @description A page, and the section on it.
+         */
+        StatusTargetOut: {
+            /** Hash */
+            hash: string | null;
+            /**
+             * To
+             * @enum {string}
+             */
+            to: "/" | "/gmail" | "/linkedin" | "/settings";
+        };
+        /**
+         * StatusTimeOut
+         * @description A time a client writes into a ``{placeholder}``: ``ago`` ("3 min ago"), ``next``
+         *     ("in 7 min", "14:20") or ``when`` (a date and time).
+         */
+        StatusTimeOut: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            style: components["schemas"]["TimeStyle"];
+        };
         /**
          * StepApproveIn
          * @description The step ``fingerprint`` its review came with.
@@ -9506,6 +9613,24 @@ export interface components {
             source: components["schemas"]["ContactSource"];
             /** Value */
             value: string | null;
+        };
+        /** SystemStatusOut */
+        SystemStatusOut: {
+            /** Campaign Sending */
+            campaign_sending: boolean;
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            gmail: components["schemas"]["StatusChipOut"];
+            linkedin: components["schemas"]["StatusChipOut"];
+            /** Linkedin Paused */
+            linkedin_paused: boolean;
+            linkedin_run: components["schemas"]["RunInProgressOut"] | null;
+            netkeep: components["schemas"]["StatusChipOut"];
+            /** Update Available */
+            update_available: string | null;
         };
         /**
          * TagAll
@@ -9757,6 +9882,12 @@ export interface components {
             /** To Address */
             to_address: string;
         };
+        /**
+         * TimeStyle
+         * @description How a client writes a time it fills into a placeholder.
+         * @enum {string}
+         */
+        TimeStyle: "ago" | "next" | "when";
         /** TimelineInteraction */
         TimelineInteraction: {
             /**
@@ -17378,6 +17509,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_system_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemStatusOut"];
                 };
             };
         };

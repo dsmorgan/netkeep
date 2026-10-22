@@ -3,26 +3,17 @@ import { Component, useCallback, useEffect, useRef, useState, type ReactNode } f
 
 import { healthQuery } from '@/api/queries'
 import { announcement, type ActivityState } from '@/features/attention/activity'
-import { ATTENTION_EVERY_MS, attentionQuery } from '@/features/attention/api'
-import { useCampaignSending } from '@/features/attention/use-campaign-sending'
+import { attentionQuery } from '@/features/attention/api'
 import { lastRunQuery } from '@/features/dashboard/api'
 import { useEventStreamStatus } from '@/features/events/event-stream-context'
 import { useServerEvent } from '@/features/events/use-server-event'
 import { budgetQuery, heatQuery, scheduleQuery, statusQuery } from '@/features/linkedin/api'
-import { mailboxListQuery } from '@/features/mailboxes/api'
 import { pollStatusQuery, usePollStatusRefresh } from '@/features/poll-status/api'
 import { CheckRepliesNow } from '@/features/poll-status/check-now'
 import { useNow } from '@/features/poll-status/use-now'
-import { useKeyPersisted } from '@/features/session/key-persisted'
 
-import {
-  gmailStatus,
-  linkedinStatus,
-  netkeepStatus,
-  read,
-  updatedText,
-  type RunProgress,
-} from './roll-up'
+import { useSystemStatus } from './api'
+import { gmailStatus, linkedinStatus, netkeepStatus, read, updatedText } from './roll-up'
 import { StatusChip } from './status-chip'
 
 /** When the newest of `queries` last answered, in ms; 0 before any has. */
@@ -31,12 +22,12 @@ function updatedAt(...queries: UseQueryResult<unknown>[]): number {
 }
 
 /**
- * Keeps the chips' reads fresh. A LinkedIn run starting or ending moves the session
- * flag, the schedule, the last run, budget and heat, and none of them says so on its
- * own, so the five the chip reads refetch once per run, and nothing else under
- * `linkedinKeys` (the LinkedIn page invalidates its own). The poll status refetches on
- * its own events. The mailbox list needs nothing here: `ReauthBanner`, on every page,
- * refetches it on `mailbox.status`.
+ * Keeps the LinkedIn reads other pages share fresh (the dashboard's problems read the
+ * session flag and heat). A LinkedIn run starting or ending moves the session flag, the
+ * schedule, the last run, budget and heat, and none of them says so on its own, so the
+ * five refetch once per run, and nothing else under `linkedinKeys` (the LinkedIn page
+ * invalidates its own). The poll status refetches on its own events. The chips read
+ * the roll-up, which refetches on its own events (`useSystemStatus`).
  */
 function useStatusRefresh(): void {
   const queryClient = useQueryClient()
@@ -110,8 +101,8 @@ class StatusBoundary extends Component<{ children: ReactNode }, { failed: boolea
 
 /**
  * The top bar's three status chips (#751), Gmail, LinkedIn and netkeep, on every page.
- * Each reads the queries its own page uses, so the cache is one and they cannot
- * disagree; nothing here starts anything but "Check now" in the Gmail popover.
+ * They read the server's roll-up (`GET /system-status`, #761) and add what only the UI
+ * knows; nothing here starts anything but "Check now" in the Gmail popover.
  */
 export function SystemStatusChips() {
   return (
@@ -123,51 +114,20 @@ export function SystemStatusChips() {
 
 function Chips() {
   const health = useQuery(healthQuery)
+  // For "Check now" in the Gmail popover; the chips read the roll-up.
   const poll = useQuery(pollStatusQuery)
-  const mailboxes = useQuery(mailboxListQuery)
-  // The session flag, the schedule and heat also change outside a run (`netkeep
-  // preflight`, the CLI) with no event, so they refetch as often as `/attention` does.
-  const status = useQuery({ ...statusQuery, refetchInterval: ATTENTION_EVERY_MS })
-  const lastRun = useQuery(lastRunQuery)
-  const schedule = useQuery({ ...scheduleQuery, refetchInterval: ATTENTION_EVERY_MS })
-  const budget = useQuery(budgetQuery)
-  const heat = useQuery({ ...heatQuery, refetchInterval: ATTENTION_EVERY_MS })
-  const attention = useQuery(attentionQuery)
+  const status = useSystemStatus()
   const stream = useEventStreamStatus()
-  const keyPersisted = useKeyPersisted()
-  const sending = useCampaignSending()
   const now = useNow()
-  const [progress, setProgress] = useState<RunProgress | null>(null)
-  useServerEvent<RunProgress>('run.progress', setProgress)
   useStatusRefresh()
 
   const serverDown = health.isError
-  const gmail = gmailStatus(
-    {
-      mailboxes: read(mailboxes),
-      poll: read(poll),
-      sending,
-      attention: attention.data,
-      serverDown,
-    },
-    now,
-  )
-  const linkedin = linkedinStatus(
-    {
-      status: read(status),
-      lastRun: lastRun.data?.items[0],
-      progress,
-      schedule: read(schedule),
-      budget: read(budget),
-      heat: read(heat),
-      poll: read(poll),
-      attention: attention.data,
-      serverDown,
-    },
-    now,
-  )
-  const app = netkeepStatus({ health: read(health), stream, poll: read(poll), keyPersisted })
+  const reads = { status: read(status), serverDown }
+  const gmail = gmailStatus(reads, now)
+  const linkedin = linkedinStatus(reads, now)
+  const app = netkeepStatus({ health: read(health), stream, status: read(status) }, now)
   const replies = poll.data?.items.find((check) => check.key === 'gmail_replies')
+  const updated = updatedText(updatedAt(status), now)
 
   return (
     <div
@@ -175,7 +135,7 @@ function Chips() {
       aria-label="System status"
       className="flex min-w-0 flex-wrap items-center justify-end gap-1.5"
     >
-      <StatusChip status={gmail} updated={updatedText(updatedAt(mailboxes, poll), now)}>
+      <StatusChip status={gmail} updated={updated}>
         {replies !== undefined && !serverDown && (
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
             <span>Ask for the reply check at the next tick.</span>
@@ -183,15 +143,9 @@ function Chips() {
           </div>
         )}
       </StatusChip>
-      <StatusChip
-        status={linkedin}
-        updated={updatedText(
-          updatedAt(status, lastRun, schedule, budget, heat, poll, attention),
-          now,
-        )}
-      />
+      <StatusChip status={linkedin} updated={updated} />
       <LinkedInAnnouncer />
-      <StatusChip status={app} updated={updatedText(updatedAt(health, poll), now)} />
+      <StatusChip status={app} updated={updatedText(updatedAt(health, status), now)} />
     </div>
   )
 }

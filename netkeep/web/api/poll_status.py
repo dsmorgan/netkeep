@@ -95,7 +95,7 @@ def _replies_every(gmail: GmailSender, user_id: int) -> timedelta | None:
         return None
 
 
-def _serving(request: Request, user_id: int) -> service.Serving:
+def serving_of(request: Request, user_id: int) -> service.Serving:
     """What this process runs, read from ``app.state``; None of it is started here."""
     engine = request.app.state.campaign_engine
     gmail = _gmail_sender(request)
@@ -118,7 +118,7 @@ def _serving(request: Request, user_id: int) -> service.Serving:
 def get_poll_status(request: Request, user: CurrentUser, session: SessionDep) -> PollStatusOut:
     """Each check's last and next run. Read-only: it never triggers one."""
     settings = effective_settings(request, session, user)
-    serving = _serving(request, user.id)
+    serving = serving_of(request, user.id)
     now = utcnow()
     status = service.poll_status(session, user, now=now, settings=settings, serving=serving)
     return PollStatusOut(
@@ -175,7 +175,7 @@ def check_gmail_replies_now(
     calls Gmail itself: the tick runs both polls, gated as usual.
     Refused, with the reason, while ``serve`` isn't running, no mailbox is armed or
     connected, or every armed mailbox needs signing in again."""
-    serving = _serving(request, user.id)
+    serving = serving_of(request, user.id)
     refused = service.replies_check_refused(session, user, serving=serving)
     gmail = _gmail_sender(request)
     if refused is None and gmail is None:

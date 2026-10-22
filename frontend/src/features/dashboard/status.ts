@@ -9,12 +9,7 @@ import type { Attention } from '@/features/attention/api'
 import { formatWhen } from '@/features/linkedin/fields'
 import type { Heat, LinkedInStatus } from '@/features/linkedin/types'
 import { reasonText, type Mailbox } from '@/features/mailboxes/api'
-import {
-  GMAIL_SETTINGS,
-  pickMailbox,
-  type Read,
-  type Target,
-} from '@/features/system-status/roll-up'
+import { GMAIL_SETTINGS, type Read, type Target } from '@/features/system-status/roll-up'
 
 export interface Problem extends Target {
   key: 'session' | 'mailbox' | 'heat' | 'breaker'
@@ -32,6 +27,18 @@ export interface StatusReads {
   status: Read<LinkedInStatus>
   heat: Read<Heat>
   attention: Attention | undefined
+}
+
+/**
+ * Which mailbox the problems read: the one live account (`ok` or `reauth_required`)
+ * when there is one, so a person acting on it sees it first; otherwise the most
+ * recently touched `disabled` row. An empty list is the only case with none. The Gmail
+ * chip picks the same way, on the server (`pick_mailbox`, #761).
+ */
+export function pickMailbox(mailboxes: Mailbox[]): Mailbox | undefined {
+  const live = mailboxes.find((mailbox) => mailbox.status !== 'disabled')
+  if (live !== undefined) return live
+  return [...mailboxes].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
 }
 
 export const SESSION: Target = { to: '/linkedin', hash: 'session' }
