@@ -3,13 +3,14 @@
  * server's parts of the Gmail, LinkedIn and netkeep chips, in one read-only call.
  *
  * Most of what it rolls up moves with no event of its own, so it refetches as often as
- * `/attention` does. It also refetches at once on the server events that move a part,
+ * `/attention` does. It also refetches on the server events that move a part (a run's
+ * progress at most every 5 seconds),
  * after every successful change this tab makes, and whenever the poll status answers
  * (a "Check now" makes that refetch every 15 seconds while it waits).
  */
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Middleware } from 'openapi-fetch'
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 
 import { api } from '@/api/client'
 import { ATTENTION_EVERY_MS, changesAttention } from '@/features/attention/api'
@@ -45,15 +46,43 @@ export const systemStatusQuery = queryOptions({
   refetchInterval: (query) => (sending(query.state.data) ? BATCH_EVERY_MS : ATTENTION_EVERY_MS),
 })
 
-/** The server events that can move a part of a chip. */
+/** The server events that can move a part of a chip; `run.progress` is throttled. */
 export const STATUS_EVENTS = [
   'run.started',
   'run.finished',
-  'run.progress',
   'mailbox.status',
   'task.finished',
   CAMPAIGN_TICK_EVENT,
 ] as const
+
+/**
+ * At most one refetch per this long for `run.progress`, which a run sends per visit or
+ * page: the first event reads at once, and the last one in each window reads at its end.
+ */
+export const PROGRESS_EVERY_MS = 5_000
+
+/** `refresh` at most once per `every` ms: at once, then once more at the window's end. */
+function useThrottled(refresh: () => void, every: number): () => void {
+  const last = useRef(0)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (timer.current !== null) clearTimeout(timer.current)
+    },
+    [],
+  )
+  return useCallback(() => {
+    if (timer.current !== null) return // a trailing read is already due
+    const wait = last.current + every - Date.now()
+    const fire = () => {
+      timer.current = null
+      last.current = Date.now()
+      refresh()
+    }
+    if (wait <= 0) fire()
+    else timer.current = setTimeout(fire, wait)
+  }, [refresh, every])
+}
 
 /**
  * Reads the roll-up, and refetches it on the server events that move it, after every
@@ -69,7 +98,7 @@ export function useSystemStatus() {
   useServerEvent(STATUS_EVENTS[2], refresh)
   useServerEvent(STATUS_EVENTS[3], refresh)
   useServerEvent(STATUS_EVENTS[4], refresh)
-  useServerEvent(STATUS_EVENTS[5], refresh)
+  useServerEvent('run.progress', useThrottled(refresh, PROGRESS_EVERY_MS))
 
   useEffect(() => {
     const middleware: Middleware = {

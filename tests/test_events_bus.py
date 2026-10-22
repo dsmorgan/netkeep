@@ -94,3 +94,14 @@ def test_latest_keeps_the_last_event_of_each_type_for_each_user() -> None:
     assert bus.latest("run.progress", 7) is second
     assert bus.latest("run.progress", 8) is other
     assert bus.latest("campaign.tick", 8) is None
+
+
+async def test_latest_reads_from_a_worker_thread() -> None:
+    """``GET /system-status`` runs in a worker thread while the loop publishes."""
+    import asyncio
+
+    bus = EventBus()
+    for n in range(50):
+        bus.publish(Event(type="run.progress", data={"n": n}, user_id=7))
+        seen = await asyncio.to_thread(bus.latest, "run.progress", 7)
+        assert seen is not None and seen.data == {"n": n}

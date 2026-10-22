@@ -2,7 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ATTENTION_EVERY_MS } from '@/features/attention/api'
-import { BATCH_EVERY_MS } from '@/features/system-status/api'
+import { BATCH_EVERY_MS, PROGRESS_EVERY_MS } from '@/features/system-status/api'
 import {
   gmailChip,
   linkedinChip,
@@ -283,6 +283,31 @@ describe('the top bar’s status chips (#751)', () => {
     await waitFor(() =>
       expect(linkedin).toHaveTextContent('LinkedIn · Enrichment running, 12 of 50'),
     )
+  })
+
+  it('reads the roll-up at most once per window for a run’s progress events', async () => {
+    const calls = serve()
+    await renderApp('/contacts')
+    await chip('linkedin', 'ok')
+    const reads = () => calls.filter((call) => call.path === STATUS).length
+    await waitFor(() => expect(reads()).toBeGreaterThan(0))
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PROGRESS_EVERY_MS)
+    })
+    const before = reads()
+
+    act(() => {
+      for (let visited = 1; visited <= 6; visited += 1) {
+        FakeEventSource.instances.at(-1)?.emit('run.progress', { run_id: 9, visited, planned: 50 })
+      }
+    })
+    await waitFor(() => expect(reads()).toBe(before + 1))
+    // The last of them reads once more at the window's end, and only once.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PROGRESS_EVERY_MS + 1)
+    })
+    await waitFor(() => expect(reads()).toBe(before + 2))
   })
 
   it('refetches the session flag as often as /attention, so a flag set outside a run shows', async () => {

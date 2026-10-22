@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Self
@@ -94,13 +95,16 @@ class Subscription:
 class EventBus:
     """Fan-out of :class:`Event` to any number of subscribers.
 
-    Not thread-safe: publish and subscribe from the event loop thread.
+    Not thread-safe: publish and subscribe from the event loop thread. :meth:`latest`
+    alone may be read from any thread (a sync request handler runs in a worker thread):
+    a lock guards the one record it reads and :meth:`publish` writes.
     """
 
     def __init__(self, *, queue_size: int = DEFAULT_QUEUE_SIZE) -> None:
         self._queue_size = queue_size
         self._subscribers: set[Subscription] = set()
         self._latest: dict[tuple[str, int | None], Event] = {}
+        self._latest_lock = threading.Lock()
 
     @property
     def subscriber_count(self) -> int:
@@ -114,7 +118,8 @@ class EventBus:
             event.user_id,
             len(self._subscribers),
         )
-        self._latest[(event.type, event.user_id)] = event
+        with self._latest_lock:
+            self._latest[(event.type, event.user_id)] = event
         for subscription in list(self._subscribers):
             subscription._offer(event)
 
@@ -123,8 +128,10 @@ class EventBus:
 
         One per type and user, kept in memory and never written down: what a read can
         say about a moment the database doesn't record, such as a run's live progress
-        or a campaign tick that just sent (the status roll-up, #761)."""
-        return self._latest.get((type, user_id))
+        or a campaign tick that just sent (the status roll-up, #761). Safe from any
+        thread: the handler of ``GET /system-status`` reads it from a worker thread."""
+        with self._latest_lock:
+            return self._latest.get((type, user_id))
 
     def subscribe(self) -> Subscription:
         """Start receiving events published from now on."""

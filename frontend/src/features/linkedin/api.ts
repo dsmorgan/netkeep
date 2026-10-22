@@ -51,6 +51,13 @@ export function apiError(error: unknown, response: Response, what: string): ApiE
   return new ApiError(`${what} returned ${response.status}`, response.status)
 }
 
+/**
+ * How often the session flag, heat and the schedule refetch while something shows them:
+ * each also changes outside a run with no event, so as often as `/attention` does. The
+ * top bar's chips set this on them until #761 moved the chips onto `/system-status`.
+ */
+export const OUTSIDE_A_RUN_EVERY_MS = 60_000
+
 export const linkedinKeys = {
   all: ['linkedin'] as const,
   status: () => [...linkedinKeys.all, 'status'] as const,
@@ -76,6 +83,8 @@ export const statusQuery = queryOptions({
     if (data === undefined) throw apiError(error, response, 'GET /api/v1/linkedin/status')
     return data
   },
+  // Changes outside a run too (`netkeep preflight`, the CLI) with no event (#761).
+  refetchInterval: OUTSIDE_A_RUN_EVERY_MS,
 })
 
 export const browserQuery = queryOptions({
@@ -121,6 +130,8 @@ export const heatQuery = queryOptions({
     if (data === undefined) throw apiError(error, response, 'GET /api/v1/linkedin/heat')
     return data
   },
+  // Changes outside a run too (`netkeep preflight`, the CLI) with no event (#761).
+  refetchInterval: OUTSIDE_A_RUN_EVERY_MS,
 })
 
 export const pinsQuery = queryOptions({
@@ -139,6 +150,8 @@ export const scheduleQuery = queryOptions({
     if (data === undefined) throw apiError(error, response, 'GET /api/v1/linkedin/schedule')
     return data
   },
+  // Changes outside a run too (`netkeep preflight`, the CLI) with no event (#761).
+  refetchInterval: OUTSIDE_A_RUN_EVERY_MS,
 })
 
 export interface RunsParams {

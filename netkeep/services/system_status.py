@@ -652,9 +652,13 @@ def gmail_chip(reads: Reads) -> Chip:
         parts.append(_sending_part(mailbox))
     if reads.sending:
         parts.append(BATCH)
-    flag = _flag_part(reads.attention, mailbox)
-    if flag is not None:
-        parts.append(flag)
+    if isinstance(reads.attention, Failed):
+        # Its flag can't be known: a draft held, or a mailbox to sign in to again.
+        parts.append(_failed("flag", "Needs you", GMAIL_SETTINGS))
+    else:
+        flag = _flag_part(reads.attention, mailbox)
+        if flag is not None:
+            parts.append(flag)
     fact = ""
     times: dict[str, Time] = {}
     replies = _find_check(reads.poll, poll_service.GMAIL_REPLIES)
@@ -938,12 +942,13 @@ def linkedin_chip(reads: Reads) -> Chip:
         fact = f"inbox {last}"
         times |= _check_times("inbox", inbox)
         parts.append(_check_part("inbox", "Inbox check", "inbox", inbox, fact, _linkedin("inbox")))
-    parts += [
-        _prefills_part(reads.prefills),
-        _heat_part(reads.heat),
-        _breaker_part(reads.attention),
-        _held_part(reads.attention),
-    ]
+    parts += [_prefills_part(reads.prefills), _heat_part(reads.heat)]
+    if isinstance(reads.attention, Failed):
+        # A breaker, a held auto-send or a block can't be known: the chip never reads
+        # green for want of them.
+        parts.append(_failed("breaker", "Breakers and holds", Target("/settings", "posture")))
+    else:
+        parts += [_breaker_part(reads.attention), _held_part(reads.attention)]
     if not isinstance(reads.heat, Failed) and reads.heat.resumes_at is not None:
         times["heat_resumes"] = Time(reads.heat.resumes_at, TimeStyle.WHEN)
     known = [part for part in parts if part is not None]
