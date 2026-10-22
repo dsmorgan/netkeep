@@ -60,4 +60,4 @@ The Decision and rule 1 use the `netkeep` names. The other rules use today's `ne
 ## Amendments
 
 - 2026-10-22, [ADR 0014](0014-menu-bar-status-app.md) (#755), accepted by the maintainer: rules 6 and 9 take the wording in ADR 0014. Run at login also manages a menu-bar job that never takes the serve lock, and a confirmed click in the UI or the menu bar may run `netkeep update`.
-- 2026-10-22, #762, accepted with that PR, pending the maintainer's approval: rule 9's check, here and in ADR 0014's wording, reads the newest published GitHub release instead of PyPI. A release is published only after PyPI has it and its `constraints.txt` and `SHA256SUMS` are attached, so the check never offers an update `netkeep update` can't finish.
+- 2026-10-22, #762, accepted with that PR, pending the maintainer's approval: rule 9's check reads the newest published GitHub release instead of PyPI. A release is published only after PyPI has it and its `constraints.txt` and `SHA256SUMS` are attached, so the check never offers an update `netkeep update` can't finish.
