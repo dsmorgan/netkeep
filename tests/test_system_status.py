@@ -7,8 +7,10 @@ is here, against the server's words; times stay ``{placeholders}`` the clients f
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -691,3 +693,41 @@ def test_a_read_that_raises_fails_only_its_own_part(caplog: pytest.LogCaptureFix
     status = service.system_status(found)
     assert status.gmail.tone == "off" and status.linkedin.tone == "off"
     assert "AttributeError" in caplog.text
+
+
+def test_attention_that_cant_be_read_never_reads_green() -> None:
+    """Without ``/attention``'s flags a breaker, a hold or a block can't be known: a part
+    says so, so the chip is never green for want of one."""
+    chip = linkedin(attention=FAILED)
+    assert chip.tone != "ok"
+    assert face(chip) == {
+        "tone": "off",
+        "text": "LinkedIn · Couldn’t check",
+        "href": "/settings#posture",
+    }
+    assert find(chip, "breaker").label == "Breakers and holds"
+    assert "held" not in keys(chip) and "blocked" not in keys(chip)
+    # A stopped session still speaks over it.
+    assert face(linkedin(attention=FAILED, linkedin=LinkedInRead("checkpoint")))["tone"] == "bad"
+    gmail_chip = gmail(attention=FAILED)
+    assert gmail_chip.tone != "ok"
+    assert (find(gmail_chip, "flag").label, find(gmail_chip, "flag").tone) == ("Needs you", "off")
+
+
+def _ts_reasons() -> dict[str, str]:
+    """``REASONS`` in ``frontend/src/features/mailboxes/api.ts``, read from the source."""
+    source = (
+        Path(__file__).resolve().parents[1] / "frontend/src/features/mailboxes/api.ts"
+    ).read_text(encoding="utf-8")
+    table = source[source.index("const REASONS: Record<string, string> = {") :]
+    table = table[: table.index("\n}\n")]
+    entries = re.findall(r"^\s+(\w+):\s*'((?:[^'\\]|\\.)*)',?$", table, flags=re.MULTILINE)
+    return dict(entries)
+
+
+def test_the_reasons_match_the_uis_word_for_word() -> None:
+    """The server's copy of a mailbox reason reads as the Gmail settings page says it."""
+    ui = _ts_reasons()
+    assert len(ui) >= len(service.REASONS) > 0
+    for reason, text in service.REASONS.items():
+        assert ui.get(reason) == text, reason

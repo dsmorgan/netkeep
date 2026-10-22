@@ -194,3 +194,25 @@ async def test_another_users_state_never_shows(app: FastAPI, client: httpx.Async
     assert (session_part["key"], session_part["tone"]) == ("session", "ok")
     assert body["linkedin_paused"] is False
     assert body["linkedin_run"] is None
+
+
+async def test_another_users_events_never_show(app: FastAPI, client: httpx.AsyncClient) -> None:
+    """Only another user's ``campaign.tick`` and ``run.progress``: neither shows here."""
+    factory: sessionmaker[Session] = app.state.session_factory
+    with session_scope(factory, write=True) as session:
+        user = _local(session)
+        ensure_account(session, user)
+        run = runs.create_run(
+            session, user, SyncRunKind.CONNECTIONS_FULL, trigger=SyncRunTrigger.MANUAL, now=utcnow()
+        )
+        run_id, other_id = run.id, user.id + 1
+    bus = app.state.bus
+    # The other user's event names this user's run id: only the user can tell them apart.
+    progress = {"run_id": run_id, "connections": 340, "total": 626}
+    bus.publish(Event(type="run.progress", data=progress, user_id=other_id))
+    bus.publish(Event(type="campaign.tick", data={"sent": 1}, user_id=other_id))
+
+    body = (await client.get(PATH)).json()
+
+    assert _face(body["linkedin"]) == "LinkedIn · Full sync running · started {run_started}"
+    assert "batch" not in {part["key"] for part in body["gmail"]["parts"]}
