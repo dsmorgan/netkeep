@@ -56,3 +56,7 @@ The Decision and rule 1 use the `netkeep` names. The other rules use today's `ne
 - We take on PyPI publishing, versioned releases, and a tested shell script, but no Apple account.
 - The one-liner still needs a terminal.
 - After an interpreter change, macOS asks once per Keychain item to let the new interpreter read it: a prompt, not data loss.
+
+## Amendments
+
+- On acceptance of [ADR 0014](0014-menu-bar-status-app.md) (#755): rules 6 and 9 take the wording in ADR 0014. Run at login also manages a menu-bar job that never takes the serve lock, and a confirmed click in the UI or the menu bar may run `netkeep update`.
