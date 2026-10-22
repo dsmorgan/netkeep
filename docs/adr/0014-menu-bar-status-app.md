@@ -4,7 +4,7 @@ Date: 2026-10-22
 
 ## Status
 
-Proposed (#755). On acceptance, this ADR amends rules 6 and 9 of [ADR 0011](0011-installation-and-updates.md).
+Accepted (#755, 2026-10-22), by the maintainer. This ADR amends rules 6 and 9 of [ADR 0011](0011-installation-and-updates.md).
 
 ## Context
 
@@ -45,9 +45,9 @@ Option a. `netkeep setup` adds a helper bundle inside `netkeep.app`, with its ow
 10. **No notifications in 1.0.** The icon's tint is the signal. *Reason:* a notification from "Script Editor" confuses more than it helps.
 11. **PyObjC is a macOS-only dependency** in the release's constraints file, and the Intel CI job imports it. *Reason:* Linux and the container don't need it.
 
-### Amendments to ADR 0011, on acceptance
+### Amendments to ADR 0011 (2026-10-22)
 
-- **Rule 6 becomes:** "`netkeep setup` and the #600 Settings switch are one implementation of one Run-at-login setting. It manages the `serve` job and, under ADR 0014, a menu-bar job that never takes the serve lock, both pointing at the stable installed executable. The formula declares no `brew services` block. Two jobs that run `serve` would race for the serve lock."
+- **Rule 6 becomes:** "`netkeep setup` and the #600 Settings switch are one implementation of one Run-at-login setting. It manages the `serve` job and, under ADR 0014, a menu-bar job that never takes the serve lock, both pointing at the stable installed executable. Each job's label is per data directory: `fun.tnkr.netkeep`, and the menu-bar job adds `.menubar`. The formula declares no `brew services` block. Two jobs that run `serve` would race for the serve lock."
 - **Rule 9 becomes:** "netkeep never updates itself silently. The UI may check PyPI at most daily, with a setting to turn it off. It shows the command. The UI and the menu bar may offer an Update action that runs `netkeep update` only after you confirm (ADR 0014)."
 
 ## Consequences
