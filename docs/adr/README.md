@@ -28,5 +28,6 @@ The project was called netkeeper until 2026-10-19, when it became netkeep (#661)
 | [0011](0011-installation-and-updates.md) | Installation and updates: PyPI and uv first, a one-line installer in front, Homebrew next, a signed app only if needed | Accepted |
 | [0012](0012-chrome-profiles.md) | Chrome profiles: one netkeeper Chrome for the UI, LinkedIn, and setup | Accepted |
 | [0013](0013-local-api-secret.md) | A per-install key for the local API, handed to the browser as a cookie | Accepted |
+| [0014](0014-menu-bar-status-app.md) | A menu-bar status app in the locally built netkeep.app | Proposed |
 
 The mechanics behind ADRs 0006, 0007, and 0008 (the browser inputs, their checks, and their pins) are in [How netkeep drives a LinkedIn page](../linkedin-browser-inputs.md).
