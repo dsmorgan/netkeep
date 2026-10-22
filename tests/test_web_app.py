@@ -137,6 +137,7 @@ API_PATHS = {
     "/api/v1/triage/suggestions",
     "/api/v1/triage/suggestions/{key}/contacts",
     "/api/v1/triage/suggestions/{key}/apply",
+    "/api/v1/update-check",
     "/api/v1/poll-status",
     "/api/v1/poll-status/gmail-replies/check-now",
     "/api/v1/attention",
@@ -419,6 +420,7 @@ def test_known_api_modules_are_discovered() -> None:
         "template_adoption",
         "templates",
         "triage",
+        "update_check",
     ]
 
 

@@ -96,7 +96,13 @@ KEY_PREFIX: Final = "config."
 Kind = Literal["int", "optional_int", "float", "bool", "window", "dates", "text"]
 Applies = Literal["now", "restart"]
 Group = Literal[
-    "linkedin_budgets", "linkedin_hours", "linkedin_runs", "campaigns", "backup", "logs"
+    "linkedin_budgets",
+    "linkedin_hours",
+    "linkedin_runs",
+    "campaigns",
+    "backup",
+    "logs",
+    "updates",
 ]
 Source = Literal["default", "ui", "file"]
 
@@ -522,6 +528,19 @@ FIELDS: Final[tuple[FieldSpec, ...]] = (
         applies_note=_LOGS_NOTE,
         minimum=1,
         maximum=MAX_LOG_FILES,
+    ),
+    FieldSpec(
+        key="updates.check_daily",
+        group="updates",
+        label="Check for updates daily",
+        help=(
+            "netkeep serve asks GitHub once a day for the newest published release, and"
+            " this page shows it when it is newer. It sends nothing about you and installs"
+            " nothing: you update with netkeep update."
+        ),
+        kind="bool",
+        applies="now",
+        applies_note="Applies at serve's next check, within an hour. Off makes no request.",
     ),
 )
 

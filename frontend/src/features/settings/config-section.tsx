@@ -15,6 +15,7 @@ import {
   configSettingsQuery,
   postureQuery,
   saveConfigSettings,
+  updateCheckQuery,
 } from './api'
 import {
   type Draft,
@@ -26,10 +27,11 @@ import {
   warnAboveHint,
 } from './config-fields'
 import { RestartBanner } from './restart-banner'
+import { UpdateStatus } from './update-status'
 
 /**
  * Settings you change here instead of in config.toml (#343): LinkedIn budgets, active
- * hours, campaign defaults, backups and logs. config.toml is optional; a key
+ * hours, campaign defaults, backups, logs and the daily update check. config.toml is optional; a key
  * it sets wins and shows here locked, with the file's path.
  */
 function message(error: unknown): string {
@@ -68,7 +70,8 @@ export function ConfigSections() {
                 {current.data.config_path !== null ? ` (${current.data.config_path})` : ''}.
               </CardDescription>
             </CardHeader>
-            <CardContent className="text-sm">
+            <CardContent className="space-y-4 text-sm">
+              {group.id === 'updates' && <UpdateStatus />}
               <GroupForm
                 title={group.title}
                 fields={fields}
@@ -101,6 +104,7 @@ function GroupForm({ title, fields }: { title: string; fields: ConfigField[] }) 
     onSuccess: (data: ConfigSettings) => {
       queryClient.setQueryData(configSettingsQuery.queryKey, data)
       void queryClient.invalidateQueries({ queryKey: postureQuery.queryKey })
+      void queryClient.invalidateQueries({ queryKey: updateCheckQuery.queryKey })
       setSaved(true)
     },
   })

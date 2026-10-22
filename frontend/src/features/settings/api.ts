@@ -15,6 +15,7 @@ export type SendingHoursIn = components['schemas']['SendingHoursIn']
 export type Day = SendingHoursIn['days'][number]
 export type SelfContact = components['schemas']['SelfContactOut']
 export type SelfContactIn = components['schemas']['SelfContactIn']
+export type UpdateCheck = components['schemas']['UpdateCheckOut']
 
 /**
  * Every protection the LinkedIn extractor has (spec section 9, P2-11), read-only.
@@ -175,6 +176,19 @@ export const configSettingsQuery = queryOptions({
   queryFn: async ({ signal }): Promise<ConfigSettings> => {
     const { data, error, response } = await api.GET('/api/v1/settings/config', { signal })
     if (data === undefined) throw failure(error, response, 'GET /settings/config')
+    return data
+  },
+})
+
+/**
+ * What `serve`'s daily update check found (#762). Reading it makes no request to GitHub:
+ * it answers what the last check recorded.
+ */
+export const updateCheckQuery = queryOptions({
+  queryKey: ['update-check'] as const,
+  queryFn: async ({ signal }): Promise<UpdateCheck> => {
+    const { data, error, response } = await api.GET('/api/v1/update-check', { signal })
+    if (data === undefined) throw failure(error, response, 'GET /update-check')
     return data
   },
 })

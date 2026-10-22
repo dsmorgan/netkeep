@@ -33,6 +33,7 @@ A test pins this table: the menu-bar module may call nothing else. The confirmat
 
 ## Update
 
+- **The daily check (#762):** `serve` asks for the newest published GitHub release (`update.latest_release`, the request `netkeep update --check` makes), at most once a day, while **Check for updates daily** is on (`updates.check_daily`, default on). It stores the answer and when it checked in `update/last-check.json` in the data directory, and `GET /update-check` serves it. **Update to X.Y.Z** appears only when that answer is newer than the running version. The source is GitHub, not PyPI: a release is published only after PyPI has the version and its `constraints.txt` and `SHA256SUMS` are attached (ADR 0011, rule 9). A failed check logs one line and waits a day.
 - The menu bar imports everything it uses at startup, before any update can replace the tool environment.
 - It starts `netkeep update` in its own session, so the update outlives the menu bar, and it watches the update's state file (`state.json` in the data directory's update folder, `netkeep/services/update.py`). It shows each phase and any refusal.
 - `update --finish` restarts the menu-bar job last, after its health check, so the menu bar runs the new code.
