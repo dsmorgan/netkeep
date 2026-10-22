@@ -43,6 +43,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import Final
+from xml.parsers.expat import ExpatError
 
 from netkeep import __version__, paths
 from netkeep.logging_setup import STDERR_LEVEL_ENV
@@ -340,7 +341,7 @@ class Launcher:
         try:
             with (path / "Contents" / "Info.plist").open("rb") as handle:
                 document = plistlib.load(handle)
-        except (OSError, plistlib.InvalidFileException, ValueError):
+        except (OSError, plistlib.InvalidFileException, ValueError, ExpatError):
             return False
         return isinstance(document, dict) and document.get("CFBundleIdentifier") == bundle_id(
             self._data

@@ -43,6 +43,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Final
+from xml.parsers.expat import ExpatError
 
 from netkeep import paths
 from netkeep.logging_setup import LOG_FILENAME
@@ -811,8 +812,8 @@ def _read_plist(path: Path) -> dict[str, object] | None:
     try:
         with path.open("rb") as handle:
             document = plistlib.load(handle)
-    except (OSError, plistlib.InvalidFileException, ValueError):
-        return None
+    except (OSError, plistlib.InvalidFileException, ValueError, ExpatError):
+        return None  # a malformed XML plist raises ExpatError, not plistlib's own
     return document if isinstance(document, dict) else None
 
 
