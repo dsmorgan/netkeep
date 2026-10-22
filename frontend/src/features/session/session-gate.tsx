@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { CopyValue } from '@/features/settings/copy-button'
 
 import { DISCONNECTED_EVENT, checkSession, type SessionInfo } from './api'
+import { KeyPersistedContext } from './key-persisted'
 
 /** The query the server's connect link adds; the gate reads it once, then drops it. */
 const CONNECT_PARAM = 'connect'
@@ -24,7 +25,7 @@ function takeExpiredFlag(): boolean {
  * connect page when it isn't (#618, ADR 0013). The first browser connects on
  * its own; this shows nothing while it does. A 401 from any call later (the
  * cookie cleared, a new key) brings the check back. When the Keychain refused
- * the key, a banner above the app says so.
+ * the key, a banner above the app says so, and so does the top bar's netkeep chip.
  */
 export function SessionGate({ children }: { children: ReactNode }) {
   const [info, setInfo] = useState<SessionInfo | null>(null)
@@ -46,10 +47,10 @@ export function SessionGate({ children }: { children: ReactNode }) {
   }
   if (info.persisted) return children
   return (
-    <>
+    <KeyPersistedContext value={false}>
       <KeyInMemoryBanner />
       {children}
-    </>
+    </KeyPersistedContext>
   )
 }
 

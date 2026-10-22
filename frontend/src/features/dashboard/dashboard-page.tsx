@@ -1,12 +1,9 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 
 import { toneClasses } from '@/components/ui/tone'
 import { attentionQuery } from '@/features/attention/api'
-import { useEventStreamStatus } from '@/features/events/event-stream-context'
-import { useServerEvent } from '@/features/events/use-server-event'
-import { linkedinKeys } from '@/features/linkedin/api'
 import { LinkedInStepsSection } from '@/features/linkedin-steps/linkedin-steps-section'
 import { cn } from '@/lib/utils'
 
@@ -15,22 +12,8 @@ import { LiveRunCard } from './live-run-card'
 import { MetricTiles } from './metric-tiles'
 import { SetupChecklist } from './setup-checklist'
 import { NEEDS_YOU_ID, needsYouCount, needsYouText, type Problem } from './status'
-import { ProblemList, StatusChips } from './status-chips'
+import { NeedsYouChip, ProblemList } from './status-chips'
 import { useDashboardStatus } from './use-dashboard-status'
-
-/**
- * A LinkedIn run starting or ending moves the schedule, the last run, the
- * session flag, budget, and heat, and none of them says so on its own; refetch
- * them all once per run, as the LinkedIn page does (`use-run-events.ts`).
- */
-function useLinkedInRefresh(): void {
-  const queryClient = useQueryClient()
-  const refresh = () => {
-    void queryClient.invalidateQueries({ queryKey: linkedinKeys.all })
-  }
-  useServerEvent('run.started', refresh)
-  useServerEvent('run.finished', refresh)
-}
 
 /** The current time, moved on each minute, for the header's eyebrow. */
 function useMinute(): Date {
@@ -55,7 +38,7 @@ function eyebrowText(now: Date): string {
 
 /**
  * The dashboard, one page (#739), top to bottom: a header saying how many things need
- * you, the status chips, the metric tiles (#740), the setup checklist (#747), and
+ * you, with a chip that goes to them, the metric tiles (#740), the setup checklist (#747), and
  * the detail: Needs you, Running now, Coming up, Campaigns and Changed jobs.
  *
  * The top bar holds the page's `<h1>`, "Dashboard", so the header here is the line
@@ -63,24 +46,24 @@ function eyebrowText(now: Date): string {
  * states, so one failed read never blanks the page.
  */
 export function DashboardPage() {
-  const { chips, problems } = useDashboardStatus()
+  const { problems } = useDashboardStatus()
   const attention = useQuery(attentionQuery)
   const now = useMinute()
-  useLinkedInRefresh()
+  const count = needsYouCount(problems, attention.data)
 
   return (
     <div className="flex max-w-6xl flex-col gap-4">
-      <header data-region="header" className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-end justify-between gap-2">
-          <div className="flex flex-col gap-0.5">
-            <span className="nk-eyebrow">{eyebrowText(now)}</span>
-            <p data-testid="needs-you-line">
-              {needsYouText(needsYouCount(problems, attention.data))}
-            </p>
-          </div>
-          <LiveUpdates />
+      <header
+        data-region="header"
+        className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2"
+      >
+        <div className="flex flex-col gap-0.5">
+          <span className="nk-eyebrow">{eyebrowText(now)}</span>
+          <p data-testid="needs-you-line">{needsYouText(count)}</p>
         </div>
-        <StatusChips chips={chips} />
+        {count !== null && count > 0 && (
+          <NeedsYouChip count={count} stopped={problems.length > 0} />
+        )}
       </header>
 
       <MetricTiles />
@@ -149,24 +132,5 @@ function NeedsYou({ problems, inbox }: { problems: Problem[]; inbox: number }) {
       <RepliesCard level={3} />
       <LinkedInStepsSection level={3} />
     </section>
-  )
-}
-
-/** Whether the page gets live updates, as a small dot and a word. */
-function LiveUpdates() {
-  const stream = useEventStreamStatus()
-  return (
-    <span className="flex items-center gap-2 text-sm text-muted-foreground">
-      <span
-        aria-hidden="true"
-        className={cn(
-          'size-2 rounded-full',
-          stream === 'connected' ? 'bg-ok' : 'bg-muted-foreground/50',
-        )}
-      />
-      <span role="status">
-        Live updates {stream === 'connected' ? 'connected' : 'disconnected'}
-      </span>
-    </span>
   )
 }

@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -7,7 +7,9 @@ import { FakeEventSource, resetFakeEventSource } from '@/test/fake-event-source'
 import { jsonResponse, mockFetch } from '@/test/fetch'
 
 import type { MailboxPoll, PollCheck, PollStatus } from './api'
-import { pollStatusKeys, pollStatusQuery } from './api'
+import { pollStatusKeys, pollStatusQuery, usePollStatusRefresh } from './api'
+import { CheckRepliesNow } from './check-now'
+import { useNow } from './use-now'
 import {
   LATE_AFTER_MS,
   ago,
@@ -18,7 +20,6 @@ import {
   repliesText,
   STATE_TEXT,
 } from './format'
-import { PollStatusHeader } from './poll-status-header'
 import { RepliesChecked } from './replies-checked'
 
 const NOW = Date.parse('2026-09-16T15:00:00Z')
@@ -125,6 +126,24 @@ function renderWith(
   return { source, fetches: () => fetches, queryClient }
 }
 
+/**
+ * The Gmail reply check as the top bar's Gmail popover holds it (#751): its line and
+ * "Check now", refreshed on the poll status events, as the status chips do.
+ */
+function GmailCheck() {
+  const status = useQuery(pollStatusQuery)
+  usePollStatusRefresh()
+  const now = useNow()
+  const replies = status.data?.items.find((item) => item.key === 'gmail_replies')
+  if (replies === undefined) return null
+  return (
+    <section aria-label="Gmail">
+      <p>{checkSummary(replies, now)}</p>
+      <CheckRepliesNow check={replies} />
+    </section>
+  )
+}
+
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(NOW)
@@ -206,7 +225,7 @@ describe('format', () => {
   })
 })
 
-describe('PollStatusHeader', () => {
+describe('the poll status', () => {
   it('refetches every minute, and every 15 seconds while a check now waits', () => {
     const interval = pollStatusQuery.refetchInterval as (query: unknown) => number
     const at = (data: PollStatus) => interval({ state: { data } })
@@ -219,46 +238,10 @@ describe('PollStatusHeader', () => {
     expect(interval({ state: { data: undefined } })).toBe(60_000)
   })
 
-  it('shows Gmail and the LinkedIn inbox in the header', async () => {
-    renderWith(<PollStatusHeader />, () => pollStatus())
-
-    expect(await screen.findByText('Gmail: checked 3 min ago · next in 7 min')).toBeInTheDocument()
-    expect(screen.getByText('LinkedIn inbox: not running yet')).toBeInTheDocument()
-  })
-
-  it('lists every check in the popover, with why one has no time', async () => {
-    renderWith(<PollStatusHeader />, () => pollStatus())
-
-    fireEvent.click(await screen.findByRole('button', { name: /Background checks/ }))
-
-    const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText('Background checks')).toBeInTheDocument()
-    const linkedin = within(dialog).getByRole('region', { name: 'LinkedIn' })
-    expect(within(linkedin).getByText('LinkedIn enrichment')).toBeInTheDocument()
-    expect(within(linkedin).getByText('checked 2 h ago · paused')).toBeInTheDocument()
-    expect(within(linkedin).getByText('The LinkedIn schedule is paused')).toBeInTheDocument()
-    const gmail = within(dialog).getByRole('region', { name: 'Gmail' })
-    expect(within(gmail).getByText('Gmail drafts')).toBeInTheDocument()
-    expect(within(gmail).getAllByText('every 10 min')).toHaveLength(2)
-  })
-
-  it('says when netkeep serve is not running', async () => {
-    renderWith(<PollStatusHeader />, () =>
-      pollStatus({
-        background_running: false,
-        items: [check({ state: 'not_running', next_at: null, reason: 'not serving' })],
-      }),
-    )
-
-    expect(await screen.findByText('Gmail: checked 3 min ago · not running')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /Background checks/ }))
-    expect(await screen.findByText(/serve isn’t running/)).toBeInTheDocument()
-  })
-
   it('updates when a LinkedIn run ends, without a reload', async () => {
     let current = pollStatus()
-    const { source, fetches } = renderWith(<PollStatusHeader />, () => current)
-    await screen.findByText('LinkedIn inbox: not running yet')
+    const { source, fetches } = renderWith(<GmailCheck />, () => current)
+    await screen.findByText('checked 3 min ago · next in 7 min')
     const before = fetches()
 
     current = pollStatus({
@@ -266,7 +249,7 @@ describe('PollStatusHeader', () => {
     })
     act(() => source.emit('run.finished', { run_id: 1 }))
 
-    expect(await screen.findByText('Gmail: checked just now · next in 10 min')).toBeInTheDocument()
+    expect(await screen.findByText('checked just now · next in 10 min')).toBeInTheDocument()
     expect(fetches()).toBeGreaterThan(before)
   })
 })
@@ -292,10 +275,8 @@ describe('RepliesChecked', () => {
 })
 
 describe('Check now', () => {
-  async function openPopover() {
-    fireEvent.click(await screen.findByRole('button', { name: /Background checks/ }))
-    const dialog = await screen.findByRole('dialog')
-    return within(dialog).getByRole('region', { name: 'Gmail' })
+  async function gmailRegion() {
+    return screen.findByRole('region', { name: 'Gmail' })
   }
 
   it('asks for the reply poll, then waits for the tick and the new last-checked time', async () => {
@@ -303,7 +284,7 @@ describe('Check now', () => {
     let release: () => void = () => {}
     let posts = 0
     const { queryClient } = renderWith(
-      <PollStatusHeader />,
+      <GmailCheck />,
       () => current,
       () => {
         posts += 1
@@ -312,7 +293,7 @@ describe('Check now', () => {
         })
       },
     )
-    const gmail = await openPopover()
+    const gmail = await gmailRegion()
     const button = within(gmail).getByRole('button', { name: 'Check now' })
     expect(button).toBeEnabled()
 
@@ -374,12 +355,12 @@ describe('Check now', () => {
   it('comes back, saying so, when the check still has not run after three minutes', async () => {
     vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] })
     vi.setSystemTime(NOW)
-    renderWith(<PollStatusHeader />, () =>
+    renderWith(<GmailCheck />, () =>
       pollStatus({
         items: [check({ state: 'due', next_at: null, requested: true, requested_at: minutes(0) })],
       }),
     )
-    const gmail = await openPopover()
+    const gmail = await gmailRegion()
     const button = within(gmail).getByRole('button', { name: 'Check now' })
     expect(button).toBeDisabled()
     expect(within(gmail).getByText('Checking within a minute')).toBeInTheDocument()
@@ -392,11 +373,11 @@ describe('Check now', () => {
 
   it('shows a refusal with its reason and does not get stuck', async () => {
     renderWith(
-      <PollStatusHeader />,
+      <GmailCheck />,
       () => pollStatus(),
       () => jsonResponse({ detail: 'No mailbox is armed, so netkeep doesn’t read Gmail' }, 409),
     )
-    const gmail = await openPopover()
+    const gmail = await gmailRegion()
     const button = within(gmail).getByRole('button', { name: 'Check now' })
 
     fireEvent.click(button)
@@ -408,12 +389,12 @@ describe('Check now', () => {
   })
 
   it('is disabled while the check cannot run', async () => {
-    renderWith(<PollStatusHeader />, () =>
+    renderWith(<GmailCheck />, () =>
       pollStatus({
         items: [check({ state: 'off', next_at: null, reason: 'Gmail isn’t connected' })],
       }),
     )
-    const gmail = await openPopover()
+    const gmail = await gmailRegion()
     expect(within(gmail).getByRole('button', { name: 'Check now' })).toBeDisabled()
   })
 

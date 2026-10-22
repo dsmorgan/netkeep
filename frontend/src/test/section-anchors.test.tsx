@@ -157,8 +157,16 @@ describe('section anchors (#739)', () => {
     expect(scrolled).toContain(document.getElementById('gmail'))
   })
 
-  it('moves focus to Needs you on every click of the Problems chip', async () => {
+  it('moves focus to Needs you on every click of the Needs you chip', async () => {
     serve({
+      '/api/v1/attention': () =>
+        jsonResponse({
+          checked_at: '2026-10-20T12:00:00Z',
+          counts: { inbox: 0, dashboard: 0, waiting: 0, try_again: 0, triage: 0, imports: 0 },
+          flags: { dashboard: null, gmail: null, linkedin: null, settings: null },
+          activity: { state: 'idle', label: '', run_id: null, run_kind: null },
+          title_total: 0,
+        }),
       '/api/v1/linkedin/heat': () =>
         jsonResponse({
           score: 6,
@@ -171,13 +179,13 @@ describe('section anchors (#739)', () => {
         }),
     })
     await renderApp('/')
-    const chip = await screen.findByRole('link', { name: '1 problem' })
+    const chip = await screen.findByRole('link', { name: 'Needs you · 1' })
     const heading = screen.getByRole('heading', { level: 2, name: 'Needs you' })
 
     fireEvent.click(chip)
     await waitFor(() => expect(heading).toHaveFocus())
 
-    // Scroll back up to the chips, and click the same chip again.
+    // Scroll back up to the chip, and click it again.
     chip.focus()
     scrolled = []
     fireEvent.click(chip)
