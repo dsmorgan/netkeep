@@ -48,7 +48,7 @@ Option a. `netkeep setup` adds a helper bundle inside `netkeep.app`, with its ow
 ### Amendments to ADR 0011 (2026-10-22)
 
 - **Rule 6 becomes:** "`netkeep setup` and the #600 Settings switch are one implementation of one Run-at-login setting. It manages the `serve` job and, under ADR 0014, a menu-bar job that never takes the serve lock, both pointing at the stable installed executable. Each job's label is per data directory: `fun.tnkr.netkeep`, and the menu-bar job adds `.menubar`. The formula declares no `brew services` block. Two jobs that run `serve` would race for the serve lock."
-- **Rule 9 becomes:** "netkeep never updates itself silently. The UI may check PyPI at most daily, with a setting to turn it off. It shows the command. The UI and the menu bar may offer an Update action that runs `netkeep update` only after you confirm (ADR 0014)."
+- **Rule 9 becomes:** "netkeep never updates itself silently. The UI may check the newest published GitHub release at most daily, with a setting to turn it off. It shows the command. The UI and the menu bar may offer an Update action that runs `netkeep update` only after you confirm (ADR 0014)."
 
 ## Consequences
 
