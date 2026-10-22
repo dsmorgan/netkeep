@@ -742,7 +742,10 @@ def _rebuild_launcher(seams: Seams, say: Say, *, build: bool) -> None:
     """The launcher app runs the installed ``netkeep`` by its absolute path, so the new
     version rewrites it: always when it exists, and when the login item was on, also when
     it doesn't yet (an install from before #754)."""
-    done = seams.launcher(build)
+    try:
+        done = seams.launcher(build)
+    except OSError as exc:  # the update went through: a launcher problem never fails it
+        done = f"couldn't check or rebuild it: {exc}. Rebuild it in Settings, or run netkeep setup."
     if done is not None:
         say(f"Launcher app: {done}")
 

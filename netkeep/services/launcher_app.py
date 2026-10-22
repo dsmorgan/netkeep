@@ -11,9 +11,11 @@ only. Design notes, and why Gatekeeper doesn't apply: ``docs/design/install-opti
 - **The script** exports the data directory and the settings the login item's plist
   carries, then runs ``<installed netkeep> open --launcher``, with that absolute path
   written in: the stable installed executable the login item runs (ADR 0011, rule 6;
-  :func:`netkeep.services.login_item.installed_executable`). When that fails, or the
-  executable is gone, it shows what ``open --launcher`` printed in a plain dialog
-  (``/usr/bin/osascript``). It runs nothing else.
+  :func:`netkeep.services.login_item.installed_executable`). The settings come from the
+  login item's plist when there is one. When that fails, or the executable is gone, it
+  shows what ``open --launcher`` printed (stdout and stderr) in a plain dialog
+  (``/usr/bin/osascript``, the message after ``--``, so it's always data). It runs
+  nothing else.
 - **open --launcher** (:func:`reach_serve`): when ``serve`` doesn't answer, it starts the
   login item (``launchctl kickstart``, or ``bootstrap`` when launchd hasn't loaded it),
   waits for ``/health``, then opens the window the way ``netkeep open`` does.
@@ -43,6 +45,7 @@ from pathlib import Path
 from typing import Final
 
 from netkeep import __version__, paths
+from netkeep.logging_setup import STDERR_LEVEL_ENV
 from netkeep.services import keychain
 from netkeep.services.login_item import SERVE_ERR_LOG, LoginItem, LoginItemError
 
@@ -169,6 +172,7 @@ class Launcher:
         icon: bytes | Callable[[], bytes | None] | None = packaged_icon,
         osascript: str = OSASCRIPT,
         version: str = __version__,
+        login_environment: Callable[[], Mapping[str, str] | None] | None = None,
     ) -> None:
         self._data = (data if data is not None else paths.data_dir()).expanduser().resolve()
         self._applications = (
@@ -180,11 +184,18 @@ class Launcher:
         self._icon = icon
         self._osascript = osascript
         self._version = version
+        self._login_environment = login_environment
 
     @classmethod
     def for_login_item(cls, item: LoginItem, *, applications_dir: Path | None = None) -> Launcher:
-        """The launcher for ``item``'s data directory, running the ``netkeep`` it runs."""
-        return cls(data=item.data, executable=item.executable, applications_dir=applications_dir)
+        """The launcher for ``item``'s data directory, running the ``netkeep`` it runs, with
+        the settings its plist gives ``serve`` (read when the script is written)."""
+        return cls(
+            data=item.data,
+            executable=item.executable,
+            applications_dir=applications_dir,
+            login_environment=item.plist_environment,
+        )
 
     # -- names ------------------------------------------------------------------------
 
@@ -222,11 +233,17 @@ class Launcher:
                 "can't find the installed netkeep command for the launcher to run. Install"
                 " netkeep with the installer in the README, then run netkeep setup again."
             )
-        exports = [f"{_DATA_LINE}{shell_quote(str(self._data))}"]
-        # The settings the login item's plist carries, so the launcher finds the same
-        # Keychain service and config file as the serve it opens.
+        exports = [
+            f"{_DATA_LINE}{shell_quote(str(self._data))}",
+            f"export {STDERR_LEVEL_ENV}=WARNING",  # as the plist's: no INFO lines in a dialog
+        ]
+        # The settings the login item's plist gives serve, so the launcher reads the same
+        # Keychain service and config file as the serve it opens. This process's own only
+        # when there is no plist.
+        plist = self._login_environment() if self._login_environment is not None else None
+        source = plist if plist is not None else self._environ
         for name in (keychain.SERVICE_ENV, paths.CONFIG_ENV):
-            value = (paths.getenv(name, self._environ) or "").strip()
+            value = (paths.getenv(name, source) or "").strip()
             if value and name == paths.CONFIG_ENV:
                 value = str(Path(value).expanduser().resolve())
             if value:
@@ -240,12 +257,12 @@ class Launcher:
             *exports,
             f"{_NETKEEP_LINE}{shell_quote(str(self._executable))}",
             'if [ -x "$netkeep" ]; then',
-            f'  message=$("$netkeep" {arguments}) && exit 0',
+            f'  message=$("$netkeep" {arguments} 2>&1) && exit 0',
             "else",
             f'  message="{NOT_INSTALLED}"',
             "fi",
             f'[ -n "$message" ] || message={shell_quote(NO_MESSAGE)}',
-            f'{shell_quote(self._osascript)} {dialog} "$message" >/dev/null',
+            f'{shell_quote(self._osascript)} {dialog} -- "$message" >/dev/null',
             "exit 1",
         ]
         return "\n".join(lines) + "\n"
@@ -439,6 +456,14 @@ def reach_serve(item: LoginItem, base: str, seams: ServeSeams, *, wait_s: float)
     status = item.status()
     if not status.supported:
         return status.reason
+    # The login item starts the netkeep its plist names, as it does at login; when that
+    # isn't this one, a failure says so.
+    stale = (
+        f" Its login item runs {status.plist_executable}, not {item.executable}: Repair, in"
+        " Settings under Run at login, or netkeep setup points it at this one."
+        if status.stale
+        else ""
+    )
     if not seams.lock_held():
         if not status.installed:
             return (
@@ -459,7 +484,8 @@ def reach_serve(item: LoginItem, base: str, seams: ServeSeams, *, wait_s: float)
             item.start()
         except LoginItemError as exc:
             return (
-                f"netkeep couldn't start: {exc}. Open Terminal and run: netkeep login-item status"
+                f"netkeep couldn't start: {exc}. Open Terminal and run: netkeep login-item"
+                f" status.{stale}"
             )
     deadline = seams.clock() + wait_s
     while not seams.answers(base):
@@ -467,7 +493,7 @@ def reach_serve(item: LoginItem, base: str, seams: ServeSeams, *, wait_s: float)
             errors = item.data / "logs" / SERVE_ERR_LOG
             return (
                 f"netkeep didn't answer at {base} within {wait_s:g} seconds. {errors} may say"
-                " why. Open Terminal and run: netkeep login-item status"
+                f" why. Open Terminal and run: netkeep login-item status.{stale}"
             )
         seams.sleep(_POLL_S)
     return None
@@ -478,16 +504,17 @@ def refresh(launcher: Launcher, *, build: bool) -> str | None:
     not what a build writes now, or build a missing one when ``build``. What it did, or
     ``None`` when it did nothing. A failure is reported, never raised: the update itself
     went through."""
-    status = launcher.status()
-    if not status.supported or (status.exists and not status.ours):
-        return None
-    if not status.exists and not build:
-        return None
-    if status.exists and launcher.up_to_date():
-        return None
     try:
+        status = launcher.status()
+        if not status.supported or (status.exists and not status.ours):
+            return None
+        if not status.exists and not build:
+            return None
+        if status.exists and launcher.up_to_date():
+            return None
         return launcher.build()
     except (LauncherError, OSError) as exc:
         return (
-            f"not rebuilt: {exc}. Rebuild it in Settings, under Run at login, or run netkeep setup."
+            f"couldn't check or rebuild it: {exc}. Rebuild it in Settings, under Run at login,"
+            " or run netkeep setup."
         )
