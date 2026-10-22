@@ -68,6 +68,14 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+def uptime_clock() -> float:
+    """Seconds on a clock that keeps counting while the computer sleeps and never jumps
+    with the wall clock: ``CLOCK_BOOTTIME`` on Linux, ``CLOCK_MONOTONIC`` on macOS (where,
+    unlike :func:`time.monotonic`, it includes sleep)."""
+    clock_id = getattr(time, "CLOCK_BOOTTIME", time.CLOCK_MONOTONIC)
+    return time.clock_gettime(clock_id)
+
+
 def github_fetch(url: str, max_bytes: int) -> bytes:
     """The real request: :func:`~netkeep.services.update.https_get`, which reaches only
     GitHub's hosts over HTTPS, with :data:`REQUEST_TIMEOUT_S` and
@@ -153,7 +161,7 @@ class DailyUpdateCheck:
         *,
         fetch: Fetch | None = None,
         clock: Callable[[], datetime] = _utcnow,
-        monotonic: Callable[[], float] = time.monotonic,
+        uptime: Callable[[], float] = uptime_clock,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         tick_s: float = TICK_S,
         first_check_s: float = FIRST_CHECK_S,
@@ -163,13 +171,14 @@ class DailyUpdateCheck:
         self._data = data
         self._fetch = github_fetch if fetch is None else fetch
         self._clock = clock
-        self._monotonic = monotonic
+        self._uptime = uptime
         self._sleep = sleep
         self._tick_s = tick_s
         self._first_check_s = first_check_s
         self._attempted: float | None = None
-        """When this process last asked, on the monotonic clock: a day's wait holds even
-        if the file couldn't be written, and whatever the wall clock does."""
+        """When this process last asked, on :func:`uptime_clock`."""
+        self._written: datetime | None = None
+        """The ``checked_at`` this process last recorded, when the write succeeded."""
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -193,9 +202,15 @@ class DailyUpdateCheck:
         now = self._clock()
         last = read_result(self._data)
         recorded = last.checked_at if last is not None else None
-        if not due(recorded, now) or not self._waited_a_day():
+        if not due(recorded, now):
             return None
-        self._attempted = self._monotonic()
+        # The record decides. Only when it isn't the one this process last wrote (it
+        # couldn't be written, or can't be read back) does this process's own memory
+        # hold the day, so a broken data directory still means one request a day.
+        ours = self._written is not None and recorded == self._written
+        if self._attempted is not None and not ours and not self._waited_a_day():
+            return None
+        self._attempted = self._uptime()
         try:
             latest: str | None = update.latest_release(self._fetch)
             ok = True
@@ -205,7 +220,9 @@ class DailyUpdateCheck:
         result = CheckResult(checked_at=now, latest=latest, ok=ok)
         try:
             write_result(result, self._data)
+            self._written = now
         except OSError as exc:
+            self._written = None
             log.warning("could not record the update check: %s", personal_exc(exc))
         if ok and (found := newer_release(result)) is not None:
             log.info("netkeep %s is available; this is %s", found, __version__)
@@ -213,8 +230,7 @@ class DailyUpdateCheck:
 
     def _waited_a_day(self) -> bool:
         return (
-            self._attempted is None
-            or self._monotonic() - self._attempted >= INTERVAL.total_seconds()
+            self._attempted is None or self._uptime() - self._attempted >= INTERVAL.total_seconds()
         )
 
     def _settings(self) -> Settings:

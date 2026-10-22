@@ -7,7 +7,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sys
 import threading
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -84,7 +86,7 @@ def _job(
         data,
         fetch=github,
         clock=clock,
-        monotonic=lambda: clock.now.timestamp(),
+        uptime=lambda: clock.now.timestamp(),
     )
 
 
@@ -228,6 +230,64 @@ def test_a_clock_set_back_a_little_still_waits_the_day(
     assert github.requests == []
 
 
+def test_a_day_asleep_still_checks_the_next_day(
+    session_factory: sessionmaker[Session], data: Path, owner: None
+) -> None:
+    # A Mac asleep most of the day: the wall clock moves a day, a clock that stops in
+    # sleep only an hour. The record decides, so it asks.
+    github, clock, ticks = FakeGitHub(), Clock(), [1000.0]
+    job = DailyUpdateCheck(
+        session_factory, Settings(), data, fetch=github, clock=clock, uptime=lambda: ticks[0]
+    )
+    assert job.check_if_due() is not None
+    clock.now = NOW + timedelta(days=1)
+    ticks[0] += 3600
+    assert job.check_if_due() is not None
+    assert len(github.requests) == 2
+
+
+def test_an_unwritable_record_still_means_one_request_a_day(
+    session_factory: sessionmaker[Session],
+    data: Path,
+    owner: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unwritable(*_args: object) -> None:
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(update_check, "write_result", unwritable)
+    github, clock, ticks = FakeGitHub(), Clock(), [1000.0]
+    job = DailyUpdateCheck(
+        session_factory, Settings(), data, fetch=github, clock=clock, uptime=lambda: ticks[0]
+    )
+    for hours in range(24):  # hourly looks through the day
+        clock.now, ticks[0] = NOW + timedelta(hours=hours), 1000.0 + hours * 3600
+        job.check_if_due()
+    assert len(github.requests) == 1
+    clock.now, ticks[0] = NOW + timedelta(days=1), 1000.0 + 86400
+    assert job.check_if_due() is not None
+    assert len(github.requests) == 2
+
+
+def test_uptime_clock_counts_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+    # time.monotonic stops while a Mac sleeps; these clocks don't.
+    asked: list[int] = []
+
+    def clock_gettime(clock_id: int) -> float:
+        asked.append(clock_id)
+        return 42.0
+
+    monkeypatch.setattr(time, "clock_gettime", clock_gettime)
+    monkeypatch.setattr(time, "monotonic", lambda: pytest.fail("time.monotonic stops in sleep"))
+
+    assert update_check.uptime_clock() == 42.0
+    assert asked == [getattr(time, "CLOCK_BOOTTIME", time.CLOCK_MONOTONIC)]
+    if sys.platform == "darwin":
+        assert asked == [time.CLOCK_MONOTONIC]
+    elif sys.platform == "linux":
+        assert asked == [time.CLOCK_BOOTTIME]
+
+
 def test_a_wall_clock_step_does_not_repeat_the_request_in_this_process(
     session_factory: sessionmaker[Session],
     data: Path,
@@ -238,7 +298,7 @@ def test_a_wall_clock_step_does_not_repeat_the_request_in_this_process(
     monkeypatch.setattr(update_check, "write_result", lambda *_args: None)
     github, clock, ticks = FakeGitHub(), Clock(), [1000.0]
     job = DailyUpdateCheck(
-        session_factory, Settings(), data, fetch=github, clock=clock, monotonic=lambda: ticks[0]
+        session_factory, Settings(), data, fetch=github, clock=clock, uptime=lambda: ticks[0]
     )
     assert job.check_if_due() is not None
     clock.now = NOW + timedelta(days=3)  # the wall clock jumps; an hour really passed
