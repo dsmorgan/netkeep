@@ -6,6 +6,11 @@ wheel (``netkeep/web/ui``, put there at build time from ``frontend/dist``, #596)
 When it exists, ``/assets`` is served as static files and every other GET that is
 not under ``/api/`` and names no file gets ``index.html`` (the SPA routes client
 side). When it does not, ``/`` explains how to build it.
+
+Cache headers (#753): ``index.html``, the SPA fallback, the not-built page and every
+unhashed file are ``no-cache``, so Chrome revalidates them and an update shows on the
+next load. Files under ``/assets`` carry a content hash in their names, so they are
+cached for a year.
 """
 
 from __future__ import annotations
@@ -17,6 +22,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from starlette.responses import FileResponse, HTMLResponse, Response
 from starlette.staticfiles import StaticFiles
+from starlette.types import Scope
 
 from netkeep import paths
 from netkeep.logging_setup import personal
@@ -27,6 +33,8 @@ FRONTEND_DIST_ENV = "NETKEEP_FRONTEND_DIST"
 PACKAGED_DIST = Path(__file__).resolve().parent / "ui"
 DEFAULT_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 API_ROOT = "api"
+NO_CACHE = {"Cache-Control": "no-cache"}
+IMMUTABLE = "public, max-age=31536000, immutable"
 
 _NOT_BUILT = """<!doctype html>
 <html lang="en">
@@ -73,7 +81,7 @@ def mount_frontend(app: FastAPI, dist: Path) -> None:
     log.info("serving the frontend build from %s", personal(dist))
     assets = dist / "assets"
     if assets.is_dir():
-        app.mount("/assets", StaticFiles(directory=assets), name="assets")
+        app.mount("/assets", _HashedAssets(directory=assets), name="assets")
 
     @app.get("/{path:path}", include_in_schema=False)
     def spa(path: str) -> Response:
@@ -82,8 +90,8 @@ def mount_frontend(app: FastAPI, dist: Path) -> None:
             target = _inside(dist, path)
             if target is None or not target.is_file():
                 raise HTTPException(status_code=404)
-            return FileResponse(target)
-        return FileResponse(index)
+            return FileResponse(target, headers=NO_CACHE)
+        return FileResponse(index, headers=NO_CACHE)
 
 
 def _mount_placeholder(app: FastAPI, dist: Path) -> None:
@@ -94,7 +102,17 @@ def _mount_placeholder(app: FastAPI, dist: Path) -> None:
         _refuse_api(path)
         if Path(path).suffix:
             raise HTTPException(status_code=404)
-        return HTMLResponse(page)
+        return HTMLResponse(page, headers=NO_CACHE)
+
+
+class _HashedAssets(StaticFiles):
+    """``/assets``: Vite names each file by its content hash, so it never changes."""
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        if response.status_code in (200, 304):
+            response.headers["Cache-Control"] = IMMUTABLE
+        return response
 
 
 def _refuse_api(path: str) -> None:
