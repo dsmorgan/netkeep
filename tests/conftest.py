@@ -164,11 +164,13 @@ def _no_live_port(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def _no_update_request(monkeypatch: pytest.MonkeyPatch) -> None:
     """No ``serve`` a test starts asks GitHub for the newest release (#762): a test that
-    exercises the daily update check passes its own fake ``fetch``."""
+    exercises the daily update check passes its own fake ``fetch``. A test that reaches
+    the real one fails, even though the job catches every ``Exception``."""
     from netkeep.services import update_check
 
     def blocked(url: str, _max_bytes: int) -> bytes:
-        raise AssertionError(f"a test must give DailyUpdateCheck a fake fetch, not ask {url}")
+        # pytest.fail raises a BaseException, which the job's own except can't swallow.
+        pytest.fail(f"a test must give DailyUpdateCheck a fake fetch, not ask {url}")
 
     monkeypatch.setattr(update_check, "github_fetch", blocked)
 

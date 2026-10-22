@@ -4,8 +4,10 @@ fake ``fetch``; nothing here reaches GitHub."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import threading
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -76,7 +78,14 @@ def _job(
     clock: Clock,
     base: Settings | None = None,
 ) -> DailyUpdateCheck:
-    return DailyUpdateCheck(factory, base or Settings(), data, fetch=github, clock=clock)
+    return DailyUpdateCheck(
+        factory,
+        base or Settings(),
+        data,
+        fetch=github,
+        clock=clock,
+        monotonic=lambda: clock.now.timestamp(),
+    )
 
 
 # --- the check --------------------------------------------------------------------
@@ -207,6 +216,53 @@ def test_a_clock_set_back_does_not_stop_the_check_for_good(
     assert len(github.requests) == 1
 
 
+def test_a_clock_set_back_a_little_still_waits_the_day(
+    session_factory: sessionmaker[Session], data: Path, owner: None
+) -> None:
+    update_check.write_result(
+        CheckResult(checked_at=NOW + timedelta(hours=2), latest=None, ok=True), data
+    )
+    github = FakeGitHub()
+
+    assert _job(session_factory, data, github, Clock()).check_if_due() is None
+    assert github.requests == []
+
+
+def test_a_wall_clock_step_does_not_repeat_the_request_in_this_process(
+    session_factory: sessionmaker[Session],
+    data: Path,
+    owner: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The record can't be written, so only this process's memory spaces the requests.
+    monkeypatch.setattr(update_check, "write_result", lambda *_args: None)
+    github, clock, ticks = FakeGitHub(), Clock(), [1000.0]
+    job = DailyUpdateCheck(
+        session_factory, Settings(), data, fetch=github, clock=clock, monotonic=lambda: ticks[0]
+    )
+    assert job.check_if_due() is not None
+    clock.now = NOW + timedelta(days=3)  # the wall clock jumps; an hour really passed
+    ticks[0] += 3600
+    assert job.check_if_due() is None
+    ticks[0] += 86400
+    assert job.check_if_due() is not None
+    assert len(github.requests) == 2
+
+
+def test_the_api_read_of_a_bad_record_logs_no_warning(
+    data: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    path = update_check.check_path(data)
+    path.parent.mkdir(parents=True)
+    path.write_text("not json")
+
+    with caplog.at_level(logging.DEBUG, logger="netkeep.services.update_check"):
+        assert update_check.read_result(data, warn=False) is None
+        assert [r.levelno for r in caplog.records] == [logging.DEBUG]
+        assert update_check.read_result(data) is None
+        assert [r.levelno for r in caplog.records] == [logging.DEBUG, logging.WARNING]
+
+
 @pytest.mark.parametrize(
     "text",
     [
@@ -260,6 +316,8 @@ def test_the_timings_are_pinned() -> None:
     assert update_check.TICK_S == 3600.0
     assert update_check.FIRST_CHECK_S == 300.0
     assert update_check.UPDATE_COMMAND == "netkeep update"
+    assert update_check.REQUEST_TIMEOUT_S == 10.0
+    assert update_check.REQUEST_DEADLINE_S == 20.0
 
 
 def test_the_check_asks_only_github_for_the_latest_release() -> None:
@@ -267,16 +325,26 @@ def test_the_check_asks_only_github_for_the_latest_release() -> None:
 
 
 def test_the_real_fetch_is_https_get(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: list[tuple[str, int]] = []
+    seen: list[tuple[str, int, float, float]] = []
 
-    def fake_get(url: str, *, max_bytes: int) -> bytes:
-        seen.append((url, max_bytes))
+    def fake_get(url: str, *, max_bytes: int, timeout_s: float, deadline_s: float) -> bytes:
+        seen.append((url, max_bytes, timeout_s, deadline_s))
         return b"{}"
 
     monkeypatch.setattr(update, "https_get", fake_get)
 
     assert REAL_FETCH(update.LATEST_URL, 1024) == b"{}"
-    assert seen == [(update.LATEST_URL, 1024)]
+    assert seen == [(update.LATEST_URL, 1024, 10.0, 20.0)]
+
+
+def test_the_conftest_guard_fails_a_test_that_reaches_the_real_fetch(
+    session_factory: sessionmaker[Session], data: Path, owner: None
+) -> None:
+    job = DailyUpdateCheck(session_factory, Settings(), data, clock=Clock())
+
+    # Not an Exception, so the job's own except can't turn it into a quiet failed check.
+    with pytest.raises(pytest.fail.Exception, match="fake fetch"):
+        job.check_if_due()
 
 
 # --- serve and the API --------------------------------------------------------------
@@ -307,6 +375,66 @@ async def test_serve_starts_and_stops_the_check(
         assert job._task is not None and not job._task.done()
         assert job._first_check_s == 300.0  # nothing is asked while serve starts
     assert job._task is None
+
+
+async def test_the_job_waits_first_runs_off_the_loop_and_survives_a_failed_look(
+    session_factory: sessionmaker[Session],
+    data: Path,
+    owner: None,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    events: list[tuple[str, object]] = []
+    loop_thread = threading.get_ident()
+    finished = asyncio.Event()
+
+    def fetch(url: str, max_bytes: int) -> bytes:
+        events.append(("fetch", threading.get_ident() != loop_thread))
+        return json.dumps({"tag_name": f"v{NEWER}"}).encode()
+
+    async def sleep(seconds: float) -> None:
+        events.append(("sleep", seconds))
+        if [name for name, _ in events].count("sleep") > 3:
+            finished.set()
+            await asyncio.Event().wait()  # until stop() cancels it
+        await asyncio.sleep(0)
+
+    job = DailyUpdateCheck(
+        session_factory,
+        Settings(),
+        data,
+        fetch=fetch,
+        clock=Clock(),
+        sleep=sleep,
+        first_check_s=300.0,
+        tick_s=3600.0,
+    )
+    real_settings = job._settings
+    calls = [0]
+
+    def settings_failing_once() -> Settings:
+        calls[0] += 1
+        if calls[0] == 1:
+            raise RuntimeError("database is locked")
+        return real_settings()
+
+    job._settings = settings_failing_once  # type: ignore[method-assign]
+    with caplog.at_level(logging.ERROR, logger="netkeep.services.update_check"):
+        job.start()
+        await asyncio.wait_for(finished.wait(), timeout=5)
+        await job.stop()
+
+    # The first wait comes before any request; the first look fails and is logged; the
+    # next look asks, from a worker thread; the one after finds nothing due.
+    assert events == [
+        ("sleep", 300.0),
+        ("sleep", 3600.0),
+        ("fetch", True),
+        ("sleep", 3600.0),
+        ("sleep", 3600.0),
+    ]
+    assert [r.getMessage() for r in caplog.records] == [
+        "update check failed; trying again at the next look"
+    ]
 
 
 async def test_the_app_without_serve_starts_no_check(
@@ -357,3 +485,17 @@ async def test_the_api_offers_nothing_once_this_is_the_latest(
     body = (await client.get("/api/v1/update-check")).json()
     assert body["latest"] == __version__
     assert body["available"] is None
+
+
+async def test_the_api_does_not_warn_on_each_read_of_a_bad_record(
+    client: httpx.AsyncClient, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    path = update_check.check_path(tmp_path / "netkeep-data")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("not json")
+
+    with caplog.at_level(logging.WARNING, logger="netkeep.services.update_check"):
+        for _ in range(3):
+            body = (await client.get("/api/v1/update-check")).json()
+            assert body["checked_at"] is None
+    assert caplog.records == []

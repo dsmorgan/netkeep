@@ -64,7 +64,7 @@ export const GROUPS: {
     anchor: 'updates',
     title: 'Updates',
     description:
-      'netkeep never updates itself. While the daily check is on, netkeep serve asks GitHub once a day for the newest release, and this card says when there is one.',
+      'netkeep never updates itself. While the daily check is on, netkeep serve asks GitHub once a day for the newest release, and this card shows a newer release when there is one.',
   },
 ]
 

@@ -135,13 +135,16 @@ def https_get(
     max_bytes: int,
     accept: str = "*/*",
     clock: Callable[[], float] = time.monotonic,
+    timeout_s: float = _DOWNLOAD_TIMEOUT_S,
+    deadline_s: float = _DOWNLOAD_DEADLINE_S,
 ) -> bytes:
     """GET ``url`` over HTTPS with certificate checks, following redirects only to HTTPS
     on :data:`ALLOWED_HOSTS` at port 443, with no proxy, at most ``max_bytes`` of the
-    body, and within :data:`_DOWNLOAD_DEADLINE_S` for the whole download, redirects
-    included. :class:`UpdateError` on anything else."""
+    body, and within ``deadline_s`` (:data:`_DOWNLOAD_DEADLINE_S`) for the whole download,
+    redirects included, each socket operation within ``timeout_s``. :class:`UpdateError`
+    on anything else."""
     context = ssl.create_default_context()
-    deadline = clock() + _DOWNLOAD_DEADLINE_S
+    deadline = clock() + deadline_s
     for _ in range(_MAX_REDIRECTS + 1):
         parts = urlsplit(url)
         host = parts.hostname
@@ -151,9 +154,7 @@ def https_get(
             port = -1
         if parts.scheme != "https" or host not in ALLOWED_HOSTS or port not in (None, 443):
             raise UpdateError(f"refused to download {url}: only HTTPS from GitHub is allowed")
-        connection = http.client.HTTPSConnection(
-            host, 443, timeout=_DOWNLOAD_TIMEOUT_S, context=context
-        )
+        connection = http.client.HTTPSConnection(host, 443, timeout=timeout_s, context=context)
         try:
             target = parts.path + (f"?{parts.query}" if parts.query else "")
             connection.request(
@@ -167,14 +168,14 @@ def https_get(
                 if not location:
                     raise UpdateError(f"{url} redirected nowhere")
                 url = urljoin(url, location)
-                _check_deadline(url, deadline, clock)
+                _check_deadline(url, deadline, clock, deadline_s)
                 continue
             if response.status != 200:
                 raise UpdateError(f"could not download {url}: HTTP {response.status}")
             chunks: list[bytes] = []
             size = 0
             while size <= max_bytes:
-                _check_deadline(url, deadline, clock)
+                _check_deadline(url, deadline, clock, deadline_s)
                 chunk = response.read(min(_CHUNK_BYTES, max_bytes + 1 - size))
                 if not chunk:
                     break
@@ -191,11 +192,11 @@ def https_get(
     raise UpdateError(f"{url} redirected more than {_MAX_REDIRECTS} times")
 
 
-def _check_deadline(url: str, deadline: float, clock: Callable[[], float]) -> None:
+def _check_deadline(
+    url: str, deadline: float, clock: Callable[[], float], limit_s: float = _DOWNLOAD_DEADLINE_S
+) -> None:
     if clock() > deadline:
-        raise UpdateError(
-            f"could not download {url}: it took longer than {_DOWNLOAD_DEADLINE_S:g} s"
-        )
+        raise UpdateError(f"could not download {url}: it took longer than {limit_s:g} s")
 
 
 def sha256_for(sums: str, name: str) -> str:

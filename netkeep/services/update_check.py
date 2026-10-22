@@ -21,7 +21,8 @@ import asyncio
 import contextlib
 import json
 import logging
-from collections.abc import Callable
+import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -54,6 +55,12 @@ FIRST_CHECK_S: Final = 300.0
 UPDATE_COMMAND: Final = "netkeep update"
 """What the UI tells you to run. Nothing here runs it."""
 
+REQUEST_TIMEOUT_S: Final = 10.0
+"""Each socket operation of the check's request."""
+REQUEST_DEADLINE_S: Final = 20.0
+"""The whole request. Short, so a Quit while it runs waits little for its thread: the
+answer is a small JSON document."""
+
 Fetch = Callable[[str, int], bytes]
 
 
@@ -63,8 +70,11 @@ def _utcnow() -> datetime:
 
 def github_fetch(url: str, max_bytes: int) -> bytes:
     """The real request: :func:`~netkeep.services.update.https_get`, which reaches only
-    GitHub's hosts over HTTPS. Tests pass a fake instead."""
-    return update.https_get(url, max_bytes=max_bytes)
+    GitHub's hosts over HTTPS, with :data:`REQUEST_TIMEOUT_S` and
+    :data:`REQUEST_DEADLINE_S`. Tests pass a fake instead."""
+    return update.https_get(
+        url, max_bytes=max_bytes, timeout_s=REQUEST_TIMEOUT_S, deadline_s=REQUEST_DEADLINE_S
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,8 +92,11 @@ def check_path(data: Path) -> Path:
     return update.update_dir(data) / CHECK_FILE
 
 
-def read_result(data: Path) -> CheckResult | None:
-    """The recorded check, or ``None`` when there is none or it can't be read (logged)."""
+def read_result(data: Path, *, warn: bool = True) -> CheckResult | None:
+    """The recorded check, or ``None`` when there is none or it can't be read. A record
+    that can't be read is logged as a warning when ``warn`` (the job, once a look), else
+    at debug level (the API, which reads it on every request)."""
+    level = logging.WARNING if warn else logging.DEBUG
     path = check_path(data)
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -93,14 +106,14 @@ def read_result(data: Path) -> CheckResult | None:
     except FileNotFoundError:
         return None
     except (OSError, ValueError, KeyError, TypeError) as exc:
-        log.warning("ignoring the recorded update check: %s", personal_exc(exc))
+        log.log(level, "ignoring the recorded update check: %s", personal_exc(exc))
         return None
     if (
         checked_at.tzinfo is None
         or not isinstance(ok, bool)
         or not (latest is None or (isinstance(latest, str) and update.parse_version(latest)))
     ):
-        log.warning("ignoring the recorded update check: it isn't one netkeep wrote")
+        log.log(level, "ignoring the recorded update check: it isn't one netkeep wrote")
         return None
     return CheckResult(checked_at=checked_at, latest=latest, ok=ok)
 
@@ -113,9 +126,10 @@ def write_result(result: CheckResult, data: Path) -> None:
 
 
 def due(last: datetime | None, now: datetime) -> bool:
-    """A check is due when none ran, a day or more has passed, or the clock went back
-    past the last one (a check dated in the future would otherwise never be due)."""
-    return last is None or now - last >= INTERVAL or last > now
+    """A check is due when none ran, or a day or more has passed. A clock set back a
+    little waits as usual; a record dated more than a day ahead is taken as wrong, so it
+    can't stop the check for good."""
+    return last is None or now - last >= INTERVAL or last - now > INTERVAL
 
 
 def newer_release(result: CheckResult | None, current: str = __version__) -> str | None:
@@ -139,6 +153,8 @@ class DailyUpdateCheck:
         *,
         fetch: Fetch | None = None,
         clock: Callable[[], datetime] = _utcnow,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         tick_s: float = TICK_S,
         first_check_s: float = FIRST_CHECK_S,
     ) -> None:
@@ -147,11 +163,13 @@ class DailyUpdateCheck:
         self._data = data
         self._fetch = github_fetch if fetch is None else fetch
         self._clock = clock
+        self._monotonic = monotonic
+        self._sleep = sleep
         self._tick_s = tick_s
         self._first_check_s = first_check_s
-        self._attempted: datetime | None = None
-        """The last request this process made: a day's wait holds even if the file
-        couldn't be written."""
+        self._attempted: float | None = None
+        """When this process last asked, on the monotonic clock: a day's wait holds even
+        if the file couldn't be written, and whatever the wall clock does."""
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -175,9 +193,9 @@ class DailyUpdateCheck:
         now = self._clock()
         last = read_result(self._data)
         recorded = last.checked_at if last is not None else None
-        if not due(recorded, now) or not due(self._attempted, now):
+        if not due(recorded, now) or not self._waited_a_day():
             return None
-        self._attempted = now
+        self._attempted = self._monotonic()
         try:
             latest: str | None = update.latest_release(self._fetch)
             ok = True
@@ -193,6 +211,12 @@ class DailyUpdateCheck:
             log.info("netkeep %s is available; this is %s", found, __version__)
         return result
 
+    def _waited_a_day(self) -> bool:
+        return (
+            self._attempted is None
+            or self._monotonic() - self._attempted >= INTERVAL.total_seconds()
+        )
+
     def _settings(self) -> Settings:
         """The local owner's settings in force now, or the file's when there is no owner."""
         with session_scope(self._factory) as session:
@@ -202,10 +226,11 @@ class DailyUpdateCheck:
             return ui_settings.resolve(session, user, self._base)
 
     async def _run(self) -> None:
-        await asyncio.sleep(self._first_check_s)
+        # Off the event loop: the request blocks. A look that fails never ends the job.
+        await self._sleep(self._first_check_s)
         while True:
             try:
                 await asyncio.to_thread(self.check_if_due)
             except Exception:
                 log.exception("update check failed; trying again at the next look")
-            await asyncio.sleep(self._tick_s)
+            await self._sleep(self._tick_s)
