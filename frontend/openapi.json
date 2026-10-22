@@ -9210,6 +9210,47 @@
         "title": "LastTryOut",
         "type": "object"
       },
+      "LauncherOut": {
+        "description": "The launcher app (#754): an icon in ``~/Applications`` that opens netkeep.",
+        "properties": {
+          "exists": {
+            "title": "Exists",
+            "type": "boolean"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "runs": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runs"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "supported": {
+            "title": "Supported",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "supported",
+          "state",
+          "exists",
+          "path",
+          "runs"
+        ],
+        "title": "LauncherOut",
+        "type": "object"
+      },
       "LeftoverDraftOut": {
         "description": "A test-send Gmail draft that deleting the campaign leaves for you to delete.",
         "properties": {
@@ -9747,6 +9788,9 @@
             "title": "Label",
             "type": "string"
           },
+          "launcher": {
+            "$ref": "#/components/schemas/LauncherOut"
+          },
           "legacy": {
             "title": "Legacy",
             "type": "boolean"
@@ -9820,7 +9864,8 @@
           "plist_path",
           "log_path",
           "points_elsewhere",
-          "legacy"
+          "legacy",
+          "launcher"
         ],
         "title": "LoginItemOut",
         "type": "object"
@@ -24504,6 +24549,34 @@
           }
         },
         "summary": "Put Login Item",
+        "tags": [
+          "login-item"
+        ]
+      }
+    },
+    "/api/v1/login-item/launcher": {
+      "post": {
+        "description": "Build or rebuild the launcher app in ~/Applications, replacing this data\ndirectory's old one whole.",
+        "operationId": "build_launcher_app",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginItemOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Only the local owner account manages the login item"
+          },
+          "409": {
+            "description": "Not macOS, or the launcher can't be written: the reason is in detail"
+          }
+        },
+        "summary": "Build Launcher App",
         "tags": [
           "login-item"
         ]

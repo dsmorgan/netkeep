@@ -33,19 +33,28 @@ curl -fsSL https://github.com/dsmorgan/netkeep/releases/latest/download/install.
 
 It installs uv if you don't have it, installs netkeep with the dependency versions its release was tested with, then runs `netkeep setup`. It prints each step before it runs it, and `| sh -s -- --dry-run` prints the steps without running any. To read and verify the installer before you run it, follow [Download, verify, read, then run](../../README.md#download-verify-read-then-run) in the README, which also lists the [requirements](../../README.md#requirements).
 
-`netkeep setup` turns on the login item, so `serve` starts whenever you log in, and opens the first-run page in netkeep's Chrome. If your release has no `netkeep setup` yet, the installer says so: start netkeep yourself with `netkeep serve`, leave it running in its own terminal (press Ctrl+C to stop it), and open <http://127.0.0.1:8000> in Chrome. You see an empty dashboard. `serve` creates and migrates the database itself.
+`netkeep setup` turns on the login item, so `serve` starts whenever you log in, adds a **netkeep** icon to your Applications folder, and opens the first-run page in netkeep's Chrome. If your release has no `netkeep setup` yet, the installer says so: start netkeep yourself with `netkeep serve`, leave it running in its own terminal (press Ctrl+C to stop it), and open <http://127.0.0.1:8000> in Chrome. You see an empty dashboard. `serve` creates and migrates the database itself.
 
 If `netkeep` isn't found in a new terminal, the installer's last lines say what to do: run `~/.local/bin/uv tool update-shell` (by its full path, since `uv` may not be found either), or add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile (`~/.zshrc` for zsh), then open another terminal.
 
 ### What netkeep setup does
 
-`netkeep setup` runs three steps and prints each one as it ends:
+`netkeep setup` runs four steps and prints each one as it ends:
 
 1. It turns on the login item, the same one as the **Start netkeep when I log in** switch in Settings, pointing at the installed `netkeep` (`~/.local/bin/netkeep` for a uv tool install). From a checkout, it points at `.venv/bin/netkeep` and says so.
-2. It waits for `serve` to answer on 127.0.0.1, at `serve`'s port: 8000 by default, or the `--port` the login item was given.
-3. It opens the first-run page in netkeep's Chrome: the UI's window and LinkedIn's sign-in page.
+2. It builds the launcher app, `~/Applications/netkeep.app` (see [Open netkeep from its icon](#open-netkeep-from-its-icon)).
+3. It waits for `serve` to answer on 127.0.0.1, at `serve`'s port: 8000 by default, or the `--port` the login item was given.
+4. It opens the first-run page in netkeep's Chrome: the UI's window and LinkedIn's sign-in page.
 
-Run it again whenever you like: it says what's already done and changes nothing that's right. It uses the data directory every netkeep command uses, and never moves it. `netkeep setup --remove` turns the login item off and keeps your data. If a step fails, see [netkeep setup stops at a step](troubleshooting.md#netkeep-setup-stops-at-a-step).
+Run it again whenever you like: it says what's already done and changes nothing that's right. It uses the data directory every netkeep command uses, and never moves it. `netkeep setup --remove` turns the login item off, removes the launcher app, and keeps your data. If a step fails, see [netkeep setup stops at a step](troubleshooting.md#netkeep-setup-stops-at-a-step).
+
+### Open netkeep from its icon
+
+After setup, **netkeep** is in your Applications folder, so you can open it from Spotlight, Launchpad or Finder; to keep it in the Dock, drag it there. Clicking it does what `netkeep open` does: it brings netkeep's window to the front in netkeep's Chrome, or opens one, starting that Chrome if it's down. If `serve` isn't running, it starts the login item first and waits up to a minute for `serve` to answer. If it can't reach netkeep, a dialog says what to run in Terminal; nothing else happens.
+
+The app is a small bundle that `netkeep setup` writes on your Mac: a short script that runs the installed `netkeep`, and the icon. netkeep never downloads it. Because your Mac made it, it carries no quarantine attribute, so macOS opens it without the "downloaded from the internet" check. `netkeep update` rewrites it, so it always runs the netkeep you have. **Settings**, under **Run at login**, shows whether it's there and has a **Build** or **Rebuild** button.
+
+If you run netkeep with another data directory (`NETKEEP_DATA`), its launcher is `netkeep <code>.app`, so it never replaces the one for your usual data.
 
 ### From a checkout
 
@@ -77,7 +86,7 @@ netkeep never updates itself: only `netkeep update` installs anything, and `--ch
 2. It stops the login item and waits until `serve` has let go of the serve lock. If you started `netkeep serve` yourself, it refuses: stop that `serve` first.
 3. It backs up the database into `<data>/backups/`, as `netkeep backup` does.
 4. It installs the release with `uv tool install`, with that release's constraints and uv's own Python 3.12.
-5. It hands over to the new version, which starts the login item and checks that `serve` answers with the new version number.
+5. It hands over to the new version, which starts the login item, checks that `serve` answers with the new version number, and rewrites the launcher app.
 
 If the install or that check fails, and the new version's `serve` hadn't started its scheduler yet, netkeep goes back by itself: it reinstalls the version you had, restores the backup with the login item off (when the new version had opened the database), starts the login item and checks again. If any `serve` had started its scheduler on this data directory during the update, it may have sent messages, and restoring the backup would forget them and could send them twice: netkeep never restores then, and never restores twice. Then netkeep stops, turns the login item off, and tells you what to do; see [Updating](troubleshooting.md#updating).
 

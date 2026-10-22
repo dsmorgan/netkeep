@@ -89,20 +89,23 @@ Each warning starts with the protection it belongs to. These are the ones you're
 
 ## netkeep setup stops at a step
 
-`netkeep setup` runs three steps and stops at the first one that fails, with a line that starts "to fix it:". It exits nonzero, so the installer stops there too. Fix the problem, then run `netkeep setup` again: it skips what's already done.
+`netkeep setup` runs four steps and stops at the first one that fails, with a line that starts "to fix it:". It exits nonzero, so the installer stops there too. Fix the problem, then run `netkeep setup` again: it skips what's already done.
 
 | Step that failed | What you see | What to do |
 |---|---|---|
 | 1. The login item | "Run at login uses launchd, which only macOS has." | On Linux, run netkeep in its container instead. |
 | 1. The login item | "can't find the installed netkeep command" | Install netkeep with the installer in the README, then run `netkeep setup` again. |
 | 1. The login item | "launchctl ... failed" | `netkeep login-item status` shows where it stands. Nothing is left half-installed. |
-| 2. Waiting for serve | "netkeep serve didn't answer ... within 60 s" | Look in `<data>/logs/serve.err.log` for why it didn't start, for example another program on `serve`'s port (8000 by default). A slow first start can take longer: run `netkeep setup --wait 180`. |
-| 3. The first-run page | "Another Chrome holds netkeep's debugging port" | Quit that Chrome, then run `netkeep setup` again. |
-| 3. The first-run page | "the Keychain refused the local API key" | Unlock your login keychain, or allow netkeep when macOS asks. |
+| 2. The launcher app | "... isn't netkeep's launcher, so netkeep leaves it alone" | Another app is at `~/Applications/netkeep.app`. Move it out of the Applications folder, then run `netkeep setup` again. |
+| 3. Waiting for serve | "netkeep serve didn't answer ... within 60 s" | Look in `<data>/logs/serve.err.log` for why it didn't start, for example another program on `serve`'s port (8000 by default). A slow first start can take longer: run `netkeep setup --wait 180`. |
+| 4. The first-run page | "Another Chrome holds netkeep's debugging port" | Quit that Chrome, then run `netkeep setup` again. |
+| 4. The first-run page | "the Keychain refused the local API key" | Unlock your login keychain, or allow netkeep when macOS asks. |
 
-Setup prints a note when the login item can't use uv's `~/.local/bin/netkeep` shim: when it runs from a checkout's `.venv`, or from a uv tool install whose shim is missing (`uv tool install --reinstall netkeep` puts it back). The login item then runs that environment's own `netkeep`, and stops working if you move or delete the folder. When netkeep's Chrome is already running, step 3 opens no other window; run `netkeep open` to bring up the UI. Step 2 can't tell this data directory's `serve` from another netkeep's on the same port, because `/api/v1/health` names no data directory: if you run two data directories, give each its own `web.port`.
+Setup prints a note when the login item can't use uv's `~/.local/bin/netkeep` shim: when it runs from a checkout's `.venv`, or from a uv tool install whose shim is missing (`uv tool install --reinstall netkeep` puts it back). The login item then runs that environment's own `netkeep`, and stops working if you move or delete the folder. When netkeep's Chrome is already running, step 4 opens no other window; run `netkeep open` to bring up the UI. Step 3 can't tell this data directory's `serve` from another netkeep's on the same port, because `/api/v1/health` names no data directory: if you run two data directories, give each its own `web.port`.
 
-`netkeep setup --remove` turns the login item off. Your data directory, logs and Keychain items stay.
+`netkeep setup --remove` turns the login item off and removes the launcher app. Your data directory, logs and Keychain items stay.
+
+When the netkeep icon shows a dialog instead of a window, the dialog says what to run in Terminal: usually `netkeep setup` when the login item is off, or `netkeep login-item status` when `serve` didn't start within a minute.
 
 ## Updating
 

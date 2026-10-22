@@ -21,7 +21,7 @@ from netkeep.db import DATABASE_FILENAME, database_url, make_engine, make_sessio
 from netkeep.logging_setup import remove_file_handler
 from netkeep.models import Base
 from netkeep.scoping import install_scope_guard
-from netkeep.services import login_item
+from netkeep.services import launcher_app, login_item
 from netkeep.web.app import create_app
 
 # The per-test time limit (#210), a small heap for short collections (#478), and pytester
@@ -99,6 +99,17 @@ def _no_real_launchd(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(login_item, "run_launchctl", blocked)
     monkeypatch.setattr(login_item, "default_agents_dir", blocked)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_applications_folder(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test writes the launcher app into the real ``~/Applications`` (#754): a test of it
+    hands ``Launcher`` a folder under ``tmp_path``."""
+
+    def blocked(*_args: object) -> object:
+        raise AssertionError("a test must give Launcher its own applications_dir")
+
+    monkeypatch.setattr(launcher_app, "default_applications_dir", blocked)
 
 
 @pytest.fixture(autouse=True)

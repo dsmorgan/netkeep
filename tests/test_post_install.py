@@ -21,9 +21,10 @@ import pytest
 from typer.testing import CliRunner
 
 from netkeep import cli, paths
-from netkeep.services import local_api_key, login_item, post_install
+from netkeep.services import launcher_app, local_api_key, login_item, post_install
 from netkeep.services import posture as posture_service
 from netkeep.services.chrome_launch import LaunchResult, LaunchStatus, Refusal
+from netkeep.services.launcher_app import Launcher
 from netkeep.services.login_item import LoginItem, RunResult
 
 UID = 501
@@ -97,6 +98,9 @@ class Machine:
         self.chrome_pid: int | None = None
         self.launcher = FakeLauncher(LaunchResult(LaunchStatus.STARTED, "started it", pid=4242))
         self.tool_shim: Path | None = self.executable
+        self.applications = tmp_path / "Applications"
+        # The CLI's launcher app, under tmp_path and built on any platform.
+        monkeypatch.setattr(Launcher, "for_login_item", lambda item, **_: self.app(item))
         monkeypatch.setattr(login_item, "LoginItem", self.item)
         monkeypatch.setattr(login_item, "tool_shim", lambda _env, _beside: self.tool_shim)
         monkeypatch.setattr(post_install, "serve_answers", self.serve_answers)
@@ -117,6 +121,20 @@ class Machine:
             lock_held=lambda: self.lock_held,
             sleep=lambda _s: None,
         )
+
+    def app(self, item: LoginItem | None = None) -> Launcher:
+        """The launcher app, built under ``tmp_path``, whatever this platform is."""
+        return Launcher(
+            data=self.data,
+            applications_dir=self.applications,
+            executable=self.executable if item is None else item.executable,
+            macos=True,
+            environ={},
+        )
+
+    @property
+    def bundle(self) -> Path:
+        return self.applications / launcher_app.bundle_name(self.data)
 
     def serve_answers(self, base: str) -> bool:
         self.health_asked.append(base)
@@ -152,7 +170,9 @@ def test_a_fresh_setup_turns_on_the_login_item_waits_for_serve_and_opens_the_fir
     assert machine.health_asked == ["http://127.0.0.1:8000"]
     assert machine.launcher.starts == [True]  # the first-run page, once
     assert machine.launcher.built[0][1:] == ("http://127.0.0.1:8000", "fake-local-key")
-    assert output.count("   done: ") == 3
+    assert output.count("   done: ") == 4
+    assert f"   done: Built {machine.bundle}: it opens netkeep with {machine.executable}." in output
+    assert machine.app().up_to_date()
     assert "netkeep is set up." in output
     assert "note:" not in output  # a uv tool install says nothing about its path
 
@@ -169,7 +189,8 @@ def test_a_re_run_reports_whats_done_and_changes_nothing(machine: Machine) -> No
     assert machine.launchctl.changes() == []  # no enable, bootstrap or bootout: serve keeps running
     assert machine.plist.read_bytes() == before
     assert machine.launcher.starts == [True]  # no second window
-    assert output.count("   already done: ") == 2
+    assert output.count("   already done: ") == 3
+    assert f"   already done: {machine.bundle} opens netkeep" in output
     assert "run netkeep open" in output
 
 
@@ -262,12 +283,15 @@ def test_remove_turns_the_login_item_off_and_keeps_the_data(machine: Machine) ->
     assert kept.read_text() == "still here"
     assert sorted(p.name for p in (machine.data / "logs").iterdir()) == logs
     assert "   done: Turned off." in output and "Nothing was deleted." in output
+    assert f"   done: removed {machine.bundle}." in output
+    assert not machine.bundle.exists() and machine.applications.is_dir()
     assert machine.launcher.starts == [True]  # --remove opens nothing
 
     machine.launchctl.calls.clear()
     code, output = machine.setup("--remove")
     assert code == 0, output
     assert "   already done: " in output
+    assert f"   already done: there is no {machine.bundle}." in output
     assert machine.launchctl.changes() == []
 
 
@@ -325,7 +349,10 @@ def test_the_wait_polls_until_serve_answers(machine: Machine) -> None:
     )
     lines: list[str] = []
 
-    assert post_install.run(item, seams, lines.append, tool_install=True, wait_s=10) == 0
+    assert (
+        post_install.run(item, machine.app(), seams, lines.append, tool_install=True, wait_s=10)
+        == 0
+    )
     assert len(slept) == 2
     assert "   done: netkeep serve answers." in lines
 
@@ -341,6 +368,19 @@ def test_the_launcher_refusing_fails_with_its_fix(machine: Machine) -> None:
     assert "failed: netkeep's Chrome: the Chrome on port 9444 isn't netkeep's." in output
     assert "to fix it: Another Chrome holds netkeep's debugging port." in output
     assert machine.plist.exists()  # the login item stays on; a re-run picks up from here
+
+
+def test_a_launcher_build_refusal_stops_setup_before_serve(machine: Machine) -> None:
+    """Another app at ``~/Applications/netkeep.app`` is never replaced; setup stops there."""
+    machine.bundle.mkdir(parents=True)
+    (machine.bundle / "theirs.txt").write_text("someone else's app")
+
+    code, output = machine.setup()
+
+    assert code == 1
+    assert "isn't netkeep's launcher, so netkeep leaves it alone" in output
+    assert (machine.bundle / "theirs.txt").read_text() == "someone else's app"
+    assert machine.health_asked == [] and machine.launcher.starts == []
 
 
 def test_a_failed_launch_without_a_refusal_still_says_what_to_do(machine: Machine) -> None:

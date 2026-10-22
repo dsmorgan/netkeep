@@ -1,7 +1,7 @@
 """``netkeep setup``: what the installer runs after it installs netkeep (ADR 0011, rules 6
 and 7, #684).
 
-Three steps, each reported as it ends, and a stop at the first that fails, with what to
+Four steps, each reported as it ends, and a stop at the first that fails, with what to
 do about it:
 
 1. **The login item**, through :class:`~netkeep.services.login_item.LoginItem`, the code
@@ -10,9 +10,12 @@ do about it:
    under ``uv tool install``, uv's shim such as ``~/.local/bin/netkeep``, never the tool
    environment's own ``bin``. From a checkout's ``.venv``, it runs that one, and setup
    says so.
-2. **serve answers.** It polls ``GET /api/v1/health`` on loopback, and only on loopback,
+2. **The launcher app** (#754): ``~/Applications/netkeep.app``, which opens netkeep from
+   the Dock, Spotlight or Launchpad (:mod:`netkeep.services.launcher_app`). It runs the
+   same ``netkeep`` as the login item.
+3. **serve answers.** It polls ``GET /api/v1/health`` on loopback, and only on loopback,
    until the agent's ``serve`` answers or the wait runs out.
-3. **The first-run page** in netkeep's Chrome, through the one launcher (#658), the way
+4. **The first-run page** in netkeep's Chrome, through the one launcher (#658), the way
    setup's first-run button opens it: the UI's window and LinkedIn's sign-in page. The
    CLI hands this module the launch, which is ``netkeep open``'s launcher with
    ``first_run=True``; nothing here imports the launcher (``tests/test_browser_safety.py``).
@@ -22,7 +25,8 @@ this ``netkeep`` and is loaded is left alone (re-enabling would restart its ``se
 while netkeep's Chrome is running, it opens no other window and points at
 ``netkeep open``. **The data directory** is the one every command uses
 (:func:`netkeep.paths.data_dir`): setup never chooses, moves or migrates it beyond the
-CLI's own startup hook (rule 7). **--remove** turns the login item off and leaves all data.
+CLI's own startup hook (rule 7). **--remove** turns the login item off, removes the
+launcher app and leaves all data.
 """
 
 from __future__ import annotations
@@ -37,6 +41,7 @@ from urllib.parse import urlsplit
 
 from netkeep.loopback import LOOPBACK_HOSTS
 from netkeep.services.chrome_launch import LaunchResult, LaunchStatus, Refusal
+from netkeep.services.launcher_app import Launcher, LauncherError
 from netkeep.services.login_item import SERVE_ERR_LOG, LoginItem, LoginItemError
 
 #: How long setup waits for the agent's ``serve`` to answer. A first start creates the
@@ -99,11 +104,20 @@ class Seams:
     clock: Callable[[], float] = time.monotonic
 
 
-def run(item: LoginItem, seams: Seams, say: Say, *, tool_install: bool, wait_s: float) -> int:
-    """Run the three steps; the exit status: 0 when every one is done."""
+def run(
+    item: LoginItem,
+    launcher: Launcher,
+    seams: Seams,
+    say: Say,
+    *,
+    tool_install: bool,
+    wait_s: float,
+) -> int:
+    """Run the four steps; the exit status: 0 when every one is done."""
     say(f"netkeep setup, for the data directory {item.data}")
     try:
         _login_item(item, say, tool_install=tool_install)
+        _launcher_app_step(launcher, say)
         base = _serve(item, seams, say, wait_s=wait_s)
         _first_run(seams, say, base)
     except StepFailed as exc:
@@ -116,8 +130,9 @@ def run(item: LoginItem, seams: Seams, say: Say, *, tool_install: bool, wait_s: 
     return 0
 
 
-def remove(item: LoginItem, say: Say) -> int:
-    """``--remove``: turn the login item off. Data, logs and Keychain items stay."""
+def remove(item: LoginItem, launcher: Launcher, say: Say) -> int:
+    """``--remove``: turn the login item off and remove the launcher app. Data, logs and
+    Keychain items stay."""
     say(f"netkeep setup --remove, for the data directory {item.data}")
     status = item.status()
     if not status.supported:
@@ -136,6 +151,11 @@ def remove(item: LoginItem, say: Say) -> int:
             )
             return 1
         say(f"   done: {outcome.message}")
+    try:
+        say(f"   {launcher.remove()}")
+    except (LauncherError, OSError) as exc:
+        say(f"   failed: {exc}")
+        return 1
     say(f"Your data stays in {item.data}. Nothing was deleted.")
     return 0
 
@@ -178,10 +198,29 @@ def _login_item(item: LoginItem, say: Say, *, tool_install: bool) -> None:
     say(f"   {outcome.status.label} runs {executable} serve.")
 
 
+def _launcher_app_step(launcher: Launcher, say: Say) -> None:
+    say("2. Add netkeep to your Applications folder, to open it from the Dock or Spotlight")
+    if launcher.up_to_date():
+        say(f"   already done: {launcher.path} opens netkeep with {launcher.executable}.")
+        return
+    try:
+        message = launcher.build()
+    except LauncherError as exc:
+        raise StepFailed(
+            str(exc), "Fix that, then run netkeep setup again. Your login item is on."
+        ) from exc
+    except OSError as exc:
+        raise StepFailed(
+            f"couldn't write {launcher.path}: {exc}",
+            "Fix that, then run netkeep setup again. Your login item is on.",
+        ) from exc
+    say(f"   done: {message}")
+
+
 def _serve(item: LoginItem, seams: Seams, say: Say, *, wait_s: float) -> str:
     host, port = item.serve_address()
     base = seams.base_url(host, port)
-    say(f"2. Wait for netkeep serve to answer at {base}")
+    say(f"3. Wait for netkeep serve to answer at {base}")
     deadline = seams.clock() + wait_s
     while not seams.serve_answers(base):
         if seams.clock() >= deadline:
@@ -197,7 +236,7 @@ def _serve(item: LoginItem, seams: Seams, say: Say, *, wait_s: float) -> str:
 
 
 def _first_run(seams: Seams, say: Say, base: str) -> None:
-    say("3. Open the first-run page in netkeep's Chrome")
+    say("4. Open the first-run page in netkeep's Chrome")
     pid = seams.chrome_pid()
     if pid is not None:
         say(

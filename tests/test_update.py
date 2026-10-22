@@ -152,6 +152,7 @@ class World:
 
     tmp: Path
     installed: str = OLD
+    launcher_calls: list[tuple[str, bool]] = field(default_factory=list)
     latest: str = NEW
     releases: dict[str, Release] = field(default_factory=dict)
     lock: FakeLock = field(default_factory=FakeLock)
@@ -314,7 +315,13 @@ class World:
             current_version=self.installed,
             sleep=self.sleep,
             clock=lambda: self.clock_s,
+            launcher=self.launcher,
         )
+
+    def launcher(self, build: bool) -> str | None:
+        """The launcher app's refresh (#754): which version asked, and whether to build."""
+        self.launcher_calls.append((self.installed, build))
+        return "Rebuilt the launcher" if build else None
 
     def say(self, line: str) -> None:
         self.output.append(line)
@@ -407,6 +414,9 @@ def test_an_update_backs_up_installs_and_hands_over(world: World) -> None:
         assert kept.read_bytes() == world.releases[version].constraints
     assert all(url.startswith("https://") for url in world.fetched)
     assert f"Done: netkeep {NEW} is running from the login item." in world.output
+    # The new version rewrites the launcher app, once, building it if it was missing.
+    assert world.launcher_calls == [(NEW, True)]
+    assert "Launcher app: Rebuilt the launcher" in world.output
 
 
 def test_the_login_item_is_stopped_before_the_backup_and_the_install(world: World) -> None:
@@ -445,6 +455,8 @@ def test_a_login_item_that_was_off_stays_off(world: World) -> None:
     assert not any(call[0] == "bootstrap" for call in world.launchctl)
     assert "Start it with: netkeep serve" in world.output
     assert world.state() is None
+    # A launcher that exists is still rewritten; a missing one isn't built.
+    assert world.launcher_calls == [(NEW, False)]
 
 
 def test_nothing_to_do_when_up_to_date(world: World) -> None:
@@ -591,6 +603,7 @@ def test_an_upgrade_failure_reinstalls_the_old_version(world: World) -> None:
     assert world.restored == [], "the new version never ran, so the database is as it was"
     assert world.state() is None
     assert f"Rolled back: netkeep {OLD} is running again" in world.text
+    assert world.launcher_calls == []  # only a finished update rewrites it
 
 
 def test_a_failed_reinstall_after_an_upgrade_failure_explains(world: World) -> None:

@@ -613,7 +613,7 @@ class LoginItem:
                     " fail against the serve lock."
                 ),
             )
-        self._launchctl("bootstrap", self._domain, str(self.plist_path))
+        self._bootstrap()
         return Outcome(
             self.status(),
             started=True,
@@ -649,6 +649,23 @@ class LoginItem:
         loaded."""
         self._require_macos()
         return self._stop(self._service)
+
+    def _bootstrap(self) -> None:
+        """Add the plist's job to launchd: what :meth:`enable` does to start it."""
+        self._launchctl("bootstrap", self._domain, str(self.plist_path))
+
+    def start(self) -> None:
+        """Start the agent's ``serve`` now, as at login, without rewriting its plist (the
+        launcher app, #754). :meth:`stop` (``netkeep update``) boots the job out of
+        launchd, so a job launchd doesn't have is added back first, the way :meth:`enable`
+        adds it; then ``kickstart`` starts it if it isn't running. The caller checks first
+        that no ``serve`` holds the serve lock."""
+        self._require_macos()
+        if not self.plist_path.is_file():
+            raise LoginItemError("the login item is off")
+        if not self._is_loaded():
+            self._bootstrap()
+        self._launchctl("kickstart", self._service)
 
     def disable(self, *, serving_here: bool = False) -> Outcome:
         """Stop the agent and remove its plist, and an old script's for this data

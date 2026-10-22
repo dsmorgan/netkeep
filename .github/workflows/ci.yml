@@ -233,6 +233,8 @@ jobs:
   # tool with uv's own Python 3.12 and the constraints file, on an Intel and an Apple-
   # silicon Mac, then `netkeep version`, `config show` and `db upgrade` on scratch data
   # (scripts/smoke-tool-install.sh). Intel is the one that needs cryptography 48.x.
+  # It also builds the launcher app (#754) into the scratch HOME and checks it with
+  # plutil -lint, sh -n and xattr: no quarantine attribute, so Gatekeeper doesn't apply.
   mac-install:
     name: Install on ${{ matrix.arch }}
     needs: wheel

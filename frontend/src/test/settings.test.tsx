@@ -65,6 +65,28 @@ describe('settings', () => {
       if (pathname === '/api/v1/gmail-setup') {
         return jsonResponse({ project_id: null, sender_email: null, done: [], steps: [] })
       }
+      if (pathname === '/api/v1/login-item') {
+        return jsonResponse({
+          supported: false,
+          unsupported_reason: 'Run at login uses launchd, which only macOS has.',
+          state: 'Off',
+          enabled: false,
+          running_under_launchd: false,
+          this_server_is_the_login_item: false,
+          label: 'fun.tnkr.netkeep',
+          plist_path: '/x/fun.tnkr.netkeep.plist',
+          log_path: '/data/logs/netkeep.log',
+          points_elsewhere: null,
+          legacy: false,
+          launcher: {
+            supported: false,
+            state: 'Not built',
+            exists: false,
+            path: '/x/netkeep.app',
+            runs: null,
+          },
+        })
+      }
       if (pathname === '/api/v1/mailboxes/status') {
         return jsonResponse({
           client_configured: false,

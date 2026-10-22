@@ -2916,6 +2916,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/login-item/launcher": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Build Launcher App
+         * @description Build or rebuild the launcher app in ~/Applications, replacing this data
+         *     directory's old one whole.
+         */
+        post: operations["build_launcher_app"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/login-item/repair": {
         parameters: {
             query?: never;
@@ -7174,6 +7195,22 @@ export interface components {
             tries: number;
         };
         /**
+         * LauncherOut
+         * @description The launcher app (#754): an icon in ``~/Applications`` that opens netkeep.
+         */
+        LauncherOut: {
+            /** Exists */
+            exists: boolean;
+            /** Path */
+            path: string;
+            /** Runs */
+            runs: string | null;
+            /** State */
+            state: string;
+            /** Supported */
+            supported: boolean;
+        };
+        /**
          * LeftoverDraftOut
          * @description A test-send Gmail draft that deleting the campaign leaves for you to delete.
          */
@@ -7378,6 +7415,7 @@ export interface components {
             enabled: boolean;
             /** Label */
             label: string;
+            launcher: components["schemas"]["LauncherOut"];
             /** Legacy */
             legacy: boolean;
             /** Log Path */
@@ -16165,6 +16203,40 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    build_launcher_app: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginItemOut"];
+                };
+            };
+            /** @description Only the local owner account manages the login item */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not macOS, or the launcher can't be written: the reason is in detail */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

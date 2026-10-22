@@ -61,4 +61,31 @@ grep -qF "data_dir = \"$NETKEEP_DATA\"" "$work/config.txt" || {
 }
 "$netkeep" db upgrade
 "$netkeep" db current
+
+# The launcher app (#754), built by the installed package into the scratch HOME the way
+# netkeep setup builds it (without setup's login item and Chrome). On macOS only: the
+# bundle's plist must lint, its script must parse, run the uv shim and be executable,
+# the icon must have shipped in the wheel, and nothing may carry a quarantine attribute,
+# which is why Gatekeeper's first-run check doesn't apply (docs/design/install-options.md).
+if [ "$(uname -s)" = Darwin ]; then
+  "$python" -I -c '
+from netkeep.services import launcher_app, login_item
+print(launcher_app.Launcher.for_login_item(login_item.LoginItem()).build())'
+  bundle="$(ls -d "$HOME/Applications/"netkeep*.app)"
+  plutil -lint "$bundle/Contents/Info.plist"
+  [ "$(plutil -extract CFBundleIdentifier raw "$bundle/Contents/Info.plist")" = \
+    "fun.tnkr.netkeep.launcher.$("$python" -I -c 'from netkeep import paths; print(paths.data_dir_digest(paths.data_dir()))')" ] \
+    || { echo "the launcher's bundle id is wrong"; exit 1; }
+  [ "$(plutil -extract CFBundleShortVersionString raw "$bundle/Contents/Info.plist")" = "$expected" ] \
+    || { echo "the launcher's version is not $expected"; exit 1; }
+  script="$bundle/Contents/MacOS/netkeep"
+  [ -x "$script" ] || { echo "the launcher's script is not executable"; exit 1; }
+  sh -n "$script"
+  grep -qxF "netkeep='$netkeep'" "$script" || { echo "the launcher doesn't run $netkeep:"; cat "$script"; exit 1; }
+  [ "$(head -c 4 "$bundle/Contents/Resources/netkeep.icns")" = icns ] || { echo "no icon in the launcher"; exit 1; }
+  if xattr -r "$bundle" | grep -q com.apple.quarantine; then
+    echo "the launcher carries a quarantine attribute:"; xattr -lr "$bundle"; exit 1
+  fi
+  echo "ok: the launcher app builds on macOS $(sw_vers -productVersion), with no quarantine attribute"
+fi
 echo "ok: netkeep $got installs as a uv tool with the constraints file on $machine"
