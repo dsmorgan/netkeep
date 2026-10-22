@@ -383,6 +383,23 @@ def test_a_launcher_build_refusal_stops_setup_before_serve(machine: Machine) -> 
     assert machine.health_asked == [] and machine.launcher.starts == []
 
 
+def test_an_unsearchable_applications_folder_fails_the_step_cleanly(machine: Machine) -> None:
+    if os.geteuid() == 0:
+        pytest.skip("root ignores folder permissions")
+    machine.applications.mkdir(parents=True)
+    machine.applications.chmod(0)
+    try:
+        code, output = machine.setup()
+    finally:
+        machine.applications.chmod(0o755)
+
+    assert code == 1
+    assert "2. Add netkeep to your Applications folder" in output
+    assert "   failed: couldn't write" in output and "Permission denied" in output
+    assert "to fix it: Fix that, then run netkeep setup again." in output
+    assert machine.health_asked == [] and machine.launcher.starts == []
+
+
 def test_a_failed_launch_without_a_refusal_still_says_what_to_do(machine: Machine) -> None:
     machine.launcher.result = LaunchResult(LaunchStatus.FAILED, "Chrome exited with status 1")
 

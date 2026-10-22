@@ -426,6 +426,17 @@ class LoginItem:
         """Whether launchd would start ``legacy`` at login: not ``launchctl disable``-d."""
         return not self._is_disabled(legacy.label)
 
+    def plist_environment(self) -> dict[str, str] | None:
+        """The ``EnvironmentVariables`` of this label's plist, or ``None`` when there is no
+        plist (the launcher app exports what the agent's ``serve`` runs with, #754)."""
+        document = _read_plist(self.plist_path)
+        if document is None:
+            return None
+        env = document.get("EnvironmentVariables")
+        if not isinstance(env, dict):
+            return {}
+        return {str(key): value for key, value in env.items() if isinstance(value, str)}
+
     def _plist_executable(self) -> str | None:
         document = _read_plist(self.plist_path)
         arguments = _arguments(document) if document is not None else None
@@ -656,16 +667,23 @@ class LoginItem:
 
     def start(self) -> None:
         """Start the agent's ``serve`` now, as at login, without rewriting its plist (the
-        launcher app, #754). :meth:`stop` (``netkeep update``) boots the job out of
-        launchd, so a job launchd doesn't have is added back first, the way :meth:`enable`
-        adds it; then ``kickstart`` starts it if it isn't running. The caller checks first
-        that no ``serve`` holds the serve lock."""
+        launcher app, #754). A loaded job is ``kickstart``-ed. :meth:`stop` (``netkeep
+        update``) boots the job out of launchd, so a job launchd doesn't have is added back
+        the way :meth:`enable` adds it, which starts it (``RunAtLoad``); the ``kickstart``
+        after that may fail and isn't an error. The caller checks first that no ``serve``
+        holds the serve lock."""
         self._require_macos()
         if not self.plist_path.is_file():
             raise LoginItemError("the login item is off")
-        if not self._is_loaded():
-            self._bootstrap()
-        self._launchctl("kickstart", self._service)
+        if self._is_loaded():
+            self._launchctl("kickstart", self._service)
+            return
+        self._bootstrap()
+        # RunAtLoad has started the job already, and launchd may refuse a kickstart
+        # while it starts: the caller's wait for /health says whether it came up.
+        done = self._runner(["kickstart", self._service])
+        if done.returncode != 0:
+            log.info("kickstart after bootstrap: %s", (done.stderr or done.stdout).strip())
 
     def disable(self, *, serving_here: bool = False) -> Outcome:
         """Stop the agent and remove its plist, and an old script's for this data

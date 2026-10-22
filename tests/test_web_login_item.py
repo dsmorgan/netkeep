@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import factories
 import httpx
+import pytest
 from fastapi import FastAPI
 from isolation.harness import acting_as
 from test_login_item import FakeLaunchctl, make
@@ -189,3 +191,24 @@ async def test_a_second_user_cannot_rebuild_the_launcher(
     with acting_as(running_app, other):
         assert (await client.post(f"{URL}/launcher", headers=HEADERS)).status_code == 403
     assert not (tmp_path / "Applications").exists()
+
+
+async def test_an_unsearchable_applications_folder_still_shows_the_card(
+    running_app: FastAPI, client: httpx.AsyncClient, tmp_path: Path
+) -> None:
+    if os.geteuid() == 0:
+        pytest.skip("root ignores folder permissions")
+    _install(running_app, tmp_path)
+    applications = tmp_path / "Applications"
+    applications.mkdir()
+    applications.chmod(0)
+    try:
+        response = await client.get(URL)
+        rebuilt = await client.post(f"{URL}/launcher", headers=HEADERS)
+    finally:
+        applications.chmod(0o755)
+    assert response.status_code == 200
+    launcher = response.json()["launcher"]
+    assert launcher["state"].startswith("Couldn't check: ") and launcher["exists"] is False
+    assert rebuilt.status_code == 409
+    assert "Permission denied" in rebuilt.json()["detail"]

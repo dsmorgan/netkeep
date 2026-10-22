@@ -54,3 +54,7 @@ On acceptance, ADR 0002 gets a dated amendment, `CLAUDE.md`'s "Browser identity"
 - **Focus:** a run raises its own window, not the UI's (#632). #488's live check still applies.
 - **The port reaches more:** the UI's page and, after Gmail linkage, your Google session. That's acceptable because the port already gives full control of LinkedIn. #624 and the loopback-only port stay the guard.
 - **Keep true:** runs act only on their own tabs, nothing reads other sites' tabs or cookies, and no spawn grows an argument these rules don't allow.
+
+## Amendments
+
+- 2026-10-22 (#754): the launcher app, `~/Applications/netkeep.app`, is a fourth way you trigger a spawn under rule 5: clicking its icon runs `netkeep open`.

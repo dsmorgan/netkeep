@@ -200,10 +200,10 @@ def _login_item(item: LoginItem, say: Say, *, tool_install: bool) -> None:
 
 def _launcher_app_step(launcher: Launcher, say: Say) -> None:
     say("2. Add netkeep to your Applications folder, to open it from the Dock or Spotlight")
-    if launcher.up_to_date():
-        say(f"   already done: {launcher.path} opens netkeep with {launcher.executable}.")
-        return
     try:
+        if launcher.up_to_date():
+            say(f"   already done: {launcher.path} opens netkeep with {launcher.executable}.")
+            return
         message = launcher.build()
     except LauncherError as exc:
         raise StepFailed(

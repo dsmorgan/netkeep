@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 from test_login_item import FakeLaunchctl
+from test_login_item import make as make_item
 from typer.testing import CliRunner
 
 from netkeep import __version__, cli, paths
@@ -68,7 +69,12 @@ class Box:
         self.executable = tmp_path / "tool bin" / "net'keep"  # a space and a quote
         self.executable.parent.mkdir()
         for name in ("launchctl", "osascript", "open"):
-            self._stub(self.bin / name, f'printf "%s\\n" "{name} $*" >> "$LOG"\nexit 0\n')
+            # Each argument in brackets, so where one ends is visible.
+            self._stub(
+                self.bin / name,
+                f'{{ printf "%s" "{name} "; for a in "$@"; do printf "[%s]" "$a"; done; echo; }}'
+                ' >> "$LOG"\nexit 0\n',
+            )
         self.netkeep("exit 0\n")
 
     def _stub(self, path: Path, body: str) -> None:
@@ -186,9 +192,10 @@ def test_the_script_runs_the_absolute_netkeep_and_nothing_else(box: Box) -> None
         "# netkeep's launcher app (#754), written by netkeep setup; netkeep update rewrites\n"
         "# it. It opens netkeep for one data directory, or says in a dialog why it can't.\n"
         f"export NETKEEP_DATA='{box.data.resolve()}'\n"
+        "export NETKEEP_LOG_STDERR_LEVEL=WARNING\n"
         f"netkeep={quoted}\n"
         'if [ -x "$netkeep" ]; then\n'
-        '  message=$("$netkeep" open --launcher) && exit 0\n'
+        '  message=$("$netkeep" open --launcher 2>&1) && exit 0\n'
         "else\n"
         "  message=\"netkeep isn't installed at $netkeep any more. Install it again with the"
         " installer in netkeep's README, then run netkeep setup in Terminal.\"\n"
@@ -197,7 +204,7 @@ def test_the_script_runs_the_absolute_netkeep_and_nothing_else(box: Box) -> None
         " netkeep open'\n"
         f"{osascript} -e 'on run argv' -e 'display dialog (item 1 of argv) with title"
         ' "netkeep" buttons {"OK"} default button "OK" with icon caution\' -e \'end run\''
-        ' "$message" >/dev/null\n'
+        ' -- "$message" >/dev/null\n'
         "exit 1\n"
     )
 
@@ -213,6 +220,44 @@ def test_the_script_carries_the_login_items_settings(box: Box, tmp_path: Path) -
     text = box.launcher(environ=environ).render_script()
     assert "export NETKEEP_KEYCHAIN_SERVICE='netkeep-scratch'\n" in text
     assert f"export NETKEEP_CONFIG='{config.resolve()}'\n" in text
+
+
+def test_the_script_takes_the_login_items_settings_from_its_plist(
+    box: Box, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The plist's values win over the builder's environment; the environment counts only
+    when there is no plist."""
+    plist_config = tmp_path / "plist-conf" / "config.toml"
+    shell_config = tmp_path / "shell-conf" / "config.toml"
+    item = make_item(
+        FakeLaunchctl(),
+        tmp_path,
+        box.data,
+        environ={keychain.SERVICE_ENV: "from-plist", paths.CONFIG_ENV: str(plist_config)},
+    )
+    monkeypatch.setenv(keychain.SERVICE_ENV, "from-shell")
+    monkeypatch.setenv(paths.CONFIG_ENV, str(shell_config))
+    launcher = Launcher.for_login_item(item, applications_dir=box.applications)
+
+    before = launcher.render_script()
+    assert "export NETKEEP_KEYCHAIN_SERVICE='from-shell'\n" in before
+    assert f"export NETKEEP_CONFIG='{shell_config.resolve()}'\n" in before
+
+    item.enable()
+    after = launcher.render_script()
+    assert "export NETKEEP_KEYCHAIN_SERVICE='from-plist'\n" in after
+    assert f"export NETKEEP_CONFIG='{plist_config.resolve()}'\n" in after
+    assert "from-shell" not in after and str(shell_config) not in after
+
+
+def test_a_plist_without_those_settings_exports_none(
+    box: Box, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    item = make_item(FakeLaunchctl(), tmp_path, box.data)
+    item.enable()
+    monkeypatch.setenv(keychain.SERVICE_ENV, "from-shell")
+    text = Launcher.for_login_item(item, applications_dir=box.applications).render_script()
+    assert "NETKEEP_KEYCHAIN_SERVICE" not in text and "NETKEEP_CONFIG" not in text
 
 
 def test_a_rebuild_replaces_the_bundle_whole(box: Box) -> None:
@@ -341,6 +386,28 @@ def test_refresh_rebuilds_a_stale_one_and_builds_a_missing_one_only_when_told(
     assert moved.status().runs == str(tmp_path / "new" / "netkeep")
 
 
+@pytest.fixture
+def unsearchable(box: Box) -> Iterator[Path]:
+    """The scratch Applications folder at mode 000, so even looking for the bundle fails."""
+    if os.geteuid() == 0:
+        pytest.skip("root ignores folder permissions")
+    box.applications.mkdir(parents=True)
+    box.applications.chmod(0)
+    try:
+        yield box.applications
+    finally:
+        box.applications.chmod(0o755)
+
+
+def test_refresh_reports_an_unsearchable_folder(box: Box, unsearchable: Path) -> None:
+    with pytest.raises(PermissionError):
+        box.launcher().status()
+    for build in (True, False):
+        note = launcher_app.refresh(box.launcher(), build=build)
+        assert note is not None and note.startswith("couldn't check or rebuild it: ")
+        assert "Permission denied" in note
+
+
 def test_refresh_reports_a_failure_instead_of_raising(box: Box) -> None:
     launcher = box.launcher()
     launcher.path.mkdir(parents=True)  # not ours: refresh leaves it alone
@@ -349,7 +416,7 @@ def test_refresh_reports_a_failure_instead_of_raising(box: Box) -> None:
     box.applications.rmdir()
     box.applications.write_text("a file, not a folder")
     note = launcher_app.refresh(launcher, build=True)
-    assert note is not None and note.startswith("not rebuilt: ")
+    assert note is not None and note.startswith("couldn't check or rebuild it: ")
 
 
 # --- the script, run -------------------------------------------------------------------------
@@ -370,9 +437,30 @@ def test_a_failure_shows_what_netkeep_printed_in_a_dialog(box: Box) -> None:
     code, calls = box.run_script(launcher)
     assert code == 1
     assert calls[0].startswith("netkeep open --launcher")
-    assert calls[1].startswith("osascript -e on run argv -e display dialog (item 1 of argv)")
-    assert calls[1].endswith(" -e end run netkeep isn't running; run: netkeep setup")
+    assert calls[1].startswith("osascript [-e][on run argv][-e][display dialog (item 1 of argv)")
+    assert calls[1].endswith("[-e][end run][--][netkeep isn't running; run: netkeep setup]")
     assert len(calls) == 2  # never launchctl or open from the script
+
+
+def test_a_message_that_looks_like_an_option_stays_data(box: Box) -> None:
+    """osascript reads ``-e`` after its script lines as more script; ``--`` ends its
+    options, so the message is ``item 1 of argv`` whatever it starts with."""
+    box.netkeep('echo "-e return 42"\nexit 1\n')
+    launcher = box.launcher()
+    launcher.build()
+    code, calls = box.run_script(launcher)
+    assert code == 1
+    assert calls[1].endswith("[-e][end run][--][-e return 42]")
+
+
+def test_what_netkeep_prints_to_stderr_reaches_the_dialog(box: Box) -> None:
+    """A refusal on stderr, such as an update in progress, shows its own text."""
+    box.netkeep('echo "error: an update is in progress." >&2\nexit 1\n')
+    launcher = box.launcher()
+    launcher.build()
+    code, calls = box.run_script(launcher)
+    assert code == 1
+    assert calls[1].endswith("[--][error: an update is in progress.]")
 
 
 def test_a_silent_failure_still_says_what_to_run(box: Box) -> None:
@@ -381,7 +469,7 @@ def test_a_silent_failure_still_says_what_to_run(box: Box) -> None:
     launcher.build()
     code, calls = box.run_script(launcher)
     assert code == 1
-    assert calls[-1].endswith("netkeep didn't open. Open Terminal and run: netkeep open")
+    assert calls[-1].endswith("[--][netkeep didn't open. Open Terminal and run: netkeep open]")
 
 
 def test_a_missing_netkeep_says_to_reinstall(box: Box) -> None:
@@ -539,8 +627,54 @@ def test_launchctl_refusing_says_what_to_run(tmp_path: Path, launchctl: FakeLaun
     problem = launcher_app.reach_serve(item, BASE, Serve(launchctl, item.label).seams(), wait_s=5)
     assert problem == (
         "netkeep couldn't start: launchctl bootstrap failed: Input/output error. Open"
-        " Terminal and run: netkeep login-item status"
+        " Terminal and run: netkeep login-item status."
     )
+
+
+def test_a_kickstart_refused_right_after_bootstrap_still_waits_for_health(
+    tmp_path: Path, launchctl: FakeLaunchctl
+) -> None:
+    """``RunAtLoad`` starts the job at ``bootstrap``; launchd may then refuse the
+    ``kickstart``. That isn't a failure: the wait for /health decides."""
+    item = _item(tmp_path, launchctl)
+    item.enable()
+    item.stop()
+    launchctl.calls.clear()
+    launchctl.fail = "kickstart"
+    assert (
+        launcher_app.reach_serve(item, BASE, Serve(launchctl, item.label).seams(), wait_s=5) is None
+    )
+    assert [c[0] for c in _changes(launchctl)] == ["bootstrap", "kickstart"]
+
+
+def test_a_kickstart_refused_for_a_loaded_job_is_reported(
+    tmp_path: Path, launchctl: FakeLaunchctl
+) -> None:
+    item = _item(tmp_path, launchctl)
+    item.enable()
+    launchctl.fail = "kickstart"
+    serve = Serve(launchctl, item.label)
+    serve.answers = lambda _base: False  # type: ignore[method-assign]
+    problem = launcher_app.reach_serve(item, BASE, serve.seams(), wait_s=5)
+    assert problem is not None
+    assert problem.startswith("netkeep couldn't start: launchctl kickstart failed")
+
+
+def test_a_stale_login_item_is_named_when_it_fails(
+    tmp_path: Path, launchctl: FakeLaunchctl
+) -> None:
+    item = _item(tmp_path, launchctl)
+    other = tmp_path / "old-checkout" / "netkeep"
+    item.plist_path.parent.mkdir(parents=True, exist_ok=True)
+    item.plist_path.write_bytes(
+        plistlib.dumps({"Label": item.label, "ProgramArguments": [str(other), "serve"]})
+    )
+    serve = Serve(launchctl, item.label)
+    serve.answers = lambda _base: False  # type: ignore[method-assign]
+    problem = launcher_app.reach_serve(item, BASE, serve.seams(), wait_s=1)
+    assert problem is not None
+    assert f"Its login item runs {other}, not {item.executable}" in problem
+    assert "Repair" in problem
 
 
 def test_start_refuses_when_the_login_item_is_off(tmp_path: Path, launchctl: FakeLaunchctl) -> None:

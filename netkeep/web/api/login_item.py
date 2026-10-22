@@ -26,7 +26,6 @@ from pydantic import BaseModel
 
 from netkeep.models import User
 from netkeep.services.launcher_app import Launcher, LauncherError
-from netkeep.services.launcher_app import Status as LauncherStatus
 from netkeep.services.login_item import LoginItem, LoginItemError, Status
 from netkeep.services.users import local_owner
 from netkeep.web.deps import CurrentUser, SessionDep, read_only
@@ -77,7 +76,19 @@ class LoginItemOut(BaseModel):
     """What a change did, such as "starts at your next login, not now"; null on a read."""
 
 
-def _launcher_out(status: LauncherStatus) -> LauncherOut:
+def _launcher_out(launcher: Launcher) -> LauncherOut:
+    """The launcher's state; a folder it can't read shows as such instead of failing the
+    whole card."""
+    try:
+        status = launcher.status()
+    except (LauncherError, OSError) as exc:
+        return LauncherOut(
+            supported=True,
+            state=f"Couldn't check: {exc}",
+            exists=False,
+            path=str(launcher.path),
+            runs=None,
+        )
     return LauncherOut(
         supported=status.supported,
         state=status.state.value,
@@ -100,7 +111,7 @@ def _out(status: Status, launcher: Launcher, message: str | None = None) -> Logi
         log_path=str(status.log_path),
         points_elsewhere=status.plist_executable if status.stale else None,
         legacy=status.legacy,
-        launcher=_launcher_out(launcher.status()),
+        launcher=_launcher_out(launcher),
         message=message,
     )
 

@@ -419,6 +419,21 @@ def test_an_update_backs_up_installs_and_hands_over(world: World) -> None:
     assert "Launcher app: Rebuilt the launcher" in world.output
 
 
+def test_a_launcher_error_never_fails_a_finished_update(world: World) -> None:
+    """The launcher's refresh reports its own failures; an OSError that still escapes
+    it is reported here, and the update, which went through, still exits 0."""
+    world.install_login_item()
+
+    def broken(build: bool) -> str | None:
+        raise PermissionError(13, "Permission denied", "/scratch/Applications")
+
+    world.launcher = broken  # type: ignore[method-assign]
+    assert world.run_update() == 0, world.text
+    assert world.state() is None
+    assert "Launcher app: couldn't check or rebuild it: [Errno 13] Permission denied" in world.text
+    assert f"Done: netkeep {NEW} is running from the login item." in world.output
+
+
 def test_the_login_item_is_stopped_before_the_backup_and_the_install(world: World) -> None:
     world.install_login_item()
     order: list[str] = []
