@@ -80,3 +80,17 @@ def test_event_defaults_and_wire_shape() -> None:
 def test_event_rejects_a_naive_timestamp() -> None:
     with pytest.raises(ValueError, match="timezone-aware"):
         Event(type="x", ts=datetime(2026, 1, 1))
+
+
+def test_latest_keeps_the_last_event_of_each_type_for_each_user() -> None:
+    """What the status roll-up reads between saves (#761): one per type and user."""
+    bus = EventBus()
+    assert bus.latest("run.progress", 7) is None
+    first = Event(type="run.progress", data={"run_id": 1, "visited": 1}, user_id=7)
+    second = Event(type="run.progress", data={"run_id": 1, "visited": 2}, user_id=7)
+    other = Event(type="run.progress", data={"run_id": 2, "visited": 9}, user_id=8)
+    for event in (first, other, second, Event(type="campaign.tick", user_id=7)):
+        bus.publish(event)  # with no subscriber, too
+    assert bus.latest("run.progress", 7) is second
+    assert bus.latest("run.progress", 8) is other
+    assert bus.latest("campaign.tick", 8) is None

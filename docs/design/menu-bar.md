@@ -4,7 +4,11 @@ This note holds the mechanics behind [ADR 0014](../adr/0014-menu-bar-status-app.
 
 ## Status
 
-- `serve` serves one read-only endpoint with the server-side parts of the three chips (#751), rolled up into a tone, a word, and a fact for each chip. The UI's chips move onto it.
+- `serve` serves one read-only endpoint, `GET /api/v1/system-status` (#761), with the server-side parts of the three chips (#751), rolled up into a tone, a word, and a fact for each chip. The UI's chips read it. The rules live in `netkeep/services/system_status.py`; the menu bar imports its `roll_up` and `NETKEEP_LEAD` to add its own part to the netkeep chip.
+- Besides the chips, it returns `linkedin_paused` (Pause or Resume), `linkedin_run` (the run in progress, with its name and start), `campaign_sending` (a campaign tick in flight in this process, which may be sending), and `update_available` (null until #762 fills it). The Update and Quit confirmations name the run and the batch.
+- **Times are timestamps, never text.** A fact or a detail that says when holds a `{name}` placeholder, and the chip's `times` maps each name to an absolute UTC time (ISO 8601) and a style: `ago` ("3 min ago"), `next` ("in 7 min", "14:20", "Tue 14:20") or `when` (a date and time in the reader's locale). Each client writes them when it renders: the UI with its existing formatters, the menu bar each time the menu opens. A cached answer then never shows a stale "2 min ago" (maintainer, 2026-10-22).
+- A read that fails on the server fails only its own part, which says "Couldn't check". The netkeep chip in the answer holds only the server's parts (background checks, and the Keychain when it refused the key), so each client rolls it up again with its own.
+- Two moments the database doesn't record come from this process's memory: a run's live progress (the latest `run.progress` event) and a campaign send batch (shown for 15 s after the `campaign.tick` event of a tick that sent).
 - Each client adds its own connection parts on the same scale (`ok`, `off`, `busy`, `warn`, `bad`, worst wins):
   - **The UI:** server reachable, and live updates (the event stream).
   - **The menu bar:** server reachable. A failed read shows "Unreachable" on the netkeep line, and "Unknown" on Gmail and LinkedIn, as in the UI.

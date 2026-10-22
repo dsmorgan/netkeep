@@ -3,7 +3,7 @@ import type { Attention } from '@/features/attention/api'
 import type { BudgetStatus, Heat, LinkedInStatus, Run, Schedule } from '@/features/linkedin/types'
 import type { PollCheck, PollStatus } from '@/features/poll-status/api'
 
-import type { Read } from './roll-up'
+import type { Read, ServerChip, ServerStatus } from './roll-up'
 
 export const ok = <T>(data: T): Read<T> => ({ state: 'ok', data })
 
@@ -121,4 +121,126 @@ export function attention(overrides: Partial<Attention> = {}): Attention {
     title_total: 0,
     ...overrides,
   } as Attention
+}
+
+// --- `GET /system-status` (#761), as the server answers it ------------------------------
+
+type ServerPart = ServerChip['parts'][number]
+
+/** One server part; `fact` and `target` null unless given. */
+export function part(
+  key: string,
+  tone: ServerPart['tone'],
+  word: string,
+  detail: string,
+  overrides: Partial<ServerPart> = {},
+): ServerPart {
+  return { key, label: key, tone, word, detail, fact: null, target: null, ...overrides }
+}
+
+/** The Gmail chip of a healthy install: armed to send, replies checked 2 min before noon. */
+export function gmailChip(overrides: Partial<ServerChip> = {}): ServerChip {
+  return {
+    system: 'gmail',
+    name: 'Gmail',
+    tone: 'ok',
+    word: 'Sending',
+    fact: 'checked {replies_last}',
+    parts: [
+      part('mailbox', 'ok', 'Connected', 'sender@example.com · connected', { label: 'Mailbox' }),
+      part('sending', 'ok', 'Sending', 'Armed to send', { label: 'Sending' }),
+      part('replies', 'ok', 'Checked', 'Checked {replies_last} · next {replies_next}', {
+        label: 'Reply check',
+        fact: 'checked {replies_last}',
+      }),
+    ],
+    target: { to: '/gmail', hash: null },
+    page: 'Gmail',
+    times: {
+      replies_last: { at: '2026-10-21T11:58:00Z', style: 'ago' },
+      replies_next: { at: '2026-10-21T12:08:00Z', style: 'next' },
+    },
+    ...overrides,
+  }
+}
+
+const SCHEDULE = { to: '/linkedin' as const, hash: 'schedule' }
+
+/** The LinkedIn chip of a healthy install: armed, inbox checked 34 min before noon. */
+export function linkedinChip(overrides: Partial<ServerChip> = {}): ServerChip {
+  return {
+    system: 'linkedin',
+    name: 'LinkedIn',
+    tone: 'ok',
+    word: 'Armed',
+    fact: 'inbox {inbox_last}',
+    parts: [
+      part(
+        'session',
+        'ok',
+        'No session flag',
+        'No session flag: no run has found LinkedIn logged out',
+        {
+          label: 'Session',
+          target: { to: '/linkedin', hash: 'session' },
+        },
+      ),
+      part('schedule', 'ok', 'Armed', 'Armed', { label: 'Scheduled runs', target: SCHEDULE }),
+      part('inbox', 'ok', 'Checked', 'Checked {inbox_last} · next {inbox_next}', {
+        label: 'Inbox check',
+        fact: 'inbox {inbox_last}',
+        target: { to: '/linkedin', hash: 'inbox' },
+      }),
+      part('prefills', 'ok', '2 prefills left', '2 of 15 left', {
+        label: 'Prefills today',
+        target: { to: '/linkedin', hash: 'budget' },
+      }),
+      part('heat', 'ok', 'Heat normal', 'Normal', {
+        label: 'Heat',
+        target: { to: '/linkedin', hash: 'heat' },
+      }),
+    ],
+    target: SCHEDULE,
+    page: 'LinkedIn',
+    times: {
+      inbox_last: { at: '2026-10-21T11:26:00Z', style: 'ago' },
+      inbox_next: { at: '2026-10-21T12:26:00Z', style: 'next' },
+    },
+    ...overrides,
+  }
+}
+
+/** The netkeep chip's server parts while `netkeep serve` runs the background checks. */
+export function netkeepChip(overrides: Partial<ServerChip> = {}): ServerChip {
+  return {
+    system: 'netkeep',
+    name: 'netkeep',
+    tone: 'ok',
+    word: 'Connected',
+    fact: '',
+    parts: [
+      part('checks', 'ok', 'Connected', 'netkeep serve is running them', {
+        label: 'Background checks',
+      }),
+    ],
+    target: { to: '/settings', hash: 'support' },
+    page: 'Settings › Support',
+    times: {},
+    ...overrides,
+  }
+}
+
+/** The whole answer of a healthy, quiet install. */
+export function serverStatus(overrides: Partial<ServerStatus> = {}): ServerStatus {
+  return {
+    checked_at: '2026-10-21T12:00:00Z',
+    gmail: gmailChip(),
+    linkedin: linkedinChip(),
+    netkeep: netkeepChip(),
+    linkedin_paused: false,
+    linkedin_run: null,
+    campaign_sending: false,
+    update_available: null,
+    ...overrides,
+  }
 }

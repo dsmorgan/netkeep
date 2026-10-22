@@ -2,28 +2,26 @@
  * The top bar's three status chips (#751), Gmail, LinkedIn and netkeep, as pure
  * functions of the reads they come from, so every state is tested without rendering.
  *
- * Each chip rolls up its parts: every part has a tone on one scale, the chip takes the
- * worst, and its word and fact come from the part that set it. A read still in flight
- * or failed is a part of its own that says so, never a guess. When the server can't be
- * reached, Gmail and LinkedIn say "Unknown" rather than their last answer.
+ * The server rolls up its own parts (`GET /system-status`, #761, ADR 0014 rule 1), and
+ * this adds only what the UI alone can know, by the same rule: whether the server
+ * answers, and live updates. Each chip's parts have a tone on one scale, the chip takes
+ * the worst, and its word and fact come from the part that set it. A read still in
+ * flight or failed is a part of its own that says so, never a guess. When the server
+ * can't be reached, Gmail and LinkedIn say "Unknown" rather than their last answer.
+ *
+ * The server sends times as absolute UTC timestamps, named by `{placeholders}` in a
+ * fact or a detail; they are written here at render time, so they never go stale.
  */
 import type { UseQueryResult } from '@tanstack/react-query'
 
-import type { Attention } from '@/features/attention/api'
+import type { components } from '@/api/schema'
 import type { EventStreamStatus } from '@/features/events/use-event-stream'
 import { formatWhen } from '@/features/linkedin/fields'
-import type {
-  BudgetStatus,
-  Heat,
-  LinkedInStatus,
-  Run,
-  RunKind,
-  Schedule,
-} from '@/features/linkedin/types'
-import { runKindLabel } from '@/features/linkedin/types'
-import { reasonText, type Mailbox } from '@/features/mailboxes/api'
-import type { CheckState, PollCheck, PollStatus } from '@/features/poll-status/api'
-import { STATE_TEXT, ago, checkSummary, nextText } from '@/features/poll-status/format'
+import { ago, nextText } from '@/features/poll-status/format'
+
+export type ServerStatus = components['schemas']['SystemStatusOut']
+export type ServerChip = components['schemas']['StatusChipOut']
+export type ServerTime = components['schemas']['StatusTimeOut']
 
 /**
  * One severity scale for every chip: working as set up, busy right now, needs you
@@ -154,7 +152,12 @@ function rollUp(
 }
 
 /** A part whose read has not answered, or failed: grey, and saying which. */
-function unread(key: string, label: string, read: { state: 'pending' | 'error' }): Part {
+function unread(
+  key: string,
+  label: string,
+  read: { state: 'pending' | 'error' },
+  target?: Target,
+): Part {
   const pending = read.state === 'pending'
   return {
     key,
@@ -163,58 +166,8 @@ function unread(key: string, label: string, read: { state: 'pending' | 'error' }
     word: pending ? 'Checking…' : 'Couldn’t check',
     fact: '',
     detail: pending ? 'Checking…' : 'Couldn’t be read; netkeep tries again shortly',
+    ...(target === undefined ? {} : { target }),
   }
-}
-
-function capitalized(text: string): string {
-  return text === '' ? text : text.charAt(0).toUpperCase() + text.slice(1)
-}
-
-/**
- * A background check's tone. A check that waits on its own (outside active hours,
- * nothing to look at) is working as set up. One that `netkeep serve` doesn't run is
- * off here; the netkeep chip is the one that says serve isn't running.
- */
-export const CHECK_TONE: Record<CheckState, StatusTone> = {
-  scheduled: 'ok',
-  due: 'ok',
-  idle: 'ok',
-  outside_hours: 'ok',
-  paused: 'warn',
-  blocked: 'warn',
-  off: 'off',
-  not_running: 'off',
-  not_wired: 'off',
-}
-
-/** "checked 3 min ago", or "not checked yet". */
-function lastChecked(check: PollCheck, now: number): string {
-  return check.last_at ? `checked ${ago(check.last_at, now)}` : 'not checked yet'
-}
-
-function checkPart(
-  key: string,
-  label: string,
-  check: PollCheck,
-  now: number,
-  fact: string,
-  target?: Target,
-): Part {
-  const summary = capitalized(checkSummary(check, now))
-  return {
-    key,
-    label,
-    tone: CHECK_TONE[check.state],
-    word: check.state === 'scheduled' ? 'Checked' : capitalized(STATE_TEXT[check.state]),
-    fact,
-    detail: check.reason ? `${summary}. ${check.reason}` : summary,
-    target,
-  }
-}
-
-function findCheck(poll: Read<PollStatus>, key: string): Read<PollCheck | undefined> {
-  if (poll.state !== 'ok') return poll
-  return { state: 'ok', data: poll.data.items.find((check) => check.key === key) }
 }
 
 /** A chip whose system can't be known while the server is down. */
@@ -236,477 +189,97 @@ function unknown(system: SystemKey, name: string, target: Target): SystemStatus 
   )
 }
 
-// --- Gmail ----------------------------------------------------------------------------
+// --- the server's answer --------------------------------------------------------------
 
-/**
- * Which mailbox Gmail reads: the one live account (`ok` or `reauth_required`) when
- * there is one, so a person acting on it sees it first; otherwise the most recently
- * touched `disabled` row, so a mailbox someone disconnected still reads as
- * "disconnected" rather than "not connected". An empty list is the only case with none.
- */
-export function pickMailbox(mailboxes: Mailbox[]): Mailbox | undefined {
-  const live = mailboxes.find((mailbox) => mailbox.status !== 'disabled')
-  if (live !== undefined) return live
-  return [...mailboxes].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
+/** A time as its style says: "3 min ago", "in 7 min" or "14:20", a date and time. */
+export function timeText(time: ServerTime, now: number): string {
+  switch (time.style) {
+    case 'ago':
+      return ago(time.at, now)
+    case 'next':
+      return nextText(time.at, now)
+    case 'when':
+      return formatWhen(time.at)
+  }
 }
 
-export interface GmailReads {
-  /** The mailbox list, never `/mailboxes/status`, so it answers while the Keychain is locked. */
-  mailboxes: Read<Mailbox[]>
-  poll: Read<PollStatus>
-  /** A campaign send batch just ran (`campaign.tick`, #547). */
-  sending: boolean
-  /** Its `flags.gmail`: a mailbox to sign in again, or a draft held for a contact (#543). */
-  attention?: Attention | undefined
+/** `text` with each `{name}` the chip's `times` holds written out at `now`. */
+export function fill(text: string, times: ServerChip['times'], now: number): string {
+  return text.replace(/\{(\w+)\}/g, (placeholder, name: string) => {
+    const time = times[name]
+    return time === undefined ? placeholder : timeText(time, now)
+  })
+}
+
+function target(raw: components['schemas']['StatusTargetOut']): Target {
+  return raw.hash === null ? { to: raw.to } : { to: raw.to, hash: raw.hash }
+}
+
+function serverParts(chip: ServerChip, now: number): Part[] {
+  return chip.parts.map((raw) => ({
+    key: raw.key,
+    label: raw.label,
+    tone: raw.tone,
+    word: raw.word,
+    detail: fill(raw.detail, chip.times, now),
+    ...(raw.fact === null ? {} : { fact: fill(raw.fact, chip.times, now) }),
+    ...(raw.target === null ? {} : { target: target(raw.target) }),
+  }))
+}
+
+/** A chip the server rolled up, with its times written out at `now`. */
+export function fromServer(chip: ServerChip, now: number): SystemStatus {
+  const to = target(chip.target)
+  return {
+    system: chip.system,
+    name: chip.name,
+    tone: chip.tone,
+    word: chip.word,
+    fact: fill(chip.fact, chip.times, now),
+    parts: serverParts(chip, now),
+    target: to,
+    page: chip.page,
+  }
+}
+
+export interface ChipReads {
+  /** `GET /system-status`. */
+  status: Read<ServerStatus>
+  /** The health check failed: the server can't be reached. */
   serverDown: boolean
 }
 
 /**
- * `/attention`'s Gmail flag, unless the mailbox part already says it: a draft waiting
- * for a contact you shouldn't email (see Leftover drafts), or a mailbox to sign in
- * again that the list hasn't caught up with yet.
+ * Gmail: the mailbox, whether it is armed, the reply check, and a campaign send batch
+ * while it runs, as the server rolled them up.
  */
-function flagPart(attention: Attention | undefined, mailbox: Mailbox | undefined): Part | null {
-  const flag = attention?.flags.gmail ?? null
-  if (flag === null || mailbox?.status === 'reauth_required') return null
-  const draft = /draft/i.test(flag)
-  return {
-    key: 'flag',
-    label: draft ? 'Leftover drafts' : 'Needs you',
-    tone: 'warn',
-    word: draft ? 'Draft held' : 'Needs you',
-    fact: '',
-    detail: flag,
-    target: draft ? { to: '/gmail', hash: 'leftover-drafts' } : GMAIL_SETTINGS,
-  }
-}
-
-function mailboxPart(read: Read<Mailbox[]>): Part {
-  if (read.state !== 'ok') return unread('mailbox', 'Mailbox', read)
-  const mailbox = pickMailbox(read.data)
-  const part = { key: 'mailbox', label: 'Mailbox', target: GMAIL_SETTINGS }
-  if (mailbox === undefined) {
-    return {
-      ...part,
-      tone: 'off',
-      word: 'Not set up',
-      fact: '',
-      detail: 'No Gmail account is connected',
-    }
-  }
-  if (mailbox.status === 'disabled') {
-    return {
-      ...part,
-      tone: 'off',
-      word: 'Disconnected',
-      fact: '',
-      detail: `${mailbox.email} · disconnected`,
-    }
-  }
-  if (mailbox.status === 'reauth_required') {
-    return {
-      ...part,
-      tone: 'bad',
-      word: 'Re-authorize',
-      fact: 'nothing sent or checked',
-      detail: [
-        `Google signed netkeep out of ${mailbox.email}. Nothing is drafted, sent or checked until you authorize it again.`,
-        reasonText(mailbox.status_reason),
-      ]
-        .filter((text): text is string => text !== null)
-        .join(' '),
-    }
-  }
-  return {
-    key: 'mailbox',
-    label: 'Mailbox',
-    tone: 'ok',
-    word: 'Connected',
-    detail: `${mailbox.email} · connected`,
-  }
-}
-
-function sendingPart(mailbox: Mailbox): Part {
-  const part = { key: 'sending', label: 'Sending' }
-  if (mailbox.arm === 'send') {
-    return { ...part, tone: 'ok', word: 'Sending', detail: 'Armed to send' }
-  }
-  if (mailbox.arm === 'draft') {
-    return {
-      ...part,
-      tone: 'ok',
-      word: 'Drafts only',
-      detail: 'Armed for drafts only: nothing is sent',
-    }
-  }
-  return {
-    ...part,
-    tone: 'warn',
-    word: 'Not armed',
-    detail: 'Not armed: nothing is drafted or sent',
-    target: GMAIL_SETTINGS,
-  }
-}
-
-const BATCH: Part = {
-  key: 'batch',
-  label: 'Campaign batch',
-  tone: 'busy',
-  word: 'Sending now',
-  fact: 'campaign batch',
-  detail: 'A campaign send batch just ran',
-}
-
-/**
- * Gmail: the mailbox (connected, needs re-authorizing or disconnected), whether it is
- * armed (drafts only, sending or not armed), the reply check, and a campaign send batch
- * while it runs. All well, it says how it sends and when replies were last checked.
- */
-export function gmailStatus(reads: GmailReads, now: number): SystemStatus {
+export function gmailStatus(reads: ChipReads, now: number): SystemStatus {
   if (reads.serverDown) return unknown('gmail', 'Gmail', { to: '/gmail' })
-  const parts: Part[] = [mailboxPart(reads.mailboxes)]
-  const mailbox = reads.mailboxes.state === 'ok' ? pickMailbox(reads.mailboxes.data) : undefined
-  if (mailbox?.status === 'ok') parts.push(sendingPart(mailbox))
-  if (reads.sending) parts.push(BATCH)
-  const flag = flagPart(reads.attention, mailbox)
-  if (flag !== null) parts.push(flag)
-  let fact = ''
-  const replies = findCheck(reads.poll, 'gmail_replies')
-  if (replies.state !== 'ok') {
-    parts.push(unread('replies', 'Reply check', replies))
-  } else if (replies.data !== undefined) {
-    fact = lastChecked(replies.data, now)
-    parts.push(checkPart('replies', 'Reply check', replies.data, now, fact))
-  }
-  return rollUp('gmail', 'Gmail', parts, {
-    lead: ['mailbox', 'flag', 'batch', 'sending', 'replies'],
-    calm: 'sending',
-    fact,
-    target: { to: '/gmail' },
-  })
-}
-
-// --- LinkedIn -------------------------------------------------------------------------
-
-export interface LinkedInReads {
-  status: Read<LinkedInStatus>
-  /** The newest run, to name the running one. */
-  lastRun: Run | undefined
-  /** The latest `run.progress` event, so the running run's count moves without a refetch. */
-  progress?: RunProgress | null
-  schedule: Read<Schedule>
-  budget: Read<BudgetStatus>
-  heat: Read<Heat>
-  poll: Read<PollStatus>
-  attention: Attention | undefined
-  serverDown: boolean
-}
-
-const RUN_WORDS: Record<RunKind, string> = {
-  connections_full: 'Full sync',
-  connections_incremental: 'Sync',
-  enrich: 'Enrichment',
-  inbox: 'Inbox check',
-  message_send: 'Prefill',
-  session_check: 'Connection check',
-}
-
-const linkedin = (hash: string): Target => ({ to: '/linkedin', hash })
-
-/**
- * "No flag" is not "the session is healthy": nothing here checks the live session (a
- * request handler never touches the browser), so the part says only what it knows.
- */
-function sessionPart(read: Read<LinkedInStatus>): Part {
-  const target = linkedin('session')
-  if (read.state !== 'ok') return { ...unread('session', 'Session', read), target }
-  const flag = read.data.session_flag
-  if (flag === 'checkpoint') {
-    return {
-      key: 'session',
-      label: 'Session',
-      tone: 'bad',
-      word: 'Checkpoint',
-      fact: 'runs stopped',
-      detail:
-        'LinkedIn asked for a checkpoint. No run touches the browser until it is resolved and the flag cleared.',
-      target,
-    }
-  }
-  if (flag !== null) {
-    return {
-      key: 'session',
-      label: 'Session',
-      tone: 'bad',
-      word: 'Logged out',
-      fact: 'runs stopped',
-      detail: 'Logged out. No run touches the browser until you log in and run netkeep preflight.',
-      target,
-    }
-  }
-  return {
-    key: 'session',
-    label: 'Session',
-    tone: 'ok',
-    word: 'No session flag',
-    detail: 'No session flag: no run has found LinkedIn logged out',
-    target,
-  }
-}
-
-/** A `run.progress` event: the run's id and its progress counts. */
-export type RunProgress = { run_id: number } & Record<string, unknown>
-
-function count(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
-/**
- * How far a run got, as "340 of 626", from the two known progress shapes (spec 9.10's
- * `ProgressEvent`): an enrichment's `visited` of `planned`, a sync's `connections` of
- * LinkedIn's `total`. Anything else has no count to show.
- */
-export function progressText(progress: Record<string, unknown> | null | undefined): string | null {
-  if (progress == null) return null
-  const pairs: [unknown, unknown][] = [
-    [progress.visited, progress.planned],
-    [progress.connections, progress.total],
-  ]
-  for (const [done, of] of pairs) {
-    const a = count(done)
-    const b = count(of)
-    if (a !== null && b !== null && b > 0) return `${a} of ${b}`
-  }
-  return null
-}
-
-function runningPart(
-  status: LinkedInStatus,
-  lastRun: Run | undefined,
-  live: RunProgress | null | undefined,
-  now: number,
-): Part | null {
-  if (status.running_run_id === null) return null
-  const run = lastRun?.id === status.running_run_id ? lastRun : undefined
-  const target = linkedin('runs')
-  if (run === undefined) {
-    return {
-      key: 'running',
-      label: 'Running',
-      tone: 'busy',
-      word: 'Running',
+  if (reads.status.state !== 'ok') {
+    return rollUp('gmail', 'Gmail', [unread('mailbox', 'Mailbox', reads.status)], {
+      lead: [],
       fact: '',
-      detail: 'A LinkedIn run is running',
-      target,
-    }
+      target: { to: '/gmail' },
+    })
   }
-  const word =
-    run.kind === 'message_send' && run.trigger === 'scheduled' ? 'Auto-send' : RUN_WORDS[run.kind]
-  const progress =
-    progressText(live?.run_id === run.id ? live : null) ??
-    progressText(run.progress) ??
-    (run.planned === null ? null : `${run.completed ?? 0} of ${run.planned}`)
-  const started = `started ${ago(run.started_at, now)}`
-  return {
-    key: 'running',
-    label: 'Running',
-    tone: 'busy',
-    word: `${word} running`,
-    fact: progress ?? started,
-    detail: [runKindLabel(run), progress, started]
-      .filter((text): text is string => text !== null)
-      .join(' · '),
-    target,
-  }
-}
-
-function heldPart(attention: Attention | undefined): Part | null {
-  const held = attention?.flags.dashboard ?? null
-  if (held === null) return null
-  // Resume is with the LinkedIn steps, under Needs you on the dashboard.
-  return {
-    key: 'held',
-    label: 'Auto-send',
-    tone: 'warn',
-    word: 'Auto-send held',
-    fact: '',
-    detail: held,
-    target: { to: '/', hash: 'needs-you' },
-  }
+  return fromServer(reads.status.data.gmail, now)
 }
 
 /**
- * A tripped breaker (route changed, answer lost, Contact info, the inbox poll's):
- * scheduled runs of its kind can't start until you reset it on Settings › Posture.
+ * LinkedIn: the session, the running run, scheduled runs, the inbox check, prefills,
+ * heat, a breaker and a held auto-send, as the server rolled them up.
  */
-function breakerPart(attention: Attention | undefined): Part | null {
-  const breaker = attention?.flags.settings ?? null
-  if (breaker === null) return null
-  return {
-    key: 'breaker',
-    label: 'Breaker',
-    tone: 'bad',
-    word: 'Breaker tripped',
-    fact: 'some runs can’t start',
-    detail: breaker,
-    target: { to: '/settings', hash: 'posture' },
-  }
-}
-
-/**
- * `/attention` says LinkedIn is blocked (`stopped`) but no other part says why: a read
- * that hasn't caught up, or a cause added later. The chip then never reads green while
- * the live region beside it says "blocked".
- */
-function blockedPart(attention: Attention | undefined, parts: Part[]): Part | null {
-  if (attention?.activity.state !== 'stopped') return null
-  if (parts.some((part) => TONE_RANK[part.tone] >= TONE_RANK.warn)) return null
-  return {
-    key: 'blocked',
-    label: 'Blocked',
-    tone: 'warn',
-    word: 'Blocked',
-    fact: '',
-    detail: attention.activity.label || 'Something blocks LinkedIn runs from starting',
-  }
-}
-
-function schedulePart(read: Read<Schedule>, now: number): Part {
-  const target = linkedin('schedule')
-  const part = { key: 'schedule', label: 'Scheduled runs', target }
-  if (read.state !== 'ok') return { ...unread('schedule', 'Scheduled runs', read), target }
-  const schedule = read.data
-  if (schedule.paused) {
-    return {
-      ...part,
-      tone: 'warn',
-      word: 'Paused',
-      detail: 'Paused: no scheduled run starts until you resume',
-    }
-  }
-  if (!schedule.armed) {
-    return {
-      ...part,
-      tone: 'off',
-      word: 'Off',
-      fact: '',
-      detail: 'Off: nothing runs on a schedule',
-    }
-  }
-  if (!schedule.scheduler_running) {
-    return {
-      ...part,
-      tone: 'bad',
-      word: 'No scheduler',
-      fact: 'runs don’t start',
-      detail: 'Armed, but no scheduler is running, so nothing starts on time',
-    }
-  }
-  const next = schedule.jobs
-    .map((job) => job.next_due)
-    .filter((due): due is string => due !== null)
-    .sort()[0]
-  return {
-    ...part,
-    tone: 'ok',
-    word: 'Armed',
-    detail: next === undefined ? 'Armed' : `Armed · next run ${nextText(next, now)}`,
-  }
-}
-
-function prefillsPart(read: Read<BudgetStatus>): Part | null {
-  const target = linkedin('budget')
-  if (read.state !== 'ok') return { ...unread('prefills', 'Prefills today', read), target }
-  const day = read.data.budgets.find((row) => row.action === 'li_prefills')?.day
-  if (day === undefined) return null
-  const left = Math.max(day.remaining, 0)
-  const text = `${left} of ${day.limit} left`
-  return left === 0
-    ? {
-        key: 'prefills',
-        label: 'Prefills today',
-        tone: 'warn',
-        word: 'No prefills left',
-        fact: 'until tomorrow',
-        detail: text,
-        target,
-      }
-    : {
-        key: 'prefills',
-        label: 'Prefills today',
-        tone: 'ok',
-        word: `${left} prefills left`,
-        detail: text,
-        target,
-      }
-}
-
-function heatPart(read: Read<Heat>): Part {
-  const target = linkedin('heat')
-  if (read.state !== 'ok') return { ...unread('heat', 'Heat', read), target }
-  const heat = read.data
-  if (!heat.tripped) {
-    return { key: 'heat', label: 'Heat', tone: 'ok', word: 'Heat normal', detail: 'Normal', target }
-  }
-  return {
-    key: 'heat',
-    label: 'Heat',
-    tone: 'bad',
-    word: 'Heat high',
-    fact: heat.resumes_at === null ? 'runs wait' : `runs wait until ${formatWhen(heat.resumes_at)}`,
-    detail:
-      heat.resumes_at === null
-        ? 'Over its threshold: scheduled runs are skipped until it cools'
-        : `Over its threshold: scheduled runs are skipped until ${formatWhen(heat.resumes_at)}`,
-    target,
-  }
-}
-
-/**
- * LinkedIn: the session (signed in, logged out or a checkpoint), the running run with
- * its progress, scheduled runs (armed, paused, off or no scheduler), the inbox check,
- * prefills left today, heat and a held auto-send. All well, it says scheduled runs are
- * armed and when the inbox was last checked.
- */
-export function linkedinStatus(reads: LinkedInReads, now: number): SystemStatus {
+export function linkedinStatus(reads: ChipReads, now: number): SystemStatus {
   if (reads.serverDown) return unknown('linkedin', 'LinkedIn', { to: '/linkedin' })
-  const parts: (Part | null)[] = [sessionPart(reads.status)]
-  if (reads.status.state === 'ok')
-    parts.push(runningPart(reads.status.data, reads.lastRun, reads.progress, now))
-  parts.push(schedulePart(reads.schedule, now))
-  let fact = ''
-  const inbox = findCheck(reads.poll, 'linkedin_inbox')
-  if (inbox.state !== 'ok') {
-    parts.push({ ...unread('inbox', 'Inbox check', inbox), target: linkedin('inbox') })
-  } else if (inbox.data !== undefined) {
-    fact = `inbox ${lastChecked(inbox.data, now).replace(/^checked /, '')}`
-    parts.push(checkPart('inbox', 'Inbox check', inbox.data, now, fact, linkedin('inbox')))
+  if (reads.status.state !== 'ok') {
+    const session = unread('session', 'Session', reads.status, { to: '/linkedin', hash: 'session' })
+    return rollUp('linkedin', 'LinkedIn', [session], {
+      lead: [],
+      fact: '',
+      target: { to: '/linkedin' },
+    })
   }
-  parts.push(
-    prefillsPart(reads.budget),
-    heatPart(reads.heat),
-    breakerPart(reads.attention),
-    heldPart(reads.attention),
-  )
-  const known = parts.filter((part): part is Part => part !== null)
-  const blocked = blockedPart(reads.attention, known)
-  if (blocked !== null) known.push(blocked)
-  return rollUp('linkedin', 'LinkedIn', known, {
-    lead: [
-      'session',
-      'heat',
-      'breaker',
-      'blocked',
-      'held',
-      'running',
-      'schedule',
-      'inbox',
-      'prefills',
-    ],
-    calm: 'schedule',
-    fact,
-    target: { to: '/linkedin' },
-  })
+  return fromServer(reads.status.data.linkedin, now)
 }
 
 // --- netkeep --------------------------------------------------------------------------
@@ -714,20 +287,24 @@ export function linkedinStatus(reads: LinkedInReads, now: number): SystemStatus 
 export interface NetkeepReads {
   health: Read<{ version: string }>
   stream: EventStreamStatus
-  poll: Read<PollStatus>
-  /** False when the Keychain refused the local API key (the session check, #618). */
-  keyPersisted: boolean
+  /** `GET /system-status`, for the server's parts: background checks and the Keychain. */
+  status: Read<ServerStatus>
 }
 
 /** How often the health check runs, so "retrying" can say when. */
 export const HEALTH_EVERY_S = 15
 
+/** The server's `NETKEEP_LEAD` and `NETKEEP_CALM` (`netkeep/services/system_status.py`). */
+const NETKEEP_LEAD = ['server', 'keychain', 'checks', 'live'] as const
+const NETKEEP_CALM = 'server'
+
 /**
- * netkeep itself: the server (reachable, with its version), live updates (the event
- * stream), background checks (`netkeep serve`), and the Keychain when it refused the
- * key. Whether the server is down is this chip's to say; the other two read "Unknown".
+ * netkeep itself: the server (reachable, with its version) and live updates (the event
+ * stream), which only the UI knows, then the server's own parts: background checks
+ * (`netkeep serve`), and the Keychain when it refused the key. Whether the server is
+ * down is this chip's to say; the other two read "Unknown".
  */
-export function netkeepStatus(reads: NetkeepReads): SystemStatus {
+export function netkeepStatus(reads: NetkeepReads, now: number): SystemStatus {
   const parts: Part[] = []
   const health = reads.health
   const down = health.state === 'error'
@@ -772,41 +349,14 @@ export function netkeepStatus(reads: NetkeepReads): SystemStatus {
             : 'Disconnected · reconnecting; until then pages refresh on their own timers',
         },
   )
-  if (!down && reads.poll.state !== 'ok') {
-    parts.push(unread('checks', 'Background checks', reads.poll))
-  } else if (!down && reads.poll.state === 'ok') {
-    parts.push(
-      reads.poll.data.background_running
-        ? {
-            key: 'checks',
-            label: 'Background checks',
-            tone: 'ok',
-            word: 'Connected',
-            detail: 'netkeep serve is running them',
-          }
-        : {
-            key: 'checks',
-            label: 'Background checks',
-            tone: 'warn',
-            word: 'No background checks',
-            fact: 'serve isn’t running',
-            detail: 'netkeep serve isn’t running, so nothing is checked in the background',
-          },
-    )
-  }
-  if (!reads.keyPersisted) {
-    parts.push({
-      key: 'keychain',
-      label: 'Keychain',
-      tone: 'warn',
-      word: 'Keychain refused',
-      fact: 'key in memory',
-      detail: 'Refused · the local API key lives in memory until netkeep stops',
-    })
+  if (!down && reads.status.state !== 'ok') {
+    parts.push(unread('checks', 'Background checks', reads.status))
+  } else if (!down && reads.status.state === 'ok') {
+    parts.push(...serverParts(reads.status.data.netkeep, now))
   }
   const status = rollUp('netkeep', 'netkeep', parts, {
-    lead: ['server', 'keychain', 'checks', 'live'],
-    calm: 'server',
+    lead: NETKEEP_LEAD,
+    calm: NETKEEP_CALM,
     fact: live ? 'live' : 'not live',
     target: SUPPORT,
   })

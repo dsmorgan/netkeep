@@ -32,6 +32,8 @@ from netkeep.models import (
     ListMember,
     MailboxStatus,
     MessageStatus,
+    SyncRunKind,
+    SyncRunTrigger,
     TemplateChannel,
     User,
     UserKind,
@@ -39,8 +41,8 @@ from netkeep.models import (
 from netkeep.models.base import utcnow
 from netkeep.scoping import scoped, scoped_count
 from netkeep.services import mailboxes as mailbox_service
-from netkeep.services import route_breaker
-from netkeep.services.linkedin_accounts import ensure_account
+from netkeep.services import route_breaker, runs
+from netkeep.services.linkedin_accounts import ensure_account, pause_schedule
 from netkeep.services.linkedin_session import flag_session
 from netkeep.web.app import API_PREFIX
 from netkeep.web.security import CLIENT_HEADER, CLIENT_HEADER_VALUE
@@ -352,6 +354,50 @@ async def test_attention_is_isolated(running_app: FastAPI) -> None:
     assert a_body["activity"]["label"] != b_body["activity"]["label"]
     assert a_body["title_total"] == 5
     assert b_body["title_total"] == 1
+
+
+async def test_system_status_is_isolated(running_app: FastAPI) -> None:
+    """``GET /system-status`` (#761) is a record, not a list, so it is not in ``REGISTRY``.
+    Each user's chips are their own, both ways: A has a checkpoint and a paused schedule;
+    B has a running run, a tripped breaker and a mailbox that needs signing in again."""
+    factory: sessionmaker[Session] = running_app.state.session_factory
+    with session_scope(factory, write=True) as session:
+        a = User(kind=UserKind.HOSTED, display_name="A")
+        b = User(kind=UserKind.HOSTED, display_name="B")
+        session.add_all([a, b])
+        session.flush()
+        ensure_account(session, a)
+        flag_session(session, a, Outcome.CHECKPOINT, url="https://example.invalid/checkpoint/x")
+        pause_schedule(session, a, now=utcnow())
+        account = ensure_account(session, b).id
+        for _ in range(3):
+            route_breaker.record(
+                session, b, account, route_changed=True, succeeded=False, now=utcnow()
+            )
+        run = runs.create_run(
+            session, b, SyncRunKind.ENRICH, trigger=SyncRunTrigger.MANUAL, now=utcnow()
+        )
+        mailbox = mailbox_service.connect(session, b, "b@example.test", "rt-b", daily_cap=80)
+        mailbox.status = MailboxStatus.REAUTH_REQUIRED
+        a_id, b_id, run_id = a.id, b.id, run.id
+
+    a_body = await _get(running_app, a_id, "/system-status")
+    b_body = await _get(running_app, b_id, "/system-status")
+
+    def keys(body: dict[str, Any]) -> set[str]:
+        return {part["key"] for part in body["linkedin"]["parts"]}
+
+    assert a_body["linkedin"]["word"] == "Checkpoint"
+    assert a_body["linkedin_paused"] is True
+    assert a_body["linkedin_run"] is None
+    assert "breaker" not in keys(a_body) and "running" not in keys(a_body)
+    assert a_body["gmail"]["word"] == "Not set up"
+    assert b_body["linkedin"]["word"] == "Breaker tripped"
+    assert b_body["linkedin_paused"] is False
+    assert b_body["linkedin_run"]["id"] == run_id
+    assert "running" in keys(b_body)
+    assert b_body["linkedin"]["parts"][0]["tone"] == "ok"  # A's checkpoint isn't B's
+    assert b_body["gmail"]["word"] == "Re-authorize"
 
 
 async def test_inbound_this_week_is_isolated(running_app: FastAPI) -> None:

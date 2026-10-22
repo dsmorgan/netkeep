@@ -28,6 +28,7 @@ from netkeep.worker import dev_app, serve_app
 REPO_ROOT = Path(__file__).resolve().parents[1]
 API_PATHS = {
     "/api/v1/health",
+    "/api/v1/system-status",
     "/api/v1/history/import",
     "/api/v1/history/scan-gmail",
     "/api/v1/gmail-setup",
@@ -412,6 +413,7 @@ def test_known_api_modules_are_discovered() -> None:
         "setup",
         "step_mode",
         "support",
+        "system_status",
         "tags",
         "tasks",
         "template_adoption",

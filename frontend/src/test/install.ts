@@ -4,7 +4,7 @@
  */
 import { GRAPH } from '@/features/dashboard/steps-fixtures'
 import { mailbox } from '@/features/mailboxes/test-support'
-import { pollStatus } from '@/features/system-status/test-support'
+import { pollStatus, serverStatus } from '@/features/system-status/test-support'
 
 import { jsonResponse, mockFetch } from './fetch'
 
@@ -37,6 +37,7 @@ export function quiet(): Record<string, unknown> {
   return {
     '/api/v1/health': { status: 'ok', version: '0.0.1-test' },
     '/api/v1/poll-status': pollStatus(),
+    '/api/v1/system-status': serverStatus(),
     '/api/v1/setup': {
       complete: false,
       steps: GRAPH.map((step) => ({ ...step, title: `Step ${step.key}`, reason: 'Waits.' })),
