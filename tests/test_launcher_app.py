@@ -328,6 +328,7 @@ def test_a_malformed_plist_counts_as_none_and_the_launcher_still_builds(
 ) -> None:
     """A cut-short XML plist raises expat's error, not plistlib's: it reads as no plist,
     so the builder's environment is used, and nothing raises on the way."""
+    monkeypatch.setattr(launcher_app.sys, "platform", "darwin")  # for_login_item reads it
     monkeypatch.setenv(keychain.SERVICE_ENV, "from-shell")
     item = make_item(FakeLaunchctl(), tmp_path, box.data)
     item.plist_path.parent.mkdir(parents=True, exist_ok=True)
