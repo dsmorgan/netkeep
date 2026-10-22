@@ -269,6 +269,33 @@ def test_an_unwritable_record_still_means_one_request_a_day(
     assert len(github.requests) == 2
 
 
+def test_a_record_that_stops_being_writable_still_means_one_request_a_day(
+    session_factory: sessionmaker[Session],
+    data: Path,
+    owner: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Day 1 is recorded; from day 2 every write fails, so the record stays at day 1 and
+    # would say "due" at every look. This process's memory must hold the day instead.
+    github, clock, ticks = FakeGitHub(), Clock(), [1000.0]
+    job = DailyUpdateCheck(
+        session_factory, Settings(), data, fetch=github, clock=clock, uptime=lambda: ticks[0]
+    )
+    assert job.check_if_due() is not None
+    assert update_check.read_result(data) is not None
+
+    def unwritable(*_args: object) -> None:
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(update_check, "write_result", unwritable)
+    day2 = timedelta(days=1)
+    for hours in range(24):  # hourly looks through day 2
+        clock.now = NOW + day2 + timedelta(hours=hours)
+        ticks[0] = 1000.0 + 86400 + hours * 3600
+        job.check_if_due()
+    assert len(github.requests) == 2  # day 1's, and one on day 2
+
+
 def test_uptime_clock_counts_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     # time.monotonic stops while a Mac sleeps; these clocks don't.
     asked: list[int] = []
