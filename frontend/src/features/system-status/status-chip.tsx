@@ -82,7 +82,7 @@ export function StatusChip({
         <span className="shrink-0">{status.name}</span>
         <span className="truncate max-sm:sr-only"> · {status.word}</span>
         {status.fact !== '' && (
-          <span className="truncate font-medium opacity-80 max-sm:sr-only">
+          <span className="truncate font-medium max-sm:sr-only">
             <span className="sr-only">, </span>
             {status.fact}
           </span>
@@ -121,14 +121,21 @@ export function StatusChip({
         {children}
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2.5">
           <span className="text-xs text-muted-foreground">{updated}</span>
-          <Button
-            size="sm"
-            variant={urgent ? 'default' : 'outline'}
-            render={<Link to={status.target.to} hash={status.target.hash} />}
-            onClick={() => setOpen(false)}
-          >
-            {status.tone === 'bad' ? `Fix on the ${status.page} page` : `Open ${status.page}`}
-          </Button>
+          {status.reload === true ? (
+            // No page loads while the server is down; a reload picks up once it is back.
+            <Button size="sm" onClick={() => window.location.reload()}>
+              Reload
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant={urgent ? 'default' : 'outline'}
+              render={<Link to={status.target.to} hash={status.target.hash} />}
+              onClick={() => setOpen(false)}
+            >
+              {status.tone === 'bad' ? `Fix on the ${status.page} page` : `Open ${status.page}`}
+            </Button>
+          )}
         </div>
       </PopoverContent>
     </Popover>

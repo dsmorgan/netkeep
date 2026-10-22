@@ -89,6 +89,8 @@ export interface SystemStatus {
   target: Target
   /** The target page's name, for the popover's button. */
   page: string
+  /** No page can load (the server is down): the popover offers a reload instead of a link. */
+  reload?: boolean
 }
 
 export const GMAIL_SETTINGS: Target = { to: '/settings', hash: 'gmail' }
@@ -254,7 +256,29 @@ export interface GmailReads {
   poll: Read<PollStatus>
   /** A campaign send batch just ran (`campaign.tick`, #547). */
   sending: boolean
+  /** Its `flags.gmail`: a mailbox to sign in again, or a draft held for a contact (#543). */
+  attention?: Attention | undefined
   serverDown: boolean
+}
+
+/**
+ * `/attention`'s Gmail flag, unless the mailbox part already says it: a draft waiting
+ * for a contact you shouldn't email (see Leftover drafts), or a mailbox to sign in
+ * again that the list hasn't caught up with yet.
+ */
+function flagPart(attention: Attention | undefined, mailbox: Mailbox | undefined): Part | null {
+  const flag = attention?.flags.gmail ?? null
+  if (flag === null || mailbox?.status === 'reauth_required') return null
+  const draft = /draft/i.test(flag)
+  return {
+    key: 'flag',
+    label: draft ? 'Leftover drafts' : 'Needs you',
+    tone: 'warn',
+    word: draft ? 'Draft held' : 'Needs you',
+    fact: '',
+    detail: flag,
+    target: draft ? { to: '/gmail', hash: 'leftover-drafts' } : GMAIL_SETTINGS,
+  }
 }
 
 function mailboxPart(read: Read<Mailbox[]>): Part {
@@ -344,6 +368,8 @@ export function gmailStatus(reads: GmailReads, now: number): SystemStatus {
   const mailbox = reads.mailboxes.state === 'ok' ? pickMailbox(reads.mailboxes.data) : undefined
   if (mailbox?.status === 'ok') parts.push(sendingPart(mailbox))
   if (reads.sending) parts.push(BATCH)
+  const flag = flagPart(reads.attention, mailbox)
+  if (flag !== null) parts.push(flag)
   let fact = ''
   const replies = findCheck(reads.poll, 'gmail_replies')
   if (replies.state !== 'ok') {
@@ -353,7 +379,7 @@ export function gmailStatus(reads: GmailReads, now: number): SystemStatus {
     parts.push(checkPart('replies', 'Reply check', replies.data, now, fact))
   }
   return rollUp('gmail', 'Gmail', parts, {
-    lead: ['mailbox', 'batch', 'sending', 'replies'],
+    lead: ['mailbox', 'flag', 'batch', 'sending', 'replies'],
     calm: 'sending',
     fact,
     target: { to: '/gmail' },
@@ -509,6 +535,42 @@ function heldPart(attention: Attention | undefined): Part | null {
   }
 }
 
+/**
+ * A tripped breaker (route changed, answer lost, Contact info, the inbox poll's):
+ * scheduled runs of its kind can't start until you reset it on Settings › Posture.
+ */
+function breakerPart(attention: Attention | undefined): Part | null {
+  const breaker = attention?.flags.settings ?? null
+  if (breaker === null) return null
+  return {
+    key: 'breaker',
+    label: 'Breaker',
+    tone: 'bad',
+    word: 'Breaker tripped',
+    fact: 'some runs can’t start',
+    detail: breaker,
+    target: { to: '/settings', hash: 'posture' },
+  }
+}
+
+/**
+ * `/attention` says LinkedIn is blocked (`stopped`) but no other part says why: a read
+ * that hasn't caught up, or a cause added later. The chip then never reads green while
+ * the live region beside it says "blocked".
+ */
+function blockedPart(attention: Attention | undefined, parts: Part[]): Part | null {
+  if (attention?.activity.state !== 'stopped') return null
+  if (parts.some((part) => TONE_RANK[part.tone] >= TONE_RANK.warn)) return null
+  return {
+    key: 'blocked',
+    label: 'Blocked',
+    tone: 'warn',
+    word: 'Blocked',
+    fact: '',
+    detail: attention.activity.label || 'Something blocks LinkedIn runs from starting',
+  }
+}
+
 function schedulePart(read: Read<Schedule>, now: number): Part {
   const target = linkedin('schedule')
   const part = { key: 'schedule', label: 'Scheduled runs', target }
@@ -620,18 +682,31 @@ export function linkedinStatus(reads: LinkedInReads, now: number): SystemStatus 
     fact = `inbox ${lastChecked(inbox.data, now).replace(/^checked /, '')}`
     parts.push(checkPart('inbox', 'Inbox check', inbox.data, now, fact, linkedin('inbox')))
   }
-  parts.push(prefillsPart(reads.budget), heatPart(reads.heat), heldPart(reads.attention))
-  return rollUp(
-    'linkedin',
-    'LinkedIn',
-    parts.filter((part): part is Part => part !== null),
-    {
-      lead: ['session', 'heat', 'held', 'running', 'schedule', 'inbox', 'prefills'],
-      calm: 'schedule',
-      fact,
-      target: { to: '/linkedin' },
-    },
+  parts.push(
+    prefillsPart(reads.budget),
+    heatPart(reads.heat),
+    breakerPart(reads.attention),
+    heldPart(reads.attention),
   )
+  const known = parts.filter((part): part is Part => part !== null)
+  const blocked = blockedPart(reads.attention, known)
+  if (blocked !== null) known.push(blocked)
+  return rollUp('linkedin', 'LinkedIn', known, {
+    lead: [
+      'session',
+      'heat',
+      'breaker',
+      'blocked',
+      'held',
+      'running',
+      'schedule',
+      'inbox',
+      'prefills',
+    ],
+    calm: 'schedule',
+    fact,
+    target: { to: '/linkedin' },
+  })
 }
 
 // --- netkeep --------------------------------------------------------------------------
@@ -697,7 +772,9 @@ export function netkeepStatus(reads: NetkeepReads): SystemStatus {
             : 'Disconnected · reconnecting; until then pages refresh on their own timers',
         },
   )
-  if (!down && reads.poll.state === 'ok') {
+  if (!down && reads.poll.state !== 'ok') {
+    parts.push(unread('checks', 'Background checks', reads.poll))
+  } else if (!down && reads.poll.state === 'ok') {
     parts.push(
       reads.poll.data.background_running
         ? {
@@ -727,12 +804,14 @@ export function netkeepStatus(reads: NetkeepReads): SystemStatus {
       detail: 'Refused · the local API key lives in memory until netkeep stops',
     })
   }
-  return rollUp('netkeep', 'netkeep', parts, {
+  const status = rollUp('netkeep', 'netkeep', parts, {
     lead: ['server', 'keychain', 'checks', 'live'],
     calm: 'server',
     fact: live ? 'live' : 'not live',
     target: SUPPORT,
   })
+  // Settings can't load without the server; the health check retries on its own.
+  return down ? { ...status, reload: true } : status
 }
 
 /** "Updated just now", "Updated 3 min ago"; before any read answers, "Not updated yet". */

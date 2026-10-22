@@ -10,11 +10,16 @@ export const SURFACE_TONE: Record<Exclude<StatusTone, 'off'>, Tone> = {
   bad: 'bad',
 }
 
+/**
+ * The soft tint is a gradient layer over an opaque card, so the color field never shows
+ * through: on the bare field a blob drops the light inks to about 3.5:1 (theme.test.ts).
+ */
 const TONE_CLASSES: Record<Tone, string> = {
-  ok: 'border-ok/40 bg-ok-soft text-ok-ink',
-  warn: 'border-warn/45 bg-warn-soft text-warn-ink',
-  bad: 'border-bad/45 bg-bad-soft text-bad-ink',
-  accent: 'border-primary/45 bg-accent-soft text-accent-ink',
+  ok: 'border-ok/40 bg-card bg-linear-to-r from-ok-soft to-ok-soft text-ok-ink',
+  warn: 'border-warn/45 bg-card bg-linear-to-r from-warn-soft to-warn-soft text-warn-ink',
+  bad: 'border-bad/45 bg-card bg-linear-to-r from-bad-soft to-bad-soft text-bad-ink',
+  accent:
+    'border-primary/45 bg-card bg-linear-to-r from-accent-soft to-accent-soft text-accent-ink',
 }
 
 /** A status chip's border, tint and ink for each tone, from the soft tokens; off has none. */

@@ -196,6 +196,26 @@ describe('gmailStatus', () => {
     expect(face(gmail({ poll: failed })).text).toBe('Gmail · Couldn’t check')
   })
 
+  it('shows a draft held for a contact you shouldn’t email, from /attention', () => {
+    const flag =
+      'A Gmail draft waits for a contact you shouldn’t email; see Leftover drafts on the Gmail page.'
+    const flags = { dashboard: null, gmail: flag, linkedin: null, settings: null }
+    const chip = gmail({ attention: attention({ flags }) })
+    expect(face(chip)).toEqual({
+      tone: 'warn',
+      text: 'Gmail · Draft held',
+      href: '/gmail#leftover-drafts',
+    })
+    expect(chip.parts.find((row) => row.key === 'flag')?.detail).toBe(flag)
+    // A sign-in flag the mailbox part already says adds no row.
+    const signIn = { ...flags, gmail: 'A mailbox needs you to sign in again.' }
+    const reauth = gmail({
+      mailboxes: ok([mailbox({ status: 'reauth_required' })]),
+      attention: attention({ flags: signIn }),
+    })
+    expect(reauth.parts.map((row) => row.key)).toEqual(['mailbox', 'replies'])
+  })
+
   it('reads Unknown while the server is down', () => {
     const chip = gmail({ serverDown: true })
     expect(face(chip)).toEqual({ tone: 'off', text: 'Gmail · Unknown', href: '/gmail' })
@@ -387,6 +407,47 @@ describe('linkedinStatus', () => {
     expect(chip.parts.at(-1)?.detail).toBe('Auto-send is held until you resume it.')
   })
 
+  it('stops for a tripped breaker, linking to Settings › Posture', () => {
+    const breaker =
+      'A breaker is tripped, so some scheduled runs can’t start; reset it on the Settings page.'
+    const chip = linkedin({
+      attention: attention({
+        flags: { dashboard: null, gmail: null, linkedin: null, settings: breaker },
+        activity: { state: 'stopped', label: breaker, run_id: null, run_kind: null },
+      }),
+    })
+    expect(face(chip)).toEqual({
+      tone: 'bad',
+      text: 'LinkedIn · Breaker tripped · some runs can’t start',
+      href: '/settings#posture',
+    })
+    expect(chip.page).toBe('Settings')
+    expect(chip.parts.map((row) => row.key)).not.toContain('blocked')
+  })
+
+  it('never reads green while /attention says LinkedIn is blocked', () => {
+    // The session flag was set outside a run, and /linkedin/status hasn't caught up.
+    const label = 'The LinkedIn session is flagged; clear it on the LinkedIn page.'
+    const chip = linkedin({
+      attention: attention({
+        flags: { dashboard: null, gmail: null, linkedin: label, settings: null },
+        activity: { state: 'stopped', label, run_id: null, run_kind: null },
+      }),
+    })
+    expect(face(chip)).toMatchObject({ tone: 'warn', text: 'LinkedIn · Blocked' })
+    expect(chip.parts.at(-1)).toMatchObject({ label: 'Blocked', detail: label })
+    // Once a part explains it, that part speaks and there is no extra row.
+    const caught = linkedin({
+      status: ok(status({ session_flag: 'logged_out' })),
+      attention: attention({
+        flags: { dashboard: null, gmail: null, linkedin: label, settings: null },
+        activity: { state: 'stopped', label, run_id: null, run_kind: null },
+      }),
+    })
+    expect(face(caught).text).toBe('LinkedIn · Logged out · runs stopped')
+    expect(caught.parts.map((row) => row.key)).not.toContain('blocked')
+  })
+
   it('says it is checking, or couldn’t check, instead of guessing', () => {
     const chip = linkedin({ status: pending, schedule: pending, budget: failed })
     expect(face(chip)).toEqual({
@@ -448,6 +509,17 @@ describe('netkeepStatus', () => {
       ['Server', 'bad', 'Can’t reach netkeep · retrying every 15 s'],
       ['Live updates', 'off', 'Disconnected'],
     ])
+  })
+
+  it('offers a reload, not a page that can’t load, while the server is down', () => {
+    expect(app({ health: failed }).reload).toBe(true)
+    expect(app().reload).toBeUndefined()
+  })
+
+  it('never reads green when the background checks can’t be read', () => {
+    const chip = app({ poll: failed })
+    expect(face(chip)).toMatchObject({ tone: 'off', text: 'netkeep · Couldn’t check' })
+    expect(chip.parts.find((row) => row.key === 'checks')?.label).toBe('Background checks')
   })
 
   it('warns when netkeep serve isn’t running the background checks', () => {

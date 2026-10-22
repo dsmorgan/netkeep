@@ -386,6 +386,15 @@ describe.each(CONTRAST_MODES)('the theme with %s', (_, __, choice, os) => {
     expect(worst(colorOf(tokens, ink), surfaces)).toBeGreaterThanOrEqual(4.5)
   })
 
+  // The top bar's status chips (#751): the tone's soft tint over an opaque card, so the
+  // color field never shows through, and the word and the fact both in its full ink. On
+  // the bare field the inks drop to about 3.5:1 under a blob. An off chip is muted text
+  // on a card, which SOLID_PAIRS holds.
+  it.each(INKS)('keeps a status chip’s %s text readable on its tint over a card', (ink) => {
+    const chip = over(colorOf(tokens, SOFTS[ink]), colorOf(tokens, 'card'))
+    expect(contrast(colorOf(tokens, ink), chip)).toBeGreaterThanOrEqual(4.5)
+  })
+
   it.each(['foreground', 'muted-foreground'])(
     'keeps %s on the bare color field at WCAG AA',
     (text) => {
