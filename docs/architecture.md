@@ -1290,6 +1290,9 @@ keep = 14
 [logs]
 max_mb = 10
 keep = 5
+
+[updates]
+check_daily = true
 ```
 
 ## Appendix C: default pacing and budget values

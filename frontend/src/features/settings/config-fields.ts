@@ -59,6 +59,13 @@ export const GROUPS: {
     description:
       'netkeep serve and every command write one log file, which starts over at a set size and keeps a few old files.',
   },
+  {
+    id: 'updates',
+    anchor: 'updates',
+    title: 'Updates',
+    description:
+      'netkeep never updates itself. While the daily check is on, netkeep serve asks GitHub once a day for the newest release, and this card says when there is one.',
+  },
 ]
 
 /** The draft a field's value in force starts as. */

@@ -4021,6 +4021,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/update-check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Update Check */
+        get: operations["get_update_check"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/views": {
         parameters: {
             query?: never;
@@ -5145,7 +5162,7 @@ export interface components {
              * Group
              * @enum {string}
              */
-            group: "linkedin_budgets" | "linkedin_hours" | "linkedin_runs" | "campaigns" | "backup" | "logs";
+            group: "linkedin_budgets" | "linkedin_hours" | "linkedin_runs" | "campaigns" | "backup" | "logs" | "updates";
             /** Help */
             help: string;
             /** Key */
@@ -10263,6 +10280,23 @@ export interface components {
             last_try: components["schemas"]["LastTryOut"];
             /** Step Position */
             step_position: number;
+        };
+        /** UpdateCheckOut */
+        UpdateCheckOut: {
+            /** Available */
+            available: string | null;
+            /** Checked At */
+            checked_at: string | null;
+            /** Command */
+            command: string | null;
+            /** Current */
+            current: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Latest */
+            latest: string | null;
+            /** Ok */
+            ok: boolean | null;
         };
         /**
          * UserKind
@@ -18469,6 +18503,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_update_check: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateCheckOut"];
                 };
             };
         };

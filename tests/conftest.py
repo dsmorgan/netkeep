@@ -162,6 +162,18 @@ def _no_live_port(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_update_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No ``serve`` a test starts asks GitHub for the newest release (#762): a test that
+    exercises the daily update check passes its own fake ``fetch``."""
+    from netkeep.services import update_check
+
+    def blocked(url: str, _max_bytes: int) -> bytes:
+        raise AssertionError(f"a test must give DailyUpdateCheck a fake fetch, not ask {url}")
+
+    monkeypatch.setattr(update_check, "github_fetch", blocked)
+
+
+@pytest.fixture(autouse=True)
 def _no_real_browser(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """No test reaches a real Chrome unless it opts out, and none ever reaches port 9222.
 

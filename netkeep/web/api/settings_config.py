@@ -45,12 +45,13 @@ from netkeep.web.deps import (
 
 router = APIRouter(tags=["settings"])
 
-# Stored per user like the rest, but the nightly backup and /backups act for the local owner
-# alone, so only the owner's values take effect: anyone else sees the group read-only.
-OWNER_ONLY_GROUPS = frozenset({"backup"})
+# Stored per user like the rest, but the nightly backup, /backups and the daily update
+# check act for the local owner alone, so only the owner's values take effect: anyone else
+# sees the group read-only.
+OWNER_ONLY_GROUPS = frozenset({"backup", "updates"})
 NOT_OWNER_NOTE = (
-    "Only the local owner account sets this: backups are made for the whole install,"
-    " from the owner's settings."
+    "Only the local owner account sets this: it applies to the whole install, from the"
+    " owner's settings."
 )
 
 
@@ -58,7 +59,13 @@ class ConfigFieldOut(BaseModel):
     key: str
     """The dotted config key, as ``config.toml`` spells it: ``linkedin.active_hours``."""
     group: Literal[
-        "linkedin_budgets", "linkedin_hours", "linkedin_runs", "campaigns", "backup", "logs"
+        "linkedin_budgets",
+        "linkedin_hours",
+        "linkedin_runs",
+        "campaigns",
+        "backup",
+        "logs",
+        "updates",
     ]
     label: str
     help: str

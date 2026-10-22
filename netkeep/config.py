@@ -169,6 +169,14 @@ class LogSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class UpdateSettings:
+    """``[updates]``: whether ``serve`` asks GitHub once a day for the newest release
+    (:mod:`netkeep.services.update_check`, #762). It never installs anything."""
+
+    check_daily: bool = True
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     """Every section of ``config.toml``. ``source_path`` is None when defaults were used."""
 
@@ -178,6 +186,7 @@ class Settings:
     llm: LlmSettings = field(default_factory=LlmSettings)
     backup: BackupSettings = field(default_factory=BackupSettings)
     logs: LogSettings = field(default_factory=LogSettings)
+    updates: UpdateSettings = field(default_factory=UpdateSettings)
     source_path: Path | None = field(default=None, metadata=_SKIP)
     # A deprecated [me] section's values, when the file had one (see LegacyMe).
     legacy_me: LegacyMe | None = field(default=None, metadata=_SKIP)

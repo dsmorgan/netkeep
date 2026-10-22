@@ -415,7 +415,13 @@ CHECKOUT_REFUSAL: Final = (
 
 def latest_version(seams: Seams) -> str:
     """The newest GitHub release's version."""
-    body = seams.fetch(LATEST_URL, _MAX_RELEASE_BYTES)
+    return latest_release(seams.fetch)
+
+
+def latest_release(fetch: Callable[[str, int], bytes]) -> str:
+    """The newest published GitHub release's version, read through ``fetch``
+    (:attr:`Seams.fetch`): what ``--check`` and ``serve``'s daily check (#762) ask."""
+    body = fetch(LATEST_URL, _MAX_RELEASE_BYTES)
     try:
         release = json.loads(body)
     except ValueError as exc:

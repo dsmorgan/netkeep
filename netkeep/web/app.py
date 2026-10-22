@@ -73,6 +73,7 @@ from netkeep.services.scheduled_runs import (
 )
 from netkeep.services.scheduler import ActiveHoursProvider
 from netkeep.services.tasks import TaskRunner
+from netkeep.services.update_check import DailyUpdateCheck
 from netkeep.services.users import ensure_local_user
 from netkeep.web import api as api_package
 from netkeep.web.deps import LocalSingleUser
@@ -202,6 +203,11 @@ def create_app(
                     teardown.push_async_callback(nightly.stop)
                     nightly.start()
                     app.state.nightly_backups = nightly
+                # #762: at most one request a day for the newest GitHub release, while the
+                # owner's "Check for updates daily" is on. It installs nothing.
+                checker = DailyUpdateCheck(app.state.session_factory, resolved, data_dir())
+                teardown.push_async_callback(checker.stop)
+                checker.start()
                 # #599: what ``serve`` does once it is listening (start netkeep's Chrome,
                 # when you turned that on), as a task: it never holds up startup.
                 after: Callable[[], Coroutine[Any, Any, object]] | None = getattr(

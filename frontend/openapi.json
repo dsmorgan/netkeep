@@ -2626,7 +2626,8 @@
               "linkedin_runs",
               "campaigns",
               "backup",
-              "logs"
+              "logs",
+              "updates"
             ],
             "title": "Group",
             "type": "string"
@@ -16937,6 +16938,85 @@
         "title": "TryAgainOut",
         "type": "object"
       },
+      "UpdateCheckOut": {
+        "properties": {
+          "available": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available"
+          },
+          "checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked At"
+          },
+          "command": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Command"
+          },
+          "current": {
+            "title": "Current",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "latest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest"
+          },
+          "ok": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ok"
+          }
+        },
+        "required": [
+          "enabled",
+          "current",
+          "checked_at",
+          "ok",
+          "latest",
+          "available",
+          "command"
+        ],
+        "title": "UpdateCheckOut",
+        "type": "object"
+      },
       "UserKind": {
         "enum": [
           "local",
@@ -27517,6 +27597,27 @@
         "summary": "Undo Triage",
         "tags": [
           "triage"
+        ]
+      }
+    },
+    "/api/v1/update-check": {
+      "get": {
+        "operationId": "get_update_check",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateCheckOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Update Check",
+        "tags": [
+          "update-check"
         ]
       }
     },
