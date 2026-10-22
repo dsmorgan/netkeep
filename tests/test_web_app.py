@@ -491,18 +491,29 @@ async def test_serves_the_built_frontend(
             assert response.status_code == 200, path
             assert response.headers["content-type"].startswith("text/html")
             assert response.text == "<!doctype html><title>netkeep</title>"
+            # Revalidated on every load, so an update shows without a forced reload (#753).
+            assert response.headers["cache-control"] == "no-cache", path
 
         asset = await client.get("/assets/app.js")
         assert asset.status_code == 200
         assert asset.text == "console.log(1)"
         assert "javascript" in asset.headers["content-type"]
+        assert asset.headers["cache-control"] == "public, max-age=31536000, immutable"
+        revalidated = await client.get(
+            "/assets/app.js", headers={"if-none-match": asset.headers["etag"]}
+        )
+        assert revalidated.status_code == 304
+        assert revalidated.headers["cache-control"] == "public, max-age=31536000, immutable"
 
         favicon = await client.get("/favicon.svg")
         assert favicon.status_code == 200
         assert favicon.text == "<svg/>"
+        assert favicon.headers["cache-control"] == "no-cache"
 
         assert (await client.get("/missing.png")).status_code == 404
-        assert (await client.get("/assets/missing.js")).status_code == 404
+        missing_asset = await client.get("/assets/missing.js")
+        assert missing_asset.status_code == 404
+        assert "immutable" not in missing_asset.headers.get("cache-control", "")
 
         # Never shadow the API: an unknown API path is a JSON 404, not the SPA page.
         missing_api = await client.get("/api/v1/nope")
@@ -521,8 +532,11 @@ async def test_not_built_page_when_the_build_is_missing(app: FastAPI) -> None:
         assert "not built" in response.text
         assert "make build-ui" in response.text
         assert "no-dist" in response.text
+        assert response.headers["cache-control"] == "no-cache"
 
-        assert (await client.get("/contacts")).status_code == 200
+        deep = await client.get("/contacts/12")
+        assert deep.status_code == 200
+        assert deep.headers["cache-control"] == "no-cache"
         assert (await client.get("/api/v1/nope")).status_code == 404
         assert (await client.get("/assets/app.js")).status_code == 404
 
