@@ -4,11 +4,9 @@ import { Menu } from 'lucide-react'
 import type { RefObject } from 'react'
 
 import { Button } from '@/components/ui/button'
-import { ActivityIndicator } from '@/features/attention/activity-indicator'
 import { attentionQuery, menuLabel, needsYou } from '@/features/attention/api'
-import { PollStatusHeader } from '@/features/poll-status/poll-status-header'
+import { SystemStatusChips } from '@/features/system-status/system-status'
 
-import { BackendHealth } from './backend-health'
 import { sectionLabel } from './nav'
 import { AttentionDot } from './nav-badge'
 
@@ -25,7 +23,7 @@ export function TopBar({ menuButtonRef, navId, navOpen, onToggleNav }: TopBarPro
   // At phone width the badges are inside the closed drawer; the menu button stands in.
   const marked = needsYou(attention.data)
   return (
-    <header className="flex h-11 items-center justify-between gap-2 border-b border-border/70 px-(--space-page)">
+    <header className="flex min-h-11 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-border/70 px-(--space-page) py-1.5">
       <div className="flex min-w-0 items-center gap-2">
         {/* Below `sm` only: from `sm` up the sidebar is always in place. */}
         <Button
@@ -45,11 +43,7 @@ export function TopBar({ menuButtonRef, navId, navOpen, onToggleNav }: TopBarPro
           {sectionLabel(pathname)}
         </h1>
       </div>
-      <div className="flex min-w-0 items-center gap-3">
-        <ActivityIndicator compact announce campaigns />
-        <PollStatusHeader />
-        <BackendHealth />
-      </div>
+      <SystemStatusChips />
     </header>
   )
 }

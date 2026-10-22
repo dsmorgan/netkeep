@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { api } from '@/api/client'
 import { jsonResponse, mockFetch } from '@/test/fetch'
 
+import { useKeyPersisted } from './key-persisted'
 import { SessionGate } from './session-gate'
 
 type Session = {
@@ -143,6 +144,19 @@ describe('SessionGate', () => {
     expect(await screen.findByText('the app')).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('The Keychain refused')
     expect(screen.getByRole('status')).toHaveTextContent('unlock your login keychain')
+  })
+
+  it('tells the top bar whether the Keychain holds the key (#751)', async () => {
+    function Probe() {
+      return <p>{useKeyPersisted() ? 'key persisted' : 'key in memory'}</p>
+    }
+    serve({ connected: true, claimable: false, persisted: false })
+    render(
+      <SessionGate>
+        <Probe />
+      </SessionGate>,
+    )
+    expect(await screen.findByText('key in memory')).toBeInTheDocument()
   })
 
   it('shows no banner when the key is in the Keychain', async () => {

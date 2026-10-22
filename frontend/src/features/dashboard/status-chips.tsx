@@ -1,55 +1,35 @@
 import { useMutation } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
+import { CircleDot, CircleX } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { navigation, startAuthorization } from '@/features/mailboxes/api'
+import { TONE_CHIP_CLASSES } from '@/features/system-status/tone-classes'
 import { cn } from '@/lib/utils'
 
-import type { Chip, ChipTone, Problem } from './status'
-
-const CHIP_CLASSES: Record<ChipTone, string> = {
-  ok: 'border-ok/40 bg-ok-soft text-ok-ink',
-  warn: 'border-warn/40 bg-warn-soft text-warn-ink',
-  bad: 'border-bad/40 bg-bad-soft text-bad-ink',
-  accent: 'border-primary/40 bg-accent-soft text-accent-ink',
-  none: 'border-border bg-card/60 text-foreground',
-}
-
-const DOT_CLASSES: Record<ChipTone, string> = {
-  ok: 'bg-ok',
-  warn: 'bg-warn',
-  bad: 'bg-bad',
-  accent: 'bg-primary motion-safe:animate-pulse',
-  none: 'bg-muted-foreground/50',
-}
+import { NEEDS_YOU_ID, type Problem } from './status'
 
 /**
- * The status chips (#739): one pill per fact, each a link to the page or section that
- * fixes it. A list, so a screen reader hears how many there are.
+ * The header's one chip (#751): how many things need you, linking to Needs you. Red
+ * while something stopped, the accent otherwise; shape as well as color.
  */
-export function StatusChips({ chips }: { chips: Chip[] }) {
+export function NeedsYouChip({ count, stopped }: { count: number; stopped: boolean }) {
+  const Icon = stopped ? CircleX : CircleDot
   return (
-    <ul aria-label="Status" className="flex flex-wrap gap-1.5">
-      {chips.map((chip) => (
-        <li key={chip.key} data-chip={chip.key} data-tone={chip.tone}>
-          <Link
-            to={chip.to}
-            hash={chip.hash}
-            className={cn(
-              'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap hover:border-muted-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
-              CHIP_CLASSES[chip.tone],
-            )}
-          >
-            <span
-              aria-hidden="true"
-              className={cn('size-2 rounded-full', DOT_CLASSES[chip.tone])}
-            />
-            {chip.label}
-          </Link>
-        </li>
-      ))}
-    </ul>
+    <Link
+      to="/"
+      hash={NEEDS_YOU_ID}
+      data-testid="needs-you-chip"
+      data-tone={stopped ? 'bad' : 'busy'}
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap hover:border-muted-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+        TONE_CHIP_CLASSES[stopped ? 'bad' : 'busy'],
+      )}
+    >
+      <Icon aria-hidden="true" className="size-3.5 shrink-0" />
+      Needs you · {count}
+    </Link>
   )
 }
 

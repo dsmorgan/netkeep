@@ -354,21 +354,24 @@ describe('the activity indicator (#347)', () => {
     ['paused', 'The LinkedIn schedule is paused.'],
     ['armed', 'Scheduled LinkedIn runs are armed.'],
     ['idle', 'Scheduled LinkedIn runs are off.'],
-  ] as const)('shows %s with its own icon and the sentence', async (state, label) => {
-    serve(() => activity(state, label))
-    await renderApp('/exports')
+  ] as const)(
+    'shows %s with its own icon and the sentence on the LinkedIn page',
+    async (state, label) => {
+      serve(() => activity(state, label))
+      await renderApp('/linkedin')
 
-    const chip = await screen.findByTestId('activity-indicator')
-    expect(chip).toHaveAttribute('data-state', state)
-    expect(chip).toHaveAttribute('title', label)
-    expect(chip.querySelector(`[data-icon="${state}"]`)).not.toBeNull()
-    expect(chip).toHaveTextContent(ACTIVITY_TEXT[state])
-    expect(chip).toHaveTextContent(label)
-  })
+      const chip = await screen.findByTestId('activity-indicator')
+      expect(chip).toHaveAttribute('data-state', state)
+      expect(chip).toHaveAttribute('title', label)
+      expect(chip.querySelector(`[data-icon="${state}"]`)).not.toBeNull()
+      expect(chip).toHaveTextContent(ACTIVITY_TEXT[state])
+      expect(chip).toHaveTextContent(label)
+    },
+  )
 
   it('spins while running, but not under reduced motion', async () => {
     serve(() => activity('running', 'A LinkedIn inbox check run is running.'))
-    await renderApp('/exports')
+    await renderApp('/linkedin')
 
     const icon = (await screen.findByTestId('activity-indicator')).querySelector(
       '[data-icon="running"]',
@@ -376,20 +379,19 @@ describe('the activity indicator (#347)', () => {
     expect(icon).toHaveClass('animate-spin', 'motion-reduce:animate-none')
   })
 
-  it('keeps only the icon at phone width in the top bar, with the text for screen readers', async () => {
+  it('leaves the top bar: its LinkedIn status chip says it there (#751)', async () => {
     serve(() => activity('armed', 'Scheduled LinkedIn runs are armed.'))
     await renderApp('/exports')
-
-    const chip = await screen.findByTestId('activity-indicator')
-    expect(within(chip).getByText('LinkedIn: armed')).toHaveClass('max-sm:sr-only')
+    await screen.findByTestId('activity-live')
+    expect(screen.queryByTestId('activity-indicator')).toBeNull()
   })
 
   it('announces a change of state once, and never the first answer or a repeat', async () => {
     let current = activity('armed', 'Scheduled LinkedIn runs are armed.')
     serve(() => current)
-    await renderApp('/exports')
-    await screen.findByTestId('activity-indicator')
-    const live = screen.getByTestId('activity-live')
+    const { queryClient } = await renderApp('/exports')
+    const live = await screen.findByTestId('activity-live')
+    await waitFor(() => expect(queryClient.getQueryData(attentionQuery.queryKey)).toBeDefined())
     expect(live).toHaveAttribute('aria-live', 'polite')
     expect(live).toHaveTextContent('')
 
@@ -416,7 +418,7 @@ describe('the activity indicator (#347)', () => {
       'The LinkedIn session is flagged; clear it on the LinkedIn page.',
     )
     serve(() => current)
-    await renderApp('/exports')
+    await renderApp('/linkedin')
     const chip = await screen.findByTestId('activity-indicator')
     const live = screen.getByTestId('activity-live')
 
@@ -436,11 +438,11 @@ describe('the activity indicator (#347)', () => {
     expect(live).toHaveTextContent('')
   })
 
-  it('shows on the LinkedIn page’s Scheduled runs card too, with one live region', async () => {
+  it('has one live region on the LinkedIn page, beside the top bar’s chip', async () => {
     serve(() => activity('paused', 'The LinkedIn schedule is paused.'))
     await renderApp('/linkedin')
 
-    await waitFor(() => expect(screen.getAllByTestId('activity-indicator')).toHaveLength(2))
+    await screen.findByTestId('activity-indicator')
     expect(screen.getAllByTestId('activity-live')).toHaveLength(1)
   })
 })
@@ -492,38 +494,17 @@ describe('the running favicon', () => {
 })
 
 describe('campaign send batches (#547)', () => {
-  it('keeps the chip off the LinkedIn schedule card', async () => {
+  it('keeps the batch off the LinkedIn schedule card and the LinkedIn state', async () => {
     serve(() => activity('paused', 'The LinkedIn schedule is paused.'))
     await renderApp('/linkedin')
-    await waitFor(() => expect(screen.getAllByTestId('activity-indicator')).toHaveLength(2))
+    const chip = await screen.findByTestId('activity-indicator')
 
     act(() => FakeEventSource.instances.at(-1)?.emit('campaign.tick', { sent: 1 }))
 
-    // Only the top bar's indicator shows it, not the card's.
-    expect(await screen.findAllByTestId('campaign-activity')).toHaveLength(1)
-  })
-
-  it('shows "Campaigns: sending" beside the LinkedIn state, then clears it', async () => {
-    serve(() => activity('idle', 'Scheduled LinkedIn runs are off.'))
-    await renderApp('/exports')
-    const chip = await screen.findByTestId('activity-indicator')
-    expect(screen.queryByTestId('campaign-activity')).toBeNull()
-
-    vi.useFakeTimers({ shouldAdvanceTime: true })
-    try {
-      act(() => FakeEventSource.instances.at(-1)?.emit('campaign.tick', { sent: 1 }))
-      expect(await screen.findByTestId('campaign-activity')).toHaveTextContent('Campaigns: sending')
-      // The LinkedIn state is untouched.
-      expect(chip).toHaveAttribute('data-state', 'idle')
-      expect(chip).toHaveTextContent('LinkedIn: off')
-
-      act(() => {
-        vi.advanceTimersByTime(CAMPAIGN_SENDING_MS + 1)
-      })
-      expect(screen.queryByTestId('campaign-activity')).toBeNull()
-    } finally {
-      vi.useRealTimers()
-    }
+    // The top bar's Gmail chip shows it (system-status.test.tsx); the card does not.
+    await act(() => Promise.resolve())
+    expect(chip).toHaveAttribute('data-state', 'paused')
+    expect(chip).toHaveTextContent('LinkedIn: paused')
   })
 
   it('swaps the tab icon while a batch shows, and back after', async () => {
@@ -533,8 +514,8 @@ describe('campaign send batches (#547)', () => {
     document.head.append(link)
     try {
       serve(() => activity('idle', 'Scheduled LinkedIn runs are off.'))
-      await renderApp('/exports')
-      await screen.findByTestId('activity-indicator')
+      const { queryClient } = await renderApp('/exports')
+      await waitFor(() => expect(queryClient.getQueryData(attentionQuery.queryKey)).toBeDefined())
       expect(link.getAttribute('href')).toBe(FAVICON)
 
       vi.useFakeTimers({ shouldAdvanceTime: true })
