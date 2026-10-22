@@ -3,19 +3,13 @@ import { Component, useCallback, useEffect, useRef, useState, type ReactNode } f
 
 import { healthQuery } from '@/api/queries'
 import { announcement, type ActivityState } from '@/features/attention/activity'
-import { attentionQuery } from '@/features/attention/api'
+import { ATTENTION_EVERY_MS, attentionQuery } from '@/features/attention/api'
 import { useCampaignSending } from '@/features/attention/use-campaign-sending'
 import { lastRunQuery } from '@/features/dashboard/api'
 import { useEventStreamStatus } from '@/features/events/event-stream-context'
 import { useServerEvent } from '@/features/events/use-server-event'
-import {
-  budgetQuery,
-  heatQuery,
-  linkedinKeys,
-  scheduleQuery,
-  statusQuery,
-} from '@/features/linkedin/api'
-import { mailboxKeys, mailboxListQuery } from '@/features/mailboxes/api'
+import { budgetQuery, heatQuery, scheduleQuery, statusQuery } from '@/features/linkedin/api'
+import { mailboxListQuery } from '@/features/mailboxes/api'
 import { pollStatusQuery, usePollStatusRefresh } from '@/features/poll-status/api'
 import { CheckRepliesNow } from '@/features/poll-status/check-now'
 import { useNow } from '@/features/poll-status/use-now'
@@ -37,23 +31,20 @@ function updatedAt(...queries: UseQueryResult<unknown>[]): number {
 }
 
 /**
- * Keeps the chips' reads fresh. The mailbox list refreshes on the `mailbox.status`
- * event the backend's poll publishes, so a status change shows without a reload; it is
- * the list, never `/mailboxes/status`, so it still answers while the Keychain is locked.
- * A LinkedIn run starting or ending moves the session flag, the schedule, the last run,
- * budget and heat, and none of them says so on its own, so each refetches once per run.
- * The poll status refetches on its own events. The top bar is on every page, so these
- * are the app's.
+ * Keeps the chips' reads fresh. A LinkedIn run starting or ending moves the session
+ * flag, the schedule, the last run, budget and heat, and none of them says so on its
+ * own, so the five the chip reads refetch once per run, and nothing else under
+ * `linkedinKeys` (the LinkedIn page invalidates its own). The poll status refetches on
+ * its own events. The mailbox list needs nothing here: `ReauthBanner`, on every page,
+ * refetches it on `mailbox.status`.
  */
 function useStatusRefresh(): void {
   const queryClient = useQueryClient()
-  const mailboxes = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: mailboxKeys.all })
-  }, [queryClient])
   const linkedin = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: linkedinKeys.all })
+    for (const { queryKey } of [statusQuery, scheduleQuery, budgetQuery, heatQuery, lastRunQuery]) {
+      void queryClient.invalidateQueries({ queryKey, exact: true })
+    }
   }, [queryClient])
-  useServerEvent('mailbox.status', mailboxes)
   useServerEvent('run.started', linkedin)
   useServerEvent('run.finished', linkedin)
   usePollStatusRefresh()
@@ -134,11 +125,13 @@ function Chips() {
   const health = useQuery(healthQuery)
   const poll = useQuery(pollStatusQuery)
   const mailboxes = useQuery(mailboxListQuery)
-  const status = useQuery(statusQuery)
+  // The session flag, the schedule and heat also change outside a run (`netkeep
+  // preflight`, the CLI) with no event, so they refetch as often as `/attention` does.
+  const status = useQuery({ ...statusQuery, refetchInterval: ATTENTION_EVERY_MS })
   const lastRun = useQuery(lastRunQuery)
-  const schedule = useQuery(scheduleQuery)
+  const schedule = useQuery({ ...scheduleQuery, refetchInterval: ATTENTION_EVERY_MS })
   const budget = useQuery(budgetQuery)
-  const heat = useQuery(heatQuery)
+  const heat = useQuery({ ...heatQuery, refetchInterval: ATTENTION_EVERY_MS })
   const attention = useQuery(attentionQuery)
   const stream = useEventStreamStatus()
   const keyPersisted = useKeyPersisted()
@@ -150,7 +143,13 @@ function Chips() {
 
   const serverDown = health.isError
   const gmail = gmailStatus(
-    { mailboxes: read(mailboxes), poll: read(poll), sending, serverDown },
+    {
+      mailboxes: read(mailboxes),
+      poll: read(poll),
+      sending,
+      attention: attention.data,
+      serverDown,
+    },
     now,
   )
   const linkedin = linkedinStatus(

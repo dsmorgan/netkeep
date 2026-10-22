@@ -1,6 +1,7 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { ATTENTION_EVERY_MS } from '@/features/attention/api'
 import { CAMPAIGN_SENDING_MS } from '@/features/attention/use-campaign-sending'
 import { mailbox } from '@/features/mailboxes/test-support'
 import { check, pollStatus, run } from '@/features/system-status/test-support'
@@ -84,7 +85,10 @@ describe('the top bar’s status chips (#751)', () => {
     const gmail = await chip('gmail', 'ok')
     const word = within(gmail).getByText('· Sending')
     expect(word).toHaveClass('max-sm:sr-only')
-    expect(within(gmail).getByText(/^checked /)).toHaveClass('max-sm:sr-only')
+    const fact = within(gmail).getByText(/^checked /)
+    expect(fact).toHaveClass('max-sm:sr-only')
+    // Full ink: an opacity would drop the fact under AA on the light tints (theme.test.ts).
+    expect(fact.className).not.toMatch(/opacity/)
     expect(within(gmail).getByText('Gmail')).not.toHaveClass('max-sm:sr-only')
   })
 
@@ -159,10 +163,9 @@ describe('the top bar’s status chips (#751)', () => {
     fireEvent.click(app)
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText('Can’t reach netkeep · retrying every 15 s')).toBeVisible()
-    expect(within(dialog).getByRole('link', { name: /Settings › Support/ })).toHaveAttribute(
-      'href',
-      '/settings#support',
-    )
+    // Settings can't load without the server: a reload, not a link.
+    expect(within(dialog).queryByRole('link')).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Reload' })).toBeInTheDocument()
   })
 
   it('reads the mailbox list while the Keychain is locked, never the mailbox status', async () => {
@@ -228,6 +231,21 @@ describe('the top bar’s status chips (#751)', () => {
     await waitFor(() =>
       expect(linkedin).toHaveTextContent('LinkedIn · Enrichment running, 12 of 50'),
     )
+  })
+
+  it('refetches the session flag as often as /attention, so a flag set outside a run shows', async () => {
+    let current = linkedinStatus()
+    serve({ '/api/v1/linkedin/status': () => jsonResponse(current) })
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    await renderApp('/contacts')
+    await chip('linkedin', 'ok')
+
+    // `netkeep preflight` found LinkedIn logged out; no event says so.
+    current = linkedinStatus({ session_flag: 'logged_out' })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ATTENTION_EVERY_MS + 1)
+    })
+    await chip('linkedin', 'bad')
   })
 
   it('spins Gmail for a campaign send batch, then clears it', async () => {
