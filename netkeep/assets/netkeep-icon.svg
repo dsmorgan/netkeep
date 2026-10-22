@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- netkeep app icon (variant B, chosen 2026-10-22): a white lowercase "n" with three nodes,
+       in front of a light-blue lowercase "k" facing left, on Apple's macOS icon grid
+       (824 px rounded square centered on 1024, soft drop shadow). -->
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity=".28"/></filter>
+    <linearGradient id="fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1a86ff"/><stop offset="1" stop-color="#005bd0"/></linearGradient>
+    <clipPath id="tile"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#fill)" filter="url(#shadow)"/>
+  <g clip-path="url(#tile)"><svg x="100" y="100" width="824" height="824" viewBox="0 0 32 32"><path d="M25 4.5V26.5M25 19.5L14 15M21.48 18.06L14 27" fill="none" stroke="#5aa6ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="25" cy="26.5" r="2.5" fill="#5aa6ff"/><circle cx="14" cy="15" r="2.5" fill="#5aa6ff"/><circle cx="14" cy="27" r="2.5" fill="#5aa6ff"/><g transform="translate(-2 -1.5)"><path d="M10 9.5V23M10 15.5a6 6 0 0 1 12 0V23" fill="none" stroke="#f9fcff" stroke-width="3.2" stroke-linecap="round"/><circle cx="10" cy="9.5" r="3" fill="#f9fcff"/><circle cx="10" cy="23" r="3" fill="#f9fcff"/><circle cx="22" cy="23" r="3" fill="#f9fcff"/></g></svg></g>
+</svg>
