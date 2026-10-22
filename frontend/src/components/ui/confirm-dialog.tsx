@@ -100,8 +100,12 @@ export function ConfirmDialog({
   return (
     <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
       <AlertDialog.Portal>
-        <AlertDialog.Backdrop className="fixed inset-0 bg-black/40" />
-        <AlertDialog.Popup className="fixed top-1/2 left-1/2 w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg bg-popover p-5 text-sm text-popover-foreground shadow-overlay">
+        {/* z-50, the overlay tier `Dialog`, `Popover` and `Menu` use (#749). The
+            portal lands at the end of <body>, but the shell's content column is
+            `relative z-[1]` (#606): at `z-index: auto` both of these painted under
+            the page, so a card there took the click meant for the confirm button. */}
+        <AlertDialog.Backdrop className="fixed inset-0 z-50 bg-black/40" />
+        <AlertDialog.Popup className="fixed top-1/2 left-1/2 z-50 w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg bg-popover p-5 text-sm text-popover-foreground shadow-overlay">
           <AlertDialog.Title className="font-heading text-base font-bold">
             {title}
           </AlertDialog.Title>
