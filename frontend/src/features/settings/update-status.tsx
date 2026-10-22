@@ -17,8 +17,8 @@ export function UpdateStatus() {
   if (!enabled) {
     return (
       <p role="status">
-        This is netkeep {current}. The daily check is off, so netkeep asks nothing. To check by
-        hand, run <code>netkeep update --check</code>.
+        This is netkeep {current}. The daily check is off, so netkeep doesn't ask GitHub. To check
+        by hand, run <code>netkeep update --check</code>.
       </p>
     )
   }
@@ -28,7 +28,7 @@ export function UpdateStatus() {
         <p className="font-medium">
           netkeep {available} is available; this is {current}.
         </p>
-        <CopyValue label="To update, run" value={command} />
+        <CopyValue label="Update command" value={command} />
       </div>
     )
   }

@@ -44,7 +44,7 @@ class UpdateCheckOut(BaseModel):
 def get_update_check(request: Request, session: SessionDep, user: CurrentUser) -> UpdateCheckOut:
     owner = local_owner(session) or user
     enabled = ui_settings.resolve(session, owner, file_settings(request)).updates.check_daily
-    result = update_check.read_result(data_dir())
+    result = update_check.read_result(data_dir(), warn=False)
     available = update_check.newer_release(result) if enabled else None
     return UpdateCheckOut(
         enabled=enabled,

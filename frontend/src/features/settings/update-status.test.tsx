@@ -46,7 +46,7 @@ describe('UpdateStatus', () => {
     })
     expect(await screen.findByText('netkeep 1.3.0 is available; this is 1.2.0.')).toBeVisible()
     expect(screen.getByText('netkeep update')).toBeVisible()
-    expect(screen.getByRole('button', { name: 'Copy to update, run' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Copy update command' })).toBeVisible()
     expect(requests).toEqual(['GET /api/v1/update-check'])
   })
 
@@ -69,7 +69,9 @@ describe('UpdateStatus', () => {
 
   it('says the check is off and how to check by hand', async () => {
     renderStatus({ ...NONE, enabled: false })
-    expect(await screen.findByText(/The daily check is off, so netkeep asks nothing/)).toBeVisible()
+    expect(
+      await screen.findByText(/The daily check is off, so netkeep doesn't ask GitHub/),
+    ).toBeVisible()
     expect(screen.getByText('netkeep update --check')).toBeVisible()
   })
 })

@@ -495,6 +495,30 @@ async def test_backup_settings_are_the_owners_alone(
         assert ui_settings.stored(session, other) == {PREFILLS: 40}
 
 
+async def test_the_daily_update_check_is_the_owners_alone(
+    running_app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    """#762: the check is install-wide, run from the owner's ``updates.check_daily``, so
+    anyone else sees it read-only with a note, and a write is refused (403) with nothing
+    stored."""
+    factory: sessionmaker[Session] = running_app.state.session_factory
+    with session_scope(factory, write=True) as session:
+        other_id = factories.make_user(session).id
+    owner_view = _field((await client.get(URL)).json(), "updates.check_daily")
+    assert owner_view["editable"] is True and owner_view["locked_reason"] is None
+    with acting_as(running_app, other_id):
+        field = _field((await client.get(URL)).json(), "updates.check_daily")
+        assert field["editable"] is False
+        assert "local owner" in field["locked_reason"]
+        refused = await _put(client, {"updates.check_daily": False})
+        assert refused.status_code == 403
+        assert "local owner" in refused.json()["detail"]
+    with session_scope(factory) as session:
+        other = session.get(User, other_id)
+        assert other is not None
+        assert ui_settings.stored(session, other) == {}
+
+
 async def test_only_the_owner_sees_the_chrome_profile_path(
     running_app: FastAPI, client: httpx.AsyncClient
 ) -> None:
