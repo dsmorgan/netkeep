@@ -47,7 +47,7 @@ dependencies = [
   # complementary pair forks the lock: 48.x on Intel Macs, current everywhere else
   # (ADR 0011 rule 2, docs/design/install-options.md "Intel Macs"). A frozen major gets
   # no security fixes, so this ends when 48.x stops being acceptable.
-  "cryptography<49; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+  "cryptography<51; sys_platform == 'darwin' and platform_machine == 'x86_64'",
   "cryptography>=49; sys_platform != 'darwin' or platform_machine != 'x86_64'",
   "google-auth-httplib2>=0.2",
   "httplib2>=0.22",
