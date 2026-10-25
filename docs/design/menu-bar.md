@@ -52,3 +52,30 @@ A test pins this table: the menu-bar module may call nothing else. The confirmat
 
 - **Quit:** `LoginItem.stop()` boots out the `serve` job and leaves its plist. Then the menu bar exits with status 0. Both come back at the next login.
 - **The launcher (#754):** for each job whose plist exists, it bootstraps the job if `launchctl print` doesn't find it, then kickstarts it. After that it waits for `/health` and opens the window. So **Open netkeep** brings both processes back after a Quit.
+
+## Checked on a real Mac (#760)
+
+macOS 26.6.2 on Apple silicon, 2026-10-25, with a throwaway PyObjC prototype against a scratch data directory and Keychain service. Intel wasn't checked.
+
+| Fact | Result | What follows |
+|---|---|---|
+| Survives `uv tool install` | It kept running for 10 minutes after a `--reinstall`. A shell-out ran the new version, and a late import worked. | Rule 6 stands. The menu still shows the version that started until `update --finish` restarts it. |
+| Its own identity | A script that `exec`s Python, or a symlink to Python, shows as "python3.12" in **System Settings > Menu Bar**, and each Python version adds its own entry. A copy of Python, named for the helper and signed with its bundle id, shows as the helper. | The helper's executable is that copy (ADR 0014 amendments). |
+| Keychain | The copy asks once on its first read, naming the helper. **Always Allow** holds across restarts. Rewriting the copy, even from the same Python, asks again. | Rule 12: rewrite the copy only when the installed Python changed. |
+| Hidden item | The setting lists the unsigned helper and hides it. The process isn't told: `isVisible` stays true and no KVO change arrives. | The preference's help text says hiding it in System Settings leaves it running. |
+| Notifications | From the script or the symlink: the call hangs or is refused (`UNErrorDomain` 1). From the signed copy: one notification arrived with the helper's name and icon. | Possible after 1.0 by an amendment (rule 10). |
+| Gatekeeper | No `com.apple.quarantine`, before and after a rewrite in place. `spctl` rejects it ("no usable signature"), but launchd and a double-click start it without a dialog. | No change. |
+
+### The helper bundle
+
+```
+netkeep.app/Contents/Helpers/netkeep Menu Bar.app/
+  Contents/Info.plist         CFBundleIdentifier <launcher id>.menubar, LSUIElement, CFBundleIconFile
+  Contents/MacOS/netkeep      a copy of the installed tool's Python, ad-hoc signed with -i <bundle id>
+  Contents/lib -> <that Python's home>/lib   (@executable_path/../lib and the stdlib search both use it)
+  Contents/Resources/netkeep.icns
+```
+
+The launchd job runs `Contents/MacOS/netkeep -c "<add the tool's site-packages>; run netkeep menubar"`, because a bundle executable can't carry arguments. Finder can't start the helper by itself, so **Open netkeep** and the launcher start it through `launchctl kickstart`.
+
+**Open:** System Settings shows the helper's name without an icon, even after `lsregister -f`. The notification shows the icon, so the `.icns` is fine. #766 checks it with the bundle in `~/Applications`.
