@@ -55,12 +55,14 @@ Option a. `netkeep setup` adds a helper bundle inside `netkeep.app`, with its ow
 - You see netkeep's state, and reach its common actions, without opening its window.
 - We maintain an AppKit process, a second launchd job, a preference, and a server-side roll-up.
 - **Keep true:** the menu bar never acts on its own, keeps the key only in memory, and calls nothing outside rule 4's list.
-- **Unverified; check on a real Mac before implementation:**
-  - whether the menu-bar process survives `uv tool install` replacing its code;
-  - whether the helper keeps its own identity, or shows as "Python" in macOS 26's menu-bar list;
-  - whether reading `serve`'s Keychain item prompts from the helper;
-  - whether macOS 26 tells the process that its item is hidden, and whether the setting covers an unsigned helper (the source below is a press article, not Apple's);
-  - whether `UNUserNotificationCenter` works from an ad-hoc-signed helper;
-  - whether Gatekeeper leaves the bundle alone (#754 checks the launcher).
+- **Checked on a real Mac** (macOS 26.6.2, Apple silicon, 2026-10-25, #760): the process survives `uv tool install`; Gatekeeper leaves the bundle alone; hiding works but isn't reported to the process; a script or link that runs Python shows as "python3.12" and can't post notifications, so the amendments below change the helper's executable. [The menu-bar app](../design/menu-bar.md) records each result.
+
+## Amendments (2026-10-25, #760)
+
+- **The helper's executable is a copy of the installed tool's Python**, named for the helper and ad-hoc signed with the helper's bundle id. `Contents/lib` links to that Python's `lib`. The launchd job passes the arguments that run `netkeep menubar`. *Reason:* macOS names a process after its executable file, so a script that runs Python, or a link to it, shows as "python3.12" in System Settings, and notifications fail.
+- **12. `setup` and `update --finish` rewrite the copy only when the installed Python changed.** *Reason:* macOS treats each rewrite as a new program, so it asks for the Keychain item again. The first start asks once, naming the helper; **Always Allow** covers later starts. Rule 3 still covers a refusal.
+- **Rule 9:** macOS doesn't tell the process that you hid its item. The preference's help text says that hiding it in System Settings leaves it running.
+- **Rule 10:** a notification from the helper arrives under its own name and icon. 1.0 still has none; adding them needs an amendment.
+- **Open:** System Settings shows the helper without an icon. #766 checks it from `~/Applications`.
 
 Sources: PyPI's JSON for pyobjc-core, pyobjc-framework-Cocoa, and rumps (checked 2026-10-22); [NSApplication.ActivationPolicy](https://developer.apple.com/documentation/appkit/nsapplication/activationpolicy-swift.enum); [LSUIElement](https://developer.apple.com/documentation/bundleresources/information-property-list/lsuielement); [UserNotifications from a command-line program](https://developer.apple.com/forums/thread/724249); [desktop-notifier's macOS backend](https://desktop-notifier.readthedocs.io/en/latest/_modules/desktop_notifier/macos.html); [osascript and Script Editor's permission](https://forum.latenightsw.com/t/trying-to-use-terminal-for-display-notification/5068); [macOS Tahoe's menu-bar settings (OWC)](https://eshop.macsales.com/blog/97824-macos-tahoe-makes-it-extremely-easy-to-clean-up-a-messy-menu-bar/); [Gatekeeper](https://support.apple.com/guide/security/gatekeeper-and-runtime-protection-sec5599b66df/web).
