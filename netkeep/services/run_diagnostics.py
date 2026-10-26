@@ -92,11 +92,16 @@ class VisitReason:
 
 @dataclass(frozen=True, slots=True)
 class LostAnswerReason:
-    """One answer a connections run lost (#200): the list offset and a fixed cause."""
+    """One answer a connections run lost (#200): the list offset and a fixed cause.
+
+    ``copy`` is what became of its streamed copy (#735), in fixed words, or ``None``
+    for a run recorded before that was kept.
+    """
 
     start: int
     cause: str
     ending: str | None
+    copy: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,8 +196,16 @@ def _lost(run: SyncRun) -> tuple[LostAnswerReason, ...]:
         if not isinstance(item, dict):
             continue
         start, cause, ending = item.get("start"), item.get("cause"), item.get("ending")
+        copy = item.get("copy")
         if isinstance(start, int) and isinstance(cause, str):
-            rows.append(LostAnswerReason(start, cause, ending if isinstance(ending, str) else None))
+            rows.append(
+                LostAnswerReason(
+                    start,
+                    cause,
+                    ending if isinstance(ending, str) else None,
+                    copy if isinstance(copy, str) else None,
+                )
+            )
     return tuple(rows)
 
 

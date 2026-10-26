@@ -63,7 +63,7 @@ from netkeep.models import (
     User,
 )
 from netkeep.scoping import scoped
-from netkeep.services import budgets, route_breaker, runs
+from netkeep.services import budgets, connections_sync, route_breaker, runs
 from netkeep.services import heat as heat_service
 from netkeep.services.budgets import ActionClass
 from netkeep.services.connections_sync import (
@@ -1569,6 +1569,28 @@ async def test_a_run_without_a_lost_answer_records_none(
 
 def _lost(start: int) -> LostAnswer:
     return LostAnswer(start=start, cause=_LOST_CAUSE, ending="the page moved past it")
+
+
+def test_the_run_record_keeps_what_became_of_a_lost_answers_copy() -> None:
+    """#735: a lost answer's copy note reaches ``counts_json``; a source that says
+    nothing about a copy leaves the record as it was before."""
+    noted = LostAnswer(
+        start=40,
+        cause=_LOST_CAUSE,
+        ending="the page moved past it",
+        copy="no streamed copy: never matched",
+    )
+    assert connections_sync._lost_record(noted) == {
+        "start": 40,
+        "cause": _LOST_CAUSE,
+        "ending": "the page moved past it",
+        "copy": "no streamed copy: never matched",
+    }
+    assert connections_sync._lost_record(_lost(40)) == {
+        "start": 40,
+        "cause": _LOST_CAUSE,
+        "ending": "the page moved past it",
+    }
 
 
 @dataclass

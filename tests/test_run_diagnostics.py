@@ -205,15 +205,20 @@ def test_a_connections_runs_lost_answers_read_back(writer: Session) -> None:
         kind=SyncRunKind.CONNECTIONS_FULL,
         counts={
             "lost": [
-                {"start": 80, "cause": "Error (no resource)", "ending": "the page moved past it"},
+                {
+                    "start": 80,
+                    "cause": "Error (no resource)",
+                    "ending": "the page moved past it",
+                    "copy": "streamed copy did not parse",
+                },
                 {"start": 120, "cause": "Error (no resource)"},  # recorded before #405
             ]
         },
     )
     found = run_diagnostics.diagnose(session, user, run)
-    assert [(a.start, a.cause, a.ending) for a in found.lost_answers] == [
-        (80, "Error (no resource)", "the page moved past it"),
-        (120, "Error (no resource)", None),
+    assert [(a.start, a.cause, a.ending, a.copy) for a in found.lost_answers] == [
+        (80, "Error (no resource)", "the page moved past it", "streamed copy did not parse"),
+        (120, "Error (no resource)", None, None),
     ]
 
 
@@ -556,7 +561,9 @@ def test_linkedin_run_prints_a_syncs_lost_answers(cli_db: sessionmaker[Session])
                         "start": 80,
                         "cause": "Error (no resource)",
                         "ending": "the page moved past it",
-                    }
+                        "copy": "no streamed copy: never matched",
+                    },
+                    {"start": 120, "cause": "Error (no resource)"},  # recorded before #735
                 ]
             },
         ).id
@@ -566,5 +573,7 @@ def test_linkedin_run_prints_a_syncs_lost_answers(cli_db: sessionmaker[Session])
     assert result.exit_code == 0, result.output
     lines = result.output.splitlines()
     table = lines[lines.index("lost answers:") + 1 :]
-    assert table[0].split() == ["START", "CAUSE", "THEN"]
+    assert table[0].split() == ["START", "CAUSE", "THEN", "COPY"]
     assert table[1].split()[0] == "80" and "the page moved past it" in table[1]
+    assert table[1].rstrip().endswith("no streamed copy: never matched")
+    assert table[2].split()[0] == "120" and table[2].rstrip().endswith("-")

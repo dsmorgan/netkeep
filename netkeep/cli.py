@@ -2263,8 +2263,11 @@ def _run_lines(session: Session, user: User, run: SyncRun) -> list[str]:
     if found.lost_answers:
         lines += ["", "lost answers:"]
         lines += _format_table(
-            ("START", "CAUSE", "THEN"),
-            [(str(item.start), item.cause, item.ending or "-") for item in found.lost_answers],
+            ("START", "CAUSE", "THEN", "COPY"),
+            [
+                (str(item.start), item.cause, item.ending or "-", item.copy or "-")
+                for item in found.lost_answers
+            ],
         ).splitlines()
     stopped = found.stopped_by
     if stopped is not None:
