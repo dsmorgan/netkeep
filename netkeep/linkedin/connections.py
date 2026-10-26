@@ -154,11 +154,16 @@ class LostAnswer:
     (:func:`netkeep.linkedin.observe.unreadable_cause`), never its message.
     ``ending`` is how the source gave up on it: the page moved past that start
     (and the run read on), or never asked for it again, or one loss too many.
+    ``copy`` is what became of the body tap's streamed copy of it (#735), in fixed
+    words (:data:`netkeep.linkedin.page_connections.COPY_NONE` and the rest): why
+    there was none, or which rule kept it from standing in. ``None`` from a source
+    that has no tap.
     """
 
     start: int
     cause: str
     ending: str
+    copy: str | None = None
 
     def describe(self) -> str:
         """One line for the run's notes and the log: fixed phrases and a number only."""

@@ -102,6 +102,7 @@ from netkeep.linkedin.classify import Outcome
 from netkeep.linkedin.connections import (
     ConnectionsPage,
     ConnectionsSource,
+    LostAnswer,
     ProgressEvent,
     ProgressSink,
     StopReason,
@@ -187,11 +188,17 @@ class SyncRunReport:
             "outcome": None if self.result.outcome is None else self.result.outcome.value,
             "heat_raised": self.heat_raised,
             "session_flagged": self.session_flagged,
-            "lost": [
-                {"start": lost.start, "cause": lost.cause, "ending": lost.ending}
-                for lost in self.result.losses
-            ],
+            "lost": [_lost_record(lost) for lost in self.result.losses],
         }
+
+
+def _lost_record(lost: LostAnswer) -> dict[str, JsonValue]:
+    """One lost answer for ``counts_json``: fixed words and a number. ``copy`` only when
+    the source said what became of its streamed copy (#735)."""
+    record: dict[str, JsonValue] = {"start": lost.start, "cause": lost.cause, "ending": lost.ending}
+    if lost.copy is not None:
+        record["copy"] = lost.copy
+    return record
 
 
 def _utcnow() -> datetime:

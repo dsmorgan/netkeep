@@ -1569,3 +1569,124 @@ async def test_no_name_slug_or_urn_reaches_a_log(caplog: pytest.LogCaptureFixtur
     for person in people:
         assert person.slug not in text and person.urn not in text
         assert person.last not in text and (person.headline or "\0") not in text
+
+
+# --- #735: what became of a lost answer's streamed copy, in the log and the run record ------
+
+
+def _no_member_data(text: str, people: Sequence[Person]) -> None:
+    """No fixture person's name, slug or URN, and no url, reaches ``text``."""
+    for person in people:
+        for value in (person.first, person.last, person.slug, person.urn):
+            assert value not in text
+    assert "http" not in text and "linkedin.com" not in text and "/voyager" not in text
+
+
+async def test_a_lost_answer_with_no_copy_logs_why_the_tap_had_none(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The page moves past 40, and Chrome refused to stream it: the rescue says so on
+    its own line, with the tap's words, and the run record keeps the same words."""
+    caplog.set_level(logging.INFO, logger="netkeep")
+    people = many(90)
+    out = await sync(FlagshipSite(people, tap=True, lost={40: Lost("move_on", streamed="none")}))
+    assert [(x.start, x.copy) for x in out.result.losses] == [
+        (40, "no streamed copy: Chrome did not stream it")
+    ]
+    lines = [r.getMessage() for r in caplog.records if "has no streamed copy" in r.getMessage()]
+    assert lines == [
+        "connections: the page's answer for start 40 has no streamed copy"
+        " (Chrome did not stream it); not rescued"
+    ]
+    assert [r.levelno for r in caplog.records if "has no streamed copy" in r.getMessage()] == [
+        logging.INFO
+    ]
+    _no_member_data(" ".join([*lines, *(x.copy or "" for x in out.result.losses)]), people)
+
+
+async def test_a_lost_last_answer_with_no_tap_says_so() -> None:
+    """The last answer is lost on a tab with no body tap: the run record names it."""
+    out = await sync(FlagshipSite(many(25), end="short", lost={20: Lost("silent")}))
+    assert out.result.reason is StopReason.ANSWER_LOST
+    assert out.result.lost is not None
+    assert out.result.lost.copy == "no streamed copy: no body tap"
+
+
+async def test_a_copy_cut_short_is_recorded_as_not_parsed() -> None:
+    out = await sync(FlagshipSite(many(90), tap=True, lost={40: Lost("move_on", streamed="half")}))
+    assert [x.copy for x in out.result.losses] == [page_connections.COPY_UNPARSED]
+
+
+async def test_a_copy_that_disagrees_with_the_page_is_recorded_so() -> None:
+    site = FlagshipSite(
+        many(90), tap=True, lost={40: Lost("move_on", streamed="whole")}, skip=frozenset({50})
+    )
+    out = await sync(site)
+    assert out.result.lost is not None
+    assert out.result.lost.copy == page_connections.COPY_DISAGREES
+
+
+async def test_a_last_answer_copy_short_of_the_total_is_recorded_so() -> None:
+    site = FlagshipSite(
+        many(25), end="short", total=40, tap=True, lost={20: Lost("silent", streamed="whole")}
+    )
+    out = await sync(site)
+    assert out.result.lost is not None
+    assert out.result.lost.copy == page_connections.COPY_SHORT
+
+
+async def test_a_last_answer_copy_that_asks_for_more_is_recorded_so() -> None:
+    people = many(46)
+    copy = pagination_payload(people[40:46], start=40, next_start=50)
+    site = FlagshipSite(
+        people,
+        end="short",
+        tap=True,
+        hide={10: 1, 20: 1, 30: 1},
+        lost={40: Lost("silent", streamed=copy)},
+    )
+    out = await sync(site)
+    assert out.result.lost is not None
+    assert out.result.lost.copy == page_connections.COPY_ASKS_NEXT
+
+
+async def test_a_copy_the_run_stopped_before_checking_is_recorded_as_not_checked() -> None:
+    """40 is lost with a whole copy, and the next answer is a checkpoint: the page never
+    said what came next, so the copy was never checked."""
+    wall = Answer(status=302, headers={"location": CHECKPOINT_URL})
+    site = FlagshipSite(
+        many(90), tap=True, lost={40: Lost("move_on", streamed="whole")}, answers={50: wall}
+    )
+    out = await sync(site)
+    assert out.result.outcome is Outcome.CHECKPOINT
+    assert [(x.start, x.copy) for x in out.result.losses] == [
+        (40, page_connections.COPY_NOT_CHECKED)
+    ]
+
+
+def test_a_read_with_no_diagnostics_says_the_reason_is_unknown() -> None:
+    """A lost answer whose read kept no diagnostics (or none that name a reason) still
+    gets fixed words, never an empty reason."""
+    assert page_connections._copy_note(None, None) == "no streamed copy: no reason recorded"
+    assert page_connections._copy_note(b"{}", None) == page_connections.COPY_NOT_CHECKED
+
+
+def test_the_copy_words_are_fixed() -> None:
+    """The run record keeps these words, so each is pinned as written."""
+    assert (
+        page_connections.COPY_NONE,
+        page_connections.MISS_UNKNOWN,
+        page_connections.COPY_NOT_CHECKED,
+        page_connections.COPY_UNPARSED,
+        page_connections.COPY_ASKS_NEXT,
+        page_connections.COPY_SHORT,
+        page_connections.COPY_DISAGREES,
+    ) == (
+        "no streamed copy",
+        "no reason recorded",
+        "streamed copy not checked",
+        "streamed copy did not parse",
+        "streamed copy asks for a next page",
+        "streamed copy short of the total",
+        "streamed copy disagrees with the next request",
+    )

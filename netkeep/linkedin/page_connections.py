@@ -190,7 +190,10 @@ class _Pending:
     diagnostics: ReadDiagnostics | None
     #: The body tap's streamed copy of the answer (#200), unchecked until the page
     #: says what it asked for next.
-    streamed: bytes | None = None
+    streamed: bytes | None
+    #: What became of that copy (#735), one of the ``COPY_`` words: why there is none,
+    #: not checked yet, or the rescue rule it broke. The run record keeps it.
+    copy: str
 
 
 #: How a lost answer the page moved past ends (#200): the run read on without it.
@@ -198,6 +201,37 @@ MOVED_PAST: Final = "the page moved past it"
 
 #: How a lost answer ends when the run stops for another reason first (#201 review, L2).
 STOPPED_PENDING: Final = "the run stopped before it was read again"
+
+#: What became of a lost answer's streamed copy (#735), in fixed words, for the log and
+#: the run record. A missing copy is :data:`COPY_NONE`, a colon, and why the tap had
+#: none: the tap's own words (:data:`~netkeep.linkedin.body_tap.MISS_NOT_MATCHED` and
+#: the rest), :data:`~netkeep.linkedin.observe.NO_TAP`, or :data:`MISS_UNKNOWN`. Never
+#: a url, a body, or anything from the copy itself.
+COPY_NONE: Final = "no streamed copy"
+#: The read kept no diagnostics, or they name no reason, so why the copy is missing is
+#: not known.
+MISS_UNKNOWN: Final = "no reason recorded"
+#: A copy the run stopped before checking: the page never said what it asked next.
+COPY_NOT_CHECKED: Final = "streamed copy not checked"
+#: A copy that does not parse as the page for the lost start.
+COPY_UNPARSED: Final = "streamed copy did not parse"
+#: A copy of the last answer that asks for a next page, so it does not prove the end.
+COPY_ASKS_NEXT: Final = "streamed copy asks for a next page"
+#: A copy of the last answer that leaves the run short of the first screen's total.
+COPY_SHORT: Final = "streamed copy short of the total"
+#: A copy that does not agree with the start the page asked for next.
+COPY_DISAGREES: Final = "streamed copy disagrees with the next request"
+
+
+def _copy_note(streamed: bytes | None, diagnostics: ReadDiagnostics | None) -> str:
+    """What a lost answer's streamed copy is before it is checked, in fixed words (#735)."""
+    return COPY_NOT_CHECKED if streamed is not None else f"{COPY_NONE}: {_miss(diagnostics)}"
+
+
+def _miss(diagnostics: ReadDiagnostics | None) -> str:
+    """Why the body tap had no copy of a lost answer, in fixed words (#405, #735)."""
+    miss = None if diagnostics is None else diagnostics.streamed_miss
+    return MISS_UNKNOWN if miss is None else miss
 
 
 class PageConnections:
@@ -356,7 +390,12 @@ class PageConnections:
         pending, self._lost = self._lost, None
         if pending is not None:
             self._unreported.append(
-                LostAnswer(start=pending.start, cause=pending.cause, ending=STOPPED_PENDING)
+                LostAnswer(
+                    start=pending.start,
+                    cause=pending.cause,
+                    ending=STOPPED_PENDING,
+                    copy=pending.copy,
+                )
             )
 
     def _report(self) -> tuple[LostAnswer, ...]:
@@ -577,7 +616,11 @@ class PageConnections:
                 )
                 return None
             self._lost = _Pending(
-                request.start_index, cause, response.diagnostics, response.streamed
+                request.start_index,
+                cause,
+                response.diagnostics,
+                response.streamed,
+                _copy_note(response.streamed, response.diagnostics),
             )
             log.info(
                 "connections: the page's answer for start %d could not be read (%s); %s;"
@@ -661,6 +704,13 @@ class PageConnections:
         pending = self._lost
         assert pending is not None
         if pending.streamed is None:
+            # #735: say why the tap had no copy, so the next loss says which case it was.
+            log.info(
+                "connections: the page's answer for start %d has no streamed copy (%s);"
+                " not rescued",
+                pending.start,
+                _miss(pending.diagnostics),
+            )
             return False
         try:
             chunk = parse_connections_chunk(
@@ -671,7 +721,7 @@ class PageConnections:
                 "connections: the streamed copy of the answer for start %d did not parse; not used",
                 pending.start,
             )
-            return False
+            return self._refuse(pending, COPY_UNPARSED)
         if next_start is None:
             # The page went quiet: the copy must prove the end of the list on its own
             # -- an answer that ends it, or a full last answer that asks for nothing --
@@ -695,7 +745,7 @@ class PageConnections:
                     " for a next page, so it does not prove the end; not used",
                     pending.start,
                 )
-                return False
+                return self._refuse(pending, COPY_ASKS_NEXT)
             if not 0 < self._total <= places:
                 log.info(
                     "connections: the streamed copy of the last answer for start %d accounts"
@@ -706,7 +756,7 @@ class PageConnections:
                     self._hidden,
                     self._lost_places,
                 )
-                return False
+                return self._refuse(pending, COPY_SHORT)
         elif not (
             chunk.next_start == next_start and 0 < len(chunk.cards) <= next_start - pending.start
         ):
@@ -715,7 +765,7 @@ class PageConnections:
                 " with what the page asked for next; not used",
                 pending.start,
             )
-            return False
+            return self._refuse(pending, COPY_DISAGREES)
         self._lost = None
         self._rescued += 1
         # #525 review: the checks above rest on the captured layout (cards inline in
@@ -748,6 +798,11 @@ class PageConnections:
         self._take(chunk)
         return True
 
+    def _refuse(self, pending: _Pending, copy: str) -> bool:
+        """Keep the answer lost, noting which rule its copy broke (#735). Always ``False``."""
+        self._lost = dataclasses.replace(pending, copy=copy)
+        return False
+
     def _move_past(self, next_start: int, response: ObservedResponse) -> None:
         """The page asked past the lost answer: record the loss and read on (#200).
 
@@ -763,7 +818,9 @@ class PageConnections:
         self._lost_count += 1
         self._lost_places += next_start - pending.start
         self._next_start = next_start
-        lost = LostAnswer(start=pending.start, cause=pending.cause, ending=MOVED_PAST)
+        lost = LostAnswer(
+            start=pending.start, cause=pending.cause, ending=MOVED_PAST, copy=pending.copy
+        )
         next_bytes = "unreadable" if response.body is None else str(len(response.body))
         if self._lost_count > self._max_lost:
             raise AnswerLost(
@@ -788,7 +845,9 @@ class PageConnections:
         """The pending lost answer as the exception that ends the run incomplete (#197)."""
         pending = self._lost
         assert pending is not None
-        return AnswerLost(LostAnswer(start=pending.start, cause=pending.cause, ending=ending))
+        return AnswerLost(
+            LostAnswer(start=pending.start, cause=pending.cause, ending=ending, copy=pending.copy)
+        )
 
     def _distinct(self) -> int:
         return len({card.urn for card in self._cards})
