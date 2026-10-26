@@ -1680,6 +1680,7 @@ def test_the_copy_words_are_fixed() -> None:
         page_connections.COPY_UNPARSED,
         page_connections.COPY_ASKS_NEXT,
         page_connections.COPY_SHORT,
+        page_connections.COPY_NO_TOTAL,
         page_connections.COPY_DISAGREES,
     ) == (
         "no streamed copy",
@@ -1688,5 +1689,32 @@ def test_the_copy_words_are_fixed() -> None:
         "streamed copy did not parse",
         "streamed copy asks for a next page",
         "streamed copy short of the total",
+        "streamed copy has no total to check",
         "streamed copy disagrees with the next request",
     )
+
+
+async def test_a_last_answer_copy_with_no_total_is_recorded_so() -> None:
+    """#735 review: the first screen gives no total, so a copy of the lost last answer
+    has nothing to be checked against. The record says so, not "short of the total"."""
+    site = FlagshipSite(
+        many(25), end="short", total=None, tap=True, lost={20: Lost("silent", streamed="whole")}
+    )
+    out = await sync(site)
+    assert out.result.reason is StopReason.ANSWER_LOST
+    assert out.result.lost is not None
+    assert out.result.lost.copy == page_connections.COPY_NO_TOTAL
+
+
+async def test_a_retry_that_cannot_be_read_again_logs_its_own_diagnostics(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#735 review: the page asks again for 30 and the retry is unreadable too. The
+    line says what the tap had for the retry, in fixed words only."""
+    caplog.set_level(logging.INFO, logger="netkeep")
+    people = many(45)
+    await sync(FlagshipSite(people, tap=True, lost={30: Lost("reask", times=2)}))
+    lines = [r.getMessage() for r in caplog.records if "could not be read again" in r.getMessage()]
+    assert len(lines) == 1
+    assert "streamed_bytes=none streamed_miss='Chrome did not stream it'" in lines[0]
+    _no_member_data(lines[0], people)

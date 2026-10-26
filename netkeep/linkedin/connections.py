@@ -156,8 +156,10 @@ class LostAnswer:
     (and the run read on), or never asked for it again, or one loss too many.
     ``copy`` is what became of the body tap's streamed copy of it (#735), in fixed
     words (:data:`netkeep.linkedin.page_connections.COPY_NONE` and the rest): why
-    there was none, or which rule kept it from standing in. ``None`` from a source
-    that has no tap.
+    there was none, or which rule kept it from standing in. ``None`` when the source
+    records no copy at all (today only test fakes);
+    :class:`~netkeep.linkedin.page_connections.PageConnections` without a body tap
+    records ``"no streamed copy: no body tap"``.
     """
 
     start: int

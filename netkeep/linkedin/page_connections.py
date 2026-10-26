@@ -219,6 +219,9 @@ COPY_UNPARSED: Final = "streamed copy did not parse"
 COPY_ASKS_NEXT: Final = "streamed copy asks for a next page"
 #: A copy of the last answer that leaves the run short of the first screen's total.
 COPY_SHORT: Final = "streamed copy short of the total"
+#: A copy of the last answer with no total to check it against: the first screen
+#: gave none, so the copy cannot prove the end.
+COPY_NO_TOTAL: Final = "streamed copy has no total to check"
 #: A copy that does not agree with the start the page asked for next.
 COPY_DISAGREES: Final = "streamed copy disagrees with the next request"
 
@@ -608,11 +611,16 @@ class PageConnections:
             # does next settles it (asks again, moves past, or goes quiet).
             cause = response.cause or "unknown"
             if self._lost is not None and self._lost.start == request.start_index:
+                # #735 review: the retry's own diagnostics, so the log says whether the
+                # tap had a copy of it. Logged only; the rescue still uses the first.
                 log.info(
                     "connections: the page asked again for start %d, and it could not be"
-                    " read again (%s)",
+                    " read again (%s); %s",
                     request.start_index,
                     cause,
+                    "no diagnostics"
+                    if response.diagnostics is None
+                    else response.diagnostics.describe(),
                 )
                 return None
             self._lost = _Pending(
@@ -756,7 +764,7 @@ class PageConnections:
                     self._hidden,
                     self._lost_places,
                 )
-                return self._refuse(pending, COPY_SHORT)
+                return self._refuse(pending, COPY_SHORT if self._total > 0 else COPY_NO_TOTAL)
         elif not (
             chunk.next_start == next_start and 0 < len(chunk.cards) <= next_start - pending.start
         ):
