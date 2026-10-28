@@ -262,14 +262,13 @@ def metrics(session: Session, user: User, window: MetricsWindow, *, now: datetim
       window: a reply either poll found, an opt-out, or a response recorded from
       outside netkeep (#512). An enrollment counts once, at its first response, as a
       campaign's results count it. Unlike the results, a response dated before the
-      enrollment's first send is not left out (#744).
+      enrollment's first send (or with no send at all) is not left out (#744).
     - **reply_rate**: ``replies / sent``, from the window's own two counts; None when
       nothing was sent. A reply in the window can answer a message sent before it, so
       on a short window the rate can pass 1.
     - **bounced**: outbound messages marked ``bounced``, by ``bounced_at`` (``sent_at``
-      for a row with none). Every bounced message
-      counts: an enrollment with two bounces counts twice, where a campaign's results
-      count only its earliest (#744).
+      for a row with none). Every bounced message counts: an enrollment with two
+      bounces counts twice, where a campaign's results count only its earliest (#744).
     - **changed_jobs**: contacts with a job change noticed in the window, as
       :func:`~netkeep.crm.job_changes.job_change` defines one (a sync's snapshot marked
       ``position_changed``: the title or company changed), and live, not merged away
