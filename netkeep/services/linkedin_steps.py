@@ -1543,7 +1543,7 @@ NOT_STARTED_RESTARTING: Final = "netkeep is restarting"
 
 def record_not_started(
     session: Session, user: User, run_id: int, *, settings: Settings, now: datetime
-) -> None:
+) -> bool:
     """Record a claimed ``message_send`` run the task runner refused before it started
     (#730), as :func:`netkeep.services.message_send.record` records the prefill runner's
     own refusals before the lock (``not_typed``, no budget spent, nothing opened):
@@ -1553,25 +1553,26 @@ def record_not_started(
       (#708), so a later fire never sends the message the person stopped; so does a
       prefill a person asked for.
 
-    A run that already ended, or has no claimed message, is left as it is. Needs a
-    writer session."""
+    A run that already ended, or has no claimed message, is left as it is, and the answer
+    is False: nothing was recorded, so the caller ends a run that is still running itself.
+    Needs a writer session."""
     engine._require_writer(session, "record_not_started")
     run = runs.get_run(session, user, run_id)
     if run.status is not SyncRunStatus.RUNNING:
-        return
+        return False
     message = session.scalars(
         scoped(user, Message).where(
             Message.sync_run_id == run_id, Message.status == MessageStatus.SCHEDULED
         )
     ).first()
     if message is None:
-        return
+        return False
     auto = run.trigger is SyncRunTrigger.SCHEDULED
     reason = NOT_STARTED_RESTARTING
     if auto and run.cancel_requested_at is None:
         give_back_not_started(session, user, message.id, run_id, reason, now=now)
         log.info("auto-send run %d never started; the step stays due", run_id)
-        return
+        return True
     outcome = MessageOutcome(MessageOutcomeKind.NOT_TYPED, NOT_STARTED_RESTARTING, None, 0)
     record_prefill_outcome(session, user, message.id, outcome, settings=settings, now=now)
     runs.finish_run(
@@ -1591,6 +1592,7 @@ def record_not_started(
         },
         error=reason,
     )
+    return True
 
 
 def _give_back(
