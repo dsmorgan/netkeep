@@ -3443,7 +3443,25 @@ SEND_HELPER_HOMES = {
 #: helpers). A file that reaches one gets ``.send`` counted as well: ``from
 #: netkeep.campaigns.gmail import WriteOnceConnection`` reaches a connection with no HTTP
 #: client module in the file, and its ``.send`` writes to any host.
-TRANSPORT_MODULES = frozenset({"gmail", *SEND_HELPER_HOMES.values()})
+TRANSPORT_MODULES = frozenset({"gmail", "gmail_oauth", "post_install"})
+#: Where each of those modules, and each helper's home, lives. Two files are named
+#: ``gmail`` (the web API's too), so a module is a path, not a stem.
+MODULE_FILES = {
+    "gmail": PACKAGE / "campaigns" / "gmail.py",
+    "gmail_oauth": PACKAGE / "campaigns" / "gmail_oauth.py",
+    "update": PACKAGE / "services" / "update.py",
+    "post_install": PACKAGE / "services" / "post_install.py",
+}
+#: #783 review: modules that count as reached by an attribute read of the name from any
+#: root (``m.gmail_oauth`` after ``m = mailboxes``), as the package reads neither as an
+#: attribute. ``.gmail`` is an ordinary attribute (``self.gmail``), so it is not here.
+ATTRIBUTE_MODULES = frozenset({"gmail_oauth", "post_install"})
+#: The helpers read in every file, as only their reviewed callers read them: a rebound
+#: or wrapped root (``x = nc; x.gmail_oauth._post_form``) can't hide a call. ``_send``
+#: and ``health`` are ordinary names, so they stay gated on the module being reached.
+ALWAYS_COUNTED_HELPERS = frozenset({"_post_form", "https_get"})
+#: Gmail's connection classes: opener names outside ``gmail.py``, where nothing reads them.
+WRITE_ONCE_NAMES = frozenset({"WriteOnceMixin", "WriteOnceConnection", "WriteOnceHttp"})
 
 
 def reaches_netkeep_module(tree: ast.AST, stem: str) -> bool:
@@ -3471,19 +3489,22 @@ def reaches_netkeep_module(tree: ast.AST, stem: str) -> bool:
                     roots.add(alias.asname or "netkeep")
     for node in walk(tree):
         if isinstance(node, ast.Attribute):
+            if node.attr == stem and stem in ATTRIBUTE_MODULES:
+                return True
             chain = _chain(node)
             if chain is not None and chain[0] in roots and stem in chain[1:]:
                 return True
         elif isinstance(node, ast.Call) and node.args:
             chain = _chain(node.args[0])
-            if chain is not None and chain[0] in roots:
-                for arg in _attribute_name_arguments(node):
-                    if (
-                        isinstance(arg, ast.Constant)
-                        and isinstance(arg.value, str)
-                        and stem in arg.value.split(".")
-                    ):
-                        return True
+            rooted = chain is not None and chain[0] in roots
+            for arg in _attribute_name_arguments(node):
+                if (
+                    isinstance(arg, ast.Constant)
+                    and isinstance(arg.value, str)
+                    and stem in arg.value.split(".")
+                    and (rooted or stem in ATTRIBUTE_MODULES)
+                ):
+                    return True
     return False
 
 
@@ -3590,13 +3611,19 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
     for path, source in sources.items():
         tree = parse(source)
         scopes = _scoped(tree)
+        # #783 review: Gmail's connection classes are openers outside gmail.py.
+        opener_names = (
+            RAW_CONNECTION_NAMES
+            if path == MODULE_FILES["gmail"]
+            else RAW_CONNECTION_NAMES | WRITE_ONCE_NAMES
+        )
         # #677: each local name a ``from`` import binds to an opener, and which.
         imported = {
             alias.asname or alias.name: alias.name
             for node in walk(tree)
             if isinstance(node, ast.ImportFrom)
             for alias in node.names
-            if alias.name in RAW_CONNECTION_NAMES and not _web_request(node, alias)
+            if alias.name in opener_names and not _web_request(node, alias)
         }
         # Every name a socket module is bound to here: ``import socket as _s`` too.
         modules = set(SOCKET_MODULES) | {
@@ -3609,7 +3636,7 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
         for node in walk(tree):
             where = scopes.get(id(node), "")
             if isinstance(node, ast.Attribute):
-                if node.attr in RAW_CONNECTION_NAMES:
+                if node.attr in opener_names:
                     add(path, where, node.attr)
                 elif (
                     node.attr in SOCKET_TYPES
@@ -3631,7 +3658,7 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
                 for alias in node.names:
                     if _web_request(node, alias):
                         continue
-                    if alias.name in RAW_CONNECTION_NAMES:
+                    if alias.name in opener_names:
                         add(path, where, alias.name)
                     elif alias.name == "*" and (star := _star_reach(node)) is not None:
                         add(path, where, star)
@@ -3649,7 +3676,7 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
                 for arg in _attribute_name_arguments(node):
                     if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                         for part in arg.value.split("."):
-                            if part in RAW_CONNECTION_NAMES or (
+                            if part in opener_names or (
                                 part in HTTP_FILE_SEND_NAMES and path in http_files
                             ):
                                 add(path, where, part)
@@ -3767,6 +3794,13 @@ def test_only_the_reviewed_sites_open_a_raw_connection() -> None:
         "import netkeep.campaigns.gmail_oauth as g\n\n\ndef f(c) -> None:\n    c.send(b'x')\n",
         "from netkeep.services.post_install import HEALTH_PATH\n\n\n"
         "def f(c) -> None:\n    c.send(b'x')\n",
+        # A rebound or wrapped root, and Gmail's connection classes by name (#783).
+        "import netkeep.campaigns as nc\nx = nc\n\n\n"
+        "def f() -> None:\n    x.gmail.WriteOnceConnection('example.invalid').send(b'x')\n",
+        "import netkeep.campaigns as nc\n\n\n"
+        "def f() -> None:\n    (nc or None).gmail.WriteOnceConnection('x.invalid').send(b'x')\n",
+        "def f(m) -> None:\n    m.WriteOnceHttp()\n",
+        "from netkeep.campaigns.gmail import WriteOnceMixin\n",
         # A chain through the package, or a module that re-exports one.
         "import netkeep.campaigns as nc\n\n\n"
         "def f() -> None:\n    nc.gmail.WriteOnceConnection('example.invalid').send(b'x')\n",
@@ -4039,10 +4073,8 @@ def send_helper_callers(sources: dict[Path, str]) -> dict[tuple[Path, str, str],
         names = {
             name
             for name, stem in SEND_HELPER_HOMES.items()
-            if path.stem == stem or reaches_netkeep_module(tree, stem)
-        }
-        if not names:
-            continue
+            if path == MODULE_FILES[stem] or reaches_netkeep_module(tree, stem)
+        } | ALWAYS_COUNTED_HELPERS
         imported = {
             alias.asname or alias.name: alias.name
             for node in walk(tree)
@@ -4057,7 +4089,10 @@ def send_helper_callers(sources: dict[Path, str]) -> dict[tuple[Path, str, str],
             elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
                 if node.id in imported:
                     add(path, where, imported[node.id])
-                elif node.id in names and path.stem == SEND_HELPER_HOMES[node.id]:
+                elif node.id in names and (
+                    node.id in ALWAYS_COUNTED_HELPERS
+                    or path == MODULE_FILES[SEND_HELPER_HOMES[node.id]]
+                ):
                     add(path, where, node.id)
             elif isinstance(node, ast.ImportFrom):
                 for alias in node.names:
@@ -4107,15 +4142,17 @@ def test_only_the_reviewed_callers_use_a_send_helper() -> None:
 
 
 def test_the_send_helper_modules_exist_and_define_their_helpers() -> None:
-    """#783 review: the module names the helper and transport rules match by are real
-    files, and each helper is defined in its home, so a rename can't leave a rule that
-    quietly matches nothing."""
-    homes = {path.stem: path for path in python_files(PACKAGE) if path.stem in TRANSPORT_MODULES}
-    assert set(homes) == TRANSPORT_MODULES
+    """#783 review: the modules the helper and transport rules match by name are the
+    files :data:`MODULE_FILES` gives (two files are named ``gmail``), and each helper is
+    defined in its home, so a rename can't leave a rule that quietly matches nothing."""
+    assert set(MODULE_FILES) >= TRANSPORT_MODULES
+    assert set(SEND_HELPER_HOMES.values()) <= set(MODULE_FILES)
+    for path in MODULE_FILES.values():
+        assert path in package_sources(), path
     for helper, stem in SEND_HELPER_HOMES.items():
         defined = {
             node.name
-            for node in parse(read_source(homes[stem])).body
+            for node in parse(read_source(MODULE_FILES[stem])).body
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
         }
         assert helper in defined, f"{helper} is not defined in {stem}.py"
@@ -4228,6 +4265,28 @@ def test_the_send_helper_modules_exist_and_define_their_helpers() -> None:
             "\n\nimport netkeep.services as s\n\n\n"
             "def _leak() -> object:\n    return s.post_install.health('http://127.0.0.1:1')\n",
         ),
+        # A rebound or wrapped root (#783 re-review).
+        *[
+            (PACKAGE / "services" / "chrome_launch.py", None, "\n\n" + code + "\n")
+            for code in (
+                "from netkeep.services import mailboxes\nm = mailboxes\n\n\n"
+                "def _leak(e, r):\n    return m.gmail_oauth._send(e, r)",
+                "import netkeep.campaigns as nc\n\n\n"
+                "def _leak(e, x=nc):\n    return x.gmail_oauth._post_form(e, 'u', {})",
+                "from netkeep.services import mailboxes\n\n\n"
+                "def _leak(e, r):\n    return (m := mailboxes).gmail_oauth._send(e, r)",
+                "from netkeep.services import mailboxes\n\n\n"
+                "def _leak(e, r):\n    return (mailboxes or None).gmail_oauth._send(e, r)",
+                "from netkeep.services import mailboxes\n\n\n"
+                "def _leak(e, r):\n"
+                "    return getattr((mailboxes,)[0], 'gmail_oauth')._send(e, r)",
+                "import netkeep.services as s\nx = s\n\n\n"
+                "def _leak() -> bytes:\n    return x.update.https_get('https://api.github.com/')",
+                "import netkeep.services as s\nx = s\n\n\n"
+                "def _leak() -> object:\n    return x.post_install.health('http://127.0.0.1:1')",
+                "def _leak(x, e):\n    return x.https_get('https://api.github.com/')",
+            )
+        ],
         # The checked helpers: a new caller of the download, or of the health check.
         (
             PACKAGE / "services" / "chrome_launch.py",
@@ -4524,11 +4583,10 @@ def http_clients(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int]:
                 # #784 review: a literal that names a re-exported client.
                 held = _chain(node.args[0])
                 literal = node.args[1].value
-                if held is not None and (
-                    (held[0] in roots and _buried([*held, literal]) is not None)
-                    or literal in CLIENT_ATTRIBUTES
+                if literal in CLIENT_ATTRIBUTES or (
+                    held is not None and held[0] in roots and _buried([*held, literal]) is not None
                 ):
-                    add(path, where, f"via {'.'.join([*held, literal])}")
+                    add(path, where, f"via {'.'.join([*(held or []), literal])}")
     return found
 
 
@@ -4633,6 +4691,7 @@ def test_only_the_reviewed_sites_open_an_http_client() -> None:
         "from netkeep.campaigns import gmail\n\n\ndef f():\n"
         "    return getattr(gmail, 'httplib2').Http()\n",
         "def f(m):\n    return getattr(m, 'httpx')\n",
+        "import starlette.testclient as t\n\n\ndef f():\n    return getattr((t,)[0], 'httpx')\n",
         # The five names no other attribute in the package has count from any root.
         "import starlette.testclient\nx = starlette.testclient\n\n\n"
         "def f():\n    x.httpx.post('http://127.0.0.1:1/')\n",
