@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from datetime import UTC, date, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import factories
@@ -438,6 +439,76 @@ def test_a_bounce_between_two_runs_survives_rolling_both_back(writer: Session, u
     ]
     assert result.kept == (import_runs.KeptRow("email", address_id, fern.id),)
     assert fern.phones == []
+
+
+def test_a_bounce_after_the_later_run_is_not_overwritten_by_its_rollback(
+    writer: Session, user: User
+) -> None:
+    """The later rollback leaves a row alone once something wrote to it after that
+    run's commit, so the earlier rollback still sees the edit (#725 re-review)."""
+    fern = seed_existing(writer, user)["fern"]
+    first = import_sample(writer, user)
+    (address,) = fern.emails
+    address_id = address.id
+    second = import_sample(writer, user)
+    update_email(writer, user, fern.id, address_id, {"status": "bounced"})
+    writer.flush()
+    after_edit = (address.source, address.observed_at, address.updated_at)
+
+    import_runs.rollback(writer, user, second)
+    row = writer.get(ContactEmail, address_id)
+    assert row is not None
+    assert (row.source, row.observed_at, row.updated_at) == after_edit
+
+    result = import_runs.rollback(writer, user, first)
+
+    assert result.kept == (import_runs.KeptRow("email", address_id, fern.id),)
+    assert [(r.email, r.status) for r in fern.emails] == [
+        ("fern@kites.example", EmailStatus.BOUNCED)
+    ]
+
+
+def test_the_first_record_of_a_refreshed_row_wins_when_two_rows_name_it(
+    writer: Session, user: User
+) -> None:
+    """The first record holds the stamps from before the run; a later one holds a
+    stamp an earlier row of the same run already wrote. No file reaches this today
+    (a second row of the same observation refreshes nothing), so the helper is
+    called with a second record by hand (#725 re-review)."""
+    fern = seed_existing(writer, user)["fern"]
+    import_sample(writer, user)
+    (address,) = fern.emails
+    address_id = address.id
+    stamps = (address.source, address.observed_at, address.updated_at)
+    second = import_sample(writer, user)
+    run = import_runs.get_run(writer, user, second)
+    rows = list(run.rows)
+    recorded = next(row for row in rows if row.changes_json and row.changes_json.get("refreshed"))
+    assert recorded.changes_json is not None
+    later_stamp = {
+        "source": ContactSource.MANUAL.value,
+        "observed_at": "2020-01-01T00:00:00+00:00",
+        "updated_at": "2020-01-01T00:00:00+00:00",
+    }
+    duplicate = SimpleNamespace(
+        contact_id=recorded.contact_id,
+        changes_json={
+            "created_contact": False,
+            "fields": {},
+            "sources": {},
+            "synced": {},
+            "children": {},
+            "refused": [],
+            "refreshed": {"contact_emails": {str(address_id): later_stamp}},
+        },
+    )
+
+    import_runs._unrefresh(writer, user, run, [*rows, duplicate], set())  # type: ignore[list-item]
+
+    writer.expire_all()
+    row = writer.get(ContactEmail, address_id)
+    assert row is not None
+    assert (row.source, row.observed_at, row.updated_at) == stamps
 
 
 def test_a_run_can_only_be_rolled_back_once(writer: Session, user: User) -> None:
