@@ -3107,34 +3107,84 @@ def _without_docstrings(node: ast.AST) -> ast.AST:
     return node
 
 
-def pinned_source(source: str, pinned: frozenset[str]) -> str:
-    """The module-level functions and classes ``pinned`` names in ``source``, normalized,
-    in file order, with their docstrings (and their methods') left out.
+def _bound_names(node: ast.AST) -> list[str]:
+    """The module-scope names ``node`` binds by itself (not the ones in its body)."""
+    names: list[str] = []
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+        names = [node.name]
+    elif isinstance(node, ast.Assign | ast.AnnAssign | ast.AugAssign):
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        names = [n.id for t in targets for n in walk(t) if isinstance(n, ast.Name)]
+    elif isinstance(node, ast.For | ast.AsyncFor):
+        names = [n.id for n in walk(node.target) if isinstance(n, ast.Name)]
+    elif isinstance(node, ast.withitem) and node.optional_vars is not None:
+        names = [n.id for n in walk(node.optional_vars) if isinstance(n, ast.Name)]
+    elif isinstance(node, ast.NamedExpr):
+        names = [node.target.id]
+    elif isinstance(node, ast.ExceptHandler | ast.MatchAs | ast.MatchStar) and node.name:
+        names = [node.name]
+    elif isinstance(node, ast.MatchMapping) and node.rest:
+        names = [node.rest]
+    elif isinstance(node, ast.Import | ast.ImportFrom):
+        names = [(a.asname or a.name).split(".")[0] for a in node.names]
+    return names
 
-    A module-level name bound twice (a second ``def``, a class, an assignment or an
-    import of the same name) prints a marker line, so a later definition that would
-    replace the pinned one at import time fails the pin too."""
+
+def module_scope_bindings(tree: ast.Module) -> list[tuple[ast.AST, str]]:
+    """Every name bound at module scope, with its node, in source order: top-level
+    statements, and those inside ``if``, ``try``, ``for``, ``while``, ``with`` and
+    ``match`` blocks, and a walrus anywhere outside a function. A function's or class's
+    own name is bound, but its body is not read (its names are its own scope). Not
+    covered: ``globals()[name] = ...``, ``setattr(module, name, ...)`` and a ``global``
+    statement in a function, which bind a module name with no statement that names it."""
+    found: list[tuple[ast.AST, str]] = []
+    stack: list[ast.AST] = list(reversed(tree.body))
+    while stack:
+        node = stack.pop()
+        found.extend((node, name) for name in _bound_names(node))
+        inner: list[ast.AST]
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            # What runs at definition time: decorators, defaults and bases (a walrus).
+            inner = [*node.decorator_list]
+            if isinstance(node, ast.ClassDef):
+                inner += [*node.bases, *(k.value for k in node.keywords)]
+            else:
+                inner += [d for d in (*node.args.defaults, *node.args.kw_defaults) if d]
+        elif isinstance(node, ast.Lambda):
+            inner = []
+        elif isinstance(node, ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp):
+            # A comprehension's own targets are its scope's, but a walrus binds outside.
+            inner = [n for n in walk(node) if isinstance(n, ast.NamedExpr)]
+        else:
+            inner = list(ast.iter_child_nodes(node))
+        stack.extend(reversed(inner))
+
+    def position(node: ast.AST) -> tuple[int, int]:
+        at = node.context_expr if isinstance(node, ast.withitem) else node
+        return (getattr(at, "lineno", 0), getattr(at, "col_offset", 0))
+
+    found.sort(key=lambda item: position(item[0]))
+    return found
+
+
+def pinned_source(source: str, pinned: frozenset[str]) -> str:
+    """The functions and classes ``pinned`` names in ``source``, normalized, in file
+    order, with their docstrings (and their methods') left out.
+
+    A module-scope name bound twice (:func:`module_scope_bindings`: a second ``def``, a
+    class, an assignment, an import, a loop or ``with`` target, a walrus, at the top
+    level or inside an ``if`` or ``try``) prints a marker line, so a later definition
+    that would replace the pinned one at import time fails the pin too. It does not
+    cover ``globals()``, ``setattr`` or a ``global`` statement."""
     printed = []
     bound: dict[str, int] = {}
-    for node in parse(source).body:
-        names: list[str] = []
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-            names = [node.name]
-        elif isinstance(node, ast.Assign | ast.AnnAssign | ast.AugAssign):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            names = [n.id for t in targets for n in walk(t) if isinstance(n, ast.Name)]
-        elif isinstance(node, ast.Import | ast.ImportFrom):
-            names = [(a.asname or a.name).split(".")[0] for a in node.names]
-        for name in names:
-            if name in pinned:
-                bound[name] = bound.get(name, 0) + 1
-                if bound[name] > 1:
-                    printed.append(f"# {name} is bound a second time")
-        if (
-            isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
-            and node.name in pinned
-            and bound[node.name] == 1
-        ):
+    for node, name in module_scope_bindings(parse(source)):
+        if name not in pinned:
+            continue
+        bound[name] = bound.get(name, 0) + 1
+        if bound[name] > 1:
+            printed.append(f"# {name} is bound a second time")
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
             printed.append(ast.unparse(_without_docstrings(node)))
     return "\n\n".join(printed) + "\n"
 
@@ -3274,6 +3324,50 @@ def test_the_whole_function_pin_ignores_docstrings_and_comments() -> None:
     assert identity_transport_source(reworded) == IDENTITY_TRANSPORT_FILE.read_text()
 
 
+@pytest.mark.parametrize(
+    "tail",
+    [
+        "\n\nif True:\n    def health(base, **kw):\n        return {'status': 'ok'}\n",
+        "\n\ntry:\n    pass\nexcept OSError:\n    pass\nelse:\n    def health():\n        pass\n",
+        "\n\nfor health in range(1):\n    pass\n",
+        "\n\nwith open('x') as health:\n    pass\n",
+        "\n\nwhile (health := None):\n    pass\n",
+        "\n\nvalues = [(health := 1) for _ in range(1)]\n",
+        "\n\nif True:\n    health = None\n",
+        "\n\nif True:\n    from os import path as health\n",
+        "\n\nif True:\n    health.__code__ = None\n",
+        "\n\nmatch 1:\n    case health:\n        pass\n",
+        "\n\ntry:\n    pass\nexcept OSError as health:\n    pass\n",
+        "\n\nclass _Z:\n    pass\n\n\nif True:\n    class health:\n        pass\n",
+        "\n\n@(health := (lambda f: f))\ndef _z() -> None:\n    pass\n",
+    ],
+)
+def test_the_pinned_source_catches_a_rebinding_inside_a_block(tail: str) -> None:
+    """#785: a name rebound inside ``if``, ``try``, ``for``, ``with`` or ``match``, or by
+    a walrus, replaces the pinned one at import time as a top-level ``def`` would."""
+    pinned = frozenset({"health"})
+    source = read_source(PACKAGE / "services" / "post_install.py")
+    assert pinned_source(source + tail, pinned) != pinned_source(source, pinned)
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        # Each is a separate scope: a local, a parameter, a class attribute, a lambda's
+        # parameter, a comprehension's own target.
+        "\n\ndef _other() -> None:\n    health = 1\n    print(health)\n",
+        "\n\ndef _other(health: int) -> int:\n    return health\n",
+        "\n\nclass _Other:\n    health = 1\n\n    def health_again(self) -> None:\n        pass\n",
+        "\n\nkeep = lambda health: health\n",
+        "\n\nvalues = [health for health in range(2)]\n",
+    ],
+)
+def test_the_pinned_source_leaves_other_scopes_alone(tail: str) -> None:
+    pinned = frozenset({"health"})
+    source = read_source(PACKAGE / "services" / "post_install.py")
+    assert pinned_source(source + tail, pinned) == pinned_source(source, pinned)
+
+
 #: #675 re-review: the names that open a raw connection. Anywhere in the package, a
 #: reach of one (an attribute, a ``from`` import, a ``getattr`` literal) must be one of
 #: :data:`ALLOWED_RAW_CONNECTIONS`.
@@ -3322,8 +3416,35 @@ RAW_CONNECTION_NAMES = frozenset(
 WEB_REQUEST_MODULES = frozenset({"fastapi", "starlette.requests"})
 #: #677 review: a connection's raw sends. ``HTTPConnection.send`` writes bytes as they
 #: are (connecting first), but CDP sessions ``send`` too, so these are read only in a
-#: file that reaches an HTTP client module (:func:`http_clients`).
-HTTP_FILE_SEND_NAMES = frozenset({"send", "sendall"})
+#: file that reaches an HTTP client module (:func:`http_clients`) or imports from one of
+#: the transport modules (:func:`transport_importers`). #785: the socket's other sends
+#: (``c.sock.sendmsg``, ``sendto``, ``sendfile``), and ``makefile``, whose file object
+#: writes to the socket (``c.sock.makefile("wb").write(...)``): the package reads none.
+HTTP_FILE_SEND_NAMES = frozenset({"send", "sendall", "sendmsg", "sendto", "sendfile", "makefile"})
+#: #785: the modules that hold a send site (``gmail`` and ``gmail_oauth``, ``update``,
+#: ``post_install``). A file that imports from one gets ``.send`` counted as well:
+#: ``from netkeep.campaigns.gmail import WriteOnceConnection`` reaches a connection
+#: with no HTTP client module in the file, and its ``.send`` writes to any host.
+TRANSPORT_MODULES = frozenset({"gmail", "gmail_oauth", "update", "post_install"})
+
+
+def transport_importers(sources: dict[Path, str]) -> set[Path]:
+    """The files that import a :data:`TRANSPORT_MODULES` module, or a name from one:
+    ``from netkeep.campaigns.gmail import X``, ``from .gmail import *``, ``from
+    netkeep.campaigns import gmail``, ``import netkeep.campaigns.gmail``, absolutely or
+    relatively, under any alias."""
+    found: set[Path] = set()
+    for path, source in sources.items():
+        for node in walk(parse(source)):
+            if isinstance(node, ast.ImportFrom):
+                parts = (node.module or "").split(".")
+                names = [alias.name for alias in node.names]
+                if parts[-1] in TRANSPORT_MODULES or TRANSPORT_MODULES.intersection(names):
+                    found.add(path)
+            elif isinstance(node, ast.Import):
+                if any(alias.name.split(".")[-1] in TRANSPORT_MODULES for alias in node.names):
+                    found.add(path)
+    return found
 
 
 def _web_request(node: ast.ImportFrom, alias: ast.alias) -> bool:
@@ -3386,6 +3507,11 @@ ALLOWED_RAW_CONNECTIONS = {
     # GitHub's hosts only. This and the health check are pinned whole (HTTP_SEND_SITES).
     (PACKAGE / "services" / "update.py", "https_get", "HTTPSConnection"): 1,
     (PACKAGE / "services" / "update.py", "https_get", "request"): 1,
+    # #785: the Gmail client's `send` (Gmail.send, the protocol the sender and the test-send
+    # route hold), in the two files that import from campaigns.gmail. It is the API
+    # method, pinned by the never-sends-unreviewed and caller pins, not a raw write.
+    (PACKAGE / "services" / "campaign_sender.py", "GmailSender.send", "send"): 1,
+    (PACKAGE / "web" / "api" / "campaign_review.py", "test_send", "send"): 1,
     # Not a send: an observed Playwright response's request, read for its method and
     # matched to the request's end (ADR 0006).
     (LINKEDIN / "observe.py", "Observation._on_response", "request"): 1,
@@ -3404,7 +3530,7 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
     that reaches an HTTP client module, each :data:`HTTP_FILE_SEND_NAMES` read is one
     too. A star import that could bind an opener (:func:`_star_reach`) is a reach."""
     found: dict[tuple[Path, str, str], int] = {}
-    http_files = {path for path, _, _ in http_clients(sources)}
+    http_files = {path for path, _, _ in http_clients(sources)} | transport_importers(sources)
 
     def add(path: Path, where: str, name: str) -> None:
         found[(path, where, name)] = found.get((path, where, name), 0) + 1
@@ -3578,6 +3704,17 @@ def test_only_the_reviewed_sites_open_a_raw_connection() -> None:
         "from ..campaigns.gmail_oauth import *\n",
         "from . import *\n",
         "from netkeep import *\n",
+        # #785: ``.send`` on a connection class imported from a transport module, in a
+        # file with no HTTP client module of its own.
+        "from netkeep.campaigns.gmail import WriteOnceConnection\n\n\n"
+        "def f(c: WriteOnceConnection) -> None:\n    c.send(b'x')\n",
+        "from netkeep.campaigns import gmail\n\n\n"
+        "def f() -> None:\n    gmail.WriteOnceConnection('example.invalid').sendall(b'x')\n",
+        "from .gmail import WriteOnceHttp\n\n\n"
+        "def f(c: WriteOnceHttp) -> None:\n    c.send(b'x')\n",
+        "import netkeep.campaigns.gmail_oauth as g\n\n\ndef f(c) -> None:\n    c.send(b'x')\n",
+        "from netkeep.services.update import *  # noqa: F403\n\n\n"
+        "def f(c) -> None:\n    c.send(b'x')\n",
         # The web framework's Request only when imported absolutely.
         "from .fastapi import Request\n",
         "from fastapi.requests import Request\n",
@@ -3683,6 +3820,22 @@ _OAUTH_PUT = (
             "\n\ndef _put(conn: WriteOnceMixin) -> None:\n    getattr(conn, 'sendall')(b'x')\n",
         ),
         *_HTTP_RAW_SENDS,
+        # #785: the socket's other sends, and a file object that writes to it, on a
+        # pooled connection in Gmail's transport.
+        *[
+            (
+                PACKAGE / "campaigns" / "gmail.py",
+                None,
+                f"\n\ndef _poke(c: WriteOnceMixin) -> None:\n    {body}\n",
+            )
+            for body in (
+                "c.sock.sendmsg([b'x'])",
+                "c.sock.sendto(b'x', ('example.invalid', 80))",
+                "c.sock.sendfile(open('x', 'rb'))",
+                "c.sock.makefile('wb').write(b'x')",
+                "getattr(c.sock, 'sendmsg')([b'x'])",
+            )
+        ],
     ],
 )
 def test_the_raw_connection_pin_catches_a_new_send_at_a_reviewed_site(
@@ -3797,6 +3950,236 @@ def test_the_http_send_site_pin_ignores_docstrings_and_comments() -> None:
     assert http_send_sites_source(sources) == HTTP_SEND_SITES_FILE.read_text()
 
 
+#: #783: the helpers that send for a caller, each to a host the caller picks: Gmail
+#: OAuth's form POST and its send of any ``Request`` (``_post_form`` takes the URL,
+#: ``_send`` the whole request), and the two checked ones, the update download
+#: (``https_get``, GitHub's hosts only) and setup's loopback health check (``health``).
+#: A new caller of one matches no opener pin, so each caller is pinned by function.
+SEND_HELPERS = frozenset({"_post_form", "_send", "https_get", "health"})
+#: The module that defines each helper. ``_send`` and ``health`` are ordinary names
+#: (a handler's ``self._send``, a local ``health``), so a read of one counts only in
+#: its own file and in a file that imports its module.
+SEND_HELPER_HOMES = {
+    "_post_form": "gmail_oauth",
+    "_send": "gmail_oauth",
+    "https_get": "update",
+    "health": "post_install",
+}
+
+
+def _imports_module(tree: ast.AST, stem: str) -> bool:
+    """Whether ``tree`` imports the module ``stem``, or a name from it, absolutely or
+    relatively, under any alias."""
+    for node in walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if (node.module or "").split(".")[-1] == stem or any(
+                alias.name == stem for alias in node.names
+            ):
+                return True
+        elif isinstance(node, ast.Import) and any(
+            alias.name.split(".")[-1] == stem for alias in node.names
+        ):
+            return True
+    return False
+
+
+def send_helper_callers(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int]:
+    """Each reach of a :data:`SEND_HELPERS` name, by file and function, in the helper's
+    own file and in each file that imports its module: a call, a held reference, an
+    attribute read (``oauth._send``), a ``from`` import (and each read of the name it
+    binds, under its alias), a ``getattr`` literal, or a star import of the module."""
+    found: dict[tuple[Path, str, str], int] = {}
+
+    def add(path: Path, where: str, name: str) -> None:
+        found[(path, where, name)] = found.get((path, where, name), 0) + 1
+
+    for path, source in sources.items():
+        tree = parse(source)
+        scopes = _scoped(tree)
+        names = {
+            name
+            for name, stem in SEND_HELPER_HOMES.items()
+            if path.stem == stem or _imports_module(tree, stem)
+        }
+        if not names:
+            continue
+        imported = {
+            alias.asname or alias.name: alias.name
+            for node in walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            for alias in node.names
+            if alias.name in names
+        }
+        for node in walk(tree):
+            where = scopes.get(id(node), "")
+            if isinstance(node, ast.Attribute) and node.attr in names:
+                add(path, where, node.attr)
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                if node.id in imported:
+                    add(path, where, imported[node.id])
+                elif node.id in names and path.stem == SEND_HELPER_HOMES[node.id]:
+                    add(path, where, node.id)
+            elif isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    if alias.name in names:
+                        add(path, where, alias.name)
+                    elif alias.name == "*" and (node.module or "").split(".")[-1] in (
+                        SEND_HELPER_HOMES.values()
+                    ):
+                        add(path, where, f"{node.module}.*")
+            elif isinstance(node, ast.Call):
+                for arg in _attribute_name_arguments(node):
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                        for part in arg.value.split("."):
+                            if part in names:
+                                add(path, where, part)
+    return found
+
+
+#: Every caller of a send helper, by (file, function, helper): count.
+ALLOWED_SEND_HELPER_CALLERS = {
+    # Gmail OAuth: two token requests post a form to Google's endpoints, and the profile
+    # fetch sends its own request; the form POST ends in the one send (#677).
+    (PACKAGE / "campaigns" / "gmail_oauth.py", "exchange_code", "_post_form"): 1,
+    (PACKAGE / "campaigns" / "gmail_oauth.py", "refresh_access_token", "_post_form"): 1,
+    (PACKAGE / "campaigns" / "gmail_oauth.py", "fetch_email", "_send"): 1,
+    (PACKAGE / "campaigns" / "gmail_oauth.py", "_post_form", "_send"): 1,
+    # The update download's two callers: `netkeep update`'s fetch and serve's daily
+    # check. The function refuses anything but HTTPS to GitHub's hosts.
+    (PACKAGE / "cli.py", "update_command", "https_get"): 1,
+    (PACKAGE / "services" / "update_check.py", "github_fetch", "https_get"): 1,
+    # Setup's loopback health check, called by its two pollers.
+    (PACKAGE / "services" / "post_install.py", "serve_answers", "health"): 1,
+    (PACKAGE / "services" / "post_install.py", "serve_version", "health"): 1,
+}
+
+
+def test_only_the_reviewed_callers_use_a_send_helper() -> None:
+    """#783: a new function that calls ``_post_form`` or ``_send`` can POST to any URL
+    through Gmail OAuth's opener, and no opener pin sees it (the helper holds the
+    opener). Each caller is pinned by function, with a count."""
+    found = send_helper_callers(package_sources())
+    assert found == ALLOWED_SEND_HELPER_CALLERS, sorted(
+        (str(p.relative_to(PACKAGE)), f, n, c)
+        for (p, f, n), c in found.items() | ALLOWED_SEND_HELPER_CALLERS.items()
+        if ALLOWED_SEND_HELPER_CALLERS.get((p, f, n)) != found.get((p, f, n))
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        # A new function in the module that defines the helpers.
+        (
+            PACKAGE / "campaigns" / "gmail_oauth.py",
+            None,
+            "\n\ndef _leak(ends: GoogleEndpoints) -> object:\n"
+            "    return _post_form(ends, 'https://example.invalid/', {})\n",
+        ),
+        (
+            PACKAGE / "campaigns" / "gmail_oauth.py",
+            None,
+            "\n\ndef _leak(ends: GoogleEndpoints) -> object:\n"
+            "    return _send(ends, Request('https://example.invalid/', method='PUT'))\n",
+        ),
+        # A second call in a function that already calls one.
+        (
+            PACKAGE / "campaigns" / "gmail_oauth.py",
+            "    return _send(ends, request)\n",
+            "    _send(ends, request)\n    return _send(ends, request)\n",
+        ),
+        (PACKAGE / "campaigns" / "gmail_oauth.py", None, "\n\nhold = _post_form\n"),
+        (
+            PACKAGE / "campaigns" / "gmail_oauth.py",
+            None,
+            "\n\ndef _leak(ends: GoogleEndpoints) -> object:\n"
+            "    return getattr(sys.modules[__name__], '_post_form')(ends, 'u', {})\n",
+        ),
+        # A new module that imports a helper, under any spelling.
+        (
+            PACKAGE / "services" / "chrome_launch.py",
+            None,
+            "\n\nfrom netkeep.campaigns.gmail_oauth import _post_form\n",
+        ),
+        (
+            PACKAGE / "services" / "chrome_launch.py",
+            None,
+            "\n\nfrom netkeep.campaigns.gmail_oauth import _send as s\n\n\n"
+            "def _leak(e, r):\n    return s(e, r)\n",
+        ),
+        (
+            PACKAGE / "services" / "chrome_launch.py",
+            None,
+            "\n\nfrom netkeep.campaigns import gmail_oauth\n\n\n"
+            "def _leak(e):\n    return gmail_oauth._post_form(e, 'https://example.invalid/', {})\n",
+        ),
+        (
+            PACKAGE / "services" / "chrome_launch.py",
+            None,
+            "\n\nimport netkeep.campaigns.gmail_oauth as g\n\n\n"
+            "def _leak(e, r):\n    return getattr(g, '_send')(e, r)\n",
+        ),
+        (
+            PACKAGE / "services" / "chrome_launch.py",
+            None,
+            "\n\nfrom .campaigns.gmail_oauth import *  # noqa: F403\n",
+        ),
+        # The checked helpers: a new caller of the download, or of the health check.
+        (
+            PACKAGE / "services" / "chrome_launch.py",
+            None,
+            "\n\nfrom netkeep.services import update\n\n\n"
+            "def _leak() -> bytes:\n    return update.https_get('https://api.github.com/')\n",
+        ),
+        (
+            PACKAGE / "services" / "chrome_launch.py",
+            None,
+            "\n\nfrom netkeep.services.update import https_get\n\n\n"
+            "def _leak() -> bytes:\n    return https_get('https://api.github.com/')\n",
+        ),
+        (
+            PACKAGE / "services" / "update_check.py",
+            None,
+            "\n\ndef _again() -> bytes:\n    return update.https_get('https://api.github.com/')\n",
+        ),
+        (
+            PACKAGE / "services" / "chrome_launch.py",
+            None,
+            "\n\nfrom netkeep.services import post_install\n\n\n"
+            "def _leak() -> object:\n    return post_install.health('http://127.0.0.1:1')\n",
+        ),
+        (
+            PACKAGE / "services" / "post_install.py",
+            None,
+            "\n\ndef _poll() -> object:\n    return health('http://127.0.0.1:1')\n",
+        ),
+    ],
+)
+def test_the_send_helper_pin_catches_a_new_caller(path: Path, old: str | None, new: str) -> None:
+    sources = package_sources()
+    if old is None:
+        sources[path] += new
+    else:
+        assert sources[path].count(old) == 1, old
+        sources[path] = sources[path].replace(old, new, 1)
+    assert send_helper_callers(sources) != ALLOWED_SEND_HELPER_CALLERS
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # An unrelated ``_send`` or ``health``, in a file that imports neither module.
+        "class H:\n    def _send(self) -> None:\n        pass\n\n    def go(self) -> None:\n"
+        "        self._send()\n",
+        "def f(health: int) -> int:\n    return health\n",
+    ],
+)
+def test_the_send_helper_pin_leaves_unrelated_names_alone(line: str) -> None:
+    sources = package_sources()
+    sources[PACKAGE / "services" / "chrome_launch.py"] += "\n\n" + line
+    assert send_helper_callers(sources) == ALLOWED_SEND_HELPER_CALLERS
+
+
 #: #684 re-review: the modules that make an HTTP (or other network) client. Reaching
 #: one (``import``, ``import ... as``, ``from ... import``, a star import, ``from http
 #: import client``, an attribute read such as ``http.client``, or ``getattr(http,
@@ -3862,6 +4245,9 @@ ALLOWED_HTTP_CLIENTS = {
     # errors.
     (PACKAGE / "services" / "post_install.py", "", "http.client"): 1,
     (PACKAGE / "services" / "post_install.py", "health", "http.client"): 2,
+    # #784: not the `requests` client: Starlette's own `starlette.requests` module, whose
+    # cookie parser the web security check imports.
+    (PACKAGE / "web" / "security.py", "", "via starlette.requests.cookie_parser"): 1,
     # Not a network client: the log file's size-based rotation (#602).
     (PACKAGE / "logging_setup.py", "", "logging.handlers"): 1,
     # `netkeep update`'s release downloads (#685): HTTPS with certificate checks, only to
@@ -3920,9 +4306,42 @@ def _dotted(node: ast.AST, parents: dict[str, str]) -> str | None:
     return ".".join([parents[node.id], *reversed(parts)])
 
 
+def _buried(parts: list[str]) -> str | None:
+    """The :data:`HTTP_CLIENT_MODULES` entry, or the package above one (``urllib``,
+    ``http``), that ``parts`` names *after* its first part: ``["starlette", "testclient",
+    "httpx"]``, ``["six", "moves", "urllib", "request"]``. The first part is the module
+    that re-exports it (or the root of the attribute chain)."""
+    for i in range(1, len(parts)):
+        for module in HTTP_CLIENT_MODULES:
+            names = module.split(".")
+            if parts[i : i + len(names)] == names:
+                return module
+        if _http_parent(parts[i]):
+            return parts[i]
+    return None
+
+
+def _chain(node: ast.AST) -> list[str] | None:
+    """``a.b.c`` as ``["a", "b", "c"]``, or None when it doesn't start at a name."""
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    return [node.id, *reversed(parts)]
+
+
 def http_clients(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int]:
     """Each reach of a :data:`HTTP_CLIENT_MODULES` module or a :data:`HTTP_SEND_NAMES`
-    name, by file and function. A parent package is followed through any alias of it."""
+    name, by file and function. A parent package is followed through any alias of it.
+
+    #784: so is a module reached through another module's namespace, which the
+    module's own dotted name never shows: ``from starlette.testclient import httpx``,
+    ``from .gmail import httplib2``, ``import six.moves.urllib.request``, ``from
+    six.moves.urllib.request import *``, and the attribute forms (``starlette.testclient
+    .httpx.post``), keyed ``via <the dotted name>``. An attribute chain counts only when
+    it starts at an imported name, so ``self.http`` and ``conn.requests`` are not."""
     found: dict[tuple[Path, str, str], int] = {}
 
     def add(path: Path, where: str, name: str) -> None:
@@ -3935,13 +4354,29 @@ def http_clients(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int]:
         tree = parse(source)
         scopes = _scoped(tree)
         parents = _http_parents(tree)
+        roots = {
+            (alias.asname or alias.name).split(".")[0]
+            for node in walk(tree)
+            if isinstance(node, ast.Import | ast.ImportFrom)
+            for alias in node.names
+        }
         for node in walk(tree):
             where = scopes.get(id(node), "")
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     if (module := _http_module(alias.name)) is not None:
                         add(path, where, module)
-            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                    elif _buried(alias.name.split(".")) is not None:
+                        add(path, where, f"via {alias.name}")
+            if isinstance(node, ast.ImportFrom):
+                # A relative import starts at a sibling module, so its name is buried.
+                head = ["." * node.level] if node.level else []
+                prefix = [*head, *(node.module.split(".") if node.module else [])]
+                for alias in node.names:
+                    parts = prefix if alias.name == "*" else [*prefix, alias.name]
+                    if _buried(parts) is not None:
+                        add(path, where, f"via {'.'.join(parts)}")
+            if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
                 if (module := _http_module(node.module)) is not None:
                     add(path, where, module)
                 elif _http_parent(node.module):
@@ -3956,6 +4391,9 @@ def http_clients(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int]:
                 dotted = _dotted(node, parents)
                 if dotted is not None and dotted in HTTP_CLIENT_MODULES:
                     add(path, where, dotted)
+                chain = _chain(node)
+                if chain is not None and chain[0] in roots and _buried(chain) is not None:
+                    add(path, where, f"via {'.'.join(chain)}")
             elif (
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Name)
@@ -4046,6 +4484,27 @@ def test_only_the_reviewed_sites_open_an_http_client() -> None:
         "import logging\nlogging.config.listen(1)\n",
         "import logging as lg\nlg.config.dictConfig({})\n",
         "import logging\nc = getattr(logging, 'config')\n",
+        # #784: a client module reached through another module's namespace.
+        "from starlette.testclient import httpx\nhttpx.post('http://127.0.0.1:1/')\n",
+        "import starlette.testclient\nstarlette.testclient.httpx.post('http://127.0.0.1:1/')\n",
+        "from netkeep.campaigns.gmail import httplib2\nhttplib2.Http()\n",
+        "from netkeep.campaigns import gmail\nh = gmail.httplib2.Http()\n",
+        "from .campaigns.gmail import httplib2\n",
+        "from . import httpx\n",
+        "from starlette.testclient import requests\n",
+        "from aiohttp_wrapper import aiohttp as a\n",
+        "from netkeep.campaigns.gmail import googleapiclient\n",
+        "from netkeep.services.update import http\nhttp.client.HTTPSConnection('x')\n",
+        "from six.moves import urllib\nurllib.request.urlopen('http://127.0.0.1:1/')\n",
+        "import six\nsix.moves.urllib.request.urlopen('http://127.0.0.1:1/')\n",
+        "import six\nr = six.moves.urllib.request\n",
+        "import six.moves.urllib.request\n",
+        "import six.moves.urllib.request as r\n",
+        "from six.moves.urllib.request import *\n",
+        "from six.moves.urllib import request\n",
+        "import six\nx = six.moves.http.client\n",
+        "from twisted.web import http\nx = http.client\n",
+        "import library\nlibrary.smtplib.SMTP('example.invalid')\n",
     ],
 )
 def test_the_http_client_pin_catches_a_new_opener(line: str) -> None:
