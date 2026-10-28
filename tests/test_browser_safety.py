@@ -26,6 +26,7 @@ are the other two layers.
 from __future__ import annotations
 
 import ast
+import copy
 import difflib
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -3090,7 +3091,25 @@ IDENTITY_PINNED_FUNCTIONS = frozenset(
 
 
 def identity_transport_source(source: str) -> str:
-    """The pinned functions in ``source``, normalized, in file order.
+    """The identity read's pinned functions in ``source`` (:func:`pinned_source`)."""
+    return pinned_source(source, IDENTITY_PINNED_FUNCTIONS)
+
+
+def _without_docstrings(node: ast.AST) -> ast.AST:
+    """A copy of ``node`` with the docstring of it, and of each function and class in
+    it, left out."""
+    node = copy.deepcopy(node)
+    for inner in walk(node):
+        if isinstance(inner, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            body = inner.body
+            if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
+                inner.body = body[1:] or [ast.Pass()]
+    return node
+
+
+def pinned_source(source: str, pinned: frozenset[str]) -> str:
+    """The module-level functions and classes ``pinned`` names in ``source``, normalized,
+    in file order, with their docstrings (and their methods') left out.
 
     A module-level name bound twice (a second ``def``, a class, an assignment or an
     import of the same name) prints a marker line, so a later definition that would
@@ -3107,19 +3126,16 @@ def identity_transport_source(source: str) -> str:
         elif isinstance(node, ast.Import | ast.ImportFrom):
             names = [(a.asname or a.name).split(".")[0] for a in node.names]
         for name in names:
-            if name in IDENTITY_PINNED_FUNCTIONS:
+            if name in pinned:
                 bound[name] = bound.get(name, 0) + 1
                 if bound[name] > 1:
                     printed.append(f"# {name} is bound a second time")
         if (
-            isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-            and node.name in IDENTITY_PINNED_FUNCTIONS
+            isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+            and node.name in pinned
             and bound[node.name] == 1
         ):
-            body = node.body
-            if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
-                body = body[1:]
-            printed.append(ast.unparse(type(node)(**{**vars(node), "body": body})))
+            printed.append(ast.unparse(_without_docstrings(node)))
     return "\n\n".join(printed) + "\n"
 
 
@@ -3304,6 +3320,33 @@ RAW_CONNECTION_NAMES = frozenset(
 #: sends. ``from fastapi import Request`` is not a reach of ``Request``; any other
 #: ``from ... import Request``, and any ``<x>.Request``, is.
 WEB_REQUEST_MODULES = frozenset({"fastapi", "starlette.requests"})
+#: #677 review: a connection's raw sends. ``HTTPConnection.send`` writes bytes as they
+#: are (connecting first), but CDP sessions ``send`` too, so these are read only in a
+#: file that reaches an HTTP client module (:func:`http_clients`).
+HTTP_FILE_SEND_NAMES = frozenset({"send", "sendall"})
+
+
+def _web_request(node: ast.ImportFrom, alias: ast.alias) -> bool:
+    """Whether ``alias`` is the web framework's ``Request``, imported absolutely from
+    one of :data:`WEB_REQUEST_MODULES` (``from .fastapi import Request`` is not)."""
+    return alias.name == "Request" and node.level == 0 and node.module in WEB_REQUEST_MODULES
+
+
+def _star_reach(node: ast.ImportFrom) -> str | None:
+    """The key for a star import that could bind an opener under no name read here:
+    from an HTTP client module, from a netkeep module (``gmail_oauth`` has no
+    ``__all__``, so its ``Request`` and ``build_opener`` come along), or relative."""
+    module = node.module or ""
+    if (
+        node.level
+        or module == "netkeep"
+        or module.startswith("netkeep.")
+        or _http_module(module) is not None
+    ):
+        return f"{'.' * node.level}{module}.*"
+    return None
+
+
 #: #703: the modules a socket is made from (``_socket`` is the C module ``socket``
 #: re-exports), and the names in them that make one.
 SOCKET_MODULES = frozenset({"socket", "_socket"})
@@ -3317,12 +3360,19 @@ ALLOWED_RAW_CONNECTIONS = {
     (LINKEDIN / "browser.py", "_browser_websocket_url", "open_connection"): 1,
     # #677: Gmail's write-once connection (#563) subclasses http.client's connection and
     # httplib2's HTTPS one, and its request overrides call the request they override.
+    # These classes are pinned whole too (HTTP_SEND_SITES).
     (PACKAGE / "campaigns" / "gmail.py", "WriteOnceMixin", "HTTPConnection"): 1,
     (PACKAGE / "campaigns" / "gmail.py", "WriteOnceMixin.request", "request"): 2,
     (PACKAGE / "campaigns" / "gmail.py", "WriteOnceConnection", "HTTPSConnectionWithTimeout"): 1,
     (PACKAGE / "campaigns" / "gmail.py", "WriteOnceHttp.request", "request"): 1,
+    # The Gmail API client's messages.send (#563): the API method, built by
+    # googleapiclient and sent through the write-once transport above.
+    (PACKAGE / "campaigns" / "gmail.py", "GmailClient.send", "send"): 1,
     # Gmail's OAuth: the token exchange's form POST and the profile GET build a Request,
-    # and its one send builds the opener, with no proxy unless the system's is asked for.
+    # and its one send builds the opener: through the system's proxy by default
+    # (``use_system_proxy``), with none for a test's endpoints. In ``_send`` the Request
+    # is the parameter's annotation, not a construction: ``_send`` is pinned whole
+    # (HTTP_SEND_SITES), so swapping one for the other fails there.
     (PACKAGE / "campaigns" / "gmail_oauth.py", "", "Request"): 1,
     (PACKAGE / "campaigns" / "gmail_oauth.py", "", "build_opener"): 1,
     (PACKAGE / "campaigns" / "gmail_oauth.py", "fetch_email", "Request"): 1,
@@ -3333,7 +3383,7 @@ ALLOWED_RAW_CONNECTIONS = {
     (PACKAGE / "services" / "post_install.py", "health", "HTTPConnection"): 1,
     (PACKAGE / "services" / "post_install.py", "health", "request"): 1,
     # `netkeep update` and serve's daily check (#685, #762): one HTTPS GET per hop, to
-    # GitHub's hosts only.
+    # GitHub's hosts only. This and the health check are pinned whole (HTTP_SEND_SITES).
     (PACKAGE / "services" / "update.py", "https_get", "HTTPSConnection"): 1,
     (PACKAGE / "services" / "update.py", "https_get", "request"): 1,
     # Not a send: an observed Playwright response's request, read for its method and
@@ -3350,8 +3400,11 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
     name read on a :data:`SOCKET_MODULES` module (or imported from it), by file and
     function. Either socket name is keyed as ``socket.<name>``. A name a ``from`` import
     binds (``from urllib.request import urlopen as u``) is a reach where it's imported
-    and at each read of it (``u(...)``), keyed by the name it was imported as."""
+    and at each read of it (``u(...)``), keyed by the name it was imported as. In a file
+    that reaches an HTTP client module, each :data:`HTTP_FILE_SEND_NAMES` read is one
+    too. A star import that could bind an opener (:func:`_star_reach`) is a reach."""
     found: dict[tuple[Path, str, str], int] = {}
+    http_files = {path for path, _, _ in http_clients(sources)}
 
     def add(path: Path, where: str, name: str) -> None:
         found[(path, where, name)] = found.get((path, where, name), 0) + 1
@@ -3365,8 +3418,7 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
             for node in walk(tree)
             if isinstance(node, ast.ImportFrom)
             for alias in node.names
-            if alias.name in RAW_CONNECTION_NAMES
-            and not (alias.name == "Request" and node.module in WEB_REQUEST_MODULES)
+            if alias.name in RAW_CONNECTION_NAMES and not _web_request(node, alias)
         }
         # Every name a socket module is bound to here: ``import socket as _s`` too.
         modules = set(SOCKET_MODULES) | {
@@ -3392,18 +3444,19 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
                     # ``asyncio.base_events.socket``): ``<x>.socket.socket`` is
                     # ``socket.socket``, and so is the module read on its own.
                     add(path, where, "socket.socket")
+                elif node.attr in HTTP_FILE_SEND_NAMES and path in http_files:
+                    add(path, where, node.attr)
             elif isinstance(node, ast.Name):
                 if node.id in imported and isinstance(node.ctx, ast.Load):
                     add(path, where, imported[node.id])
             elif isinstance(node, ast.ImportFrom):
                 for alias in node.names:
-                    if alias.name == "Request" and node.module in WEB_REQUEST_MODULES:
+                    if _web_request(node, alias):
                         continue
                     if alias.name in RAW_CONNECTION_NAMES:
                         add(path, where, alias.name)
-                    elif alias.name == "*" and _http_module(node.module or "") is not None:
-                        # #677: binds every opener in it, under no name read here.
-                        add(path, where, f"{node.module}.*")
+                    elif alias.name == "*" and (star := _star_reach(node)) is not None:
+                        add(path, where, star)
                     elif node.module in SOCKET_MODULES and alias.name == "*":
                         for name in sorted(SOCKET_TYPES):
                             add(path, where, f"socket.{name}")
@@ -3418,7 +3471,9 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
                 for arg in _attribute_name_arguments(node):
                     if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                         for part in arg.value.split("."):
-                            if part in RAW_CONNECTION_NAMES:
+                            if part in RAW_CONNECTION_NAMES or (
+                                part in HTTP_FILE_SEND_NAMES and path in http_files
+                            ):
                                 add(path, where, part)
                         held = node.args[0] if node.args else None
                         if isinstance(held, ast.Name) and held.id in modules:
@@ -3515,6 +3570,17 @@ def test_only_the_reviewed_sites_open_a_raw_connection() -> None:
         "from netkeep.campaigns.gmail_oauth import Request as R\n",
         "from netkeep.campaigns import gmail_oauth\nr = gmail_oauth.Request('http://x/')\n",
         "from netkeep.services import update\nc = update.http.client.HTTPSConnection('x')\n",
+        # #677 review: a star import binds a netkeep module's openers under no name read
+        # here (gmail_oauth has no ``__all__``), absolutely or relatively.
+        "from netkeep.campaigns.gmail_oauth import *  # noqa: F403\n\n\ndef _leak() -> None:\n"
+        "    build_opener().open(Request('https://example.invalid/', method='PUT'))"
+        "  # noqa: F405\n",
+        "from ..campaigns.gmail_oauth import *\n",
+        "from . import *\n",
+        "from netkeep import *\n",
+        # The web framework's Request only when imported absolutely.
+        "from .fastapi import Request\n",
+        "from fastapi.requests import Request\n",
     ],
 )
 def test_the_raw_connection_pin_catches_a_new_opener(line: str) -> None:
@@ -3539,6 +3605,32 @@ def test_the_raw_connection_pin_leaves_the_web_frameworks_request_alone(line: st
     assert raw_connections(sources) == ALLOWED_RAW_CONNECTIONS
 
 
+#: #677 review: raw bytes on a connection a reviewed site builds or holds: the four
+#: spellings that passed every scan before ``send`` was read in an HTTP client's file.
+_GETRESPONSE = "        response = connection.getresponse()\n"
+_HTTP_RAW_SENDS = [
+    (
+        PACKAGE / "services" / "post_install.py",
+        _GETRESPONSE,
+        "        connection.send(b'PUT /x HTTP/1.1\\r\\n\\r\\n')\n" + _GETRESPONSE,
+    ),
+    (
+        PACKAGE / "services" / "update.py",
+        "    " + _GETRESPONSE,
+        "            connection.send(b'PUT /x HTTP/1.1\\r\\n\\r\\n')\n    " + _GETRESPONSE,
+    ),
+    (
+        PACKAGE / "campaigns" / "gmail.py",
+        "    def _no_answer(self, exc: BaseException) -> SentWithoutAnswer:\n",
+        "    def ping(self) -> None:\n        self.send(b'x')\n\n"
+        "    def _no_answer(self, exc: BaseException) -> SentWithoutAnswer:\n",
+    ),
+    (
+        PACKAGE / "services" / "post_install.py",
+        _GETRESPONSE,
+        "        type(connection)('example.invalid', 80).send(b'x')\n" + _GETRESPONSE,
+    ),
+]
 _OAUTH_IMPORT = "from urllib.request import BaseHandler, ProxyHandler, Request, build_opener\n"
 _OAUTH_PUT = (
     "\n\ndef _put(url: str) -> object:\n"
@@ -3585,13 +3677,21 @@ _OAUTH_PUT = (
             None,
             "\n\ndef _put(conn: WriteOnceMixin) -> None:\n    conn.request('PUT', '/')\n",
         ),
+        (
+            PACKAGE / "campaigns" / "gmail.py",
+            None,
+            "\n\ndef _put(conn: WriteOnceMixin) -> None:\n    getattr(conn, 'sendall')(b'x')\n",
+        ),
+        *_HTTP_RAW_SENDS,
     ],
 )
 def test_the_raw_connection_pin_catches_a_new_send_at_a_reviewed_site(
     path: Path, old: str | None, new: str
 ) -> None:
     """#677: each use is keyed by function, so a module that already makes a reviewed
-    request can't make another one without a new entry."""
+    request can't make another one without a new entry. A count can't read arguments
+    (``"GET"`` made ``"PUT"``) or tell a construction from an annotation swapped for
+    one; the whole-function pin (:data:`HTTP_SEND_SITES`) holds those."""
     sources = package_sources()
     if old is None:
         sources[path] += new
@@ -3599,6 +3699,102 @@ def test_the_raw_connection_pin_catches_a_new_send_at_a_reviewed_site(
         assert sources[path].count(old) == 1, old
         sources[path] = sources[path].replace(old, new, 1)
     assert raw_connections(sources) != ALLOWED_RAW_CONNECTIONS
+
+
+#: #677 review: the reviewed HTTP sends, pinned whole the way the identity read's
+#: transport is (:func:`pinned_source`), by file: setup's health check, the update
+#: download, Gmail's write-once connection classes, and Gmail OAuth's one send.
+HTTP_SEND_SITES = {
+    PACKAGE / "services" / "post_install.py": frozenset({"health"}),
+    PACKAGE / "services" / "update.py": frozenset({"https_get"}),
+    PACKAGE / "campaigns" / "gmail.py": frozenset(
+        {"WriteOnceMixin", "WriteOnceConnection", "WriteOnceHttp"}
+    ),
+    PACKAGE / "campaigns" / "gmail_oauth.py": frozenset({"_send"}),
+}
+HTTP_SEND_SITES_FILE = Path(__file__).parent / "http_send_sites.txt"
+
+
+def http_send_sites_source(sources: dict[Path, str]) -> str:
+    """Each :data:`HTTP_SEND_SITES` file's pinned code, under a line naming the file."""
+    return "\n".join(
+        f"# {path.relative_to(PACKAGE)}\n\n{pinned_source(sources[path], names)}"
+        for path, names in sorted(HTTP_SEND_SITES.items())
+    )
+
+
+def test_the_http_send_sites_are_exactly_the_reviewed_ones() -> None:
+    """Any change to a reviewed HTTP send, an argument included, fails here until the
+    expected text changes in the same, reviewed PR. To update it, write
+    ``http_send_sites_source(package_sources())`` to ``tests/http_send_sites.txt`` and
+    explain the change."""
+    found = http_send_sites_source(package_sources())
+    expected = HTTP_SEND_SITES_FILE.read_text()
+    assert found == expected, (
+        "a reviewed HTTP send changed. If that's intended, regenerate"
+        f" {HTTP_SEND_SITES_FILE.name} (see this test's docstring) and say why in the PR:\n"
+        + "".join(difflib.unified_diff(expected.splitlines(True), found.splitlines(True)))
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        *_HTTP_RAW_SENDS,
+        # What a count can't see: an argument, and an annotation swapped for a build.
+        (
+            PACKAGE / "services" / "post_install.py",
+            'connection.request("GET", HEALTH_PATH',
+            'connection.request("PUT", HEALTH_PATH',
+        ),
+        (
+            PACKAGE / "services" / "update.py",
+            "connection = http.client.HTTPSConnection(host, 443,",
+            "connection = http.client.HTTPSConnection(host, 80,",
+        ),
+        (
+            PACKAGE / "campaigns" / "gmail_oauth.py",
+            "def _send(ends: GoogleEndpoints, request: Request) -> dict[str, Any]:\n",
+            "def _send(ends: GoogleEndpoints, request: Any) -> dict[str, Any]:\n"
+            "    Request('https://example.invalid/', method='PUT')\n",
+        ),
+        (
+            PACKAGE / "campaigns" / "gmail_oauth.py",
+            "    if not ends.use_system_proxy:\n",
+            "    if False:\n",
+        ),
+        (
+            PACKAGE / "campaigns" / "gmail.py",
+            "            if self._nk_method in RESENDABLE_METHODS:\n                raise\n",
+            "            if True:\n                raise\n",
+        ),
+        (
+            PACKAGE / "campaigns" / "gmail.py",
+            "        self.follow_redirects = False\n",
+            "        self.follow_redirects = True\n",
+        ),
+        # A second definition that would replace a pinned one at import time.
+        (PACKAGE / "services" / "post_install.py", None, "\n\ndef health() -> None:\n    pass\n"),
+        (PACKAGE / "campaigns" / "gmail.py", None, "\n\nWriteOnceHttp = object\n"),
+    ],
+)
+def test_the_http_send_site_pin_catches_a_change(path: Path, old: str | None, new: str) -> None:
+    sources = package_sources()
+    if old is None:
+        sources[path] += new
+    else:
+        assert sources[path].count(old) == 1, old
+        sources[path] = sources[path].replace(old, new, 1)
+    assert http_send_sites_source(sources) != HTTP_SEND_SITES_FILE.read_text()
+
+
+def test_the_http_send_site_pin_ignores_docstrings_and_comments() -> None:
+    sources = package_sources()
+    path = PACKAGE / "campaigns" / "gmail.py"
+    anchor = "    def _no_answer(self, exc: BaseException) -> SentWithoutAnswer:\n"
+    assert sources[path].count(anchor) == 1
+    sources[path] = sources[path].replace(anchor, anchor + '        """Reworded."""\n  # a\n', 1)
+    assert http_send_sites_source(sources) == HTTP_SEND_SITES_FILE.read_text()
 
 
 #: #684 re-review: the modules that make an HTTP (or other network) client. Reaching
