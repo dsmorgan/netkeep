@@ -1,0 +1,160 @@
+# campaigns/gmail.py
+
+class WriteOnceMixin(http.client.HTTPConnection):
+    _nk_method = 'GET'
+    _nk_fresh = False
+
+    def connect(self) -> None:
+        super().connect()
+        self._nk_fresh = True
+
+    def request(self, method: str, url: str, *args: Any, **kwargs: Any) -> None:
+        self._nk_method = method.upper()
+        try:
+            if self._nk_method in RESENDABLE_METHODS:
+                super().request(method, url, *args, **kwargs)
+                return
+            if self.sock is None or not self._nk_fresh:
+                self.close()
+                self.connect()
+            try:
+                super().request(method, url, *args, **kwargs)
+            except (OSError, http.client.HTTPException) as exc:
+                raise self._no_answer(exc) from exc
+        finally:
+            self._nk_fresh = False
+
+    def getresponse(self) -> http.client.HTTPResponse:
+        try:
+            return super().getresponse()
+        except (OSError, http.client.HTTPException) as exc:
+            if self._nk_method in RESENDABLE_METHODS:
+                raise
+            raise self._no_answer(exc) from exc
+
+    def _no_answer(self, exc: BaseException) -> SentWithoutAnswer:
+        self.close()
+        return SentWithoutAnswer(f'the connection failed during a {self._nk_method} ({type(exc).__name__})')
+
+class WriteOnceConnection(WriteOnceMixin, httplib2.HTTPSConnectionWithTimeout):
+    pass
+
+class WriteOnceHttp(httplib2.Http):
+
+    def __init__(self, *, timeout: float | None=DEFAULT_TIMEOUT_S, connection_type: type[WriteOnceMixin]=WriteOnceConnection) -> None:
+        super().__init__(timeout=timeout)
+        self.follow_redirects = False
+        self._nk_connection_type = connection_type
+
+    def request(self, uri: str, method: str='GET', body: Any=None, headers: Any=None, redirections: int=httplib2.DEFAULT_MAX_REDIRECTS, connection_type: Any=None) -> Any:
+        if connection_type is None and uri.lower().startswith('https:'):
+            connection_type = self._nk_connection_type
+        return super().request(uri, method, body, headers, redirections, connection_type)
+
+# campaigns/gmail_oauth.py
+
+def _send(ends: GoogleEndpoints, request: Request) -> dict[str, Any]:
+    handlers: list[BaseHandler] = []
+    if not ends.use_system_proxy:
+        handlers.append(ProxyHandler({}))
+    opener = build_opener(*handlers)
+    target = urlsplit(request.full_url)
+    where = f'{target.scheme}://{target.netloc}{target.path}'
+    try:
+        with opener.open(request, timeout=ends.timeout_s) as response:
+            raw = response.read()
+    except HTTPError as exc:
+        if exc.code >= 500 or exc.code in _TRY_LATER:
+            log.info('%s %s answered %d', request.get_method(), where, exc.code)
+            raise OAuthUnavailable(f'Google answered {exc.code}', code='unavailable') from exc
+        error = _error_code(exc) if exc.code in _OAUTH_ERROR_STATUSES else None
+        log.info('%s %s answered %d (%s)', request.get_method(), where, exc.code, error)
+        if error == INVALID_GRANT:
+            raise InvalidGrant('Google refused the grant (revoked, or expired on a consent screen in Testing); authorize again', code=INVALID_GRANT) from exc
+        code = error or f'http_{exc.code}'
+        raise OAuthRefused(f'Google refused the request: {code}', code=code) from exc
+    except (URLError, TimeoutError, OSError, http.client.HTTPException) as exc:
+        log.info('%s %s failed: %s', request.get_method(), where, type(exc).__name__)
+        raise OAuthUnavailable('could not reach Google', code='unavailable') from exc
+    try:
+        body: Any = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise OAuthUnavailable('Google answered with something not JSON', code='unavailable') from exc
+    if not isinstance(body, dict):
+        raise OAuthUnavailable('Google answered with something not an object', code='unavailable')
+    return body
+
+# services/post_install.py
+
+def health(base: str, *, timeout_s: float=_HEALTH_TIMEOUT_S) -> dict[str, object] | None:
+    parts = urlsplit(base)
+    host = parts.hostname
+    if parts.scheme != 'http' or host not in LOOPBACK_HOSTS:
+        return None
+    try:
+        port = parts.port
+    except ValueError:
+        return None
+    if port is None:
+        return None
+    connection = http.client.HTTPConnection(host, port, timeout=timeout_s)
+    try:
+        connection.request('GET', HEALTH_PATH, headers={'Accept': 'application/json'})
+        response = connection.getresponse()
+        if response.status != 200:
+            return None
+        body = json.loads(response.read(_HEALTH_MAX_BYTES))
+    except (OSError, http.client.HTTPException, ValueError):
+        return None
+    finally:
+        connection.close()
+    if not isinstance(body, dict) or body.get('status') != 'ok':
+        return None
+    return {str(key): value for key, value in body.items()}
+
+# services/update.py
+
+def https_get(url: str, *, max_bytes: int, accept: str='*/*', clock: Callable[[], float]=time.monotonic, timeout_s: float=_DOWNLOAD_TIMEOUT_S, deadline_s: float=_DOWNLOAD_DEADLINE_S) -> bytes:
+    context = ssl.create_default_context()
+    deadline = clock() + deadline_s
+    for _ in range(_MAX_REDIRECTS + 1):
+        parts = urlsplit(url)
+        host = parts.hostname
+        try:
+            port = parts.port
+        except ValueError:
+            port = -1
+        if parts.scheme != 'https' or host not in ALLOWED_HOSTS or port not in (None, 443):
+            raise UpdateError(f'refused to download {url}: only HTTPS from GitHub is allowed')
+        connection = http.client.HTTPSConnection(host, 443, timeout=timeout_s, context=context)
+        try:
+            target = parts.path + (f'?{parts.query}' if parts.query else '')
+            connection.request('GET', target or '/', headers={'Accept': accept, 'User-Agent': f'netkeep-update ({REPOSITORY})'})
+            response = connection.getresponse()
+            if response.status in (301, 302, 303, 307, 308):
+                location = response.getheader('Location')
+                if not location:
+                    raise UpdateError(f'{url} redirected nowhere')
+                url = urljoin(url, location)
+                _check_deadline(url, deadline, clock, deadline_s)
+                continue
+            if response.status != 200:
+                raise UpdateError(f'could not download {url}: HTTP {response.status}')
+            chunks: list[bytes] = []
+            size = 0
+            while size <= max_bytes:
+                _check_deadline(url, deadline, clock, deadline_s)
+                chunk = response.read(min(_CHUNK_BYTES, max_bytes + 1 - size))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                size += len(chunk)
+            body = b''.join(chunks)
+        except (OSError, http.client.HTTPException) as exc:
+            raise UpdateError(f'could not download {url}: {exc}') from exc
+        finally:
+            connection.close()
+        if len(body) > max_bytes:
+            raise UpdateError(f'{url} is larger than {max_bytes} bytes')
+        return body
+    raise UpdateError(f'{url} redirected more than {_MAX_REDIRECTS} times')
