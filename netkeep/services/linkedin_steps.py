@@ -1513,6 +1513,86 @@ def give_back_unopened(session: Session, user: User, message_id: int, *, now: da
     return True
 
 
+def give_back_not_started(
+    session: Session, user: User, message_id: int, run_id: int, reason: str, *, now: datetime
+) -> None:
+    """An auto-send run that opened nothing ends ``aborted`` (``not_typed``, nothing
+    opened, ``NOT_STARTED_NOTE`` with ``reason``), and its claim is given back
+    (:func:`give_back_unopened`): the step is due again and never listed for Try again.
+    The prefill runner's refusals before the navigation (:mod:`netkeep.services.message_send`)
+    and a run the task runner refused (#730, :func:`record_not_started`) both end so.
+    Needs a writer session."""
+    give_back_unopened(session, user, message_id, now=now)
+    runs.finish_run(
+        session,
+        user,
+        run_id,
+        status=SyncRunStatus.ABORTED,
+        now=now,
+        stop_reason=MessageOutcomeKind.NOT_TYPED.value,
+        counts={"opened": False, "typed_chars": 0},
+        notes=(f"{NOT_STARTED_NOTE}{reason}",),
+        error=reason,
+    )
+
+
+#: Why a claimed run never started: the task runner refused it, a restart triggered
+#: (#730). The words of :data:`netkeep.services.tasks.RESTARTING`.
+NOT_STARTED_RESTARTING: Final = "netkeep is restarting"
+
+
+def record_not_started(
+    session: Session, user: User, run_id: int, *, settings: Settings, now: datetime
+) -> None:
+    """Record a claimed ``message_send`` run the task runner refused before it started
+    (#730), as :func:`netkeep.services.message_send.record` records the prefill runner's
+    own refusals before the lock (``not_typed``, no budget spent, nothing opened):
+
+    - an auto-send nobody cancelled is given back due (:func:`give_back_not_started`);
+    - a run a person cancelled (``cancel_requested_at``) parks its step for Try again
+      (#708), so a later fire never sends the message the person stopped; so does a
+      prefill a person asked for.
+
+    A run that already ended, or has no claimed message, is left as it is. Needs a
+    writer session."""
+    engine._require_writer(session, "record_not_started")
+    run = runs.get_run(session, user, run_id)
+    if run.status is not SyncRunStatus.RUNNING:
+        return
+    message = session.scalars(
+        scoped(user, Message).where(
+            Message.sync_run_id == run_id, Message.status == MessageStatus.SCHEDULED
+        )
+    ).first()
+    if message is None:
+        return
+    auto = run.trigger is SyncRunTrigger.SCHEDULED
+    reason = NOT_STARTED_RESTARTING
+    if auto and run.cancel_requested_at is None:
+        give_back_not_started(session, user, message.id, run_id, reason, now=now)
+        log.info("auto-send run %d never started; the step stays due", run_id)
+        return
+    outcome = MessageOutcome(MessageOutcomeKind.NOT_TYPED, NOT_STARTED_RESTARTING, None, 0)
+    record_prefill_outcome(session, user, message.id, outcome, settings=settings, now=now)
+    runs.finish_run(
+        session,
+        user,
+        run_id,
+        status=SyncRunStatus.ABORTED,
+        now=now,
+        stop_reason=MessageOutcomeKind.NOT_TYPED.value,
+        counts={
+            "typed_chars": 0,
+            "recipient_name_checked": None,
+            "li_prefills_spent": False,
+            **(
+                {"send_clicked": False, "bubble_closed": False, "tab_closed": False} if auto else {}
+            ),
+        },
+        error=reason,
+    )
+
+
 def _give_back(
     session: Session, user: User, message: Message, reason: str, *, now: datetime
 ) -> None:

@@ -161,6 +161,11 @@ const BEFORE_CLICK: readonly Rule[] = [
     text: 'The claim on this message ran out before the prefill started.',
     bubble: 'closed',
   },
+  {
+    match: 'netkeep is restarting',
+    text: 'netkeep was restarting, so the prefill never started.',
+    bubble: 'closed',
+  },
   { match: 'the message has no body', text: 'The message has no text.', bubble: 'closed' },
   {
     match: 'the contact has no usable LinkedIn URN',

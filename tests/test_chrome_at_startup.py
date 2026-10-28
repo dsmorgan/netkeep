@@ -141,16 +141,21 @@ async def test_off_starts_nothing(running_app: FastAPI) -> None:
     assert spawner.calls == []
 
 
-async def test_a_restart_triggered_before_it_listens_starts_nothing(
+async def test_a_restart_triggered_between_listening_and_the_submit_starts_nothing(
     running_app: FastAPI, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """#730: the task runner refuses new work once a restart is triggered, so the start
-    at startup spawns nothing, and says why."""
+    """#730: the restart is triggered after serve began listening, while the startup
+    launch still reads the browser lock, before its submit. The task runner refuses it,
+    so it spawns nothing, and says why."""
     caplog.set_level(logging.INFO, logger="netkeep.worker")
     spawner = _FakeSpawner()
     _ready(running_app, spawner)
-    running_app.state.tasks.refuse_new(RESTARTING)
-    assert await _start(running_app) is None
+
+    def triggered_meanwhile() -> bool:
+        running_app.state.tasks.refuse_new(RESTARTING)
+        return False
+
+    assert await _start(running_app, run_holds_browser=triggered_meanwhile) is None
     assert spawner.calls == []
     assert "not starting netkeep's Chrome at startup: netkeep is restarting" in caplog.text
 

@@ -279,6 +279,9 @@ def _live_busy(app: FastAPI) -> list[str]:
 
 async def _busy(app: FastAPI) -> list[str]:
     stored = await asyncio.to_thread(restart_gate.stored_busy, app.state.session_factory)
+    # The live read stays after the last await (#730): the gate refuses new runs and
+    # triggers with no await after this returns, so a task submitted while the database
+    # was read is still seen here. Read first, it would be missed and cut off.
     return stored + _live_busy(app)
 
 
