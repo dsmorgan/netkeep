@@ -16,7 +16,7 @@ from netkeep.crm import identity
 from netkeep.crm.importer import FIELD_SIZE_LIMIT
 from netkeep.crm.provenance import set_manual_field
 from netkeep.db import session_scope
-from netkeep.models import Contact, ContactSource, User
+from netkeep.models import Contact, ContactSource, ImportRun, User
 from netkeep.scoping import scoped
 
 CSRF = {"X-Netkeep-Client": "1"}
@@ -420,7 +420,7 @@ async def test_a_commit_counts_contacts_with_no_profile_url_and_no_email(
 
 
 async def test_the_unreachable_count_is_history_once_the_run_is_rolled_back(
-    client: httpx.AsyncClient,
+    client: httpx.AsyncClient, running_app: FastAPI
 ) -> None:
     """Like ``duplicate_groups``: kept in ``report_json``, no longer a live warning (#656)."""
     body = await _commit_unreachable(client)
@@ -428,6 +428,12 @@ async def test_the_unreachable_count_is_history_once_the_run_is_rolled_back(
         await client.post(f"/api/v1/imports/{body['id']}/rollback", headers=CSRF)
     ).status_code == 200
     assert (await client.get(f"/api/v1/imports/{body['id']}")).json()["unreachable_contacts"] == 0
+    # The count stays on the run as history; only the live warning is gone.
+    factory: sessionmaker[Session] = running_app.state.session_factory
+    with session_scope(factory) as session:
+        user = session.scalars(select(User)).one()
+        run = session.scalars(scoped(user, ImportRun).where(ImportRun.id == body["id"])).one()
+        assert run.report_json == {"unreachable_contacts": 2}
 
 
 async def test_a_draft_has_no_unreachable_count(client: httpx.AsyncClient) -> None:

@@ -1,7 +1,9 @@
 """Mailboxes: connect, disconnect, the health check and its poll (#244, P3-01)."""
 
 import asyncio
+import re
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import factories
 import pytest
@@ -660,3 +662,18 @@ def test_another_users_mailbox_reads_disarmed(session_factory: sessionmaker[Sess
     with session_scope(session_factory, write=True) as session:
         assert service.armed(session, other, mailbox.id) is None
         assert not service.record_message_id_verified(session, other, mailbox.id, now=NOW)
+
+
+def test_return_paths_match_the_frontend_routes() -> None:
+    """A Connect Gmail button can return to every static page route and to no other (#656)."""
+    routes = Path(__file__).parent.parent / "frontend" / "src" / "routes"
+    paths = set()
+    for file in routes.glob("*.tsx"):
+        match = re.search(r"createFileRoute\('([^']+)'\)", file.read_text())
+        if match is None:  # ``__root.tsx`` is not a page
+            continue
+        path = match.group(1)
+        if "$" not in path:
+            paths.add(path.rstrip("/") or "/")
+    # ``/imports`` is a layout route; its page is ``/imports/``, which strips to the same path.
+    assert paths == service.RETURN_PATHS
