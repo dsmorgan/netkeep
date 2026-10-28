@@ -38,7 +38,14 @@ from netkeep import migrations
 from netkeep.cli import app as cli
 from netkeep.config import Settings
 from netkeep.crm import import_runs, triage
-from netkeep.crm.contacts import _has_child, _has_tag, add_email, contact_stats, merge_contacts
+from netkeep.crm.contacts import (
+    _has_child,
+    _has_tag,
+    add_email,
+    contact_stats,
+    merge_contacts,
+    update_email,
+)
 from netkeep.crm.exports import export_stream
 from netkeep.crm.filters import FilterTree
 from netkeep.crm.tags import create_tag, tag_contact
@@ -1036,6 +1043,42 @@ def test_cli_import_rollback_undoes_a_committed_run_and_reports_counts(
     with cli_db() as session:
         user = ensure_local_user(session)
         assert session.scalar(scoped_count(user, Contact)) == 0
+
+
+def test_cli_import_rollback_names_the_rows_it_kept(
+    cli_db: sessionmaker[Session], tmp_path: Path
+) -> None:
+    """#725: a row the run added to a contact it did not create, edited since, stays."""
+    with session_scope(cli_db, write=True) as session:
+        user = ensure_local_user(session)
+        existing = factories.make_contact(
+            session, user, li_urn=None, li_public_id="quillon-varnadoe-qz", first_name="Quillon"
+        )
+        existing_id = existing.id
+    source = tmp_path / "quillon.csv"
+    source.write_text(
+        "Profile Url,First Name,Last Name,Company Name,Position,Email\n"
+        "https://www.linkedin.com/in/quillon-varnadoe-qz/,Quillon,Varnadoe,Lantern Guild,"
+        "Wick Trimmer,quillon@lanterns.example\n"
+    )
+    commit = CliRunner().invoke(cli, ["import", "csv", str(source)])
+    assert commit.exit_code == 0, commit.output
+    run_id = _run_id(commit.output, "committed")
+    with session_scope(cli_db, write=True) as session:
+        user = ensure_local_user(session)
+        (address,) = session.scalars(
+            scoped(user, ContactEmail).where(ContactEmail.contact_id == existing_id)
+        )
+        update_email(session, user, existing_id, address.id, {"status": "bounced"})
+        address_id = address.id
+
+    result = CliRunner().invoke(cli, ["import", "rollback", str(run_id)])
+
+    assert result.exit_code == 0, result.output
+    assert (
+        "kept 1 row(s) the run added, because they changed after the import: "
+        f"email {address_id} on contact {existing_id}"
+    ) in result.output
 
 
 def test_cli_import_rollback_of_an_unknown_run_reports_a_clean_error(

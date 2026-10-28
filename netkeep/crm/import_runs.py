@@ -35,7 +35,12 @@ the child rows the run created (addresses, phones, links, positions, the
 snapshot a job change wrote, a retired slug's alias) are deleted by id. A field
 that something changed after the import is left alone: the rollback only puts
 back what still holds the value the run wrote. A field the import was refused
-was never written, so a rollback never touches it either.
+was never written, so a rollback never touches it either. The same goes for a
+child row the run added, and for an interaction an archive run wrote: one that
+something wrote to after the commit (a person's edit, a bounce, the inbox poll
+adopting it, a later import seeing it again) is kept, because deleting it would
+take that later change with it (#725). Its ``updated_at``, which every write
+stamps, says so. :attr:`RollbackResult.kept` names each row kept.
 
 A rollback does not undo the ``source`` and ``observed_at`` stamps refreshed on
 child rows that already existed: the row was not created by the run, and its
@@ -53,7 +58,7 @@ enriched, is therefore refused (:class:`RunSuperseded`), naming the runs to
 undo first. And a contact the run created may since have gained things the run
 never gave it: interactions, tags or lists a person added, triage decisions,
 their own edits, child rows from a later import, fields a sync or another source
-filled in. Deleting it would take all of
+filled in, a detail of its own changed since. Deleting it would take all of
 that with it, so such a run is refused (:class:`CreatedContactsChanged`),
 saying what would be lost, unless the caller passes ``force``. A campaign
 message is the one thing ``force`` never deletes (#242): the database refuses
@@ -75,9 +80,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from datetime import date, datetime
-from typing import Any, Final, assert_never, cast
+from typing import Any, Final, Literal, assert_never, cast
 
-from sqlalchemy import CursorResult, Delete, or_, select
+from sqlalchemy import ColumnElement, CursorResult, Delete, and_, not_, or_, select, true
 from sqlalchemy.orm import Session, class_mapper, selectinload
 
 from netkeep.crm import identity
@@ -179,6 +184,17 @@ CHILD_MODELS: Final[dict[str, type[ContactChild]]] = {
 # an archive run's interactions (#132), recorded in ``import_runs.created_json``.
 RUN_CREATED_MODELS: Final[dict[str, type[Interaction]]] = {
     Interaction.__tablename__: Interaction,
+}
+KeptKind = Literal["email", "phone", "link", "position", "snapshot", "alias", "interaction"]
+"""What a row a rollback kept is, in words a report can use (#725)."""
+KEPT_KINDS: Final[dict[str, KeptKind]] = {
+    ContactEmail.__tablename__: "email",
+    ContactPhone.__tablename__: "phone",
+    ContactLink.__tablename__: "link",
+    ContactPosition.__tablename__: "position",
+    ContactSnapshot.__tablename__: "snapshot",
+    ContactAlias.__tablename__: "alias",
+    Interaction.__tablename__: "interaction",
 }
 _CHILD_RELATIONSHIPS: Final[dict[str, str]] = {
     ContactEmail.__tablename__: "emails",
@@ -286,7 +302,12 @@ class Acquired:
     forced rollback deletes with them while nothing has been sent (#242).
     ``adopted`` is how many of ``interactions`` are the run's own archive
     messages that the inbox poll has adopted since (#702); the refusal says so,
-    since they read as the run's own.
+    since they read as the run's own. ``changed_interactions`` is how many more
+    of them are the run's own that something else wrote to since, such as a
+    summary edited by hand (#725). ``changed_children`` counts the emails,
+    phones, links, positions, snapshots and aliases the run gave them that
+    something wrote to since: a person's edit, a bounce, a later import seeing
+    one again (#725).
     """
 
     contact_ids: tuple[int, ...]
@@ -300,6 +321,8 @@ class Acquired:
     later_imports: int = 0
     enrollments: int = 0
     adopted: int = 0
+    changed_interactions: int = 0
+    changed_children: int = 0
 
     def __bool__(self) -> bool:
         return any(count for count, _, _ in self._parts())
@@ -312,6 +335,11 @@ class Acquired:
             (self.enrollments, "campaign enrollment", "campaign enrollments"),
             (self.triage_decisions, "triage decision", "triage decisions"),
             (self.children, "detail added later", "details added later"),
+            (
+                self.changed_children,
+                "detail changed since the import",
+                "details changed since the import",
+            ),
             (self.edited_contacts, "contact with your own edits", "contacts with your own edits"),
             (
                 self.enriched_contacts,
@@ -330,13 +358,18 @@ class Acquired:
         parts = [
             f"{count} {one if count == 1 else many}" for count, one, many in self._parts() if count
         ]
+        notes = []
         if self.adopted:
-            # Always the first part: ``interactions`` leads _parts() and counts these.
             noun = "message" if self.adopted == 1 else "messages"
-            parts[0] += (
-                f" (including {self.adopted} {noun} this run wrote that the inbox poll "
-                "has since adopted)"
+            notes.append(
+                f"{self.adopted} {noun} this run wrote that the inbox poll has since adopted"
             )
+        if self.changed_interactions:
+            verb = "was" if self.changed_interactions == 1 else "were"
+            notes.append(f"{self.changed_interactions} this run wrote that {verb} changed since")
+        if notes:
+            # Always the first part: ``interactions`` leads _parts() and counts these.
+            parts[0] += f" (including {', and '.join(notes)})"
         return ", ".join(parts)
 
 
@@ -1433,6 +1466,9 @@ def commit(
         report[REPORT_UNREACHABLE_KEY] = unreachable
     run.report_json = report or None
     run.status = ImportStatus.COMMITTED
+    # Every row's writes land before the commit is stamped, so none of them reads
+    # as written after it to a rollback (#725, _untouched_since).
+    session.flush()
     run.committed_at = utcnow()
     # The rules, over the contacts this commit wrote and no others, in the same
     # transaction (spec 10.3, #64). A file that lands leaves its contacts tagged;
@@ -1482,14 +1518,37 @@ def _written_contacts(outcomes: Sequence[_Outcome]) -> list[int]:
 
 
 @dataclass(frozen=True)
+class KeptRow:
+    """A row the run added that its rollback kept, because something wrote to it since (#725).
+
+    ``contact_id`` is the contact holding the row now, which a merge may have
+    changed since the import.
+    """
+
+    kind: KeptKind
+    row_id: int
+    contact_id: int
+
+    def describe(self) -> str:
+        """``"email 12 on contact 5"``."""
+        return f"{self.kind} {self.row_id} on contact {self.contact_id}"
+
+
+@dataclass(frozen=True)
 class RollbackResult:
-    """What undoing a run removed and put back."""
+    """What undoing a run removed and put back, and what it kept.
+
+    ``kept`` names each row the run added to a contact it did not create, or
+    each interaction it wrote, that the rollback left in place because something
+    wrote to it after the commit (#725), ordered by contact, kind, and id.
+    """
 
     run_id: int
     contacts_deleted: int
     contacts_restored: int
     fields_restored: int
     children_deleted: int
+    kept: tuple[KeptRow, ...] = ()
 
 
 def rollback(session: Session, user: User, run_id: int, *, force: bool = False) -> RollbackResult:
@@ -1502,7 +1561,13 @@ def rollback(session: Session, user: User, run_id: int, *, force: bool = False) 
     import keeps that later value, and keeps its ``field_sources`` and
     ``synced_values`` entries with it: putting the provenance back without the
     value would leave a person's own edit in place marked as nobody's, and the
-    next import would overwrite it.
+    next import would overwrite it. A child row the run added, or an interaction
+    it wrote, that something wrote to after the commit is kept, ``force`` or not,
+    and named in :attr:`RollbackResult.kept` (#725): a person edited it, marked
+    it bounced, the inbox poll adopted it, or a later import saw it again, and
+    deleting it would lose that. On a contact the run created such a row counts
+    as something the contact gained instead, because deleting the contact
+    deletes the row too.
 
     Refused, with nothing undone: ``CreatedContactsMessaged`` when a contact
     the run created has a campaign message, which nothing may delete, ``force``
@@ -1550,6 +1615,7 @@ def rollback(session: Session, user: User, run_id: int, *, force: bool = False) 
         acquired = _acquired_since(session, user, run, created_ids)
         if acquired:
             raise CreatedContactsChanged(acquired)
+    kept = _kept_rows(session, user, run, rows, created_ids)
     restored = fields = children = 0
     for row in rows:
         changes = row.changes_json
@@ -1557,7 +1623,7 @@ def rollback(session: Session, user: User, run_id: int, *, force: bool = False) 
             continue
         if row.contact_id in created_ids:
             continue  # the same run created this contact; it is about to be deleted
-        undone = _restore(session, user, row.contact_id, changes)
+        undone = _restore(session, user, row.contact_id, changes, since=run.committed_at)
         if undone is None:
             continue
         restored += 1
@@ -1571,13 +1637,14 @@ def rollback(session: Session, user: User, run_id: int, *, force: bool = False) 
     run.rolled_back_at = utcnow()
     session.flush()
     log.info(
-        "import run %d rolled back for user %d: %d contacts deleted, %d restored",
+        "import run %d rolled back for user %d: %d contacts deleted, %d restored, %d rows kept",
         run.id,
         user.id,
         deleted,
         restored,
+        len(kept),
     )
-    return RollbackResult(run.id, deleted, restored, fields, children)
+    return RollbackResult(run.id, deleted, restored, fields, children, kept)
 
 
 # --- deleting a draft ---------------------------------------------------------
@@ -1606,9 +1673,13 @@ def delete_run(session: Session, user: User, run_id: int) -> None:
 
 
 def _restore(
-    session: Session, user: User, contact_id: int, changes: RowChanges
+    session: Session, user: User, contact_id: int, changes: RowChanges, *, since: datetime | None
 ) -> tuple[int, int] | None:
-    """Put one enriched contact back. ``(fields restored, child rows deleted)``, or None."""
+    """Put one enriched contact back. ``(fields restored, child rows deleted)``, or None.
+
+    A child row something wrote to after ``since``, the run's commit, stays
+    (:func:`_untouched_since`, #725).
+    """
     contact = get_scoped_contact(session, user, contact_id)
     if contact is None:
         return None  # deleted since the import; there is nothing to put back
@@ -1658,10 +1729,73 @@ def _restore(
             continue
         # ``ContactChild`` declares no primary key of its own; each table does.
         (key,) = class_mapper(model).primary_key
-        statement = scoped_delete(user, model).where(model.contact_id == contact.id, key.in_(ids))
+        statement = scoped_delete(user, model).where(
+            model.contact_id == contact.id, key.in_(ids), _untouched_since(model, since)
+        )
         result = cast("CursorResult[Any]", session.execute(_unsynchronized(statement)))
         deleted += result.rowcount
     return restored, deleted
+
+
+def _untouched_since(model: type[ContactChild], since: datetime | None) -> ColumnElement[bool]:
+    """A row of the run's that a rollback may still delete: nothing wrote to it after ``since``.
+
+    ``since`` is the run's commit. Every write stamps ``updated_at``
+    (:class:`~netkeep.models.base.TimestampMixin`): a person's edit, a bounce,
+    a merge moving the row, a later import refreshing it. The commit flushes
+    before it stamps ``committed_at``, so the run's own writes are never later
+    than it (#725). An interaction is also claimed once the inbox poll adopts it
+    (``external_id``) or a campaign send links it (``message_id``, #702).
+    """
+    condition: ColumnElement[bool] = true() if since is None else model.updated_at <= since
+    if model is Interaction:
+        condition = and_(
+            condition, Interaction.external_id.is_(None), Interaction.message_id.is_(None)
+        )
+    return condition
+
+
+def _kept_rows(
+    session: Session,
+    user: User,
+    run: ImportRun,
+    rows: Sequence[ImportRow],
+    created_ids: set[int],
+) -> tuple[KeptRow, ...]:
+    """The rows the run added that its rollback keeps, because something wrote to them since.
+
+    The child rows recorded on the rows that enriched a contact, and the
+    interactions recorded on the run (an archive's messages), that
+    :func:`_untouched_since` rules out. A row now on a contact the run created
+    is left out: it goes with the contact, and :func:`_acquired_since` counted it.
+    """
+    wanted: dict[str, set[int]] = {}
+    for row in rows:
+        changes = row.changes_json
+        if changes is None or changes["created_contact"] or row.contact_id is None:
+            continue
+        if row.contact_id in created_ids:
+            continue
+        for table, ids in changes["children"].items():
+            if table in CHILD_MODELS and ids:
+                wanted.setdefault(table, set()).update(ids)
+    for table, created in (run.created_json or {}).items():
+        if table in RUN_CREATED_MODELS and created:
+            wanted.setdefault(table, set()).update(created)
+    kept: list[KeptRow] = []
+    for table, found in wanted.items():
+        model: type[ContactChild] = CHILD_MODELS.get(table) or RUN_CREATED_MODELS[table]
+        (key,) = class_mapper(model).primary_key
+        for chunk in _chunks(sorted(found)):
+            statement = (
+                scoped(user, model)
+                .where(key.in_(chunk), not_(_untouched_since(model, run.committed_at)))
+                .with_only_columns(key, model.contact_id)
+            )
+            for row_id, contact_id in session.execute(statement):
+                if contact_id not in created_ids:
+                    kept.append(KeptRow(KEPT_KINDS[table], row_id, contact_id))
+    return tuple(sorted(kept, key=lambda row: (row.contact_id, row.kind, row.row_id)))
 
 
 def _messaged(session: Session, user: User, contact_ids: Iterable[int]) -> tuple[list[int], int]:
@@ -1858,7 +1992,11 @@ def _acquired_since(
     anybody who still matched, so nothing a person did is lost with them. Nor
     are the interactions the run itself wrote (an archive run's messages), unless
     the inbox poll has adopted one since (#702): deleting the contact would lose
-    that record of a message netkeep observed.
+    that record of a message netkeep observed. Or unless something else wrote to
+    one since, such as a person editing its summary (#725). The same goes for
+    the child rows the run gave the contact: one written to since the commit,
+    edited by hand, marked bounced, or seen again by a later import, counts in
+    ``changed_children`` (:func:`_untouched_since`).
 
     A contact counts as enriched when its ``field_sources`` or ``synced_values``
     name an automated source other than the run's own (#217). A sync that sets a
@@ -1873,29 +2011,43 @@ def _acquired_since(
     # Compared in Python: an archive's message history can hold more ids than a
     # statement may bind parameters.
     own_interactions = set((run.created_json or {}).get(Interaction.__tablename__, []))
+    since = run.committed_at
     interactions: set[int] = set()
-    adopted = 0
-    for interaction_id, external_id, message_id in session.execute(
+    adopted = changed_interactions = 0
+    for interaction_id, external_id, message_id, updated_at in session.execute(
         scoped(user, Interaction)
         .where(Interaction.contact_id.in_(ids))
-        .with_only_columns(Interaction.id, Interaction.external_id, Interaction.message_id)
+        .with_only_columns(
+            Interaction.id, Interaction.external_id, Interaction.message_id, Interaction.updated_at
+        )
     ):
         interactions.add(interaction_id)
-        claimed = external_id is not None or message_id is not None
-        if claimed and interaction_id in own_interactions:
+        if interaction_id not in own_interactions:
+            continue
+        if external_id is not None or message_id is not None:
             # The inbox poll adopted it since (#702): no longer only the run's.
             own_interactions.discard(interaction_id)
             adopted += 1
+        elif since is not None and updated_at > since:
+            # Something wrote to it since, a person's edit say (#725).
+            own_interactions.discard(interaction_id)
+            changed_interactions += 1
 
     def count(statement: Any) -> int:
         return int(session.scalar(statement) or 0)
 
-    since = run.committed_at
-    children = 0
+    children = changed_children = 0
     if since is not None:
         for model in CHILD_MODELS.values():
             children += count(
                 scoped_count(user, model).where(model.contact_id.in_(ids), model.created_at > since)
+            )
+            changed_children += count(
+                scoped_count(user, model).where(
+                    model.contact_id.in_(ids),
+                    model.created_at <= since,
+                    not_(_untouched_since(model, since)),
+                )
             )
     edited = enriched = 0
     ours = {run.source_kind.value, ContactSource.MANUAL.value}
@@ -1937,6 +2089,8 @@ def _acquired_since(
         enriched_contacts=enriched,
         later_imports=len(later_imports),
         adopted=adopted,
+        changed_interactions=changed_interactions,
+        changed_children=changed_children,
     )
 
 
@@ -1948,6 +2102,8 @@ def _delete_run_created(session: Session, user: User, run: ImportRun) -> int:
     ``external_id``, and a campaign send it confirms links through
     ``message_id``. That row is now the timeline's record of a message netkeep
     saw, and the poll will not write it again once the message leaves its window.
+    One something wrote to after the commit, such as a summary a person edited,
+    stays too (#725). :func:`_untouched_since` says which.
     """
     deleted = 0
     for table, ids in (run.created_json or {}).items():
@@ -1957,7 +2113,7 @@ def _delete_run_created(session: Session, user: User, run: ImportRun) -> int:
         (key,) = class_mapper(model).primary_key
         for chunk in _chunks(sorted(ids)):
             statement = scoped_delete(user, model).where(
-                key.in_(chunk), model.external_id.is_(None), model.message_id.is_(None)
+                key.in_(chunk), _untouched_since(model, run.committed_at)
             )
             result = cast("CursorResult[Any]", session.execute(_unsynchronized(statement)))
             deleted += result.rowcount

@@ -26,7 +26,7 @@ from netkeep.crm.archive import (
     import_archive,
     report_json,
 )
-from netkeep.crm.interactions import INVITATION_SUMMARY, add_interaction
+from netkeep.crm.interactions import INVITATION_SUMMARY, add_interaction, update_interaction
 from netkeep.crm.provenance import SOURCE_RANK, revert_to_synced, set_manual_field
 from netkeep.crm.tags import contact_tags, create_rule, create_tag, list_rules
 from netkeep.db import session_scope
@@ -892,10 +892,55 @@ def test_rolling_back_an_archive_run_keeps_the_messages_the_inbox_poll_adopted(
     second.message_id = campaign_message.id
     writer.flush()
 
-    import_runs.rollback(writer, user, run_id)
+    result = import_runs.rollback(writer, user, run_id)
 
     # Ada's other messages, and every interaction on the contacts the run created, go.
     assert {row.id for row in _interactions(writer, user)} == {first.id, second.id}
+    # The report names what stayed (#725).
+    assert {(row.kind, row.row_id, row.contact_id) for row in result.kept} == {
+        ("interaction", first.id, ada_id),
+        ("interaction", second.id, ada_id),
+    }
+
+
+def test_rolling_back_an_archive_run_keeps_a_message_whose_summary_was_edited_since(
+    writer: Session, user: User, archive: Archive
+) -> None:
+    """#725: the edited summary is the person's; deleting the row would lose it."""
+    run_id, ada_id = _ada_with_the_runs_messages(writer, user, archive)
+    edited, *rest = [row for row in _interactions(writer, user) if row.contact_id == ada_id]
+    assert rest, "the sample gives Ada more than one message"
+    update_interaction(writer, user, edited.id, summary="Invented summary, edited by hand.")
+    edited_id = edited.id
+
+    result = import_runs.rollback(writer, user, run_id)
+
+    # Ada's untouched messages, and every interaction on the contacts the run created, go.
+    remaining = _interactions(writer, user)
+    assert [(row.id, row.summary) for row in remaining] == [
+        (edited_id, "Invented summary, edited by hand.")
+    ]
+    assert result.kept == (import_runs.KeptRow("interaction", edited_id, ada_id),)
+
+
+def test_a_message_edited_on_a_contact_the_archive_created_counts_as_gained(
+    writer: Session, user: User, archive: Archive
+) -> None:
+    """Deleting the contact would take the edited row with it, so only ``force`` may (#725)."""
+    report = _run(writer, user, archive)
+    assert report.run_id is not None
+    edited = _interactions(writer, user)[0]
+    update_interaction(writer, user, edited.id, summary="Invented summary, edited by hand.")
+
+    with pytest.raises(import_runs.CreatedContactsChanged) as raised:
+        import_runs.rollback(writer, user, report.run_id)
+
+    assert raised.value.acquired.interactions == 1
+    assert raised.value.acquired.changed_interactions == 1
+    assert raised.value.acquired.adopted == 0
+    assert "1 interaction (including 1 this run wrote that was changed since)" in str(raised.value)
+    import_runs.rollback(writer, user, report.run_id, force=True)
+    assert _all_contacts(writer, user) == []
 
 
 def test_an_adopted_message_on_a_contact_the_archive_created_counts_as_gained(

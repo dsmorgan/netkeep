@@ -82,6 +82,7 @@ from netkeep.web.schemas import (
     ImportRunOut,
     ImportRunPage,
     RollbackAcquiredOut,
+    RollbackKeptOut,
     RollbackRefusalOut,
 )
 
@@ -581,7 +582,8 @@ ROLLBACK_REFUSED: Responses = {
         "model": RollbackRefusalOut,
         "description": "The run is not committed, or rolling it back is refused: a contact "
         "it created has a campaign message, a merge drew in a contact it created or enriched, "
-        "a later run wrote over it, or contacts it created have gained things since (unless force)",
+        "a later run wrote over it, or contacts it created have gained things or had their "
+        "details changed since (unless force)",
     }
 }
 
@@ -615,6 +617,7 @@ def rollback_refusal(exc: service.ImportRunError) -> ApiError:
                 list_memberships=acquired.list_memberships,
                 triage_decisions=acquired.triage_decisions,
                 children=acquired.children,
+                changed_children=acquired.changed_children,
                 edited_contacts=acquired.edited_contacts,
                 enriched_contacts=acquired.enriched_contacts,
                 later_imports=acquired.later_imports,
@@ -644,7 +647,9 @@ def rollback_import_run(
     A contact the run created is deleted; a contact it only enriched keeps the
     values it had before the run, and the child rows the run added are removed. A
     field something changed after the import keeps that later value, and its
-    provenance with it.
+    provenance with it. A child row the run added to a contact it did not create,
+    or an interaction it wrote, that something wrote to after the import (an
+    edit, a bounce, the inbox poll) stays, and ``kept`` names it (#725).
 
     Refused with ``409`` and nothing undone, the body's ``code`` saying why
     (#78): ``created_contacts_messaged`` when a contact the run created has a
@@ -654,8 +659,8 @@ def rollback_import_run(
     when a later run wrote over fields this one wrote, naming the runs to roll
     back first; ``created_contacts_changed`` when contacts the run created have
     gained interactions, tags, lists, campaign enrollments, edits, another
-    source's data or later imports, counted in
-    ``acquired``, which ``force`` overrides.
+    source's data or later imports, or something wrote to a detail the run gave
+    them since (#725), counted in ``acquired``, which ``force`` overrides.
     """
     try:
         with translate_errors():
@@ -673,6 +678,10 @@ def rollback_import_run(
         contacts_restored=result.contacts_restored,
         fields_restored=result.fields_restored,
         children_deleted=result.children_deleted,
+        kept=[
+            RollbackKeptOut(kind=row.kind, id=row.row_id, contact_id=row.contact_id)
+            for row in result.kept
+        ],
     )
 
 

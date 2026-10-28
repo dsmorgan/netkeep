@@ -175,6 +175,7 @@ function detailBackend(
           contacts_restored: 1,
           fields_restored: 3,
           children_deleted: 5,
+          kept: [],
         })
       },
     },
@@ -242,6 +243,31 @@ describe('one import run', () => {
     })
     expect(within(screen.getByRole('main')).getByRole('status')).toHaveTextContent(
       'Deleted 2 contacts this import created',
+    )
+  })
+
+  it('names the records a rollback kept because they changed since (issue #725)', async () => {
+    mockFetch(
+      detailBackend(COMMITTED_RUN, [], () =>
+        jsonResponse({
+          run_id: 7,
+          contacts_deleted: 2,
+          contacts_restored: 1,
+          fields_restored: 3,
+          children_deleted: 4,
+          kept: [{ kind: 'email', id: 90, contact_id: 31 }],
+        }),
+      ),
+    )
+    await renderApp('/imports/runs/7')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Roll back this import' }))
+    const dialog = within(await screen.findByRole('alertdialog'))
+    fireEvent.click(dialog.getByRole('button', { name: 'Delete 2 contacts and restore the rest' }))
+
+    expect(await screen.findByText(/^Kept 1 record this import added/)).toHaveTextContent(
+      'because it was changed after the import (edited, marked bounced, or seen again): ' +
+        'email on contact #31.',
     )
   })
 

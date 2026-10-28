@@ -451,6 +451,9 @@ def import_archive(
     # deleted (netkeep.crm.tags.ensure_default_rules).
     ensure_default_rules(session, user)
     report.tagging = run_rules(session, user, sorted(set(touched)))
+    # Every write lands before the run is stamped committed, so a rollback never
+    # reads one of the import's own rows as written after it (#725).
+    session.flush()
     _finish_run(run, report, written.created, ignored=archive.ignored)
     session.flush()
     report.run_id = run.id
