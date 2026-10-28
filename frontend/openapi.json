@@ -8183,7 +8183,7 @@
         "type": "string"
       },
       "ImportRollbackOut": {
-        "description": "What undoing a run removed and put back.",
+        "description": "What undoing a run removed and put back, and what it kept.",
         "properties": {
           "children_deleted": {
             "title": "Children Deleted",
@@ -8201,6 +8201,13 @@
             "title": "Fields Restored",
             "type": "integer"
           },
+          "kept": {
+            "items": {
+              "$ref": "#/components/schemas/RollbackKeptOut"
+            },
+            "title": "Kept",
+            "type": "array"
+          },
           "run_id": {
             "title": "Run Id",
             "type": "integer"
@@ -8211,7 +8218,8 @@
           "contacts_deleted",
           "contacts_restored",
           "fields_restored",
-          "children_deleted"
+          "children_deleted",
+          "kept"
         ],
         "title": "ImportRollbackOut",
         "type": "object"
@@ -12900,6 +12908,10 @@
       "RollbackAcquiredOut": {
         "description": "What the contacts a run created gained since, none of it from the run (#78).",
         "properties": {
+          "changed_children": {
+            "title": "Changed Children",
+            "type": "integer"
+          },
           "children": {
             "title": "Children",
             "type": "integer"
@@ -12943,12 +12955,46 @@
           "list_memberships",
           "triage_decisions",
           "children",
+          "changed_children",
           "edited_contacts",
           "enriched_contacts",
           "later_imports",
           "enrollments"
         ],
         "title": "RollbackAcquiredOut",
+        "type": "object"
+      },
+      "RollbackKeptOut": {
+        "description": "A row the run added that its rollback kept, because something wrote to it since (#725).",
+        "properties": {
+          "contact_id": {
+            "title": "Contact Id",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "email",
+              "phone",
+              "link",
+              "position",
+              "snapshot",
+              "alias",
+              "interaction"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "contact_id"
+        ],
+        "title": "RollbackKeptOut",
         "type": "object"
       },
       "RollbackRefusalOut": {
@@ -23084,7 +23130,7 @@
     },
     "/api/v1/imports/{run_id}/rollback": {
       "post": {
-        "description": "Undo a committed run, and only what that run did.\n\nA contact the run created is deleted; a contact it only enriched keeps the\nvalues it had before the run, and the child rows the run added are removed. A\nfield something changed after the import keeps that later value, and its\nprovenance with it.\n\nRefused with ``409`` and nothing undone, the body's ``code`` saying why\n(#78): ``created_contacts_messaged`` when a contact the run created has a\ncampaign message, which is never deleted, so ``force`` does not override it\n(#242); ``merged`` when a merge has since drawn in a contact the run created,\nbecause deleting it would take rows the run never created; ``superseded``\nwhen a later run wrote over fields this one wrote, naming the runs to roll\nback first; ``created_contacts_changed`` when contacts the run created have\ngained interactions, tags, lists, campaign enrollments, edits, another\nsource's data or later imports, counted in\n``acquired``, which ``force`` overrides.",
+        "description": "Undo a committed run, and only what that run did.\n\nA contact the run created is deleted; a contact it only enriched keeps the\nvalues it had before the run, and the child rows the run added are removed. A\nfield something changed after the import keeps that later value, and its\nprovenance with it. A child row the run added to a contact it did not create,\nor an interaction it wrote, that something wrote to after the import (an\nedit, a bounce, the inbox poll) stays, and ``kept`` names it (#725).\n\nRefused with ``409`` and nothing undone, the body's ``code`` saying why\n(#78): ``created_contacts_messaged`` when a contact the run created has a\ncampaign message, which is never deleted, so ``force`` does not override it\n(#242); ``merged`` when a merge has since drawn in a contact the run created,\nbecause deleting it would take rows the run never created; ``superseded``\nwhen a later run wrote over fields this one wrote, naming the runs to roll\nback first; ``created_contacts_changed`` when contacts the run created have\ngained interactions, tags, lists, campaign enrollments, edits, another\nsource's data or later imports, or something wrote to a detail the run gave\nthem since (#725), counted in ``acquired``, which ``force`` overrides.",
         "operationId": "rollback_import_run",
         "parameters": [
           {
@@ -23131,7 +23177,7 @@
                 }
               }
             },
-            "description": "The run is not committed, or rolling it back is refused: a contact it created has a campaign message, a merge drew in a contact it created or enriched, a later run wrote over it, or contacts it created have gained things since (unless force)"
+            "description": "The run is not committed, or rolling it back is refused: a contact it created has a campaign message, a merge drew in a contact it created or enriched, a later run wrote over it, or contacts it created have gained things or had their details changed since (unless force)"
           },
           "422": {
             "content": {

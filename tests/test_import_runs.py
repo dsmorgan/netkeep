@@ -18,7 +18,8 @@ import pytest
 from sqlalchemy import event, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from netkeep.crm import identity, import_runs, triage
+from netkeep.crm import do_not_send, identity, import_runs, triage
+from netkeep.crm.contacts import update_email
 from netkeep.crm.identity import CreateNew, MergeInto
 from netkeep.crm.interactions import add_interaction
 from netkeep.crm.lists import add_members, create_list
@@ -33,6 +34,7 @@ from netkeep.models import (
     ContactPhone,
     ContactSource,
     ContactTag,
+    EmailKind,
     EmailStatus,
     Enrollment,
     EnrollmentStatus,
@@ -271,6 +273,127 @@ def test_rollback_deletes_the_children_the_run_added_but_not_the_ones_it_found(
     import_runs.rollback(writer, user, run_id)
 
     assert {row.email for row in fern.emails} == {"fern.old@kites.example"}
+
+
+# --- rows changed after the commit (#725) ---------------------------------
+
+
+def test_rollback_keeps_an_address_the_run_added_that_was_edited_by_hand_since(
+    writer: Session, user: User
+) -> None:
+    """#725: the edit is the person's own, and deleting the row would take it with it."""
+    fern = seed_existing(writer, user)["fern"]
+    run_id = import_sample(writer, user)
+    (address,) = fern.emails
+    address_id = address.id
+    update_email(writer, user, fern.id, address_id, {"kind": "work"})
+
+    result = import_runs.rollback(writer, user, run_id)
+
+    assert [(row.email, row.kind) for row in fern.emails] == [
+        ("fern@kites.example", EmailKind.WORK)
+    ]
+    assert result.kept == (import_runs.KeptRow("email", address_id, fern.id),)
+    # Everything else the run did to Fern is still undone: the phone nobody touched
+    # since, and the fields.
+    assert fern.phones == []
+    assert fern.current_title == "Kite Apprentice"
+    assert import_runs.get_run(writer, user, run_id).status is ImportStatus.ROLLED_BACK
+
+
+def test_rollback_keeps_an_address_the_run_added_that_was_marked_bounced_since(
+    writer: Session, user: User
+) -> None:
+    """#725: the bounce is a verdict on the address; the CRM keeps the row that carries it."""
+    fern = seed_existing(writer, user)["fern"]
+    run_id = import_sample(writer, user)
+    (address,) = fern.emails
+    address_id = address.id
+    update_email(writer, user, fern.id, address_id, {"status": "bounced"})
+
+    result = import_runs.rollback(writer, user, run_id)
+
+    assert [(row.email, row.status) for row in fern.emails] == [
+        ("fern@kites.example", EmailStatus.BOUNCED)
+    ]
+    assert [row.describe() for row in result.kept] == [f"email {address_id} on contact {fern.id}"]
+    assert do_not_send.find(writer, user, "fern@kites.example") is not None
+
+
+def test_rows_the_run_added_and_nothing_changed_since_are_still_rolled_back(
+    writer: Session, user: User
+) -> None:
+    """The run's own writes are not later than its commit, even when one row of the file
+    writes over another's child row in the same commit (#725)."""
+    fern = seed_existing(writer, user)["fern"]
+    content = (
+        "Profile Url,First Name,Last Name,Email,Phone\n"
+        "https://www.linkedin.com/in/fern-oglethorpe-qz/,Fern,Oglethorpe,"
+        "fern@kites.example,+15550100001\n"
+        "https://www.linkedin.com/in/fern-oglethorpe-qz/,Fern,Oglethorpe,"
+        "fern@kites.example,+15550100001\n"
+    )
+    run_id = import_sample(writer, user, content=content)
+    assert {row.email for row in fern.emails} == {"fern@kites.example"}
+
+    result = import_runs.rollback(writer, user, run_id)
+
+    assert result.kept == ()
+    assert result.children_deleted == 2
+    assert fern.emails == []
+    assert fern.phones == []
+
+
+def test_force_does_not_delete_a_changed_row_on_a_contact_the_run_did_not_create(
+    writer: Session, user: User
+) -> None:
+    """``force`` deletes what contacts the run created gained; it never widens to rows
+    on a contact the rollback keeps (#725)."""
+    fern = seed_existing(writer, user)["fern"]
+    run_id = import_sample(writer, user)
+    (address,) = fern.emails
+    update_email(writer, user, fern.id, address.id, {"status": "bounced"})
+
+    result = import_runs.rollback(writer, user, run_id, force=True)
+
+    assert [row.email for row in fern.emails] == ["fern@kites.example"]
+    assert len(result.kept) == 1
+
+
+def test_a_detail_of_a_created_contact_changed_since_needs_force(
+    writer: Session, user: User
+) -> None:
+    """#725: deleting the contact deletes the edited row with it, so it counts as gained."""
+    run_id, imogen = _created_imogen(writer, user)
+    imogen_id = imogen.id
+    (address,) = imogen.emails
+    update_email(writer, user, imogen_id, address.id, {"status": "bounced"})
+
+    with pytest.raises(import_runs.CreatedContactsChanged) as raised:
+        import_runs.rollback(writer, user, run_id)
+
+    acquired = raised.value.acquired
+    assert acquired.changed_children == 1
+    assert acquired.children == 0
+    assert "1 detail changed since the import" in str(raised.value)
+    assert import_runs.get_run(writer, user, run_id).status is ImportStatus.COMMITTED
+
+    result = import_runs.rollback(writer, user, run_id, force=True)
+
+    assert writer.scalars(scoped(user, Contact).where(Contact.id == imogen_id)).first() is None
+    # Deleted with its contact, so not kept.
+    assert result.kept == ()
+
+
+def test_the_details_a_created_contact_came_with_are_not_counted_as_changed(
+    writer: Session, user: User
+) -> None:
+    """The file names Imogen twice, so the commit writes her rows twice (#725)."""
+    run_id, _ = _created_imogen(writer, user)
+
+    result = import_runs.rollback(writer, user, run_id)
+
+    assert result.contacts_deleted == 2
 
 
 def test_a_run_can_only_be_rolled_back_once(writer: Session, user: User) -> None:

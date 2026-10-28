@@ -167,6 +167,16 @@ function RollbackSummary({ result }: { result: RollbackResult }) {
           {result.children_deleted} related {result.children_deleted === 1 ? 'record' : 'records'}{' '}
           such as emails, phones and positions.
         </p>
+        {result.kept.length > 0 && (
+          <Note>
+            <p>
+              Kept {result.kept.length} {result.kept.length === 1 ? 'record' : 'records'} this
+              import added, because {result.kept.length === 1 ? 'it was' : 'they were'} changed
+              after the import (edited, marked bounced, or seen again):{' '}
+              {result.kept.map((row) => `${row.kind} on contact #${row.contact_id}`).join(', ')}.
+            </p>
+          </Note>
+        )}
       </CardContent>
     </Card>
   )
@@ -211,6 +221,10 @@ function RollbackCard({ run, onDone }: { run: ImportRun; onDone: (r: RollbackRes
           <li>
             Anything changed after the import — by you, by a later import, or by a sync — keeps the
             newer value. This is not a general undo, and it cannot itself be undone.
+          </li>
+          <li>
+            An email, phone, link, position or message the import added to a contact it only
+            updated, and that was changed since, such as an address marked bounced, stays.
           </li>
           <li>
             If a merge has since drawn in one of the contacts this import created, the rollback is

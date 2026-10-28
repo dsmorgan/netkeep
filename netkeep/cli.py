@@ -3921,9 +3921,10 @@ def import_rollback_cmd(
         typer.Option(
             "--force",
             help="Roll back even though contacts the run created have gained interactions, "
-            "tags, lists, campaign enrollments or edits since; they are deleted with them. "
-            "Never overrides a campaign message, a merge or a later run that wrote over "
-            "this one.",
+            "tags, lists, campaign enrollments or edits since, or had a detail the run gave "
+            "them changed; they are deleted with them. Never overrides a campaign message, "
+            "a merge or a later run that wrote over this one. A row the run added to a "
+            "contact it did not create that changed since is kept either way.",
         ),
     ] = False,
 ) -> None:
@@ -3933,7 +3934,9 @@ def import_rollback_cmd(
     message (#242), when a merge has drawn in a contact the run
     created, when a later run wrote over fields it wrote (roll that one back
     first), or when contacts it created have gained things since, which
-    ``--force`` deletes anyway (#78).
+    ``--force`` deletes anyway (#78). An email, phone, link, position or message
+    the run added to a contact it did not create, and that something changed
+    since (an edit, a bounce, the inbox poll), is kept and named (#725).
     """
     engine = make_engine(database_url())
     try:
@@ -3954,6 +3957,11 @@ def import_rollback_cmd(
                 f"{result.contacts_restored} restored, {result.fields_restored} field(s) "
                 f"put back, {result.children_deleted} child row(s) removed"
             )
+            if result.kept:
+                summary += (
+                    f"\nkept {len(result.kept)} row(s) the run added, because they changed "
+                    "after the import: " + ", ".join(row.describe() for row in result.kept)
+                )
     finally:
         engine.dispose()
     typer.echo(summary)

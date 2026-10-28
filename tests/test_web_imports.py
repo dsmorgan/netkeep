@@ -620,6 +620,63 @@ async def test_rolling_back_a_created_contact_that_gained_things_needs_force(
     assert contact_by_slug(running_app, "imogen-thistlewhite-qz") is None
 
 
+async def test_a_rollback_names_the_rows_it_kept_because_they_changed_since(
+    client: httpx.AsyncClient, seeded: dict[str, int]
+) -> None:
+    """#725: an address marked bounced after the import stays, and the response says so."""
+    run = await draft(client)
+    await client.post(
+        f"/api/v1/imports/{run['id']}/commit", headers=CSRF, json={"skip_undecided": True}
+    )
+    fern = (await client.get(f"/api/v1/contacts/{seeded['fern']}")).json()
+    (address,) = fern["emails"]
+    marked = await client.patch(
+        f"/api/v1/contacts/{seeded['fern']}/emails/{address['id']}",
+        headers=CSRF,
+        json={"status": "bounced"},
+    )
+    assert marked.status_code == 200, marked.text
+
+    response = await client.post(f"/api/v1/imports/{run['id']}/rollback", headers=CSRF)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["kept"] == [
+        {"kind": "email", "id": address["id"], "contact_id": seeded["fern"]}
+    ]
+    after = (await client.get(f"/api/v1/contacts/{seeded['fern']}")).json()
+    assert [(row["email"], row["status"]) for row in after["emails"]] == [
+        ("fern@kites.example", "bounced")
+    ]
+    assert after["phones"] == []
+
+
+async def test_a_detail_of_a_created_contact_changed_since_is_counted_in_acquired(
+    client: httpx.AsyncClient, running_app: FastAPI, seeded: object
+) -> None:
+    """#725: ``changed_children`` says why ``force`` is needed."""
+    run = await draft(client)
+    await client.post(
+        f"/api/v1/imports/{run['id']}/commit", headers=CSRF, json={"skip_undecided": True}
+    )
+    imogen = contact_by_slug(running_app, "imogen-thistlewhite-qz")
+    assert imogen is not None
+    detail = (await client.get(f"/api/v1/contacts/{imogen.id}")).json()
+    (address,) = detail["emails"]
+    await client.patch(
+        f"/api/v1/contacts/{imogen.id}/emails/{address['id']}",
+        headers=CSRF,
+        json={"kind": "work"},
+    )
+
+    refused = await client.post(f"/api/v1/imports/{run['id']}/rollback", headers=CSRF)
+
+    assert refused.status_code == 409, refused.text
+    body = refused.json()
+    assert body["code"] == "created_contacts_changed"
+    assert body["acquired"]["changed_children"] == 1
+    assert "1 detail changed since the import" in body["detail"]
+
+
 async def test_rolling_back_a_created_contact_with_a_campaign_message_is_refused_for_good(
     client: httpx.AsyncClient, running_app: FastAPI, seeded: object
 ) -> None:

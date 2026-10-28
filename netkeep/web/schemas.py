@@ -18,6 +18,7 @@ from netkeep.campaigns.render import FieldGroup, LintRule, Part, Severity
 from netkeep.campaigns.templates import TEMPLATE_BODY_MAX_LENGTH, ExampleSource, NameSource
 from netkeep.crm.confirmation import InvalidReason
 from netkeep.crm.filters import FilterTree, SortKey
+from netkeep.crm.import_runs import KeptKind
 from netkeep.crm.importer import ImportField
 from netkeep.crm.interactions import TimelineEntry
 from netkeep.crm.lists import MAX_COLUMNS
@@ -1282,14 +1283,29 @@ class ImportCommitIn(BaseModel):
     """Skip candidate rows nobody decided instead of refusing the commit."""
 
 
+class RollbackKeptOut(BaseModel):
+    """A row the run added that its rollback kept, because something wrote to it since (#725)."""
+
+    kind: KeptKind
+    id: int
+    contact_id: int
+    """The contact holding the row now."""
+
+
 class ImportRollbackOut(BaseModel):
-    """What undoing a run removed and put back."""
+    """What undoing a run removed and put back, and what it kept."""
 
     run_id: int
     contacts_deleted: int
     contacts_restored: int
     fields_restored: int
     children_deleted: int
+    kept: list[RollbackKeptOut]
+    """Each email, phone, link, position, snapshot, or alias the run added to a
+    contact it did not create, and each interaction it wrote, that the rollback
+    left in place because something wrote to it after the import: a person's
+    edit, a bounce, the inbox poll adopting it, a later import seeing it again
+    (#725). ``force`` does not change this."""
 
 
 RollbackRefusalCode = Literal[
@@ -1304,8 +1320,8 @@ message, which is never deleted (#242); the run cannot be rolled back, and
 another contact into one the run added child rows to (#702); undo the merge.
 ``superseded``: a later run wrote over fields this one wrote; roll back
 ``run_ids`` first, newest first. ``created_contacts_changed``: contacts the run
-created have gained what ``acquired`` counts; roll back with ``force`` to
-delete them anyway.
+created have gained what ``acquired`` counts, or something wrote to a detail
+the run gave them since (#725); roll back with ``force`` to delete them anyway.
 """
 
 
@@ -1317,6 +1333,9 @@ class RollbackAcquiredOut(BaseModel):
     list_memberships: int
     triage_decisions: int
     children: int
+    changed_children: int
+    """Emails, phones, links, positions, snapshots, and aliases the run gave the
+    contacts that something wrote to since: an edit, a bounce, a later import (#725)."""
     edited_contacts: int
     enriched_contacts: int
     later_imports: int

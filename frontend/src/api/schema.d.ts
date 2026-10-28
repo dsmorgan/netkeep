@@ -2122,7 +2122,9 @@ export interface paths {
          *     A contact the run created is deleted; a contact it only enriched keeps the
          *     values it had before the run, and the child rows the run added are removed. A
          *     field something changed after the import keeps that later value, and its
-         *     provenance with it.
+         *     provenance with it. A child row the run added to a contact it did not create,
+         *     or an interaction it wrote, that something wrote to after the import (an
+         *     edit, a bounce, the inbox poll) stays, and ``kept`` names it (#725).
          *
          *     Refused with ``409`` and nothing undone, the body's ``code`` saying why
          *     (#78): ``created_contacts_messaged`` when a contact the run created has a
@@ -2132,8 +2134,8 @@ export interface paths {
          *     when a later run wrote over fields this one wrote, naming the runs to roll
          *     back first; ``created_contacts_changed`` when contacts the run created have
          *     gained interactions, tags, lists, campaign enrollments, edits, another
-         *     source's data or later imports, counted in
-         *     ``acquired``, which ``force`` overrides.
+         *     source's data or later imports, or something wrote to a detail the run gave
+         *     them since (#725), counted in ``acquired``, which ``force`` overrides.
          */
         post: operations["rollback_import_run"];
         delete?: never;
@@ -6858,7 +6860,7 @@ export interface components {
         ImportResolution: "matched" | "created" | "candidate" | "skipped";
         /**
          * ImportRollbackOut
-         * @description What undoing a run removed and put back.
+         * @description What undoing a run removed and put back, and what it kept.
          */
         ImportRollbackOut: {
             /** Children Deleted */
@@ -6869,6 +6871,8 @@ export interface components {
             contacts_restored: number;
             /** Fields Restored */
             fields_restored: number;
+            /** Kept */
+            kept: components["schemas"]["RollbackKeptOut"][];
             /** Run Id */
             run_id: number;
         };
@@ -8717,6 +8721,8 @@ export interface components {
          * @description What the contacts a run created gained since, none of it from the run (#78).
          */
         RollbackAcquiredOut: {
+            /** Changed Children */
+            changed_children: number;
             /** Children */
             children: number;
             /** Edited Contacts */
@@ -8735,6 +8741,21 @@ export interface components {
             tags: number;
             /** Triage Decisions */
             triage_decisions: number;
+        };
+        /**
+         * RollbackKeptOut
+         * @description A row the run added that its rollback kept, because something wrote to it since (#725).
+         */
+        RollbackKeptOut: {
+            /** Contact Id */
+            contact_id: number;
+            /** Id */
+            id: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "email" | "phone" | "link" | "position" | "snapshot" | "alias" | "interaction";
         };
         /**
          * RollbackRefusalOut
@@ -14889,7 +14910,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The run is not committed, or rolling it back is refused: a contact it created has a campaign message, a merge drew in a contact it created or enriched, a later run wrote over it, or contacts it created have gained things since (unless force) */
+            /** @description The run is not committed, or rolling it back is refused: a contact it created has a campaign message, a merge drew in a contact it created or enriched, a later run wrote over it, or contacts it created have gained things or had their details changed since (unless force) */
             409: {
                 headers: {
                     [name: string]: unknown;
