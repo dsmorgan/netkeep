@@ -666,14 +666,13 @@ def test_another_users_mailbox_reads_disarmed(session_factory: sessionmaker[Sess
 
 def test_return_paths_match_the_frontend_routes() -> None:
     """A Connect Gmail button can return to every static page route and to no other (#656)."""
-    routes = Path(__file__).parent.parent / "frontend" / "src" / "routes"
-    paths = set()
-    for file in routes.glob("*.tsx"):
-        match = re.search(r"createFileRoute\('([^']+)'\)", file.read_text())
-        if match is None:  # ``__root.tsx`` is not a page
-            continue
-        path = match.group(1)
-        if "$" not in path:
-            paths.add(path.rstrip("/") or "/")
-    # ``/imports`` is a layout route; its page is ``/imports/``, which strips to the same path.
+    generated = Path(__file__).parent.parent / "frontend" / "src" / "routeTree.gen.ts"
+    block = re.search(r"interface FileRoutesByTo \{(.*?)\n\}", generated.read_text(), re.DOTALL)
+    assert block is not None
+    paths = {
+        path
+        for path in re.findall(r"^\s*'([^']+)':", block.group(1), re.MULTILINE)
+        if "$" not in path
+    }
+    assert paths  # the parse found the routes at all
     assert paths == service.RETURN_PATHS

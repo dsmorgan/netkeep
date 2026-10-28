@@ -327,6 +327,26 @@ describe('editing a rule', () => {
     expect(requestsTo(seen, 'GET', '/api/v1/autotag-rules').length).toBeGreaterThan(1)
   })
 
+  it('names the enable checkbox "Enabled" and describes it with the rule number', async () => {
+    const seen = mockApi(
+      routes({
+        'PATCH /api/v1/autotag-rules/5': ({ body }) =>
+          jsonResponse({ ...RULE, ...(body as object) }),
+      }),
+    )
+    renderWithClient(<TagsPanel />)
+    await screen.findByRole('button', { name: 'Edit rule 5' })
+    const row = within(screen.getByText('founder', { selector: 'span' }).closest('li')!)
+    expect(row.getByRole('checkbox', { name: 'Enabled', description: 'Rule 5' })).toBeChecked()
+
+    fireEvent.click(row.getByText('Enabled'))
+    await waitFor(() =>
+      expect(requestsTo(seen, 'PATCH', '/api/v1/autotag-rules/5')[0]?.body).toEqual({
+        enabled: false,
+      }),
+    )
+  })
+
   it('keeps a disabled rule disabled when its pattern is edited', async () => {
     const seen = mockApi(
       routes({
