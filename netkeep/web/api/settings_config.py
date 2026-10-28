@@ -33,6 +33,7 @@ from netkeep.logging_setup import log_file, set_log_rotation
 from netkeep.models import User
 from netkeep.services import restart_gate, ui_settings
 from netkeep.services.restart_gate import RestartHook
+from netkeep.services.tasks import RESTARTING, TaskRunner
 from netkeep.web.api.health import BOOT_ID
 from netkeep.web.deps import (
     CurrentUser,
@@ -311,6 +312,14 @@ def _resume(app: FastAPI) -> None:
         engine.start()
 
 
+def _refuse_runs(app: FastAPI) -> None:
+    """Once the restart is triggered, the task runner takes no new task (#730): a run
+    asked for then answers ``409`` instead of being cancelled part way by the shutdown."""
+    tasks: TaskRunner | None = getattr(app.state, "tasks", None)
+    if tasks is not None:
+        tasks.refuse_new(RESTARTING)
+
+
 def _gate(request: Request, hook: RestartHook) -> restart_gate.RestartGate:
     gate: restart_gate.RestartGate | None = getattr(request.app.state, "restart_gate", None)
     if gate is None:
@@ -320,6 +329,7 @@ def _gate(request: Request, hook: RestartHook) -> restart_gate.RestartGate:
             busy=lambda: _busy(app),
             quiesce=lambda: _quiesce(app),
             resume=lambda: _resume(app),
+            refuse_runs=lambda: _refuse_runs(app),
         )
         request.app.state.restart_gate = gate
     return gate

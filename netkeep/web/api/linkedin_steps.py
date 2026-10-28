@@ -441,7 +441,11 @@ def list_waiting(
     status_code=202,
     responses={
         404: {"description": "No such enrollment, or nothing is ready"},
-        409: {"description": "Refused: the reasons are in the body", "model": PrefillRefused},
+        409: {
+            "description": "Refused: the reasons are in the body; or netkeep is restarting"
+            " (a plain detail, and nothing was claimed)",
+            "model": PrefillRefused,
+        },
         503: {"description": "This process has no browser worker"},
     },
 )
@@ -450,8 +454,10 @@ async def prefill(
 ) -> PrefillAccepted:
     """Claim one LinkedIn step and submit its prefill; answers at once, before any browser
     work. A refusal answers ``409`` with its reasons; what the refusal changed (a reply
-    that ended the enrollment, a step parked) is kept."""
+    that ended the enrollment, a step parked) is kept. Once a restart is triggered it
+    answers ``409`` ("netkeep is restarting") and claims nothing (#730)."""
     executor = _executor(request)
+    tasks.check_open()  # #730: before the claim
     settings = _settings(request, session, user)
     now = utcnow()
     try:
@@ -499,7 +505,8 @@ async def prefill(
         404: {"description": "No such message"},
         409: {
             "description": "It does not wait for you, a run is running, the session is"
-            " flagged, heat is too high, or it is outside active hours"
+            " flagged, heat is too high, it is outside active hours, or netkeep is"
+            " restarting"
         },
         422: {"description": "A run kind the worker can't start"},
         503: {"description": "This process has no browser worker"},
@@ -508,8 +515,10 @@ async def prefill(
 async def check_sent(
     message_id: int, request: Request, user: CurrentUser, session: SessionDep, tasks: Tasks
 ) -> RunAccepted:
-    """ "I sent it, check now": start a manual inbox poll, which finds the message sent."""
+    """ "I sent it, check now": start a manual inbox poll, which finds the message sent.
+    Once a restart is triggered it answers ``409`` and records no run (#730)."""
     executor = _executor(request)
+    tasks.check_open()  # #730: before anything is written
     try:
         run = service.check_sent(
             session, user, message_id, now=utcnow(), settings=_settings(request, session, user)

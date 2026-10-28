@@ -43,6 +43,7 @@ from netkeep.services.chrome_launch import (
 )
 from netkeep.services.events import Event
 from netkeep.services.scheduled_runs import ServeExtractor
+from netkeep.services.tasks import RESTARTING
 from netkeep.services.users import local_owner
 from netkeep.web.app import create_app
 from netkeep.worker import launcher_probe
@@ -138,6 +139,20 @@ async def test_off_starts_nothing(running_app: FastAPI) -> None:
     _ready(running_app, spawner, on=False)
     assert await _start(running_app) is None
     assert spawner.calls == []
+
+
+async def test_a_restart_triggered_before_it_listens_starts_nothing(
+    running_app: FastAPI, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#730: the task runner refuses new work once a restart is triggered, so the start
+    at startup spawns nothing, and says why."""
+    caplog.set_level(logging.INFO, logger="netkeep.worker")
+    spawner = _FakeSpawner()
+    _ready(running_app, spawner)
+    running_app.state.tasks.refuse_new(RESTARTING)
+    assert await _start(running_app) is None
+    assert spawner.calls == []
+    assert "not starting netkeep's Chrome at startup: netkeep is restarting" in caplog.text
 
 
 async def test_on_starts_chrome_exactly_once_and_logs_the_outcome(

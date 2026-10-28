@@ -12,7 +12,11 @@ idle, :class:`RestartGate` waits for it:
    engine stops and waits for a tick in flight, so no new scheduled work can start;
 3. it asks again, waiting on anything started in between (a run a person started by
    hand, which then keeps scheduled runs and sends paused until it ends), and only
-   then triggers the restart.
+   then triggers the restart;
+4. in the same step, with no await between them, it first closes the task runner to
+   new work (#730): from then on a run asked for (a prefill, a Check now) answers
+   ``409`` "netkeep is restarting" instead of starting, only for the shutdown to
+   cancel it part way.
 
 :meth:`RestartGate.cancel` (**Cancel** on the banner) stops the wait and resumes the
 scheduler and the engine if it had paused them. An error while it looks never ends the
@@ -151,6 +155,7 @@ class RestartGate:
         busy: Callable[[], Awaitable[list[str]]],
         quiesce: Callable[[], Awaitable[None]],
         resume: Callable[[], None],
+        refuse_runs: Callable[[], None] = lambda: None,
         poll_s: float = POLL_S,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -158,6 +163,7 @@ class RestartGate:
         self._busy = busy
         self._quiesce = quiesce
         self._resume = resume
+        self._refuse_runs = refuse_runs
         self._quiesced = False
         self._quiescing: asyncio.Task[None] | None = None
         self._cancelling = False
@@ -261,4 +267,8 @@ class RestartGate:
                         failures, warned_at = 0, now
                 self.waiting_on = [CHECK_FAILED]
             await asyncio.sleep(self._poll_s)
+        # #730: no new run from here on. The last look read the task runner on the loop,
+        # with no await between it and here, so a run submitted during the look's
+        # database read was seen, and none can be submitted after it.
+        self._refuse_runs()
         self._hook.trigger()

@@ -37,7 +37,10 @@ _NO_WORKER = (
     status_code=202,
     responses={
         403: {"description": "Only the local owner account checks netkeep's Chrome"},
-        409: {"description": "Another run is running, or another process holds the browser"},
+        409: {
+            "description": "Another run is running, another process holds the browser, or"
+            " netkeep is restarting"
+        },
         503: {"description": "This process has no browser worker"},
     },
 )
@@ -47,12 +50,14 @@ async def check_browser(
     """Start a Check connection run; answers at once, before any browser work.
 
     The run visits no page, so it spends no budget, and the session flag, heat, and
-    active hours don't stop it, as they don't stop ``netkeep preflight``.
+    active hours don't stop it, as they don't stop ``netkeep preflight``. Once a restart
+    is triggered it answers ``409`` and records no run (#730).
     """
     require_owner(session, user, "only the local owner account checks netkeep's Chrome")
     executor: runs.RunExecutor | None = request.app.state.executor
     if executor is None:
         raise HTTPException(status_code=503, detail=_NO_WORKER)
+    tasks.check_open()  # #730: before anything is written
     try:
         run = session_check.start(session, user, now=utcnow())
     except runs.RunError as exc:

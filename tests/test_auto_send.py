@@ -93,6 +93,7 @@ from netkeep.services import (
 )
 from netkeep.services import heat as heat_service
 from netkeep.services.budgets import ActionClass
+from netkeep.services.events import EventBus
 from netkeep.services.linkedin_accounts import (
     arm_scheduled_runs,
     disarm_scheduled_runs,
@@ -108,6 +109,7 @@ from netkeep.services.linkedin_steps import (
     waiting_for_you,
 )
 from netkeep.services.settings_kv import set_setting
+from netkeep.services.tasks import RESTARTING, SubmitRefused, TaskRunner
 from netkeep.worker import BrowserWorker
 
 BODY = "Hi Zephyrine, good to see you!"
@@ -836,12 +838,16 @@ def test_serve_schedules_auto_send_whatever_the_file_says() -> None:
 
 
 class _NoTasks:
+    refusing = None  # open: no restart triggered (#730)
+
     def submit(self, *args: Any, **kwargs: Any) -> Any:
         raise AssertionError("nothing may be submitted")
 
 
 class _SeenTasks:
     """Takes the claimed run and never starts it: the test only asks whether one was."""
+
+    refusing: str | None = None  # open: no restart triggered (#730)
 
     def __init__(self) -> None:
         self.submitted = 0
@@ -910,6 +916,41 @@ async def test_the_page_turning_auto_send_on_applies_from_the_next_fire(lane: La
     assert tasks.submitted == 1
     [run] = lane.runs()
     assert (run.kind, run.trigger) == (SyncRunKind.MESSAGE_SEND, SyncRunTrigger.SCHEDULED)
+
+
+async def test_after_a_restart_is_triggered_the_fire_claims_nothing(lane: Lane) -> None:
+    """#730: the task runner refuses new work, so the handler claims and records nothing,
+    and the fire is tried again later."""
+    enrollment_id = lane.enroll(contact=dict(CONTACT))
+    lane.write(lambda s, u: record_poll(s, u, NOW - timedelta(minutes=1)))
+    tasks = TaskRunner(EventBus())
+    tasks.refuse_new(RESTARTING)
+    assert await _fire(lane, AUTO, tasks) is scheduler.JobOutcome.RETRY_LATER
+    assert lane.runs() == [] and lane.messages(enrollment_id) == []
+    assert lane.enrollment(enrollment_id).next_action_at == NOW
+
+
+class _RefusesAtSubmit(_SeenTasks):
+    """Open at the handler's first look, refused at the submit: a restart triggered
+    between the claim and the submit (#730)."""
+
+    def submit(self, *args: Any, **kwargs: Any) -> Any:
+        raise SubmitRefused(RESTARTING)
+
+
+async def test_an_auto_send_refused_at_its_submit_gives_its_step_back(lane: Lane) -> None:
+    """#730: the claim was made, but the run never starts. It ends aborted, and the step
+    is due again at its claim, never a Try again, as a run that opened nothing is."""
+    enrollment_id = lane.enroll(contact=dict(CONTACT))
+    lane.write(lambda s, u: record_poll(s, u, NOW - timedelta(minutes=1)))
+    assert await _fire(lane, AUTO, _RefusesAtSubmit()) is scheduler.JobOutcome.RETRY_LATER
+    [run] = lane.runs()
+    assert (run.status, run.stop_reason) == (SyncRunStatus.ABORTED, "restarting")
+    assert lane.messages(enrollment_id) == []
+    enrollment = lane.enrollment(enrollment_id)
+    assert enrollment.next_action_at == NOW
+    assert enrollment.not_sent_count == 0 and enrollment.not_sent_error is None
+    assert _last_fire(lane).reason == "restarting"
 
 
 async def test_two_users_each_have_their_own_switch(lane: Lane) -> None:

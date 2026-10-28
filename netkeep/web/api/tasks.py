@@ -20,9 +20,15 @@ PING_STEPS = 2
 PING_STEP_DELAY_S = 0.05
 
 
-@router.post("/ping", operation_id="ping_task", status_code=202)
+@router.post(
+    "/ping",
+    operation_id="ping_task",
+    status_code=202,
+    responses={409: {"description": "netkeep is restarting"}},
+)
 async def ping_task(user: CurrentUser, tasks: Tasks) -> TaskAccepted:
-    """Submit a tiny task that reports progress twice, and return its id at once."""
+    """Submit a tiny task that reports progress twice, and return its id at once. Once a
+    restart is triggered it answers ``409`` (#730)."""
 
     async def run() -> None:
         for step in range(1, PING_STEPS + 1):
