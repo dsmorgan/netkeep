@@ -967,6 +967,30 @@ async def test_an_auto_send_refused_at_its_submit_gives_its_step_back(lane: Lane
     assert _last_fire(lane).reason == "restarting"
 
 
+async def test_an_auto_send_refused_at_its_submit_with_no_claim_row_still_ends_its_run(
+    lane: Lane,
+) -> None:
+    """#730: the claimed message is gone, so there is nothing to give back; the run is
+    still ended (aborted, restarting), never left running."""
+
+    class _DropsTheClaim(_RefusesAtSubmit):
+        def submit(self, *args: Any, **kwargs: Any) -> Any:
+            def drop(session: Session, user: User) -> None:
+                for message in session.scalars(scoped(user, Message)):
+                    session.delete(message)
+
+            self.lane.write(drop)
+            return super().submit(*args, **kwargs)
+
+    enrollment_id = lane.enroll(contact=dict(CONTACT))
+    lane.write(lambda s, u: record_poll(s, u, NOW - timedelta(minutes=1)))
+    outcome = await _fire(lane, AUTO, _DropsTheClaim(lane))
+    assert outcome is scheduler.JobOutcome.RETRY_LATER
+    [run] = lane.runs()
+    assert (run.status, run.stop_reason) == (SyncRunStatus.ABORTED, "restarting")
+    assert lane.messages(enrollment_id) == []
+
+
 async def test_a_cancelled_auto_send_refused_at_its_submit_parks_its_step(lane: Lane) -> None:
     """#730 with #708: a person cancelled the claimed run before the refusal. The step is
     parked for Try again, never given back due, so a later fire doesn't send the message

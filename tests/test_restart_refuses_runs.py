@@ -210,7 +210,7 @@ async def test_a_task_submitted_during_the_last_looks_database_read_holds_the_re
     tasks: TaskRunner = app.state.tasks
     tasks.submit("linkedin.run", work, user_id=1)  # on the loop, while the read blocks
     release.set()
-    await asyncio.sleep(0.2)
+    await _until(lambda: any("linkedin.run" in reason for reason in gate.waiting_on))
     assert stops == [] and tasks.refusing is None  # seen: the gate waits for it
     done.set()
     await _until(lambda: len(stops) == 1)

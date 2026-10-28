@@ -198,9 +198,12 @@ def _refused_at_submit(
         user = session.get(User, user_id)
         if user is None:
             return
-        if auto_send is not None:
-            record_not_started(session, user, run_id, settings=auto_send, now=now)
+        if auto_send is not None and record_not_started(
+            session, user, run_id, settings=auto_send, now=now
+        ):
             return
+        # Nothing claimed to give back (or not an auto-send): the run still ends here, so
+        # it is never left running.
         runs.finish_run(
             session,
             user,
