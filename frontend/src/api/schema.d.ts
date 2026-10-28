@@ -1639,13 +1639,17 @@ export interface paths {
          *       ``sent`` or ``bounced``), by ``sent_at``. Test sends are not counted.
          *     - ``replies``: enrollments whose first response (``replied_at``: a reply either
          *       poll found, an opt-out, or a response recorded from outside netkeep) falls in
-         *       the window. An enrollment counts once.
+         *       the window. An enrollment counts once. Unlike a campaign's results, a response
+         *       dated before the enrollment's first send still counts.
          *     - ``reply_rate``: ``replies / sent``, or null when nothing was sent. A reply can
          *       answer a message sent before the window, so the rate can pass 1.
-         *     - ``bounced``: outbound messages marked bounced, by ``bounced_at``.
+         *     - ``bounced``: outbound messages marked bounced, by ``bounced_at`` (``sent_at`` for
+         *       a message with none). Every bounced message counts, so an enrollment with two
+         *       bounces counts twice; a campaign's results count only its earliest.
          *     - ``changed_jobs``: contacts whose title or company a sync's profile visit saw
          *       change in the window: the contacts the changed-jobs card lists (live, not
-         *       do-not-contact). Once each in the total and in each bucket it changed in.
+         *       archived, not merged away, not do-not-contact). Once each in the total and in
+         *       each bucket it changed in.
          *     - ``new_contacts``: contacts created in the window, less merged-away duplicates.
          *       ``linkedin`` were added by a LinkedIn sync; ``imported`` by an archive or CSV
          *       import, or by hand.
