@@ -3913,6 +3913,10 @@ def import_resume_cmd(
     typer.echo(_run_report("committed", committed))
 
 
+KEPT_SHOWN: Final[int] = 15
+"""How many kept rows ``import rollback`` names before it says "and N more" (#725)."""
+
+
 @import_app.command("rollback")
 def import_rollback_cmd(
     run_id: Annotated[int, typer.Argument(help="The import run to undo.")],
@@ -3958,9 +3962,11 @@ def import_rollback_cmd(
                 f"put back, {result.children_deleted} child row(s) removed"
             )
             if result.kept:
+                shown = ", ".join(row.describe() for row in result.kept[:KEPT_SHOWN])
+                more = len(result.kept) - KEPT_SHOWN
                 summary += (
                     f"\nkept {len(result.kept)} row(s) the run added, because they changed "
-                    "after the import: " + ", ".join(row.describe() for row in result.kept)
+                    f"after the import: {shown}" + (f", and {more} more" if more > 0 else "")
                 )
     finally:
         engine.dispose()

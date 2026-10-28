@@ -1081,6 +1081,25 @@ def test_cli_import_rollback_names_the_rows_it_kept(
     ) in result.output
 
 
+def test_cli_import_rollback_names_the_first_15_kept_rows_and_counts_the_rest(
+    cli_db: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An archive run's adopted messages can be hundreds of rows; one line names 15 (#725)."""
+    kept = tuple(import_runs.KeptRow("interaction", 100 + index, 7) for index in range(18))
+
+    def rolled_back(*_: object, **__: object) -> import_runs.RollbackResult:
+        return import_runs.RollbackResult(1, 0, 1, 0, 0, kept)
+
+    monkeypatch.setattr(import_runs, "rollback", rolled_back)
+
+    result = CliRunner().invoke(cli, ["import", "rollback", "1"])
+
+    assert result.exit_code == 0, result.output
+    assert "kept 18 row(s)" in result.output
+    assert "interaction 114 on contact 7, and 3 more" in result.output
+    assert "interaction 115" not in result.output
+
+
 def test_cli_import_rollback_of_an_unknown_run_reports_a_clean_error(
     cli_db: sessionmaker[Session],
 ) -> None:

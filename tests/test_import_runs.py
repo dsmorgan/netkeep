@@ -323,8 +323,8 @@ def test_rollback_keeps_an_address_the_run_added_that_was_marked_bounced_since(
 def test_rows_the_run_added_and_nothing_changed_since_are_still_rolled_back(
     writer: Session, user: User
 ) -> None:
-    """The run's own writes are not later than its commit, even when one row of the file
-    writes over another's child row in the same commit (#725)."""
+    """A row the run added and nothing wrote to since is still the run's to delete (#725),
+    here with the file naming the same person twice."""
     fern = seed_existing(writer, user)["fern"]
     content = (
         "Profile Url,First Name,Last Name,Email,Phone\n"
@@ -352,12 +352,13 @@ def test_force_does_not_delete_a_changed_row_on_a_contact_the_run_did_not_create
     fern = seed_existing(writer, user)["fern"]
     run_id = import_sample(writer, user)
     (address,) = fern.emails
-    update_email(writer, user, fern.id, address.id, {"status": "bounced"})
+    address_id = address.id
+    update_email(writer, user, fern.id, address_id, {"status": "bounced"})
 
     result = import_runs.rollback(writer, user, run_id, force=True)
 
     assert [row.email for row in fern.emails] == ["fern@kites.example"]
-    assert len(result.kept) == 1
+    assert result.kept == (import_runs.KeptRow("email", address_id, fern.id),)
 
 
 def test_a_detail_of_a_created_contact_changed_since_needs_force(
@@ -388,12 +389,55 @@ def test_a_detail_of_a_created_contact_changed_since_needs_force(
 def test_the_details_a_created_contact_came_with_are_not_counted_as_changed(
     writer: Session, user: User
 ) -> None:
-    """The file names Imogen twice, so the commit writes her rows twice (#725)."""
+    """The rows a created contact came with in the commit are not counted as changed (#725)."""
     run_id, _ = _created_imogen(writer, user)
 
     result = import_runs.rollback(writer, user, run_id)
 
     assert result.contacts_deleted == 2
+
+
+def test_two_runs_that_saw_the_same_rows_roll_back_newest_first_without_force(
+    writer: Session, user: User
+) -> None:
+    """The later run's refresh of a row is its own to undo, so the earlier run's
+    rollback finds the row as its own commit left it (#725 review)."""
+    fern = seed_existing(writer, user)["fern"]
+    first = import_sample(writer, user)
+    (address,) = fern.emails
+    stamps = (address.source, address.observed_at, address.updated_at)
+    second = import_sample(writer, user)
+    assert address.observed_at > stamps[1], "the second run refreshed the row"
+
+    import_runs.rollback(writer, user, second)
+    assert (address.source, address.observed_at, address.updated_at) == stamps
+
+    result = import_runs.rollback(writer, user, first)
+
+    assert result.kept == ()
+    assert fern.emails == []
+    assert fern.phones == []
+    assert by_slug(writer, user, "imogen-thistlewhite-qz") is None
+
+
+def test_a_bounce_between_two_runs_survives_rolling_both_back(writer: Session, user: User) -> None:
+    """The stamps the later rollback puts back are the bounce's, so the earlier
+    rollback keeps the bounced row and names it (#725 review)."""
+    fern = seed_existing(writer, user)["fern"]
+    first = import_sample(writer, user)
+    (address,) = fern.emails
+    address_id = address.id
+    update_email(writer, user, fern.id, address_id, {"status": "bounced"})
+    second = import_sample(writer, user)
+
+    import_runs.rollback(writer, user, second)
+    result = import_runs.rollback(writer, user, first)
+
+    assert [(row.email, row.status) for row in fern.emails] == [
+        ("fern@kites.example", EmailStatus.BOUNCED)
+    ]
+    assert result.kept == (import_runs.KeptRow("email", address_id, fern.id),)
+    assert fern.phones == []
 
 
 def test_a_run_can_only_be_rolled_back_once(writer: Session, user: User) -> None:

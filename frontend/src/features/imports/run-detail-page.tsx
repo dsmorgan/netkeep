@@ -167,18 +167,46 @@ function RollbackSummary({ result }: { result: RollbackResult }) {
           {result.children_deleted} related {result.children_deleted === 1 ? 'record' : 'records'}{' '}
           such as emails, phones and positions.
         </p>
-        {result.kept.length > 0 && (
-          <Note>
-            <p>
-              Kept {result.kept.length} {result.kept.length === 1 ? 'record' : 'records'} this
-              import added, because {result.kept.length === 1 ? 'it was' : 'they were'} changed
-              after the import (edited, marked bounced, or seen again):{' '}
-              {result.kept.map((row) => `${row.kind} on contact #${row.contact_id}`).join(', ')}.
-            </p>
-          </Note>
-        )}
+        {result.kept.length > 0 && <KeptNote kept={result.kept} />}
       </CardContent>
     </Card>
+  )
+}
+
+/** How many kept records the summary names before it says "and N more" (#725). */
+const KEPT_SHOWN = 15
+
+/**
+ * The records the rollback left in place because something changed them after
+ * the import (#725): edited, marked bounced, adopted by the inbox poll, or seen
+ * again by a later import. The first {@link KEPT_SHOWN} are named, each linked
+ * to its contact; the API carries the full list.
+ */
+function KeptNote({ kept }: { kept: RollbackResult['kept'] }) {
+  const shown = kept.slice(0, KEPT_SHOWN)
+  const more = kept.length - shown.length
+  return (
+    <Note>
+      <p>
+        Kept {kept.length} {kept.length === 1 ? 'record' : 'records'} this import added, because{' '}
+        {kept.length === 1 ? 'it was' : 'they were'} changed after the import (edited, marked
+        bounced, adopted by the LinkedIn inbox poll, or seen again by a later import):{' '}
+        {shown.map((row, index) => (
+          <span key={`${row.kind}-${row.id}`}>
+            {index > 0 && ', '}
+            {row.kind} {row.id} on{' '}
+            <Link
+              to="/contacts/$contactId"
+              params={{ contactId: String(row.contact_id) }}
+              className="underline underline-offset-4"
+            >
+              contact #{row.contact_id}
+            </Link>
+          </span>
+        ))}
+        {more > 0 && `, and ${more} more`}.
+      </p>
+    </Note>
   )
 }
 
@@ -233,8 +261,8 @@ function RollbackCard({ run, onDone }: { run: ImportRun; onDone: (r: RollbackRes
           </li>
           <li>
             If a later import wrote over the same fields, undo that one first. If a contact this
-            import created has since gained notes, tags, lists or interactions, you are told what
-            would go with it before anything is deleted.
+            import created has since gained notes, tags, lists or interactions, or had a detail
+            changed, you are told what would go with it before anything is deleted.
           </li>
         </ul>
         {rollback.isError && !asking && (
