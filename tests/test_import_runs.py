@@ -42,6 +42,7 @@ from netkeep.models import (
     ImportResolution,
     ImportRow,
     ImportRun,
+    ImportSourceKind,
     ImportStatus,
     Interaction,
     InteractionKind,
@@ -1588,7 +1589,7 @@ def test_no_warning_when_only_one_new_contact_matches_an_existing_one(
     assert import_runs.duplicate_groups(committed) == []
 
 
-def test_no_groups_leaves_report_json_unset(writer: Session, user: User) -> None:
+def test_no_groups_still_reports_the_unreachable_contact(writer: Session, user: User) -> None:
     content = "First Name,Last Name,Company\nJordan,Vance,Acme Inc\n"
     committed = _run_of(writer, user, content)
 
@@ -1596,6 +1597,41 @@ def test_no_groups_leaves_report_json_unset(writer: Session, user: User) -> None
     assert committed.report_json == {"unreachable_contacts": 1}
     assert import_runs.duplicate_groups(committed) == []
     assert import_runs.unreachable_contacts(committed) == 1
+
+
+def test_an_archive_run_never_reports_unreachable_contacts(writer: Session, user: User) -> None:
+    committed = _run_of(writer, user, "First Name,Last Name,Company\nJordan,Vance,Acme Inc\n")
+    assert import_runs.unreachable_contacts(committed) == 1
+
+    # The same count on an archive run is history, not a live warning.
+    committed.source_kind = ImportSourceKind.ARCHIVE
+    assert committed.report_json == {"unreachable_contacts": 1}
+    assert import_runs.unreachable_contacts(committed) == 0
+
+
+def test_a_matched_contact_that_gains_an_email_is_not_unreachable(
+    writer: Session, user: User
+) -> None:
+    contact = factories.make_contact(
+        writer,
+        user,
+        li_urn=None,
+        li_public_id=None,
+        first_name="Jordan",
+        last_name="Vance",
+        current_company="Acme Inc",
+    )
+    content = "First Name,Last Name,Company,Email Address\nJordan,Vance,Acme Inc,jv@acme.example\n"
+    mapping = {**_NAME_MAPPING, "Email Address": "email"}
+    run = import_runs.create_run(
+        writer, user, filename="gain.csv", content=content, mapping=mapping
+    )
+    committed = import_runs.commit(writer, user, run.id, decisions={1: MergeInto(contact.id)})
+
+    assert (committed.matched_count, committed.created_count) == (1, 0)
+    assert {row.email for row in contact.emails} == {"jv@acme.example"}
+    assert committed.report_json is None
+    assert import_runs.unreachable_contacts(committed) == 0
 
 
 def test_a_report_with_nothing_to_say_is_unset(writer: Session, user: User) -> None:

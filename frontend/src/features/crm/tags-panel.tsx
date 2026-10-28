@@ -324,11 +324,14 @@ function RuleRow({
       <Label className="ml-auto gap-2 text-sm">
         <Checkbox
           checked={rule.enabled}
-          aria-label={`Rule ${rule.id} enabled`}
+          aria-describedby={`rule-${rule.id}-number`}
           onCheckedChange={(checked) => onToggle(checked === true)}
         />
         Enabled
       </Label>
+      <span id={`rule-${rule.id}-number`} className="sr-only">
+        Rule {rule.id}
+      </span>
       <Button
         variant="ghost"
         size="icon-sm"
