@@ -476,8 +476,12 @@ def _sent(session: Session, user: User, at: datetime, **overrides: Any) -> None:
     factories.make_message(session, _enrollment(session, user), sent_at=at, **overrides)
 
 
+def _metrics_at(session: Session, user: User, window: str, now: datetime) -> service.Metrics:
+    return service.metrics(session, user, service.MetricsWindow(window), now=now)
+
+
 def _metrics(session: Session, user: User, window: str) -> service.Metrics:
-    return service.metrics(session, user, service.MetricsWindow(window), now=METRICS_NOW)
+    return _metrics_at(session, user, window, METRICS_NOW)
 
 
 def _series(found: service.Metrics, field: str) -> dict[date, int]:
@@ -623,6 +627,61 @@ def test_changed_jobs_are_the_cards_contacts_once_each(session: Session) -> None
 
     assert found.changed_jobs == 2
     assert _series(found, "changed_jobs") == {date(2026, 10, 15): 1, date(2026, 10, 18): 2}
+
+
+def test_a_contact_noticed_twice_in_one_day_counts_once_in_that_bucket(session: Session) -> None:
+    """The bucket query's ``.distinct()`` (#744): two snapshots in one day count once."""
+    user = _metrics_user(session)
+    mover = _noticed(session, user, _at(2026, 10, 18, 9, 0))
+    _noticed(session, user, _at(2026, 10, 18, 15, 0), contact_id=mover)
+    _noticed(session, user, _at(2026, 10, 18, 20, 0), contact_id=mover)
+
+    found = _metrics(session, user, "7d")
+
+    assert found.changed_jobs == 1
+    assert _series(found, "changed_jobs") == {date(2026, 10, 18): 1}
+
+
+def test_day_buckets_follow_local_midnights_across_spring_forward(session: Session) -> None:
+    """New York skips 02:00-03:00 on 8 March 2026: that local day is 23 hours long (#744)."""
+    user = _metrics_user(session)
+    # EST (UTC-5) before the change, EDT (UTC-4) after. All instants are UTC.
+    for at in (
+        datetime(2026, 3, 8, 4, 59, tzinfo=UTC),  # 23:59 EST on the 7th
+        datetime(2026, 3, 8, 5, 0, tzinfo=UTC),  # 00:00 EST on the 8th
+        datetime(2026, 3, 8, 6, 59, tzinfo=UTC),  # 01:59 EST on the 8th
+        datetime(2026, 3, 8, 7, 0, tzinfo=UTC),  # 03:00 EDT on the 8th
+        datetime(2026, 3, 9, 3, 59, tzinfo=UTC),  # 23:59 EDT on the 8th
+        datetime(2026, 3, 9, 4, 0, tzinfo=UTC),  # 00:00 EDT on the 9th
+    ):
+        _sent(session, user, at)
+
+    found = _metrics_at(session, user, "7d", datetime(2026, 3, 10, 15, 0, tzinfo=UTC))
+
+    assert _series(found, "sent") == {date(2026, 3, 7): 1, date(2026, 3, 8): 4, date(2026, 3, 9): 1}
+
+
+def test_day_buckets_follow_local_midnights_across_fall_back(session: Session) -> None:
+    """New York repeats 01:00-02:00 on 1 November 2026: that local day is 25 hours long (#744)."""
+    user = _metrics_user(session)
+    # EDT (UTC-4) until 06:00 UTC on the 1st, EST (UTC-5) after. All instants are UTC.
+    for at in (
+        datetime(2026, 11, 1, 3, 59, tzinfo=UTC),  # 23:59 EDT on 31 October
+        datetime(2026, 11, 1, 4, 0, tzinfo=UTC),  # 00:00 EDT on the 1st
+        datetime(2026, 11, 1, 5, 30, tzinfo=UTC),  # 01:30 EDT, the first 01:30
+        datetime(2026, 11, 1, 6, 30, tzinfo=UTC),  # 01:30 EST, the second 01:30
+        datetime(2026, 11, 2, 4, 59, tzinfo=UTC),  # 23:59 EST on the 1st
+        datetime(2026, 11, 2, 5, 0, tzinfo=UTC),  # 00:00 EST on the 2nd
+    ):
+        _sent(session, user, at)
+
+    found = _metrics_at(session, user, "7d", datetime(2026, 11, 3, 15, 0, tzinfo=UTC))
+
+    assert _series(found, "sent") == {
+        date(2026, 10, 31): 1,
+        date(2026, 11, 1): 4,
+        date(2026, 11, 2): 1,
+    }
 
 
 def test_thirty_days_have_one_bucket_per_local_day(session: Session) -> None:
