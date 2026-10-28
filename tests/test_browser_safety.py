@@ -3279,8 +3279,31 @@ RAW_CONNECTION_NAMES = frozenset(
         "create_connected_udp_socket",
         "create_unix_datagram_socket",
         "create_connected_unix_datagram_socket",
+        # #677: http.client's connections and their sends, and urllib's openers. The
+        # HTTP client pin (:data:`ALLOWED_HTTP_CLIENTS`) reads the modules, once per
+        # import; this reads each use, by function, so a new helper in a module that
+        # already imports one (``urlopen(Request(url, method="PUT"))``) is a finding.
+        "HTTPConnection",
+        "HTTPSConnection",
+        "putrequest",
+        "endheaders",
+        "request",
+        "urlopen",
+        "Request",
+        "build_opener",
+        "OpenerDirector",
+        "urlretrieve",
+        "URLopener",
+        "FancyURLopener",
+        # httplib2's connections, which Gmail's transport builds on.
+        "HTTPConnectionWithTimeout",
+        "HTTPSConnectionWithTimeout",
     }
 )
+#: #677: the modules whose ``Request`` is the request a handler answers, not one it
+#: sends. ``from fastapi import Request`` is not a reach of ``Request``; any other
+#: ``from ... import Request``, and any ``<x>.Request``, is.
+WEB_REQUEST_MODULES = frozenset({"fastapi", "starlette.requests"})
 #: #703: the modules a socket is made from (``_socket`` is the C module ``socket``
 #: re-exports), and the names in them that make one.
 SOCKET_MODULES = frozenset({"socket", "_socket"})
@@ -3292,13 +3315,42 @@ ALLOWED_RAW_CONNECTIONS = {
     # The identity read's one GET of Chrome's /json/version (#675), pinned in full by
     # test_the_identity_transport_functions_are_exactly_the_reviewed_ones.
     (LINKEDIN / "browser.py", "_browser_websocket_url", "open_connection"): 1,
+    # #677: Gmail's write-once connection (#563) subclasses http.client's connection and
+    # httplib2's HTTPS one, and its request overrides call the request they override.
+    (PACKAGE / "campaigns" / "gmail.py", "WriteOnceMixin", "HTTPConnection"): 1,
+    (PACKAGE / "campaigns" / "gmail.py", "WriteOnceMixin.request", "request"): 2,
+    (PACKAGE / "campaigns" / "gmail.py", "WriteOnceConnection", "HTTPSConnectionWithTimeout"): 1,
+    (PACKAGE / "campaigns" / "gmail.py", "WriteOnceHttp.request", "request"): 1,
+    # Gmail's OAuth: the token exchange's form POST and the profile GET build a Request,
+    # and its one send builds the opener, with no proxy unless the system's is asked for.
+    (PACKAGE / "campaigns" / "gmail_oauth.py", "", "Request"): 1,
+    (PACKAGE / "campaigns" / "gmail_oauth.py", "", "build_opener"): 1,
+    (PACKAGE / "campaigns" / "gmail_oauth.py", "fetch_email", "Request"): 1,
+    (PACKAGE / "campaigns" / "gmail_oauth.py", "_post_form", "Request"): 1,
+    (PACKAGE / "campaigns" / "gmail_oauth.py", "_send", "Request"): 1,
+    (PACKAGE / "campaigns" / "gmail_oauth.py", "_send", "build_opener"): 1,
+    # `netkeep setup`'s health check (#684): one GET of /api/v1/health on loopback.
+    (PACKAGE / "services" / "post_install.py", "health", "HTTPConnection"): 1,
+    (PACKAGE / "services" / "post_install.py", "health", "request"): 1,
+    # `netkeep update` and serve's daily check (#685, #762): one HTTPS GET per hop, to
+    # GitHub's hosts only.
+    (PACKAGE / "services" / "update.py", "https_get", "HTTPSConnection"): 1,
+    (PACKAGE / "services" / "update.py", "https_get", "request"): 1,
+    # Not a send: an observed Playwright response's request, read for its method and
+    # matched to the request's end (ADR 0006).
+    (LINKEDIN / "observe.py", "Observation._on_response", "request"): 1,
+    (LINKEDIN / "observe.py", "Observation._read", "request"): 1,
+    (LINKEDIN / "observe.py", "Observation._diagnose", "request"): 1,
+    (LINKEDIN / "rehearse.py", "_Recorder._on_response", "request"): 1,
 }
 
 
 def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int]:
     """Each reach of a :data:`RAW_CONNECTION_NAMES` name, and of a :data:`SOCKET_TYPES`
     name read on a :data:`SOCKET_MODULES` module (or imported from it), by file and
-    function. Either socket name is keyed as ``socket.<name>``."""
+    function. Either socket name is keyed as ``socket.<name>``. A name a ``from`` import
+    binds (``from urllib.request import urlopen as u``) is a reach where it's imported
+    and at each read of it (``u(...)``), keyed by the name it was imported as."""
     found: dict[tuple[Path, str, str], int] = {}
 
     def add(path: Path, where: str, name: str) -> None:
@@ -3307,6 +3359,15 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
     for path, source in sources.items():
         tree = parse(source)
         scopes = _scoped(tree)
+        # #677: each local name a ``from`` import binds to an opener, and which.
+        imported = {
+            alias.asname or alias.name: alias.name
+            for node in walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            for alias in node.names
+            if alias.name in RAW_CONNECTION_NAMES
+            and not (alias.name == "Request" and node.module in WEB_REQUEST_MODULES)
+        }
         # Every name a socket module is bound to here: ``import socket as _s`` too.
         modules = set(SOCKET_MODULES) | {
             alias.asname
@@ -3331,10 +3392,18 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
                     # ``asyncio.base_events.socket``): ``<x>.socket.socket`` is
                     # ``socket.socket``, and so is the module read on its own.
                     add(path, where, "socket.socket")
+            elif isinstance(node, ast.Name):
+                if node.id in imported and isinstance(node.ctx, ast.Load):
+                    add(path, where, imported[node.id])
             elif isinstance(node, ast.ImportFrom):
                 for alias in node.names:
+                    if alias.name == "Request" and node.module in WEB_REQUEST_MODULES:
+                        continue
                     if alias.name in RAW_CONNECTION_NAMES:
                         add(path, where, alias.name)
+                    elif alias.name == "*" and _http_module(node.module or "") is not None:
+                        # #677: binds every opener in it, under no name read here.
+                        add(path, where, f"{node.module}.*")
                     elif node.module in SOCKET_MODULES and alias.name == "*":
                         for name in sorted(SOCKET_TYPES):
                             add(path, where, f"socket.{name}")
@@ -3364,8 +3433,14 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
 def test_only_the_reviewed_sites_open_a_raw_connection() -> None:
     """#675 re-review: a raw socket or stream is a way to talk to Chrome (or anything)
     that no other rule here reads. Only the launcher's port check and the identity
-    read's GET open one."""
-    assert raw_connections(package_sources()) == ALLOWED_RAW_CONNECTIONS
+    read's GET open one. #677: an HTTP connection or a urllib opener is one too; only
+    Gmail's, setup's health check and the update download build or send on one."""
+    found = raw_connections(package_sources())
+    assert found == ALLOWED_RAW_CONNECTIONS, sorted(
+        (str(p.relative_to(PACKAGE)), f, n, c)
+        for (p, f, n), c in found.items() | ALLOWED_RAW_CONNECTIONS.items()
+        if ALLOWED_RAW_CONNECTIONS.get((p, f, n)) != found.get((p, f, n))
+    )
 
 
 @pytest.mark.parametrize(
@@ -3406,11 +3481,123 @@ def test_only_the_reviewed_sites_open_a_raw_connection() -> None:
         "from socket import SocketType as T\n",
         "import socket as _s\nmade = getattr(_s, 'SocketType')\n",
         "import _socket\ns = _socket.SocketType()\n",
+        # #677: http.client's connections and sends, urllib's openers, under any name.
+        "from urllib.request import urlopen as u\n",
+        "import urllib.request\nurllib.request.urlopen('http://127.0.0.1:1/')\n",
+        "import urllib.request as ur\nur.urlopen('http://127.0.0.1:1/')\n",
+        "import urllib\nr = urllib.request.Request('http://127.0.0.1:1/', method='PUT')\n",
+        "from urllib.request import Request as R\n",
+        "from urllib.request import build_opener\n",
+        "import urllib.request\no = urllib.request.build_opener()\n",
+        "import urllib.request\no = urllib.request.OpenerDirector()\n",
+        "import urllib.request\nurllib.request.urlretrieve('http://127.0.0.1:1/')\n",
+        "from urllib.request import URLopener\n",
+        "from urllib.request import FancyURLopener as F\n",
+        "from urllib.request import *\n",
+        "import urllib.request\nopener = getattr(urllib.request, 'urlopen')\n",
+        "from http.client import HTTPSConnection\n",
+        "from http.client import HTTPConnection as C\n",
+        "import http.client as hc\nc = hc.HTTPSConnection('example.invalid')\n",
+        "import http.client\nc = http.client.HTTPConnection('127.0.0.1', 1)\n",
+        "import http.client as hc\nmade = getattr(hc, 'HTTPSConnection')\n",
+        "from http.client import *\n",
+        "def f(c):\n    c.putrequest('PUT', '/')\n",
+        "def f(c):\n    c.endheaders()\n",
+        "def f(c):\n    c.request('PUT', '/')\n",
+        "def f(c):\n    send = c.request\n",
+        "def f(c):\n    send = getattr(c, 'request')\n",
+        # A connection held under the name an observed response has.
+        "def f(response):\n    response.request('PUT', '/')\n",
+        "import httplib2\nc = httplib2.HTTPSConnectionWithTimeout('example.invalid')\n",
+        "from httplib2 import HTTPConnectionWithTimeout\n",
+        # Re-exported by a module of netkeep's own that imports one.
+        "from netkeep.campaigns.gmail_oauth import build_opener\n",
+        "from netkeep.campaigns.gmail_oauth import Request as R\n",
+        "from netkeep.campaigns import gmail_oauth\nr = gmail_oauth.Request('http://x/')\n",
+        "from netkeep.services import update\nc = update.http.client.HTTPSConnection('x')\n",
     ],
 )
 def test_the_raw_connection_pin_catches_a_new_opener(line: str) -> None:
     sources = package_sources()
     sources[PACKAGE / "services" / "chrome_launch.py"] += "\n" + line
+    assert raw_connections(sources) != ALLOWED_RAW_CONNECTIONS
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "from fastapi import Request\n",
+        "from fastapi import Request as R\n",
+        "from starlette.requests import Request\n",
+        "from fastapi import Request\n\n\ndef f(request: Request) -> None:\n    pass\n",
+    ],
+)
+def test_the_raw_connection_pin_leaves_the_web_frameworks_request_alone(line: str) -> None:
+    """#677: the ``Request`` a handler answers opens nothing; the pin reads past it."""
+    sources = package_sources()
+    sources[PACKAGE / "services" / "chrome_launch.py"] += "\n" + line
+    assert raw_connections(sources) == ALLOWED_RAW_CONNECTIONS
+
+
+_OAUTH_IMPORT = "from urllib.request import BaseHandler, ProxyHandler, Request, build_opener\n"
+_OAUTH_PUT = (
+    "\n\ndef _put(url: str) -> object:\n"
+    "    return build_opener().open(Request(url, method='PUT'))\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        # #677's own example: a new helper, on names its module already imports.
+        (PACKAGE / "campaigns" / "gmail_oauth.py", None, _OAUTH_PUT),
+        (
+            PACKAGE / "campaigns" / "gmail_oauth.py",
+            _OAUTH_IMPORT,
+            _OAUTH_IMPORT.replace("build_opener", "build_opener, urlopen"),
+        ),
+        (
+            PACKAGE / "campaigns" / "gmail_oauth.py",
+            _OAUTH_IMPORT,
+            _OAUTH_IMPORT.replace("build_opener", "build_opener as b_, build_opener"),
+        ),
+        (PACKAGE / "campaigns" / "gmail_oauth.py", None, "\n\nopen_ = build_opener\n"),
+        # A second send on the connection a reviewed site builds.
+        (
+            PACKAGE / "services" / "post_install.py",
+            "        response = connection.getresponse()\n",
+            "        connection.request('PUT', '/')\n        response = connection.getresponse()\n",
+        ),
+        (
+            PACKAGE / "services" / "update.py",
+            "            response = connection.getresponse()\n",
+            "            connection.putrequest('PUT', '/')\n"
+            "            response = connection.getresponse()\n",
+        ),
+        (
+            PACKAGE / "services" / "update.py",
+            None,
+            "\n\ndef _put(host: str) -> None:\n"
+            "    http.client.HTTPSConnection(host, 443).request('PUT', '/')\n",
+        ),
+        (
+            PACKAGE / "campaigns" / "gmail.py",
+            None,
+            "\n\ndef _put(conn: WriteOnceMixin) -> None:\n    conn.request('PUT', '/')\n",
+        ),
+    ],
+)
+def test_the_raw_connection_pin_catches_a_new_send_at_a_reviewed_site(
+    path: Path, old: str | None, new: str
+) -> None:
+    """#677: each use is keyed by function, so a module that already makes a reviewed
+    request can't make another one without a new entry."""
+    sources = package_sources()
+    if old is None:
+        sources[path] += new
+    else:
+        assert sources[path].count(old) == 1, old
+        sources[path] = sources[path].replace(old, new, 1)
     assert raw_connections(sources) != ALLOWED_RAW_CONNECTIONS
 
 
@@ -3452,8 +3639,8 @@ HTTP_CLIENT_MODULES = frozenset(
 #: A connection's own send methods: read on a connection made anywhere (Gmail's, say),
 #: each is a request of netkeep's own.
 HTTP_SEND_NAMES = frozenset({"putrequest", "endheaders"})
-#: Every reach of one, by (file, function, module or name): count. Tightening Gmail's
-#: entries to the hosts they reach is #677's.
+#: Every reach of one, by (file, function, module or name): count. Each use of a
+#: connection or an opener, by function, is :data:`ALLOWED_RAW_CONNECTIONS`' (#677).
 ALLOWED_HTTP_CLIENTS = {
     # Gmail's API client: httplib2 under googleapiclient, and the write-once connection
     # (#563), which subclasses http.client's connection and catches its errors in its
