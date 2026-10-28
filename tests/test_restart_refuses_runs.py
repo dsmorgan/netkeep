@@ -13,27 +13,30 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
+import factories
 import httpx
 import pytest
 from campaign_fakes import NOW
 from fastapi import FastAPI
 from sqlalchemy import select
-from test_linkedin_steps_api import FakeExecutor, _messages, _seed, with_runner
+from test_linkedin_steps_api import FakeExecutor, _messages, _prefilled, _seed, with_runner
 
 from netkeep.db import session_scope
-from netkeep.models import SyncRun, SyncRunStatus, User
+from netkeep.models import SyncRun, SyncRunKind, SyncRunStatus, SyncRunTrigger, User
 from netkeep.models.base import utcnow
 from netkeep.scoping import unscoped
-from netkeep.services import restart, restart_gate, runs, scheduler
+from netkeep.services import enrich_plan, linkedin_steps, restart, restart_gate, runs, scheduler
 from netkeep.services.events import EventBus
 from netkeep.services.linkedin_accounts import arm_scheduled_runs, ensure_account
 from netkeep.services.scheduled_runs import REFUSED_RESTARTING, serve_registry
 from netkeep.services.tasks import RESTARTING, SubmitRefused, TaskInfo, TaskRunner
 from netkeep.web.api import linkedin_steps as steps_api
+from netkeep.web.api import settings_config
 
 __all__ = ["with_runner"]  # the fixture, used by name
 
@@ -79,6 +82,13 @@ async def test_a_runner_refusing_new_work_starts_nothing_and_leaves_what_runs() 
     assert finished is not None and finished.status == "succeeded"  # never cancelled
     await asyncio.sleep(0)
     assert started == []
+
+
+def test_a_refused_prefill_records_the_runners_words() -> None:
+    """The reason a refused claim records (#730) is the task runner's refusal, so the run
+    and the 409 say the same thing."""
+    assert RESTARTING == "netkeep is restarting"
+    assert linkedin_steps.NOT_STARTED_RESTARTING == RESTARTING
 
 
 # --- the gate -----------------------------------------------------------------------
@@ -128,6 +138,85 @@ async def test_a_cancelled_restart_leaves_the_runner_open() -> None:
     await tasks.join()
 
 
+async def test_a_cancel_after_the_quiesce_leaves_the_runner_open() -> None:
+    """The first look is idle, so the gate quiesces; the look after it finds work, and
+    a Cancel then must leave runs open: the runner closes only at the trigger."""
+    tasks = TaskRunner(EventBus())
+    hook = restart.Restarter(stop=lambda: None, mode="exec")
+    looks: list[int] = []
+    quiesced: list[None] = []
+
+    async def look() -> list[str]:
+        looks.append(len(looks))
+        return [] if len(looks) == 1 else ["a background task (linkedin.run) is running"]
+
+    async def quiesce() -> None:
+        quiesced.append(None)
+
+    gate = restart_gate.RestartGate(
+        hook,
+        busy=look,
+        quiesce=quiesce,
+        resume=lambda: None,
+        refuse_runs=lambda: tasks.refuse_new(RESTARTING),
+        poll_s=0.01,
+    )
+    gate.start()
+    await _until(lambda: len(looks) >= 3)  # quiesced, then waiting on the work
+    assert quiesced == [None]
+    assert await gate.cancel()
+    assert not hook.requested and tasks.refusing is None
+
+
+async def test_a_task_submitted_during_the_last_looks_database_read_holds_the_restart(
+    running_app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``settings_config._busy`` reads the task runner after its database read, the last
+    await before the gate refuses runs and triggers. A task submitted while that read is
+    in flight is seen, so the restart waits for it instead of cutting it off."""
+    app = running_app
+    stops: list[None] = []
+    hook = restart.Restarter(stop=lambda: stops.append(None), mode="exec")
+    quiesced = threading.Event()
+    entered = threading.Event()
+    release = threading.Event()
+    stored = restart_gate.stored_busy
+
+    def blocking(factory: Any) -> list[str]:
+        if quiesced.is_set() and not entered.is_set():
+            entered.set()  # the look after the quiesce: hold it until the test says
+            assert release.wait(timeout=5)
+        return stored(factory)
+
+    async def quiesce() -> None:
+        quiesced.set()
+
+    monkeypatch.setattr(restart_gate, "stored_busy", blocking)
+    gate = restart_gate.RestartGate(
+        hook,
+        busy=lambda: settings_config._busy(app),
+        quiesce=quiesce,
+        resume=lambda: None,
+        refuse_runs=lambda: settings_config._refuse_runs(app),
+        poll_s=0.01,
+    )
+    gate.start()
+    await _until(entered.is_set)
+    done = asyncio.Event()
+
+    async def work() -> None:
+        await done.wait()
+
+    tasks: TaskRunner = app.state.tasks
+    tasks.submit("linkedin.run", work, user_id=1)  # on the loop, while the read blocks
+    release.set()
+    await asyncio.sleep(0.2)
+    assert stops == [] and tasks.refusing is None  # seen: the gate waits for it
+    done.set()
+    await _until(lambda: len(stops) == 1)
+    assert tasks.refusing == RESTARTING
+
+
 # --- the API ------------------------------------------------------------------------
 
 
@@ -165,38 +254,79 @@ def _run_rows(app: FastAPI) -> list[SyncRun]:
         return list(session.scalars(unscoped(select(SyncRun))))
 
 
+Seed = Callable[[FastAPI, httpx.AsyncClient], Awaitable[tuple[str, dict[str, Any] | None]]]
+
+
+async def _a_resumable_enrichment(
+    app: FastAPI, client: httpx.AsyncClient
+) -> tuple[str, dict[str, Any] | None]:
+    """An aborted enrichment run with the rest of its plan to resume."""
+    with session_scope(app.state.session_factory, write=True) as session:
+        user = session.scalars(select(User)).one()
+        ids = [factories.make_contact(session, user).id for _ in range(2)]
+        old = runs.create_run(
+            session, user, SyncRunKind.ENRICH, trigger=SyncRunTrigger.MANUAL, now=utcnow()
+        )
+        enrich_plan.store_plan(session, user, old.id, ids)
+        runs.finish_run(session, user, old.id, status=SyncRunStatus.ABORTED, now=utcnow())
+        return f"/api/v1/linkedin/runs/{old.id}/resume", {}
+
+
+async def _a_prefill_waiting(
+    app: FastAPI, client: httpx.AsyncClient
+) -> tuple[str, dict[str, Any] | None]:
+    """A prefilled message that waits for you, so "I sent it, check now" would start a run."""
+    message_id = await _prefilled(client, app)
+    await app.state.tasks.join()
+    return f"/api/v1/campaigns/linkedin/messages/{message_id}/check", None
+
+
+def _path(path: str, body: dict[str, Any] | None = None) -> Seed:
+    async def seed(app: FastAPI, client: httpx.AsyncClient) -> tuple[str, dict[str, Any] | None]:
+        return path, body
+
+    return seed
+
+
 RUN_STARTS = [
-    pytest.param("/api/v1/linkedin/runs", {"kind": "connections_incremental"}, id="run"),
-    pytest.param("/api/v1/linkedin/runs/1/resume", {}, id="resume"),
-    pytest.param("/api/v1/linkedin/browser/check", None, id="check-connection"),
+    pytest.param(_path("/api/v1/linkedin/runs", {"kind": "connections_incremental"}), id="run"),
+    pytest.param(_a_resumable_enrichment, id="resume"),
+    pytest.param(_path("/api/v1/linkedin/browser/check"), id="check-connection"),
     pytest.param(
-        "/api/v1/campaigns/linkedin/prefill",
-        {"next": True, "retry": False, "no_bubble_open": False},
+        _path(
+            "/api/v1/campaigns/linkedin/prefill",
+            {"next": True, "retry": False, "no_bubble_open": False},
+        ),
         id="prefill",
     ),
-    pytest.param("/api/v1/campaigns/linkedin/messages/1/check", None, id="check-now"),
-    pytest.param("/api/v1/linkedin/browser/start", {"first_run": False}, id="start-chrome"),
-    pytest.param("/api/v1/tasks/ping", None, id="ping"),
+    pytest.param(_a_prefill_waiting, id="check-now"),
+    pytest.param(_path("/api/v1/linkedin/browser/start", {"first_run": False}), id="start-chrome"),
+    pytest.param(_path("/api/v1/tasks/ping"), id="ping"),
 ]
 
 
-@pytest.mark.usefixtures("inside_active_hours")
-@pytest.mark.parametrize(("path", "body"), RUN_STARTS)
+@pytest.mark.usefixtures("inside_active_hours", "with_runner")
+@pytest.mark.parametrize("seed", RUN_STARTS)
 async def test_after_the_trigger_every_run_start_answers_409_and_starts_nothing(
     running_app: FastAPI,
     client: httpx.AsyncClient,
     fakes: tuple[FakeExecutor, FakeLauncher],
-    path: str,
-    body: dict[str, Any] | None,
+    monkeypatch: pytest.MonkeyPatch,
+    seed: Seed,
 ) -> None:
     executor, launcher = fakes
+    monkeypatch.setattr(steps_api, "utcnow", lambda: NOW)
+    path, body = await seed(running_app, client)
+    rows = [run.id for run in _run_rows(running_app)]
+    executed = list(executor.executed)
     await _trigger(running_app, client)
     response = await client.post(path, headers=CSRF, json=body)
     assert response.status_code == 409, response.text
     assert response.json() == {"detail": RESTARTING}
     assert running_app.state.tasks.active() == []
-    assert executor.executed == [] and launcher.starts == 0
-    assert _run_rows(running_app) == []  # refused before anything was recorded
+    assert executor.executed == executed and launcher.starts == 0
+    # Refused before anything was recorded: no new run, whatever the route would start.
+    assert [run.id for run in _run_rows(running_app)] == rows
 
 
 @pytest.mark.usefixtures("inside_active_hours")

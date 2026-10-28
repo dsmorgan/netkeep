@@ -34,6 +34,8 @@ SOURCES = (
     "netkeep/linkedin/page_messaging.py",
     "netkeep/linkedin/messaging.py",
     "netkeep/services/message_send.py",
+    # #730: a claimed run the task runner refused records its reason here.
+    "netkeep/services/linkedin_steps.py",
     "netkeep/worker.py",
 )
 #: Calls whose arguments carry a reason.

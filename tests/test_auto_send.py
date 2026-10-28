@@ -932,25 +932,60 @@ async def test_after_a_restart_is_triggered_the_fire_claims_nothing(lane: Lane) 
 
 class _RefusesAtSubmit(_SeenTasks):
     """Open at the handler's first look, refused at the submit: a restart triggered
-    between the claim and the submit (#730)."""
+    between the claim and the submit (#730). ``cancel`` first asks the claimed run to
+    stop, as a person's Cancel in that moment would (#708)."""
+
+    def __init__(self, lane: Lane, *, cancel: bool = False) -> None:
+        super().__init__()
+        self.lane = lane
+        self.cancel = cancel
 
     def submit(self, *args: Any, **kwargs: Any) -> Any:
+        if self.cancel:
+            [run] = self.lane.runs()
+            self.lane.write(lambda s, u: runs.request_cancel(s, u, run.id, now=NOW))
         raise SubmitRefused(RESTARTING)
 
 
 async def test_an_auto_send_refused_at_its_submit_gives_its_step_back(lane: Lane) -> None:
-    """#730: the claim was made, but the run never starts. It ends aborted, and the step
-    is due again at its claim, never a Try again, as a run that opened nothing is."""
+    """#730: the claim was made, but the run never starts. It is recorded as the prefill
+    runner records a refusal before it opens anything: ``not_typed``, aborted, nothing
+    opened, and the step due again at its claim, never a Try again."""
     enrollment_id = lane.enroll(contact=dict(CONTACT))
     lane.write(lambda s, u: record_poll(s, u, NOW - timedelta(minutes=1)))
-    assert await _fire(lane, AUTO, _RefusesAtSubmit()) is scheduler.JobOutcome.RETRY_LATER
+    outcome = await _fire(lane, AUTO, _RefusesAtSubmit(lane))
+    assert outcome is scheduler.JobOutcome.RETRY_LATER
     [run] = lane.runs()
-    assert (run.status, run.stop_reason) == (SyncRunStatus.ABORTED, "restarting")
+    assert (run.status, run.stop_reason) == (SyncRunStatus.ABORTED, "not_typed")
+    assert run.notes == "not started: netkeep is restarting"
+    assert run.counts_json == {"opened": False, "typed_chars": 0}
     assert lane.messages(enrollment_id) == []
     enrollment = lane.enrollment(enrollment_id)
     assert enrollment.next_action_at == NOW
     assert enrollment.not_sent_count == 0 and enrollment.not_sent_error is None
+    assert enrollment_id not in _try_again_ids(lane)
     assert _last_fire(lane).reason == "restarting"
+
+
+async def test_a_cancelled_auto_send_refused_at_its_submit_parks_its_step(lane: Lane) -> None:
+    """#730 with #708: a person cancelled the claimed run before the refusal. The step is
+    parked for Try again, never given back due, so a later fire doesn't send the message
+    the person stopped."""
+    enrollment_id = lane.enroll(contact=dict(CONTACT))
+    lane.write(lambda s, u: record_poll(s, u, NOW - timedelta(minutes=1)))
+    outcome = await _fire(lane, AUTO, _RefusesAtSubmit(lane, cancel=True))
+    assert outcome is scheduler.JobOutcome.RETRY_LATER
+    [run] = lane.runs()
+    assert (run.status, run.stop_reason) == (SyncRunStatus.ABORTED, "not_typed")
+    assert (run.counts_json or {}).get("li_prefills_spent") is False
+    assert lane.messages(enrollment_id) == []
+    enrollment = lane.enrollment(enrollment_id)
+    assert enrollment.next_action_at is None
+    assert (enrollment.not_sent_count, enrollment.not_sent_error) == (
+        1,
+        "not_typed: netkeep is restarting",
+    )
+    assert enrollment_id in _try_again_ids(lane)
 
 
 async def test_two_users_each_have_their_own_switch(lane: Lane) -> None:

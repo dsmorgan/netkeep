@@ -105,11 +105,10 @@ from netkeep.services.linkedin_steps import (
     AUTO_SEND_HOLD_TAB,
     BUBBLE_LEFT_OPEN_NOTE,
     NOT_SENT_NOTE,
-    NOT_STARTED_NOTE,
     SEND_UNCONFIRMED_NOTE,
     auto_send_hold,
     effective_mode,
-    give_back_unopened,
+    give_back_not_started,
     hold_auto_send,
     record_prefill_outcome,
 )
@@ -234,7 +233,7 @@ def record(
     ``opened`` false says the run stopped before it opened anything (a refusal before the
     navigation: a lapse, a gate, a busy browser). An auto-send stopped there is not
     ``not_typed``: its step is given back with its due time
-    (:func:`~netkeep.services.linkedin_steps.give_back_unopened`), so a later fire tries
+    (:func:`~netkeep.services.linkedin_steps.give_back_not_started`), so a later fire tries
     it again by itself, and it is never listed for Try again (#458 final review). The
     exception is a run a person cancelled (``cancel_requested_at`` set), wherever it
     stopped before the navigation and whichever refusal won (#708): it records
@@ -293,18 +292,7 @@ def record(
             and run.cancel_requested_at is None
             and outcome.kind is MessageOutcomeKind.NOT_TYPED
         ):
-            give_back_unopened(session, user, message.id, now=now)
-            runs.finish_run(
-                session,
-                user,
-                run_id,
-                status=SyncRunStatus.ABORTED,
-                now=now,
-                stop_reason=outcome.kind.value,
-                counts={"opened": False, "typed_chars": 0},
-                notes=(f"{NOT_STARTED_NOTE}{outcome.reason}",),
-                error=outcome.reason,
-            )
+            give_back_not_started(session, user, message.id, run_id, outcome.reason, now=now)
             log.info("auto-send run %d stopped before opening anything; the step stays due", run_id)
             return PrefillReport(run_id, outcome)
         typed_whole = outcome.kind in (

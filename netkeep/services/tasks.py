@@ -99,7 +99,10 @@ class TaskRunner:
 
     def check_open(self) -> None:
         """Raise :class:`SubmitRefused` once :meth:`refuse_new` was called. A route calls
-        it before it records anything, so a refused request writes no row."""
+        it before it records anything, so a refused request writes no row. No ``await``
+        may separate the call from the route's :meth:`submit`: the restart could be
+        triggered there, and the submit's refusal would then follow a commit, leaving a
+        recorded run (or a claimed message) that never starts."""
         if self._refusing is not None:
             raise SubmitRefused(self._refusing)
 

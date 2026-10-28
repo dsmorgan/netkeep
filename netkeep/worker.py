@@ -1152,7 +1152,8 @@ async def start_chrome_at_startup(
         log.info("not starting netkeep's Chrome at startup: a launch is already under way")
         return None
     except SubmitRefused as exc:
-        # #730: a restart was triggered before the socket listened; it spawns nothing.
+        # #730: a restart was triggered after serve began listening and before this
+        # submit (while it read the setting and the browser lock): it spawns nothing.
         log.info("not starting netkeep's Chrome at startup: %s", personal_exc(exc))
         return None
 
