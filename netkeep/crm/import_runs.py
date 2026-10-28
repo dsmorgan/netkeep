@@ -42,9 +42,15 @@ adopting it, a later import seeing it again) is kept, because deleting it would
 take that later change with it (#725). Its ``updated_at``, which every write
 stamps, says so. :attr:`RollbackResult.kept` names each row kept.
 
-A rollback does not undo the ``source`` and ``observed_at`` stamps refreshed on
-child rows that already existed: the row was not created by the run, and its
-value is unchanged. It does not undo a merge either, and because deleting a
+A child row that already existed and that the run only saw again keeps its
+value, but the run refreshed its ``source``, ``observed_at`` and ``updated_at``
+stamps. The row records the stamps as they were (``changes_json["refreshed"]``),
+and a rollback puts them back while nothing has written to the row since the
+commit (#725). So when two runs saw the same row and are undone newest first,
+the earlier run's rollback finds the row as its own commit left it. A run
+recorded before this was kept leaves its refreshes in place.
+
+A rollback does not undo a merge, and because deleting a
 contact a merge has drawn in would take rows with it that the run never created,
 a run whose created contacts have since been merged is *refused* rather than
 partly undone (:class:`RunMerged`).
@@ -82,7 +88,7 @@ from dataclasses import field as dataclass_field
 from datetime import date, datetime
 from typing import Any, Final, Literal, assert_never, cast
 
-from sqlalchemy import ColumnElement, CursorResult, Delete, and_, not_, or_, select, true
+from sqlalchemy import ColumnElement, CursorResult, Delete, Update, and_, not_, or_, select, true
 from sqlalchemy.orm import Session, class_mapper, selectinload
 
 from netkeep.crm import identity
@@ -120,6 +126,7 @@ from netkeep.crm.tags import ensure_default_rules, run_rules
 from netkeep.db import is_writer
 from netkeep.logging_setup import personal, personal_exc
 from netkeep.models import (
+    ChildStamp,
     Contact,
     ContactAlias,
     ContactChild,
@@ -159,6 +166,7 @@ from netkeep.scoping import (
     scoped_contacts,
     scoped_count,
     scoped_delete,
+    scoped_update,
 )
 from netkeep.services.settings_kv import get_setting, set_setting
 
@@ -583,19 +591,31 @@ class ContactState:
     sources: dict[str, str]
     synced: dict[str, SyncedValue]
     children: dict[str, set[int]] = dataclass_field(default_factory=dict)
+    stamps: dict[str, dict[int, ChildStamp]] = dataclass_field(default_factory=dict)
 
 
 def snapshot_contact(contact: Contact) -> ContactState:
     """``contact`` as it is now: its provenance fields, their sources and ledger, its children."""
+    stamps = {
+        table: {row.id: _stamp(row) for row in getattr(contact, attribute)}
+        for table, attribute in _CHILD_RELATIONSHIPS.items()
+    }
     return ContactState(
         fields={name: getattr(contact, name) for name in PROVENANCE_ORDER},
         sources=dict(contact.field_sources or {}),
         synced={name: dict(entry) for name, entry in (contact.synced_values or {}).items()},  # type: ignore[misc]
-        children={
-            table: {row.id for row in getattr(contact, attribute)}
-            for table, attribute in _CHILD_RELATIONSHIPS.items()
-        },
+        children={table: set(rows) for table, rows in stamps.items()},
+        stamps=stamps,
     )
+
+
+def _stamp(row: ContactChild) -> ChildStamp:
+    """A child row's provenance stamps, as ``changes_json["refreshed"]`` keeps them (#725)."""
+    return {
+        "source": row.source.value,
+        "observed_at": row.observed_at.isoformat(),
+        "updated_at": row.updated_at.isoformat(),
+    }
 
 
 def contact_effect(before: ContactState, contact: Contact) -> RowChanges:
@@ -613,13 +633,23 @@ def contact_effect(before: ContactState, contact: Contact) -> RowChanges:
         synced_now = (contact.synced_values or {}).get(name)
         if before.synced.get(name) != synced_now:
             synced[name] = before.synced.get(name)
-    children = {
-        table: sorted(
-            {row.id for row in getattr(contact, attribute)} - before.children.get(table, set())
-        )
-        for table, attribute in _CHILD_RELATIONSHIPS.items()
-    }
-    return {
+    children: dict[str, list[int]] = {}
+    # A row that was already there and that the apply wrote to: its stamps before
+    # (#725). ``apply`` flushed, so ``updated_at`` here is the one it stamped.
+    refreshed: dict[str, dict[str, ChildStamp]] = {}
+    for table, attribute in _CHILD_RELATIONSHIPS.items():
+        existed = before.children.get(table, set())
+        stamped = before.stamps.get(table, {})
+        created: list[int] = []
+        for row in getattr(contact, attribute):
+            if row.id not in existed:
+                created.append(row.id)
+                continue
+            old = stamped.get(row.id)
+            if old is not None and _stamp(row) != old:
+                refreshed.setdefault(table, {})[str(row.id)] = old
+        children[table] = sorted(created)
+    effect: RowChanges = {
         "created_contact": False,
         "fields": fields,
         "sources": sources,
@@ -627,6 +657,9 @@ def contact_effect(before: ContactState, contact: Contact) -> RowChanges:
         "children": {table: ids for table, ids in children.items() if ids},
         "refused": [],
     }
+    if refreshed:
+        effect["refreshed"] = refreshed
+    return effect
 
 
 def created_effect() -> RowChanges:
@@ -1538,9 +1571,11 @@ class KeptRow:
 class RollbackResult:
     """What undoing a run removed and put back, and what it kept.
 
-    ``kept`` names each row the run added to a contact it did not create, or
-    each interaction it wrote, that the rollback left in place because something
-    wrote to it after the commit (#725), ordered by contact, kind, and id.
+    ``kept`` names each row the run added to a contact it did not create (a child
+    row, or an interaction an archive run wrote), that the rollback left in place
+    because something wrote to it after the commit (#725), ordered by contact,
+    kind, and id. A row on a contact the run created is never in it: it goes with
+    the contact.
     """
 
     run_id: int
@@ -1616,6 +1651,7 @@ def rollback(session: Session, user: User, run_id: int, *, force: bool = False) 
         if acquired:
             raise CreatedContactsChanged(acquired)
     kept = _kept_rows(session, user, run, rows, created_ids)
+    unrefreshed = _unrefresh(session, user, run, rows, created_ids)
     restored = fields = children = 0
     for row in rows:
         changes = row.changes_json
@@ -1637,12 +1673,14 @@ def rollback(session: Session, user: User, run_id: int, *, force: bool = False) 
     run.rolled_back_at = utcnow()
     session.flush()
     log.info(
-        "import run %d rolled back for user %d: %d contacts deleted, %d restored, %d rows kept",
+        "import run %d rolled back for user %d: %d contacts deleted, %d restored, "
+        "%d rows kept, %d refreshes undone",
         run.id,
         user.id,
         deleted,
         restored,
         len(kept),
+        unrefreshed,
     )
     return RollbackResult(run.id, deleted, restored, fields, children, kept)
 
@@ -1753,6 +1791,62 @@ def _untouched_since(model: type[ContactChild], since: datetime | None) -> Colum
             condition, Interaction.external_id.is_(None), Interaction.message_id.is_(None)
         )
     return condition
+
+
+def _unrefresh(
+    session: Session,
+    user: User,
+    run: ImportRun,
+    rows: Sequence[ImportRow],
+    created_ids: set[int],
+) -> int:
+    """Put back the stamps the run refreshed on child rows that were already there (#725).
+
+    How many rows it put back. Each row's ``changes_json["refreshed"]`` holds the
+    stamps as they were before it; when the file names a person twice, the first
+    row's record is the one from before the run. A row something wrote to since
+    the commit keeps what it has (:func:`_untouched_since`): an edit after the run
+    stays visible, and one before it is in the stamps put back, so an earlier
+    run's rollback still sees it. ``updated_at`` is written explicitly, so the
+    column's ``onupdate`` does not stamp the row again. Rows the run itself
+    created, and the children of contacts it created, are deleted instead.
+    """
+    own: dict[str, set[int]] = {}
+    for row in rows:
+        if row.changes_json is not None:
+            for table, ids in row.changes_json["children"].items():
+                own.setdefault(table, set()).update(ids)
+    stamps: dict[str, dict[int, ChildStamp]] = {}
+    for row in rows:
+        changes = row.changes_json
+        if changes is None or changes["created_contact"] or row.contact_id is None:
+            continue
+        if row.contact_id in created_ids:
+            continue
+        for table, recorded in changes.get("refreshed", {}).items():
+            if table not in CHILD_MODELS:  # pragma: no cover - a table this version dropped
+                continue
+            for key, stamp in recorded.items():
+                row_id = int(key)
+                if row_id not in own.get(table, set()):
+                    stamps.setdefault(table, {}).setdefault(row_id, stamp)
+    put_back = 0
+    for table, by_id in stamps.items():
+        model = CHILD_MODELS[table]
+        (key_column,) = class_mapper(model).primary_key
+        for found_id, stamp in sorted(by_id.items()):
+            statement = (
+                scoped_update(user, model)
+                .where(key_column == found_id, _untouched_since(model, run.committed_at))
+                .values(
+                    source=ContactSource(stamp["source"]),
+                    observed_at=datetime.fromisoformat(stamp["observed_at"]),
+                    updated_at=datetime.fromisoformat(stamp["updated_at"]),
+                )
+            )
+            result = cast("CursorResult[Any]", session.execute(_unsynchronized(statement)))
+            put_back += result.rowcount
+    return put_back
 
 
 def _kept_rows(
@@ -2130,8 +2224,8 @@ def _delete_contacts(session: Session, user: User, contact_ids: Iterable[int]) -
     return result.rowcount
 
 
-def _unsynchronized(statement: Delete) -> Delete:
-    """A delete the ORM does not try to mirror into the session first.
+def _unsynchronized[S: (Delete, Update)](statement: S) -> S:
+    """A delete or update the ORM does not try to mirror into the session first.
 
     Its default strategy is a SELECT of the rows about to go, which the scope
     guard rejects because the ORM builds it itself and it carries no scope mark.

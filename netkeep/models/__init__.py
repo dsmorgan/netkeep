@@ -59,6 +59,7 @@ from netkeep.models.history import (
     HistoryReplyKind,
 )
 from netkeep.models.imports import (
+    ChildStamp,
     FieldChange,
     ImportDecisionKind,
     ImportResolution,
@@ -124,6 +125,7 @@ __all__ = [
     "CampaignMailboxLocked",
     "CampaignStatus",
     "CampaignStep",
+    "ChildStamp",
     "Contact",
     "ContactAlias",
     "ContactChild",

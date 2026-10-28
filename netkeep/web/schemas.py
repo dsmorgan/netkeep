@@ -1301,11 +1301,12 @@ class ImportRollbackOut(BaseModel):
     fields_restored: int
     children_deleted: int
     kept: list[RollbackKeptOut]
-    """Each email, phone, link, position, snapshot, or alias the run added to a
-    contact it did not create, and each interaction it wrote, that the rollback
-    left in place because something wrote to it after the import: a person's
-    edit, a bounce, the inbox poll adopting it, a later import seeing it again
-    (#725). ``force`` does not change this."""
+    """Each row the run added to a contact it did not create (an email, phone,
+    link, position, snapshot, or alias, or an interaction an archive run wrote)
+    that the rollback left in place because something wrote to it after the
+    import: a person's edit, a bounce, the inbox poll adopting it, a later import
+    seeing it again (#725). A row on a contact the run created is never here: it
+    is deleted with the contact. ``force`` does not change this."""
 
 
 RollbackRefusalCode = Literal[

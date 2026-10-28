@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import enum
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
 
 from sqlalchemy import JSON, ForeignKey, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -107,6 +107,17 @@ class RowDecision(TypedDict):
     contact_id: int | None
 
 
+class ChildStamp(TypedDict):
+    """A child row's provenance stamps as they were before a commit refreshed them (#725).
+
+    ``observed_at`` and ``updated_at`` are ISO datetimes in UTC.
+    """
+
+    source: str
+    observed_at: str
+    updated_at: str
+
+
 class RowChanges(TypedDict):
     """``changes_json``: everything a rollback of this row needs, and why it did less.
 
@@ -116,6 +127,9 @@ class RowChanges(TypedDict):
     there was none), and ``children`` the ids of the child rows the row created,
     keyed by table name. ``refused`` is the audit trail of what provenance kept
     out; a rollback never touches those fields, because the run never wrote them.
+    ``refreshed`` is, per table and per row id (as text), the stamps each child row
+    that was already there carried before the row refreshed it, so a rollback can
+    put them back (#725). Rows recorded before it was kept have no such key.
     """
 
     created_contact: bool
@@ -124,6 +138,7 @@ class RowChanges(TypedDict):
     synced: dict[str, SyncedValue | None]
     children: dict[str, list[int]]
     refused: list[RefusedField]
+    refreshed: NotRequired[dict[str, dict[str, ChildStamp]]]
 
 
 class ImportRun(UserOwned, TimestampMixin, Base):

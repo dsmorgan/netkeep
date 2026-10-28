@@ -265,10 +265,45 @@ describe('one import run', () => {
     const dialog = within(await screen.findByRole('alertdialog'))
     fireEvent.click(dialog.getByRole('button', { name: 'Delete 2 contacts and restore the rest' }))
 
-    expect(await screen.findByText(/^Kept 1 record this import added/)).toHaveTextContent(
-      'because it was changed after the import (edited, marked bounced, or seen again): ' +
-        'email on contact #31.',
+    const note = await screen.findByText(/^Kept 1 record this import added/)
+    expect(note).toHaveTextContent(
+      'because it was changed after the import (edited, marked bounced, adopted by the ' +
+        'LinkedIn inbox poll, or seen again by a later import): email 90 on contact #31.',
     )
+    expect(within(note).getByRole('link', { name: 'contact #31' })).toHaveAttribute(
+      'href',
+      '/contacts/31',
+    )
+  })
+
+  it('names the first 15 kept records and counts the rest', async () => {
+    const kept = Array.from({ length: 18 }, (_, index) => ({
+      kind: 'interaction',
+      id: 100 + index,
+      contact_id: 31,
+    }))
+    mockFetch(
+      detailBackend(COMMITTED_RUN, [], () =>
+        jsonResponse({
+          run_id: 7,
+          contacts_deleted: 2,
+          contacts_restored: 1,
+          fields_restored: 3,
+          children_deleted: 4,
+          kept,
+        }),
+      ),
+    )
+    await renderApp('/imports/runs/7')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Roll back this import' }))
+    const dialog = within(await screen.findByRole('alertdialog'))
+    fireEvent.click(dialog.getByRole('button', { name: 'Delete 2 contacts and restore the rest' }))
+
+    const note = await screen.findByText(/^Kept 18 records this import added/)
+    expect(note).toHaveTextContent('interaction 114 on contact #31, and 3 more.')
+    expect(note).not.toHaveTextContent('interaction 115')
+    expect(within(note).getAllByRole('link')).toHaveLength(15)
   })
 
   it('sends nothing when the confirmation is dismissed', async () => {
