@@ -18095,7 +18095,7 @@
     },
     "/api/v1/campaigns/linkedin/messages/{message_id}/check": {
       "post": {
-        "description": "\"I sent it, check now\": start a manual inbox poll, which finds the message sent.",
+        "description": "\"I sent it, check now\": start a manual inbox poll, which finds the message sent.\nOnce a restart is triggered it answers ``409`` and records no run (#730).",
         "operationId": "check_linkedin_prefill_sent",
         "parameters": [
           {
@@ -18123,7 +18123,7 @@
             "description": "No such message"
           },
           "409": {
-            "description": "It does not wait for you, a run is running, the session is flagged, heat is too high, or it is outside active hours"
+            "description": "It does not wait for you, a run is running, the session is flagged, heat is too high, it is outside active hours, or netkeep is restarting"
           },
           "422": {
             "description": "A run kind the worker can't start"
@@ -18211,7 +18211,7 @@
     },
     "/api/v1/campaigns/linkedin/prefill": {
       "post": {
-        "description": "Claim one LinkedIn step and submit its prefill; answers at once, before any browser\nwork. A refusal answers ``409`` with its reasons; what the refusal changed (a reply\nthat ended the enrollment, a step parked) is kept.",
+        "description": "Claim one LinkedIn step and submit its prefill; answers at once, before any browser\nwork. A refusal answers ``409`` with its reasons; what the refusal changed (a reply\nthat ended the enrollment, a step parked) is kept. Once a restart is triggered it\nanswers ``409`` (\"netkeep is restarting\") and claims nothing (#730).",
         "operationId": "prefill_linkedin_step",
         "requestBody": {
           "content": {
@@ -18245,7 +18245,7 @@
                 }
               }
             },
-            "description": "Refused: the reasons are in the body"
+            "description": "Refused: the reasons are in the body; or netkeep is restarting (a plain detail, and nothing was claimed)"
           },
           "422": {
             "content": {
@@ -23571,7 +23571,7 @@
     },
     "/api/v1/linkedin/browser/check": {
       "post": {
-        "description": "Start a Check connection run; answers at once, before any browser work.\n\nThe run visits no page, so it spends no budget, and the session flag, heat, and\nactive hours don't stop it, as they don't stop ``netkeep preflight``.",
+        "description": "Start a Check connection run; answers at once, before any browser work.\n\nThe run visits no page, so it spends no budget, and the session flag, heat, and\nactive hours don't stop it, as they don't stop ``netkeep preflight``. Once a restart\nis triggered it answers ``409`` and records no run (#730).",
         "operationId": "check_linkedin_browser",
         "responses": {
           "202": {
@@ -23588,7 +23588,7 @@
             "description": "Only the local owner account checks netkeep's Chrome"
           },
           "409": {
-            "description": "Another run is running, or another process holds the browser"
+            "description": "Another run is running, another process holds the browser, or netkeep is restarting"
           },
           "503": {
             "description": "This process has no browser worker"
@@ -23624,7 +23624,7 @@
     },
     "/api/v1/linkedin/browser/start": {
       "post": {
-        "description": "Start netkeep's Chrome with the UI in an app window, or open the window in it (#636).\n\nYour act, from a button (ADR 0012, rule 5). It submits the launch to the task runner\nand answers ``202`` at once: the checks before a spawn can take seconds, and nothing\nis spawned inside a request. The launch refuses when the port answers as another\nChrome, when the profile is open without the port, or, for a cold start, while a run\nholds the browser; how it went arrives as ``browser.launch`` on ``GET /events``.\n``first_run`` (setup's first-run button) also opens LinkedIn's sign-in page. A launch\nalready under way, this button's or ``serve``'s at startup (#599), answers ``409``.",
+        "description": "Start netkeep's Chrome with the UI in an app window, or open the window in it (#636).\n\nYour act, from a button (ADR 0012, rule 5). It submits the launch to the task runner\nand answers ``202`` at once: the checks before a spawn can take seconds, and nothing\nis spawned inside a request. The launch refuses when the port answers as another\nChrome, when the profile is open without the port, or, for a cold start, while a run\nholds the browser; how it went arrives as ``browser.launch`` on ``GET /events``.\n``first_run`` (setup's first-run button) also opens LinkedIn's sign-in page. A launch\nalready under way, this button's or ``serve``'s at startup (#599), answers ``409``,\nand so does one asked for once a restart is triggered (#730): it spawns nothing.",
         "operationId": "start_linkedin_browser",
         "requestBody": {
           "content": {
@@ -23651,7 +23651,7 @@
             "description": "Only the local owner account starts netkeep's Chrome"
           },
           "409": {
-            "description": "A launch is already under way"
+            "description": "A launch is already under way, or netkeep is restarting"
           },
           "422": {
             "content": {
@@ -24023,7 +24023,7 @@
         ]
       },
       "post": {
-        "description": "Record a manual run and submit it; answers at once, before any browser work.\n\nOutside ``[linkedin] active_hours`` it answers ``409`` with the window, when it\nnext opens, and where to change it, and records no run (#213).",
+        "description": "Record a manual run and submit it; answers at once, before any browser work.\n\nOutside ``[linkedin] active_hours`` it answers ``409`` with the window, when it\nnext opens, and where to change it, and records no run (#213). Once a restart is\ntriggered it answers ``409`` (\"netkeep is restarting\") and records no run (#730).",
         "operationId": "start_linkedin_run",
         "requestBody": {
           "content": {
@@ -24047,7 +24047,7 @@
             "description": "Successful Response"
           },
           "409": {
-            "description": "A run is running, the session is flagged, heat is too high, or it is outside active hours"
+            "description": "A run is running, the session is flagged, heat is too high, it is outside active hours, or netkeep is restarting"
           },
           "422": {
             "description": "A kind with no runner, or max_visits on a sync"
@@ -24299,7 +24299,7 @@
     },
     "/api/v1/linkedin/runs/{run_id}/resume": {
       "post": {
-        "description": "Record a resume of an enrichment run's remaining plan and submit it.",
+        "description": "Record a resume of an enrichment run's remaining plan and submit it. Once a\nrestart is triggered it answers ``409`` and records nothing (#730).",
         "operationId": "resume_linkedin_run",
         "parameters": [
           {
@@ -24337,7 +24337,7 @@
             "description": "No enrichment run with a plan"
           },
           "409": {
-            "description": "Nothing to resume, or the run cannot start now"
+            "description": "Nothing to resume, the run cannot start now, or netkeep is restarting"
           },
           "422": {
             "content": {
@@ -26485,7 +26485,7 @@
     },
     "/api/v1/tasks/ping": {
       "post": {
-        "description": "Submit a tiny task that reports progress twice, and return its id at once.",
+        "description": "Submit a tiny task that reports progress twice, and return its id at once. Once a\nrestart is triggered it answers ``409`` (#730).",
         "operationId": "ping_task",
         "responses": {
           "202": {
@@ -26497,6 +26497,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "description": "netkeep is restarting"
           }
         },
         "summary": "Ping Task",

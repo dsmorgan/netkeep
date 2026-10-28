@@ -11,6 +11,13 @@ and nothing is replayed at the next start. The browser activity lock (one per
 LinkedIn account) is the browser worker's, not this runner's; a LinkedIn run
 is submitted here like any other task (``services.scheduled_runs``,
 ``web/api/linkedin.py``).
+
+Once a restart is triggered (#730), :meth:`TaskRunner.refuse_new` closes the runner to
+new work for the rest of the process: :meth:`TaskRunner.submit` raises
+:class:`SubmitRefused`, which the API answers ``409``, so nothing starts that the
+shutdown's :meth:`TaskRunner.cancel_all` would cut off part way (a prefill mid-typing).
+Every task, every LinkedIn run included, enters through ``submit``, so no route can
+start one past it.
 """
 
 from __future__ import annotations
@@ -23,7 +30,7 @@ from collections import deque
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Literal
+from typing import Final, Literal
 
 from netkeep.models.base import utcnow
 from netkeep.services.events import Event, EventBus
@@ -33,11 +40,19 @@ log = logging.getLogger(__name__)
 TaskStatus = Literal["pending", "running", "succeeded", "failed"]
 DEFAULT_HISTORY = 200
 
+RESTARTING: Final = "netkeep is restarting"
+"""Why the runner refuses new tasks once a restart is triggered (#730)."""
+
 # Set inside each task's context so progress() knows who is calling. Child tasks
 # spawned by a task inherit it.
 _current_task_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "netkeep_task_id", default=None
 )
+
+
+class SubmitRefused(RuntimeError):
+    """The runner takes no new task: this process is about to stop (#730). Its message
+    is the reason, :data:`RESTARTING` for a restart."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +82,26 @@ class TaskRunner:
         self._tasks: dict[str, TaskInfo] = {}
         self._running: dict[str, asyncio.Task[None]] = {}
         self._finished: deque[str] = deque()  # ids in completion order, oldest first
+        self._refusing: str | None = None
+
+    @property
+    def refusing(self) -> str | None:
+        """Why :meth:`submit` refuses new tasks, or None while it takes them."""
+        return self._refusing
+
+    def refuse_new(self, reason: str) -> None:
+        """Refuse every later :meth:`submit` with ``reason``, for the rest of the process
+        (#730). Tasks already pending or running are left alone. Idempotent: the first
+        reason stays."""
+        if self._refusing is None:
+            self._refusing = reason
+            log.info("the task runner takes no new task: %s", reason)
+
+    def check_open(self) -> None:
+        """Raise :class:`SubmitRefused` once :meth:`refuse_new` was called. A route calls
+        it before it records anything, so a refused request writes no row."""
+        if self._refusing is not None:
+            raise SubmitRefused(self._refusing)
 
     def submit(
         self, name: str, factory: Callable[[], Awaitable[None]], *, user_id: int
@@ -74,8 +109,12 @@ class TaskRunner:
         """Schedule ``factory()`` and return its pending :class:`TaskInfo` at once.
 
         Needs a running event loop: call it from an ``async def`` route, not from a
-        sync one (those run in a worker thread).
+        sync one (those run in a worker thread). Raises :class:`SubmitRefused`, and
+        schedules nothing, once :meth:`refuse_new` was called (#730).
         """
+        if self._refusing is not None:
+            log.warning("task %s for user %d refused: %s", name, user_id, self._refusing)
+            raise SubmitRefused(self._refusing)
         info = TaskInfo(
             id=uuid.uuid4().hex,
             name=name,

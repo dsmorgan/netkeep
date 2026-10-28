@@ -260,6 +260,7 @@ export interface paths {
         /**
          * Check Sent
          * @description "I sent it, check now": start a manual inbox poll, which finds the message sent.
+         *     Once a restart is triggered it answers ``409`` and records no run (#730).
          */
         post: operations["check_linkedin_prefill_sent"];
         delete?: never;
@@ -322,7 +323,8 @@ export interface paths {
          * Prefill
          * @description Claim one LinkedIn step and submit its prefill; answers at once, before any browser
          *     work. A refusal answers ``409`` with its reasons; what the refusal changed (a reply
-         *     that ended the enrollment, a step parked) is kept.
+         *     that ended the enrollment, a step parked) is kept. Once a restart is triggered it
+         *     answers ``409`` ("netkeep is restarting") and claims nothing (#730).
          */
         post: operations["prefill_linkedin_step"];
         delete?: never;
@@ -2269,7 +2271,8 @@ export interface paths {
          * @description Start a Check connection run; answers at once, before any browser work.
          *
          *     The run visits no page, so it spends no budget, and the session flag, heat, and
-         *     active hours don't stop it, as they don't stop ``netkeep preflight``.
+         *     active hours don't stop it, as they don't stop ``netkeep preflight``. Once a restart
+         *     is triggered it answers ``409`` and records no run (#730).
          */
         post: operations["check_linkedin_browser"];
         delete?: never;
@@ -2326,7 +2329,8 @@ export interface paths {
          *     Chrome, when the profile is open without the port, or, for a cold start, while a run
          *     holds the browser; how it went arrives as ``browser.launch`` on ``GET /events``.
          *     ``first_run`` (setup's first-run button) also opens LinkedIn's sign-in page. A launch
-         *     already under way, this button's or ``serve``'s at startup (#599), answers ``409``.
+         *     already under way, this button's or ``serve``'s at startup (#599), answers ``409``,
+         *     and so does one asked for once a restart is triggered (#730): it spawns nothing.
          */
         post: operations["start_linkedin_browser"];
         delete?: never;
@@ -2495,7 +2499,8 @@ export interface paths {
          * @description Record a manual run and submit it; answers at once, before any browser work.
          *
          *     Outside ``[linkedin] active_hours`` it answers ``409`` with the window, when it
-         *     next opens, and where to change it, and records no run (#213).
+         *     next opens, and where to change it, and records no run (#213). Once a restart is
+         *     triggered it answers ``409`` ("netkeep is restarting") and records no run (#730).
          */
         post: operations["start_linkedin_run"];
         delete?: never;
@@ -2615,7 +2620,8 @@ export interface paths {
         put?: never;
         /**
          * Resume Run
-         * @description Record a resume of an enrichment run's remaining plan and submit it.
+         * @description Record a resume of an enrichment run's remaining plan and submit it. Once a
+         *     restart is triggered it answers ``409`` and records nothing (#730).
          */
         post: operations["resume_linkedin_run"];
         delete?: never;
@@ -3625,7 +3631,8 @@ export interface paths {
         put?: never;
         /**
          * Ping Task
-         * @description Submit a tiny task that reports progress twice, and return its id at once.
+         * @description Submit a tiny task that reports progress twice, and return its id at once. Once a
+         *     restart is triggered it answers ``409`` (#730).
          */
         post: operations["ping_task"];
         delete?: never;
@@ -11015,7 +11022,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description It does not wait for you, a run is running, the session is flagged, heat is too high, or it is outside active hours */
+            /** @description It does not wait for you, a run is running, the session is flagged, heat is too high, it is outside active hours, or netkeep is restarting */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -11132,7 +11139,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Refused: the reasons are in the body */
+            /** @description Refused: the reasons are in the body; or netkeep is restarting (a plain detail, and nothing was claimed) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -15189,7 +15196,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Another run is running, or another process holds the browser */
+            /** @description Another run is running, another process holds the browser, or netkeep is restarting */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -15254,7 +15261,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A launch is already under way */
+            /** @description A launch is already under way, or netkeep is restarting */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -15569,7 +15576,7 @@ export interface operations {
                     "application/json": components["schemas"]["RunAccepted"];
                 };
             };
-            /** @description A run is running, the session is flagged, heat is too high, or it is outside active hours */
+            /** @description A run is running, the session is flagged, heat is too high, it is outside active hours, or netkeep is restarting */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -15827,7 +15834,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Nothing to resume, or the run cannot start now */
+            /** @description Nothing to resume, the run cannot start now, or netkeep is restarting */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -17746,6 +17753,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["TaskAccepted"];
                 };
+            };
+            /** @description netkeep is restarting */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -244,8 +244,8 @@ def get_run(run_id: int, user: CurrentUser, session: SessionDep) -> RunOut:
     status_code=202,
     responses={
         409: {
-            "description": "A run is running, the session is flagged, heat is too high, or"
-            " it is outside active hours"
+            "description": "A run is running, the session is flagged, heat is too high,"
+            " it is outside active hours, or netkeep is restarting"
         },
         422: {"description": "A kind with no runner, or max_visits on a sync"},
         503: {"description": "This process has no browser worker"},
@@ -257,9 +257,11 @@ async def start_run(
     """Record a manual run and submit it; answers at once, before any browser work.
 
     Outside ``[linkedin] active_hours`` it answers ``409`` with the window, when it
-    next opens, and where to change it, and records no run (#213).
+    next opens, and where to change it, and records no run (#213). Once a restart is
+    triggered it answers ``409`` ("netkeep is restarting") and records no run (#730).
     """
     executor = _executor(request)
+    tasks.check_open()  # #730: before anything is written
     try:
         runs.refuse_if_outside_active_hours(_settings(request, session, user), now=utcnow())
         # After the hours check, so a refused request writes no row at all (#294).
@@ -393,7 +395,9 @@ def _visit_out(item: run_diagnostics.VisitReason) -> RunVisitReasonOut:
     status_code=202,
     responses={
         404: {"description": "No enrichment run with a plan"},
-        409: {"description": "Nothing to resume, or the run cannot start now"},
+        409: {
+            "description": "Nothing to resume, the run cannot start now, or netkeep is restarting"
+        },
         503: {"description": "This process has no browser worker"},
     },
 )
@@ -405,8 +409,10 @@ async def resume_run(
     session: SessionDep,
     tasks: Tasks,
 ) -> RunAccepted:
-    """Record a resume of an enrichment run's remaining plan and submit it."""
+    """Record a resume of an enrichment run's remaining plan and submit it. Once a
+    restart is triggered it answers ``409`` and records nothing (#730)."""
     executor = _executor(request)
+    tasks.check_open()  # #730: before anything is written
     account = ensure_account(session, user)
     try:
         enrich_plan.load_plan(session, user, run_id)  # 404 before any 409: is there a plan?
@@ -984,7 +990,7 @@ def _launcher(request: Request) -> ChromeSpawner:
     status_code=202,
     responses={
         403: {"description": "Only the local owner account starts netkeep's Chrome"},
-        409: {"description": "A launch is already under way"},
+        409: {"description": "A launch is already under way, or netkeep is restarting"},
         503: {"description": "This process has no Chrome launcher"},
     },
 )
@@ -999,7 +1005,8 @@ async def start_browser(
     Chrome, when the profile is open without the port, or, for a cold start, while a run
     holds the browser; how it went arrives as ``browser.launch`` on ``GET /events``.
     ``first_run`` (setup's first-run button) also opens LinkedIn's sign-in page. A launch
-    already under way, this button's or ``serve``'s at startup (#599), answers ``409``.
+    already under way, this button's or ``serve``'s at startup (#599), answers ``409``,
+    and so does one asked for once a restart is triggered (#730): it spawns nothing.
     """
     require_owner(session, user, "only the local owner account starts netkeep's Chrome")
     launcher = _launcher(request)

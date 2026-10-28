@@ -34,6 +34,14 @@ and enrichment). A handler:
    nobody, so the week's full sync is not done, and the scheduler offers it again
    a day later instead of a week later.
 
+Once a restart is triggered (#730), the task runner takes no new task. Every handler
+then answers :attr:`~netkeep.services.scheduler.JobOutcome.RETRY_LATER` before it records
+or claims anything, and logs why; nothing attaches. Should the trigger land after the
+record or the claim, the refused run is ended ``aborted`` (``restarting``) and an
+auto-send's claim is given back, its step due again, as a run that opened nothing is
+(:func:`_refused_at_submit`). The restart gate pauses the scheduler and waits out a
+heartbeat in flight before it triggers, so neither should happen; this is the backstop.
+
 The auto-send kind (ADR 0008) has a handler of its own, :func:`_auto_send_handler`.
 ``serve`` schedules it whatever the flag says, so turning auto-send on on the Settings
 page applies from the next fire with no restart (#598). At each fire it first reads
@@ -65,7 +73,7 @@ from netkeep.config import LinkedInSettings, Settings
 from netkeep.crm.inbox_apply import has_anything_to_watch, owner_hold
 from netkeep.db import off_loop, session_scope
 from netkeep.logging_setup import personal_exc
-from netkeep.models import SyncRun, SyncRunKind, SyncRunStatus, SyncRunTrigger, User
+from netkeep.models import Message, SyncRun, SyncRunKind, SyncRunStatus, SyncRunTrigger, User
 from netkeep.models.base import utcnow
 from netkeep.scoping import scoped
 from netkeep.services import runs, ui_settings
@@ -79,6 +87,7 @@ from netkeep.services.linkedin_steps import (
     auto_send_budget_warning,
     auto_send_hold,
     claim_auto_send,
+    give_back_unopened,
 )
 from netkeep.services.scheduler import (
     AUTO_SEND_SPACING_MAX,
@@ -99,7 +108,7 @@ from netkeep.services.scheduler import (
     served_schedules,
     stored_due,
 )
-from netkeep.services.tasks import TaskRunner
+from netkeep.services.tasks import SubmitRefused, TaskRunner
 from netkeep.services.users import local_users
 
 log = logging.getLogger(__name__)
@@ -156,6 +165,70 @@ def submit_run(
     return info.id, lambda: outcome[0] if outcome else runs.RunOutcome.DONE
 
 
+#: The stop reason of a scheduled run the task runner refused, a restart triggered (#730).
+REFUSED_RESTARTING: Final = "restarting"
+
+
+def _restarting(tasks: TaskRunner, what: str) -> bool:
+    """Whether the task runner refuses new tasks (#730: a restart was triggered). Logs the
+    fire it stops; the handler then records and attaches to nothing."""
+    if tasks.refusing is None:
+        return False
+    log.info("scheduled %s not started: %s; it is tried again later", what, tasks.refusing)
+    return True
+
+
+def _refused_at_submit(
+    factory: sessionmaker[Session], user_id: int, run_id: int, reason: str, *, now: datetime
+) -> None:
+    """End run ``run_id``, recorded but refused by the task runner (#730), ``aborted``:
+    it never started, so nothing was opened or typed. An auto-send's claimed message is
+    given back, its step due again, as :mod:`netkeep.services.message_send` gives back a
+    run that opened nothing."""
+    with session_scope(factory, write=True) as session:
+        user = session.get(User, user_id)
+        if user is None:
+            return
+        claimed = session.scalars(
+            scoped(user, Message).where(Message.sync_run_id == run_id)
+        ).first()
+        if claimed is not None:
+            give_back_unopened(session, user, claimed.id, now=now)
+        runs.finish_run(
+            session,
+            user,
+            run_id,
+            status=SyncRunStatus.ABORTED,
+            now=now,
+            stop_reason=REFUSED_RESTARTING,
+            error=reason,
+        )
+
+
+async def _submit_or_refuse(
+    factory: sessionmaker[Session],
+    executor: runs.RunExecutor,
+    tasks: TaskRunner,
+    run_id: int,
+    user_id: int,
+    *,
+    what: str,
+    clock: Callable[[], datetime],
+) -> tuple[str, Callable[[], runs.RunOutcome]] | None:
+    """:func:`submit_run`, or None when the task runner refused it (#730): the run is
+    ended by :func:`_refused_at_submit` and the refusal logged; nothing attaches."""
+    try:
+        return submit_run(tasks, executor, run_id, user_id)
+    except SubmitRefused as exc:
+        log.warning("scheduled %s run %d not started: %s", what, run_id, personal_exc(exc))
+        try:
+            await off_loop(_refused_at_submit, factory, user_id, run_id, str(exc), now=clock())
+        except Exception:
+            # The next start fails a run left running (fail_interrupted_runs).
+            log.exception("scheduled %s: could not end the refused run %d", what, run_id)
+        return None
+
+
 class _SchedulePaused(Exception):
     """The schedule was paused between the scheduler's gate and the handler (#324)."""
 
@@ -198,6 +271,8 @@ def _handler(
             ).id
 
     async def handle(ctx: JobContext) -> JobOutcome | None:
+        if _restarting(tasks, run_kind.value):
+            return JobOutcome.RETRY_LATER
         if watch_check and await off_loop(nothing_to_watch, ctx):
             log.info(
                 "scheduled %s not started: no live enrollment has a LinkedIn contact",
@@ -237,7 +312,12 @@ def _handler(
         except runs.RunAlreadyRunning as exc:
             log.info("scheduled %s not started: %s", run_kind.value, personal_exc(exc))
             return JobOutcome.RETRY_LATER
-        task_id, result = submit_run(tasks, executor, run_id, ctx.user_id)
+        submitted = await _submit_or_refuse(
+            factory, executor, tasks, run_id, ctx.user_id, what=run_kind.value, clock=clock
+        )
+        if submitted is None:
+            return JobOutcome.RETRY_LATER
+        task_id, result = submitted
         await tasks.wait(task_id)
         if result() is runs.RunOutcome.RETRY_LATER:
             return JobOutcome.RETRY_LATER
@@ -408,6 +488,8 @@ def _auto_send_handler(
             log.exception("scheduled auto-send: could not note the last fire")
 
     async def handle(ctx: JobContext) -> JobOutcome | None:
+        if _restarting(tasks, "auto-send"):
+            return JobOutcome.RETRY_LATER
         try:
             claimed = await off_loop(claim, ctx)
         except _SchedulePaused:
@@ -424,7 +506,13 @@ def _auto_send_handler(
                 # With the flag off the handler only reads the flag, so it notes nothing.
                 await note(ctx, reason=claimed)
             return JobOutcome.NOTHING_TO_SEND
-        task_id, result = submit_run(tasks, executor, claimed, ctx.user_id)
+        submitted = await _submit_or_refuse(
+            factory, executor, tasks, claimed, ctx.user_id, what="auto-send", clock=clock
+        )
+        if submitted is None:
+            await note(ctx, run_id=claimed, reason=REFUSED_RESTARTING)
+            return JobOutcome.RETRY_LATER
+        task_id, result = submitted
         await note(ctx, run_id=claimed)
         await tasks.wait(task_id)
         if result() is runs.RunOutcome.RETRY_LATER:

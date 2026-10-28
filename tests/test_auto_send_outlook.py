@@ -99,6 +99,8 @@ def lane(session_factory: sessionmaker[Session]) -> Lane:
 class _Tasks:
     """Runs a submitted run's work when it is waited for."""
 
+    refusing = None  # open: no restart triggered (#730)
+
     def __init__(self) -> None:
         self.submitted: list[str] = []
         self._work: Any = None

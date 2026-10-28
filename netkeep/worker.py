@@ -130,6 +130,7 @@ from netkeep.services.inbox_poll import poll_inbox
 from netkeep.services.linkedin_accounts import local_account_id, scheduled_runs_armed
 from netkeep.services.posture import SessionProbe
 from netkeep.services.scheduled_runs import REFUSED_OUTSIDE_HOURS, ServeExtractor
+from netkeep.services.tasks import SubmitRefused
 from netkeep.services.users import local_owner
 from netkeep.web.app import create_app
 
@@ -1149,6 +1150,10 @@ async def start_chrome_at_startup(
         )
     except LaunchUnderWay:
         log.info("not starting netkeep's Chrome at startup: a launch is already under way")
+        return None
+    except SubmitRefused as exc:
+        # #730: a restart was triggered before the socket listened; it spawns nothing.
+        log.info("not starting netkeep's Chrome at startup: %s", personal_exc(exc))
         return None
 
 
