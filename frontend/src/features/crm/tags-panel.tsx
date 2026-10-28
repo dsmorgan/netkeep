@@ -329,7 +329,7 @@ function RuleRow({
         />
         Enabled
       </Label>
-      <span id={`rule-${rule.id}-number`} className="sr-only">
+      <span id={`rule-${rule.id}-number`} hidden>
         Rule {rule.id}
       </span>
       <Button

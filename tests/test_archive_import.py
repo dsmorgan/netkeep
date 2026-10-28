@@ -795,6 +795,8 @@ def test_an_archive_import_is_recorded_as_a_committed_run(
     assert (run.total_rows, run.created_count, run.matched_count) == (9, 7, 1)
     assert (run.skipped_count, run.candidate_count) == (1, 0)
     assert run.report_json is not None
+    assert "unreachable_contacts" not in run.report_json
+    assert import_runs.unreachable_contacts(run) == 0
     assert run.report_json["connections"]["rows"] == 9
     assert run.report_json["messages"]["added"] == report.messages.added
     assert run.report_json["invitations"]["added"] == report.invitations.added

@@ -1603,7 +1603,8 @@ def test_an_archive_run_never_reports_unreachable_contacts(writer: Session, user
     committed = _run_of(writer, user, "First Name,Last Name,Company\nJordan,Vance,Acme Inc\n")
     assert import_runs.unreachable_contacts(committed) == 1
 
-    # The same count on an archive run is history, not a live warning.
+    # A real archive report never writes the key, so setting the kind by hand is the
+    # only way to pin the gate: a run of that kind reports nothing, whatever it holds.
     committed.source_kind = ImportSourceKind.ARCHIVE
     assert committed.report_json == {"unreachable_contacts": 1}
     assert import_runs.unreachable_contacts(committed) == 0
@@ -1632,6 +1633,27 @@ def test_a_matched_contact_that_gains_an_email_is_not_unreachable(
     assert {row.email for row in contact.emails} == {"jv@acme.example"}
     assert committed.report_json is None
     assert import_runs.unreachable_contacts(committed) == 0
+
+    # Control: the same matched contact, with a row that brings no email, is unreachable.
+    bare = factories.make_contact(
+        writer,
+        user,
+        li_urn=None,
+        li_public_id=None,
+        first_name="Casey",
+        last_name="Moss",
+        current_company="Birch Ltd",
+    )
+    run = import_runs.create_run(
+        writer,
+        user,
+        filename="bare.csv",
+        content="First Name,Last Name,Company\nCasey,Moss,Birch Ltd\n",
+        mapping=_NAME_MAPPING,
+    )
+    control = import_runs.commit(writer, user, run.id, decisions={1: MergeInto(bare.id)})
+    assert control.matched_count == 1
+    assert control.report_json == {"unreachable_contacts": 1}
 
 
 def test_a_report_with_nothing_to_say_is_unset(writer: Session, user: User) -> None:
