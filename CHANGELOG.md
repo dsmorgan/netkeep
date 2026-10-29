@@ -6,6 +6,42 @@ Unreleased changes live as fragments in `changelog.d/` (one file per change, `<i
 
 <!-- towncrier release notes start -->
 
+## [0.2.0] - 2026-10-29
+
+### Added
+
+- `GET /api/v1/dashboard/metrics?window=7d|30d|1y` answers the Dashboard's five numbers (sent, replies and the reply rate, bounces, changed jobs, new contacts by source) over the last 7 or 30 local days or the last 12 months, each with a per-day or per-month series in your time zone. ([#738](https://github.com/dsmorgan/netkeep/issues/738))
+- The Dashboard's setup map is a numbered diagram: small boxes joined by right-angled arrows, the Gmail and LinkedIn tracks as two dashed groups, Skip and Undo skip on the steps you can skip (with the server's reason when it refuses), and one "Setup is complete" line once you're done. Above it, five metric tiles (Sent, Replies, Bounced, Changed jobs, New contacts) show the last 7 days, 30 days or 12 months, each with a sparkline. ([#740](https://github.com/dsmorgan/netkeep/issues/740))
+- `netkeep setup` adds a netkeep icon to your Applications folder, `~/Applications/netkeep.app`, so you can open netkeep from the Dock, Spotlight or Launchpad without a terminal. Clicking it opens netkeep's window the way `netkeep open` does, starting the login item first if `serve` isn't running, and shows a dialog that says what to run if it can't reach netkeep. `netkeep update` rewrites it, Settings › Run at login shows it with a Build or Rebuild button, and `netkeep setup --remove` removes it. It has its own icon, a white "n" with nodes in front of a light-blue "k". It's built on your Mac, never downloaded. ([#754](https://github.com/dsmorgan/netkeep/issues/754))
+- `netkeep serve` checks once a day for a newer netkeep release and the Settings page shows it, with the command to run (`netkeep update`). It asks GitHub for the newest published release, the same request `netkeep update --check` makes, sends nothing about you, and installs nothing. Turn it off with **Check for updates daily** in Settings, Updates, or `[updates] check_daily = false` in `config.toml`. A failed check logs one line and tries again the next day. ([#762](https://github.com/dsmorgan/netkeep/issues/762))
+
+### Changed
+
+- When a streamed copy of a LinkedIn answer is not whole, the log now says which rule it broke, as counts only (root missing, unclosed streams, unreached rows, unreferenced streams, dangling references, late chunks, empty-id streams), on both the connections rescue line and the enrichment line. Nothing netkeep reads or refuses changes. ([#530](https://github.com/dsmorgan/netkeep/issues/530))
+- When a connections sync loses one of the page's answers, the log and the run record (`netkeep linkedin run <id>`, new COPY column) now say what became of its streamed copy: why the body tap had none, that the run stopped before checking it, or which rescue rule it broke. Nothing netkeep reads, uses or refuses changes. ([#735](https://github.com/dsmorgan/netkeep/issues/735))
+- Setup steps are numbered 1 to 11, with Gmail and LinkedIn as two parallel tracks: `GET /api/v1/setup` lists them in the new order with shorter titles and adds `number`, `group` and `skippable` to each step, and a "Waits for" reason names steps by number. About you and Import contacts can't be skipped, Gmail and LinkedIn can't both be skipped (409), and skipping LinkedIn sign-in skips the first sync, first inbox read and scheduled runs with it, so a Gmail-only setup can complete. ([#737](https://github.com/dsmorgan/netkeep/issues/737))
+- The Dashboard is one page instead of two tabs: status chips for Gmail, the LinkedIn session, a running job, scheduled runs, prefills left and problems, each linking to its fix; the setup map; and Needs you, Running now, Coming up (sends and LinkedIn runs in one timeline), Campaigns and Changed jobs. The sidebar groups its links under People, Outreach, Sources and System, and a link such as `/settings#gmail` now scrolls to that section and focuses its heading. ([#739](https://github.com/dsmorgan/netkeep/issues/739))
+- The Dashboard's setup map is now a setup checklist: the steps in four foldable groups (Your account, Connect at least one, Start reaching out, Optional), with the next step open to say what it does and to start it, and Gmail and LinkedIn as two tracks side by side. ([#747](https://github.com/dsmorgan/netkeep/issues/747))
+- The top bar shows three status chips on every page, Gmail, LinkedIn and netkeep, each with a word and one fact ("Gmail · Sending · checked 2 min ago"). Click one for a row per part, when it was updated, and a button to the page with the fix; Gmail's keeps Check now. They replace "LinkedIn: armed", "Campaigns: sending", the background-checks clock and "Backend ok". The Dashboard keeps one Needs you chip in their place. ([#751](https://github.com/dsmorgan/netkeep/issues/751))
+- The top bar's status chips now read one server-side roll-up, `GET /api/v1/system-status`, which the menu bar will read too (ADR 0014). The chips look and read as before. The endpoint returns times as absolute UTC timestamps, and each client writes them as "3 min ago" when it renders. ([#761](https://github.com/dsmorgan/netkeep/issues/761))
+
+### Fixed
+
+- Rolling back an import no longer deletes an email, phone, link, position or archive message the import added when something changed it afterward. An address you edited or marked bounced, or a message whose summary you edited, now stays, and the rollback's result (`netkeep import rollback`, the API, and the run page) names each row it kept. On a contact the import created, such a change counts as something the contact gained, so the rollback asks for `force` before deleting the contact with it. ([#725](https://github.com/dsmorgan/netkeep/issues/725))
+- Once **Restart netkeep** stops `serve`, a run asked for in the moments before it exits (a prefill, a Check now, Start Chrome) no longer starts only to be cut off part way: it answers "netkeep is restarting" and records nothing. ([#730](https://github.com/dsmorgan/netkeep/issues/730))
+- A fresh netkeep Chrome profile no longer opens Chrome's first-run dialog (default browser, usage statistics) before the netkeep window: the printed launch command, `make chrome` and the launcher now pass `--no-first-run` and `--no-default-browser-check`. ([#733](https://github.com/dsmorgan/netkeep/issues/733))
+- Merging two contacts works again: the confirmation dialog's **Merge** button did nothing, because since the tinted-glass refresh every confirmation dialog painted under the page, and a card beneath it took the click. Confirmation dialogs (merge, bulk actions, starting and arming runs, campaign and settings changes) now sit above the page like every other dialog. ([#749](https://github.com/dsmorgan/netkeep/issues/749))
+- After an update or a `make build-ui`, the netkeep window shows the new UI on the next load instead of a cached old page that needed Cmd+Shift+R: the server now sends `index.html`, the SPA routes and the unhashed static files as `no-cache`, and caches the hashed files under `/assets` for a year. ([#753](https://github.com/dsmorgan/netkeep/issues/753))
+
+### Security
+
+- netkeep now ships certifi 2026.10.19, which drops the "emSign ECC Root CA - G3" root certificate after keys of intermediate CAs under it were compromised, so netkeep's Gmail and Google API connections no longer trust certificates issued under it.
+
+### Documentation
+
+- The dashboard metrics documentation now says that "bounced" counts every bounced message, where a campaign's results count only each enrollment's earliest, and that "replies" includes a response dated before an enrollment's first send. ([#744](https://github.com/dsmorgan/netkeep/issues/744))
+
+
 ## [0.1.0] - 2026-10-20
 
 ### Added
