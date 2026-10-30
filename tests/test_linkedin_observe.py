@@ -420,31 +420,20 @@ class _Tap:
     def __init__(self, copies: list[bytes | None]) -> None:
         self.copies = copies
         self.calls: list[tuple[str, str, str | None]] = []
-        self.starts: list[float | None] = []
         self.closed = False
         self.last_miss: str | None = None
 
     async def take(
-        self,
-        method: str,
-        url: str,
-        post_data: str | None,
-        *,
-        wait_s: float,
-        started_ms: float | None = None,
+        self, method: str, url: str, post_data: str | None, *, wait_s: float
     ) -> bytes | None:
         self.calls.append(("take", method, post_data))
-        self.starts.append(started_ms)
         assert wait_s == observe.STREAMED_WAIT_S
         copy = self.copies.pop(0) if self.copies else None
         self.last_miss = "never matched" if copy is None else None
         return copy
 
-    def discard(
-        self, method: str, url: str, post_data: str | None, *, started_ms: float | None = None
-    ) -> None:
+    def discard(self, method: str, url: str, post_data: str | None) -> None:
         self.calls.append(("discard", method, post_data))
-        self.starts.append(started_ms)
 
     async def close(self) -> None:
         self.closed = True
@@ -470,30 +459,6 @@ async def test_a_failed_read_hands_over_the_streamed_copy_never_as_the_body() ->
     ]
     await observation.close()
     assert tap.closed
-
-
-@pytest.mark.parametrize(
-    ("started", "passed"),
-    [(1_790_000_000_123.25, 1_790_000_000_123.25), (0, None), (-1, None)],
-    ids=["known", "not-yet", "unknown"],
-)
-async def test_each_read_hands_the_tap_its_requests_start(
-    started: float, passed: float | None
-) -> None:
-    """#713 review: the tap pairs a read with its own request by when it started, so a
-    take and a discard both pass ``request.timing["startTime"]``, and none when
-    Playwright has not filled it in."""
-    tab = _tab()
-    tap = _Tap([b"the copy"])
-    observation = Observation(MATCH, tab, None, tap)  # type: ignore[arg-type]
-    observation.start()
-    for body_error in (None, ProtocolError("No data found")):
-        request = FakeRequest("POST", "fetch", '{"startIndex":10}', started_ms=started)
-        tab.emit(FakeResponse(PAGINATION, 200, b"fine", request, body_error=body_error))
-        await observation.next(1.0)
-    assert [call[0] for call in tap.calls] == ["discard", "take"]
-    assert tap.starts == [passed, passed]
-    await observation.close()
 
 
 async def test_without_a_copy_the_diagnostics_say_none() -> None:
@@ -555,15 +520,14 @@ async def test_a_redirect_and_a_timed_out_read_discard_the_streamed_copy() -> No
 
 
 async def test_the_request_side_is_only_read() -> None:
-    """The observation reads the method, the resource type, the body the page sent, and
-    when the request started. ``FakeRequest`` has nothing else -- no method at all --
-    and the reads are counted."""
+    """The observation reads the method, the resource type, and the body the page sent.
+    ``FakeRequest`` has nothing else -- no method at all -- and the reads are counted."""
     tab = _tab()
     observation = await _started(tab)
     response = _response()
     tab.emit(response)
     await observation.next(1.0)
-    assert set(response.request.reads) <= {"method", "resource_type", "post_data", "timing"}
+    assert set(response.request.reads) <= {"method", "resource_type", "post_data"}
     assert not [
         name
         for name in dir(FakeRequest)

@@ -66,7 +66,6 @@ MISS_NOT_STARTED: Final = "the stream did not start in time"
 MISS_NOT_ENDED: Final = "the stream did not end in time"
 MISS_FAILED: Final = "the stream ended by a failure"
 MISS_TOO_LARGE: Final = "the copy grew past the body limit"
-MISS_AMBIGUOUS: Final = "another held answer had the same request"
 
 #: Asks Chrome to stream one answer (``Network.streamResourceContent``) and returns
 #: its parameters: ``bufferedData``, what had already arrived, base64-encoded.
@@ -92,14 +91,6 @@ class _Stream:
     #: never logged.
     canceled: bool = False
     error: str | None = None
-    #: ``requestWillBeSent``'s ``wallTime`` and ``timestamp``, when Chrome sent them.
-    wall: float | None = None
-    stamp: float | None = None
-    #: When this request started, in milliseconds since the epoch, each way Playwright
-    #: may compute a response's ``request.timing["startTime"]`` from the same CDP
-    #: events: what pairs a read with its own request among identical ones (#713
-    #: review). Empty when Chrome sent no times.
-    starts: set[float] = field(default_factory=set)
 
     @property
     def whole(self) -> bool:
@@ -169,12 +160,7 @@ class BodyTap:
         if not self.match.matches(method, url):
             return
         body = post_data if isinstance(post_data, str) else None
-        entry = _Stream(key=(method, url, body))
-        entry.wall, entry.stamp = _number(params.get("wallTime")), _number(params.get("timestamp"))
-        if entry.wall is not None:
-            # Playwright's start for an answer without timing (served from cache).
-            entry.starts.add(entry.wall * 1e3)
-        self._streams[request_id] = entry
+        self._streams[request_id] = _Stream(key=(method, url, body))
         while len(self._streams) > MAX_STREAMS:
             self._streams.popitem(last=False)
 
@@ -182,13 +168,6 @@ class BodyTap:
         entry, request_id = self._entry(params)
         if entry is None or request_id is None or entry.streaming is not None:
             return
-        response = params.get("response")
-        timing = response.get("timing") if isinstance(response, Mapping) else None
-        sent = _number(timing.get("requestTime")) if isinstance(timing, Mapping) else None
-        if sent is not None and entry.stamp is not None and entry.wall is not None:
-            # Playwright's start for an answer with timing, in its own order of operations
-            # so the float comes out the same.
-            entry.starts.add((sent - entry.stamp + entry.wall) * 1e3)
         task = asyncio.get_running_loop().create_task(self._start(request_id, entry))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
@@ -255,30 +234,19 @@ class BodyTap:
     # --- the caller's side --------------------------------------------------------------
 
     async def take(
-        self,
-        method: str,
-        url: str,
-        post_data: str | None,
-        *,
-        wait_s: float,
-        started_ms: float | None = None,
+        self, method: str, url: str, post_data: str | None, *, wait_s: float
     ) -> bytes | None:
-        """The streamed copy of this read's own request, or ``None``.
+        """The streamed copy of the oldest held answer to this request, or ``None``.
 
-        Which held answer is the read's own: see :meth:`_own`. Waits up to ``wait_s``
-        for Chrome to say whether it streamed the answer and for the answer to end. The
-        copy is handed over once and forgotten. ``None`` when the tap never matched the
-        request, it holds more than one answer to the same request and can't tell
-        which is this read's (then none of them is handed over, now or later), Chrome
-        did not stream it, the answer had not ended in time, it ended by any failure
-        but the page's own cancel (``canceled`` with ``net::ERR_ABORTED``), or it grew
-        past the body limit.
+        Waits up to ``wait_s`` for Chrome to say whether it streamed the answer and
+        for the answer to end. The copy is handed over once and forgotten. ``None``
+        when the tap never matched the request, Chrome did not stream it, the answer
+        had not ended in time, it ended by any failure but the page's own cancel
+        (``canceled`` with ``net::ERR_ABORTED``), or it grew past the body limit.
         """
-        request_id, same = self._own((method.upper(), url, post_data), started_ms)
+        request_id = self._oldest((method.upper(), url, post_data))
         if request_id is None:
-            for other in same:
-                del self._streams[other]
-            self.last_miss = MISS_AMBIGUOUS if same else MISS_NOT_MATCHED
+            self.last_miss = MISS_NOT_MATCHED
             return None
         entry = self._streams.pop(request_id)
         with contextlib.suppress(TimeoutError):
@@ -291,35 +259,14 @@ class BodyTap:
         self.handed += 1
         return bytes(entry.data)
 
-    def discard(
-        self, method: str, url: str, post_data: str | None, *, started_ms: float | None = None
-    ) -> None:
-        """Forget this read's held answer: the caller read its own copy, or takes none.
+    def discard(self, method: str, url: str, post_data: str | None) -> None:
+        """Forget the oldest held answer to this request: the caller read its own copy."""
+        request_id = self._oldest((method.upper(), url, post_data))
+        if request_id is not None:
+            del self._streams[request_id]
 
-        When :meth:`_own` can't tell which held answer to the same request is this
-        read's, every one of them is forgotten, so a later read is never handed this
-        read's copy in place of its own.
-        """
-        request_id, same = self._own((method.upper(), url, post_data), started_ms)
-        for other in same if request_id is None else [request_id]:
-            del self._streams[other]
-
-    def _own(self, key: _Key, started_ms: float | None) -> tuple[str | None, list[str]]:
-        """The request id of a read's own held answer, or ``None``; and every held id
-        whose answer is to the same request (``key``).
-
-        Playwright does not hand a read Chrome's request id, so a read is paired with
-        its own request through the start time both see (#713 review): ``started_ms``,
-        the read's ``request.timing["startTime"]``, picks the one held answer to the
-        same request that started then. Without that, the only held answer to the same
-        request is the read's own; more than one, and none is.
-        """
-        same = [rid for rid, entry in self._streams.items() if entry.key == key]
-        if started_ms is not None:
-            timed = [rid for rid in same if started_ms in self._streams[rid].starts]
-            if len(timed) == 1:
-                return timed[0], same
-        return (same[0] if len(same) == 1 else None), same
+    def _oldest(self, key: _Key) -> str | None:
+        return next((rid for rid, entry in self._streams.items() if entry.key == key), None)
 
     async def close(self) -> None:
         """Stop, drop every held copy, and detach the session. Idempotent."""
@@ -353,13 +300,6 @@ def _miss(entry: _Stream) -> str | None:
     if not entry.whole:
         return MISS_FAILED
     return None
-
-
-def _number(value: object) -> float | None:
-    """A CDP time as a float, or ``None`` when it is missing or not a number."""
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        return None
-    return float(value)
 
 
 def _decode(data: object) -> bytes:
