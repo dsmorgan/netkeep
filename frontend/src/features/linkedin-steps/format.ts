@@ -73,6 +73,8 @@ export const REASON_TEXT: Readonly<Record<string, string>> = {
   spacing: "the step's delay since the last step hasn't passed",
   template_errors: 'the template has lint errors',
   render_failed: "the message didn't render for this contact",
+  no_previous_send:
+    "the template uses the previous send date, but no earlier step was sent to this contact, so it's parked for you",
   guard_excluded: 'the guards leave this contact out',
   campaign_not_active: "the campaign isn't active",
   enrollment_not_active: "the enrollment isn't active",

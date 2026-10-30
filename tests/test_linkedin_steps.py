@@ -28,7 +28,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from netkeep.campaigns import schedule
 from netkeep.campaigns.render import LintIssue, LintRule, Part, Rendered, Severity
-from netkeep.campaigns.templates import REMOVED_FIELD_BLOCK, TEMPLATE_ERRORS_BLOCK, block_reason
+from netkeep.campaigns.templates import (
+    NO_PREVIOUS_SEND_BLOCK,
+    REMOVED_FIELD_BLOCK,
+    TEMPLATE_ERRORS_BLOCK,
+    block_reason,
+)
 from netkeep.config import BudgetSettings, LinkedInSettings, Settings
 from netkeep.crm import identity
 from netkeep.crm.self_contact import ensure_self_contact
@@ -52,7 +57,14 @@ from netkeep.models import (
     User,
 )
 from netkeep.scoping import get_scoped, scoped, unscoped
-from netkeep.services import budgets, heat, linkedin_steps, runs, sending_hours
+from netkeep.services import (
+    budgets,
+    heat,
+    linkedin_steps,
+    runs,
+    sending_hours,
+    template_adoption,
+)
 from netkeep.services import campaign_engine as engine
 from netkeep.services.campaign_engine import Skip, enroll, run_tick
 from netkeep.services.campaign_guards import Reason, Verdict, check_step
@@ -1432,6 +1444,161 @@ def test_a_discarded_linkedin_first_step_moves_on_to_the_email_step(
     result = _tick(lane, due)
     assert [f.enrollment_id for f, _ in result.fired] == [enrollment_id]
     assert result.fired[0][0].step_position == 2
+
+
+# --- a step after a discard whose template names previous_send_date (#808) ---------------
+
+#: Each way a template names the field: its ``ago`` words, a branch on it, the date itself.
+_NAMES_PREVIOUS_SEND: Final = {
+    "ago": "Hi {{ first_name }}, it has been {{ previous_send_date | ago }}.",
+    "branch": (
+        "Hi {{ first_name }}, {% if previous_send_date %}as I wrote{% else %}a first note"
+        "{% endif %}."
+    ),
+    "date": "Hi {{ first_name }}, I last wrote on {{ previous_send_date }}.",
+}
+
+
+def _set_template(lane: Lane, position: int, **fields: Any) -> None:
+    def change(session: Session, user: User) -> None:
+        campaign = get_scoped(session, user, Campaign, lane.campaign_id)
+        assert campaign is not None
+        template = next(s for s in campaign.steps if s.position == position).template
+        for name, value in fields.items():
+            setattr(template, name, value)
+        assert block_reason(template) is None  # an active campaign's clean template
+
+    lane.write(change)
+
+
+def _discard_step_one(lane: Lane) -> tuple[int, int, datetime]:
+    """Step 1 prefilled, then discarded: the enrollment, the discarded message, step 2's
+    due time. Nothing was sent."""
+    _sent_hours(lane, any_time=True)
+    enrollment_id = lane.enroll()
+    message_id = lane.prefill(enrollment_id)
+    lane.write(lambda s, u: discard(s, u, message_id, settings=lane.settings, now=NOW))
+    due = lane.enrollment(enrollment_id).next_action_at
+    assert due is not None
+    assert lane.read(lambda s, u: engine._latest_sent(s, u, enrollment_id)) is None
+    return enrollment_id, message_id, due
+
+
+@pytest.mark.parametrize("body", _NAMES_PREVIOUS_SEND.values(), ids=_NAMES_PREVIOUS_SEND.keys())
+def test_a_linkedin_step_after_a_discard_naming_the_previous_send_parks(
+    lane: Lane, body: str
+) -> None:
+    """#808: step 2's delay counts from step 1's discard, but ``previous_send_date``
+    counts real sends only. It would render empty ("it has been .") or take the
+    ``else`` branch, so the claim parks it for a person, with nothing typed."""
+    _set_template(lane, 2, body=body)
+    enrollment_id, message_id, due = _discard_step_one(lane)
+    claim = lane.claim(enrollment_id, now=due)
+    assert claim.reasons == (Skip.NO_PREVIOUS_SEND,)
+    assert claim.message_id is None and claim.run_id is None
+    enrollment = lane.enrollment(enrollment_id)
+    assert (enrollment.next_action_at, enrollment.not_sent_error) == (None, NO_PREVIOUS_SEND_BLOCK)
+    assert [m.id for m in lane.messages(enrollment_id)] == [message_id]
+    assert len(lane.runs()) == 1  # step 1's only
+    # Parked: the ready list no longer offers it.
+    assert lane.read(
+        lambda s, u: ready_to_prefill(s, u, now=due, settings=lane.settings, limit=10)
+    ) == ([], 0)
+
+
+def test_the_no_previous_send_block_is_released_by_adopting_a_template() -> None:
+    """The reason starts ``blocked:``, so adopting a newer template version releases it
+    (#397), as it does every other block a step's template causes."""
+    assert NO_PREVIOUS_SEND_BLOCK.startswith(template_adoption.PARKED_PREFIXES)
+    assert len(NO_PREVIOUS_SEND_BLOCK) <= engine.ERROR_MAX_LENGTH
+
+
+def test_a_linkedin_step_naming_the_previous_send_after_a_real_send_is_claimed(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """#808: a discard after a real send leaves the date of that send, so step 3 goes."""
+    lane = make_lane(session_factory, channels=(EMAIL, LINKEDIN, LINKEDIN))
+    _sent_hours(lane, any_time=True)
+    _set_template(lane, 3, body=_NAMES_PREVIOUS_SEND["ago"])
+    enrollment_id = lane.enroll(current_step=1)
+    _sent_step_one(lane, enrollment_id, at=NOW - timedelta(days=20))
+    message_id = lane.prefill(enrollment_id)
+    lane.write(lambda s, u: discard(s, u, message_id, settings=lane.settings, now=NOW))
+    due = lane.enrollment(enrollment_id).next_action_at
+    assert due is not None
+    claim = lane.claim(enrollment_id, now=due)
+    assert claim.claimed, claim.reasons
+    message = lane.message(claim.message_id or 0)
+    assert message is not None and message.body_rendered is not None
+    assert message.body_rendered.endswith(" weeks ago.")
+
+
+def test_a_first_linkedin_step_naming_the_previous_send_is_not_parked(lane: Lane) -> None:
+    """#808 parks a step after the first only: step 1 never has a previous send."""
+    _set_template(lane, 1, body=_NAMES_PREVIOUS_SEND["branch"])
+    enrollment_id = lane.enroll()
+    assert lane.claim(enrollment_id).claimed
+
+
+def test_a_first_email_step_naming_the_previous_send_is_not_parked(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """#808 parks a step after the first only, on the tick too."""
+    lane = make_lane(session_factory, channels=(EMAIL, LINKEDIN))
+    _sent_hours(lane, any_time=True)
+    _set_template(lane, 1, body=_NAMES_PREVIOUS_SEND["branch"])
+    enrollment_id = lane.enroll()
+    result = _tick(lane, NOW)
+    assert [(f.enrollment_id, f.step_position) for f, _ in result.fired] == [(enrollment_id, 1)]
+
+
+@pytest.mark.parametrize(
+    ("subject", "body"),
+    [
+        ("Hello", _NAMES_PREVIOUS_SEND["ago"]),
+        ("Hello", _NAMES_PREVIOUS_SEND["branch"]),
+        ("Since {{ previous_send_date | ago }}", "Hi {{ first_name }}"),
+    ],
+    ids=["ago", "branch", "subject"],
+)
+def test_an_email_step_after_a_discard_naming_the_previous_send_parks(
+    session_factory: sessionmaker[Session], subject: str, body: str
+) -> None:
+    """#808: the tick parks an email step 2 whose template names ``previous_send_date``
+    after step 1's prefill was discarded, rather than send it with the date empty."""
+    lane = make_lane(session_factory, channels=(LINKEDIN, EMAIL))
+    _set_template(lane, 2, subject=subject, body=body)
+    enrollment_id, message_id, due = _discard_step_one(lane)
+    lane.write(lambda s, u: record_poll(s, u, due - timedelta(seconds=30)))
+    result = _tick(lane, due)
+    assert result.fired == []
+    assert result.skipped()[enrollment_id] == (Skip.NO_PREVIOUS_SEND.value,)
+    enrollment = lane.enrollment(enrollment_id)
+    assert (enrollment.next_action_at, enrollment.not_sent_error) == (None, NO_PREVIOUS_SEND_BLOCK)
+    assert [m.id for m in lane.messages(enrollment_id)] == [message_id]
+    later = due + timedelta(days=1)
+    lane.write(lambda s, u: record_poll(s, u, later - timedelta(seconds=30)))
+    assert _tick(lane, later).fired == []
+
+
+def test_an_email_step_naming_the_previous_send_after_a_real_send_fires(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """#808: with a real send before the discard, the email step renders its date and goes."""
+    lane = make_lane(session_factory, channels=(EMAIL, LINKEDIN, EMAIL))
+    _sent_hours(lane, any_time=True)
+    _set_template(lane, 3, body=_NAMES_PREVIOUS_SEND["ago"])
+    enrollment_id = lane.enroll(current_step=1)
+    _sent_step_one(lane, enrollment_id, at=NOW - timedelta(days=20))
+    message_id = lane.prefill(enrollment_id)
+    lane.write(lambda s, u: discard(s, u, message_id, settings=lane.settings, now=NOW))
+    due = lane.enrollment(enrollment_id).next_action_at
+    assert due is not None
+    lane.write(lambda s, u: record_poll(s, u, due - timedelta(seconds=30)))
+    result = _tick(lane, due)
+    [(firing, _)] = result.fired
+    assert (firing.enrollment_id, firing.step_position) == (enrollment_id, 3)
+    assert firing.body.endswith(" weeks ago.")
 
 
 def test_a_discarded_step_moves_an_all_linkedin_campaign_on(lane: Lane) -> None:

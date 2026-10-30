@@ -491,6 +491,14 @@ field (#342). Stored on the enrollment and shown on the campaign page."""
 TEMPLATE_ERRORS_BLOCK: Final = f"blocked: the step's template has lint errors; {FIX_ADVICE}"
 """Why the engine parked an enrollment whose step template has any other lint error."""
 
+NO_PREVIOUS_SEND_BLOCK: Final = (
+    "blocked: no earlier step was sent to this contact, so the template's"
+    f" previous_send_date has no value; {FIX_ADVICE}"
+)
+"""Why the engine parked a step after the first whose template names ``previous_send_date``
+when no earlier step was sent (#808): an earlier step's prefill was discarded, so the
+date, its ``ago`` words, or a branch on it would come out wrong."""
+
 
 def block_reason(row: Template | None) -> str | None:
     """Why a step with this template may not send, or None when it may. A template that
