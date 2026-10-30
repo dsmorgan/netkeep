@@ -867,6 +867,23 @@ async def test_only_the_local_owner_restarts_or_cancels(
     assert (await client.request(method, URL, headers=CSRF)).status_code in (200, 202)
 
 
+async def test_the_config_says_whether_you_are_the_owner(
+    running_app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    """#729: ``is_owner`` is what the page hides **Restart netkeep** by, for anyone the
+    restart route would answer 403."""
+    import factories
+    from isolation.harness import acting_as
+
+    from netkeep.models import UserKind
+
+    with session_scope(running_app.state.session_factory, write=True) as session:
+        other = factories.make_user(session, kind=UserKind.LOCAL).id
+    assert (await client.get("/api/v1/settings/config")).json()["is_owner"] is True
+    with acting_as(running_app, other):
+        assert (await client.get("/api/v1/settings/config")).json()["is_owner"] is False
+
+
 def _held(release: asyncio.Event) -> Callable[[], Awaitable[None]]:
     """A heartbeat body that runs until ``release`` is set."""
 

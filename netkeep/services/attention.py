@@ -66,10 +66,22 @@ AUTO_SEND_HELD_ACTIVITY: Final = (
     "Auto-send is held until you resume it. Other scheduled runs continue."
 )
 """The activity sentence when the hold alone blocks: it holds auto-send, not the rest."""
-REAUTH_REQUIRED: Final = "A mailbox needs you to sign in again."
-DRAFT_FLAGGED: Final = (
-    "A Gmail draft waits for a contact you shouldn't email; see Leftover drafts on the Gmail page."
-)
+
+
+class GmailFlag(enum.StrEnum):
+    """Why the Gmail flag is up. Each member is the flag's sentence, so the API answers
+    it as before, while a reader in the server tells the two apart by member, not by a
+    word in the sentence (#752)."""
+
+    REAUTH_REQUIRED = "A mailbox needs you to sign in again."
+    DRAFT_FLAGGED = (
+        "A Gmail draft waits for a contact you shouldn't email; see Leftover drafts on the"
+        " Gmail page."
+    )
+
+
+REAUTH_REQUIRED: Final = GmailFlag.REAUTH_REQUIRED
+DRAFT_FLAGGED: Final = GmailFlag.DRAFT_FLAGGED
 SESSION_FLAGGED: Final = "The LinkedIn session is flagged; clear it on the LinkedIn page."
 HEAT_TRIPPED: Final = "LinkedIn heat is high, so runs wait until it cools."
 BREAKER_TRIPPED: Final = (
@@ -106,7 +118,7 @@ class Flags:
     """Each flag is a sentence while it is up, ``None`` otherwise."""
 
     dashboard: str | None
-    gmail: str | None
+    gmail: GmailFlag | None
     linkedin: str | None
     settings: str | None
 
@@ -160,7 +172,7 @@ def _reauth_required(session: Session, user: User) -> bool:
     return bool(session.scalar(statement))
 
 
-def _gmail_flag(session: Session, user: User) -> str | None:
+def _gmail_flag(session: Session, user: User) -> GmailFlag | None:
     """A mailbox to sign in to again first: it stops every email step."""
     if _reauth_required(session, user):
         return REAUTH_REQUIRED

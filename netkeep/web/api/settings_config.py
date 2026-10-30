@@ -122,6 +122,10 @@ class ConfigOut(BaseModel):
     """A field is ``restart_pending``, or ``config_changed``: offer **Restart netkeep**."""
     can_restart: bool
     """This process can restart itself (``netkeep serve`` without ``--reload``)."""
+    is_owner: bool
+    """You are the local owner account. Only the owner restarts netkeep or cancels a
+    restart (``403`` for anyone else), so the page offers **Restart netkeep** to the
+    owner alone (#729)."""
     busy: list[str]
     """What is running now, which a restart would wait for: refused unless ``when_idle``."""
     restart_waiting: bool
@@ -179,6 +183,7 @@ def _out(request: Request, session: SessionDep, user: User) -> ConfigOut:
         config_error=error,
         restart_pending=changed or any(view.restart_pending for view in views),
         can_restart=_hook(request) is not None,
+        is_owner=owner,
         busy=_now_busy(request),
         restart_waiting=gate is not None and gate.waiting,
         fields=[

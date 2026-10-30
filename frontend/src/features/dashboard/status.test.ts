@@ -40,7 +40,7 @@ describe('buildProblems', () => {
   it('lists a stopped session, a signed-out mailbox, heat and a breaker, most urgent first', () => {
     const problems = buildProblems(
       reads({
-        status: ok(linkedinStatus({ session_flag: 'checkpoint' })),
+        status: ok(linkedinStatus({ session_flag: 'checkpoint', heat_tripped: true })),
         mailboxes: ok([mailbox({ status: 'reauth_required', status_reason: 'invalid_grant' })]),
         heat: ok(heat(true)),
         attention: attention({
@@ -67,13 +67,25 @@ describe('buildProblems', () => {
   })
 
   it('says when tripped heat lets scheduled runs resume, when the heat read knows', () => {
+    const tripped = ok(linkedinStatus({ heat_tripped: true }))
     const resumesAt = '2099-01-02T15:40:00Z'
-    const [problem] = buildProblems(reads({ heat: ok({ ...heat(true), resumes_at: resumesAt }) }))
+    const [problem] = buildProblems(
+      reads({ status: tripped, heat: ok({ ...heat(true), resumes_at: resumesAt }) }),
+    )
     expect(problem?.detail).toBe(
       `Scheduled LinkedIn runs are skipped until ${formatWhen(resumesAt)}.`,
     )
-    const [unknown] = buildProblems(reads({ heat: ok(heat(true)) }))
+    const [unknown] = buildProblems(reads({ status: tripped, heat: ok(heat(true)) }))
     expect(unknown?.detail).toBe('Scheduled LinkedIn runs are skipped until it cools.')
+    // Not read yet (it is read only once status says tripped), or not caught up: no time.
+    for (const late of [{ state: 'pending' } as const, ok({ ...heat(), resumes_at: resumesAt })]) {
+      const [waiting] = buildProblems(reads({ status: tripped, heat: late }))
+      expect(waiting?.detail).toBe('Scheduled LinkedIn runs are skipped until it cools.')
+    }
+  })
+
+  it('takes whether heat tripped from the status read, not the heat read (#752)', () => {
+    expect(buildProblems(reads({ heat: ok(heat(true)) }))).toEqual([])
   })
 
   it('says a logged-out session has its own fix', () => {
@@ -103,7 +115,9 @@ describe('buildProblems', () => {
 
 describe('needsYouCount', () => {
   it('adds the problems, the LinkedIn steps waiting, a held auto-send and the unhandled Inbox', () => {
-    const problems = buildProblems(reads({ heat: ok(heat(true)) }))
+    const problems = buildProblems(
+      reads({ status: ok(linkedinStatus({ heat_tripped: true })), heat: ok(heat(true)) }),
+    )
     const counted = attention({
       counts: { inbox: 2, dashboard: 3, waiting: 2, try_again: 1, triage: 40, imports: 1 },
       flags: { dashboard: 'Auto-send is held.', gmail: null, linkedin: null, settings: null },

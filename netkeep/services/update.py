@@ -547,6 +547,11 @@ def start(item: LoginItem, seams: Seams, say: Say, *, version: str | None = None
     except UpdateError as exc:
         say(f"   failed: {exc}")
         return 1
+    except OSError as exc:
+        # Keeping a file failed: a full disk, or a second netkeep update's clear_state
+        # removing the folder under this one (#717). Nothing was stopped or changed yet.
+        say(f"   failed: could not keep the constraints files in {update_dir(data)}: {exc}")
+        return 1
     say(f"   done: kept in {update_dir(data)}")
 
     say("2. Stop netkeep serve")

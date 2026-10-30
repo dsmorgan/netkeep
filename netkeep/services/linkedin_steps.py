@@ -114,6 +114,7 @@ from __future__ import annotations
 
 import contextlib
 import enum
+import hashlib
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -351,7 +352,8 @@ def _hold_key(account_id: int) -> str:
 
 _UNREADABLE_HOLDS_LOGGED: set[tuple[int, int, str]] = set()
 """The unreadable hold values :func:`auto_send_hold` has warned about, so each is warned
-about once per process, not on every read."""
+about once per process, not on every read. Each value is kept as a short hash of its
+``repr``, never the value itself: a stored value can be any size (#724)."""
 
 
 def auto_send_hold(session: Session, user: User, account_id: int) -> AutoSendHold | None:
@@ -378,7 +380,8 @@ def auto_send_hold(session: Session, user: User, account_id: int) -> AutoSendHol
         since = None
     if not isinstance(raw, dict) or not isinstance(reason, str) or since is None:
         # Read on every options GET, outlook, posture call and fire: warn once per value.
-        seen = (user.id, account_id, repr(raw))
+        digest = hashlib.sha256(repr(raw).encode()).hexdigest()[:16]
+        seen = (user.id, account_id, digest)
         level = logging.DEBUG if seen in _UNREADABLE_HOLDS_LOGGED else logging.WARNING
         _UNREADABLE_HOLDS_LOGGED.add(seen)
         log.log(

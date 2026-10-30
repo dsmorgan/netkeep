@@ -25,6 +25,7 @@ export interface Problem extends Target {
 export interface StatusReads {
   mailboxes: Read<Mailbox[]>
   status: Read<LinkedInStatus>
+  /** Only when it resumes: whether heat tripped is `status.heat_tripped` (#752). */
   heat: Read<Heat>
   attention: Attention | undefined
 }
@@ -80,17 +81,20 @@ export function buildProblems(reads: StatusReads): Problem[] {
       mailboxId: mailbox.id,
     })
   }
-  const heat = reads.heat.state === 'ok' ? reads.heat.data : undefined
-  if (heat?.tripped === true) {
+  if (status?.heat_tripped === true) {
+    // The heat read says when runs resume, and is read only while heat is tripped; one
+    // that hasn't caught up yet (still says not tripped) has no time to give.
+    const heat = reads.heat.state === 'ok' ? reads.heat.data : undefined
+    const resumesAt = heat?.tripped === true ? heat.resumes_at : null
     problems.push({
       key: 'heat',
       to: '/linkedin',
       hash: 'heat',
       title: 'LinkedIn heat is over its threshold',
       detail:
-        heat.resumes_at === null
+        resumesAt === null
           ? 'Scheduled LinkedIn runs are skipped until it cools.'
-          : `Scheduled LinkedIn runs are skipped until ${formatWhen(heat.resumes_at)}.`,
+          : `Scheduled LinkedIn runs are skipped until ${formatWhen(resumesAt)}.`,
       cta: 'See heat',
     })
   }

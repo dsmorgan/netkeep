@@ -69,6 +69,7 @@ function config(menubar: ConfigField): ConfigSettings {
     config_error: null,
     restart_pending: false,
     can_restart: true,
+    is_owner: true,
     busy: [],
     restart_waiting: false,
     fields: [menubar],
