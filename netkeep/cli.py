@@ -1404,6 +1404,20 @@ def _is_missing_schema(exc: OperationalError) -> bool:
     return "no such table" in str(exc.orig or exc).lower()
 
 
+#: PostgreSQL's SQLSTATE for a table that does not exist (psycopg's ``UndefinedTable``).
+PG_UNDEFINED_TABLE: Final = "42P01"
+
+
+def _is_missing_table(exc: OperationalError | ProgrammingError) -> bool:
+    """Whether ``exc`` says a table does not exist yet, before ``netkeep db upgrade``:
+    SQLite's "no such table" (:func:`_is_missing_schema`), or PostgreSQL's
+    ``UndefinedTable`` (#728 re-review). Only that one SQLSTATE: a missing column, or
+    any other programming error, is not a fresh install."""
+    if isinstance(exc, OperationalError):
+        return _is_missing_schema(exc)
+    return getattr(exc.orig, "sqlstate", None) == PG_UNDEFINED_TABLE
+
+
 @linkedin_app.command("clear-flag")
 def linkedin_clear_flag(
     yes: Annotated[
@@ -1720,7 +1734,8 @@ def _browser_lock_key() -> str:
     `netkeep serve` keys its runs by the account row. So a command that
     attaches (preflight, posture's probe, rehearse) reads the row too, without
     writing anything: no database yet (a fresh install, before `db upgrade`), a
-    database file with no tables yet, no local user, or no account row all mean
+    database with no tables yet (SQLite's "no such table", PostgreSQL's
+    ``UndefinedTable``), no local user, or no account row all mean
     account 1, the first user's, which is also the row every existing install has
     (migration 0011).
 
@@ -1745,12 +1760,12 @@ def _browser_lock_key() -> str:
                 return SINGLE_ACCOUNT_KEY
             return account_key(account_id_for(session, user))
     except (OperationalError, ProgrammingError) as exc:
-        if isinstance(exc, OperationalError) and _is_missing_schema(exc):
+        if _is_missing_table(exc):
             log.debug(
                 "no schema to key the browser lock by yet (%s); using account 1", personal_exc(exc)
             )
             return SINGLE_ACCOUNT_KEY
-        # A missing column (code ahead of the schema), PostgreSQL's programming
+        # A missing column (code ahead of the schema), PostgreSQL's other programming
         # errors, permissions, I/O, a malformed file: which account is the local
         # user's is unknown, so no lock key is safe to take.
         log.warning("can't read the browser lock's account: %s", personal_exc(exc))
