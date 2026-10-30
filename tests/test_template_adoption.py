@@ -742,7 +742,10 @@ def test_the_cli_shows_the_change_and_asks_first(cli_db: sessionmaker[Session]) 
         cli, ["campaigns", "adopt-template", str(campaign_id), "1"], input="y\n"
     )
     assert accepted.exit_code == 0, accepted.output
-    assert "now uses v2 (was v1); 1 parked enrollments are due again" in accepted.output
+    assert (
+        "now uses v2 (was v1); 1 parked enrollments are due again (once resumed, if paused)"
+        in accepted.output
+    )
     with session_scope(cli_db) as session:
         user = _local(session)
         step = get_scoped(session, user, CampaignStep, step_id)

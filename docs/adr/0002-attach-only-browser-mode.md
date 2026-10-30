@@ -17,7 +17,7 @@ netkeeper supports only `attach`. It connects over CDP to a Chrome the user laun
 ## Consequences
 
 - LinkedIn sees one device, one fingerprint, one cookie jar, and the user's own browsing is cover traffic.
-- The user has to start Chrome with two flags and log in once. `netkeeper browser launch` wraps the command and the dashboard reports when Chrome is down.
+- The user has to start Chrome with the flags `netkeep browser launch` prints and log in once. That command wraps them and the dashboard reports when Chrome is down.
 - The container image cannot run the LinkedIn steps on macOS, because Chrome's debug port is on the Mac's loopback and the container VM cannot reach it. macOS runs natively.
 - Firefox and Safari are unsupported for the LinkedIn steps; neither speaks CDP.
 

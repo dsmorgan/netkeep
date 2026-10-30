@@ -97,6 +97,9 @@ describe('the setup checklist', () => {
     const mark = (key: string) => row(key).querySelector('[data-mark]')
     expect(mark('about_you')).toHaveAttribute('data-mark', 'done')
     expect(mark('about_you')?.querySelector('svg')).not.toBeNull()
+    // The pair theme.test.ts holds at AA (#746 review): `ok-ink`, never `ok`, under card text.
+    expect(mark('about_you')).toHaveClass('bg-ok-ink', 'text-card')
+    expect(mark('about_you')).not.toHaveClass('bg-ok')
     expect(mark('import')).toHaveAttribute('data-mark', 'next')
     expect(mark('gmail')).toHaveAttribute('data-mark', 'skipped')
     expect(mark('gmail')).toHaveClass('line-through')

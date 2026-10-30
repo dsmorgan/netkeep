@@ -36,7 +36,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Final, Protocol, cast, runtime_checkable
-from urllib.parse import parse_qsl, unquote, urljoin, urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 from netkeep.chrome_profile import (
     ProfileCheck,
@@ -63,6 +63,7 @@ from netkeep.linkedin.observe import (
     ResponseMatch,
 )
 from netkeep.linkedin.pacing import ScrollPlan, TypingPlan, rest_pointer_like_a_person
+from netkeep.linkedin.strict_origin import on_path, trim_path
 from netkeep.logging_setup import personal, personal_exc
 from netkeep.paths import data_dir
 
@@ -1665,7 +1666,7 @@ def _is_profile_link(href: str | None, path: str, *, fold_case: bool) -> bool:
         split.scheme != "https" or split.netloc != MESSAGE_COMPOSE_HOST
     ):
         return False
-    seen, want = _trim_path(unquote(split.path)), _trim_path(unquote(path))
+    seen, want = trim_path(unquote(split.path)), trim_path(unquote(path))
     return seen.casefold() == want.casefold() if fold_case else seen == want
 
 
@@ -1789,7 +1790,7 @@ def read_card_link(href: str | None, public_id: str, profile_id: str) -> CardLin
             index = 1 if route == "/mwlite/" and len(parts) > 1 else 0
             token = parts[index].split(",")[0]
             return None if token == profile_id else _someone_else(token, "other route")
-    if _trim_path(folded) == _PROFILE_VIEW_PATH:
+    if trim_path(folded) == _PROFILE_VIEW_PATH:
         ids = [value for key, value in parse_qsl(split.query) if key.casefold() == "id"]
         if ids and all(value == profile_id for value in ids):
             return None
@@ -3679,12 +3680,12 @@ class BrowserRun:
                 "the run's tab went away before the Contact info click; aborting the run"
                 " rather than reopen it, which would be a page view nobody planned"
             )
-        if not _on_path(page.url, profile_path):
+        if not on_path(page.url, profile_path):
             return ContactInfoClick(page, False, "the tab is not on the profile")
         await sleep(pause_s)
         if page.is_closed():
             raise BrowserUnavailable("the run's tab went away before the Contact info click")
-        if not _on_path(page.url, profile_path):
+        if not on_path(page.url, profile_path):
             return ContactInfoClick(page, False, "the tab left the profile before the click")
         control = cast(_ClickablePage, page).get_by_role(
             CONTACT_INFO_ROLE, name=CONTACT_INFO_NAME, exact=True
@@ -3700,8 +3701,8 @@ class BrowserRun:
             return ContactInfoClick(page, False, "no Contact info control on the page")
         if matches > 1:
             return ContactInfoClick(page, False, "more than one Contact info control")
-        expected = f"{_trim_path(profile_path)}/{CONTACT_INFO_HREF_SUFFIX}"
-        if href is None or not _on_path(href, expected, base=page.url):
+        expected = f"{trim_path(profile_path)}/{CONTACT_INFO_HREF_SUFFIX}"
+        if href is None or not on_path(href, expected, base=page.url):
             return ContactInfoClick(page, False, "the control opens something else")
         try:
             await control.click(delay=CONTACT_INFO_PRESS_MS, timeout=CONTACT_INFO_CLICK_TIMEOUT_MS)
@@ -3776,8 +3777,8 @@ class BrowserRun:
             log.debug("prefill: no name heading (%s)", NoNameHeading.CONTACT_INFO.value)
             return None
         href = await links.get_attribute("href", timeout=MESSAGING_READ_TIMEOUT_MS)
-        expected = f"{_trim_path(urlsplit(url).path)}/{CONTACT_INFO_HREF_SUFFIX}"
-        if href is None or not _on_path(href, expected, base=url):
+        expected = f"{trim_path(urlsplit(url).path)}/{CONTACT_INFO_HREF_SUFFIX}"
+        if href is None or not on_path(href, expected, base=url):
             log.debug("prefill: no name heading (%s)", NoNameHeading.CONTACT_INFO_HREF.value)
             return None
         cards = links.locator(TOP_CARD_FROM_CONTACT_INFO)
@@ -3833,12 +3834,12 @@ class BrowserRun:
             )
         if self._message_clicked:
             return MessageClick(False, False, "the Message control was already clicked")
-        if not _on_path(page.url, profile_path):
+        if not on_path(page.url, profile_path):
             return MessageClick(False, False, "the tab is not on the contact's profile")
         await sleep(pause_s)
         if page.is_closed():
             raise BrowserUnavailable("the run's tab went away before the Message click")
-        if not _on_path(page.url, profile_path):
+        if not on_path(page.url, profile_path):
             return MessageClick(False, False, "the tab left the profile before the click")
         tab = cast(_MessagingPage, page)
         # Decision 3 before the click (#444): a bubble already on the page, minimized ones
@@ -3924,7 +3925,7 @@ class BrowserRun:
         page = self._page
         if page is None or page.is_closed() or self._message_clicked:
             return None
-        if not _on_path(page.url, profile_path):
+        if not on_path(page.url, profile_path):
             return None
         tab = cast(_MessagingPage, page)
         try:
@@ -4179,7 +4180,7 @@ class BrowserRun:
             raise BrowserUnavailable("the run's tab went away before the Message check read it")
         tab = cast(_MessagingPage, page)
         errors: list[str] = []
-        on_profile = _on_path(page.url, profile_path)
+        on_profile = on_path(page.url, profile_path)
         try:
             bubble = "open" if await self._bubble_already_open(tab) else "none"
         except Exception as exc:
@@ -5641,32 +5642,6 @@ def _known_viewport_height(page: PageLike) -> float | None:
 def _clamp(value: float, low: float, high: float) -> float:
     """``value``, pinned inside ``[low, high]``."""
     return max(low, min(value, high))
-
-
-def _trim_path(path: str) -> str:
-    return path[:-1] if len(path) > 1 and path.endswith("/") else path
-
-
-def _on_path(url: str, path: str, *, base: str | None = None) -> bool:
-    """Whether ``url`` (absolute, or relative to ``base``) is at ``path``, same origin.
-
-    Compared after percent-decoding and case-folding, as LinkedIn's routing reads a
-    slug, and after dropping one trailing ``/``. A relative ``url`` takes ``base``'s
-    origin; an absolute one must have it.
-    """
-    try:
-        split = urlsplit(urljoin(base, url) if base is not None else url)
-        if base is not None:
-            want = urlsplit(base)
-            if (split.scheme, split.hostname, split.port) != (
-                want.scheme,
-                want.hostname,
-                want.port,
-            ):
-                return False
-    except ValueError:
-        return False
-    return _trim_path(unquote(split.path)).casefold() == _trim_path(unquote(path)).casefold()
 
 
 def _reason(exc: BaseException) -> str:

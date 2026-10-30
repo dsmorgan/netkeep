@@ -1,8 +1,8 @@
 """Where first-run setup stands: the steps, their state and what gates them (#651, #667, #737).
 
-One answer to "where is this person in setup?", for the dashboard's Steps tab. Every
-state is read from what netkeep already stores or can see without a probe: the
-database, netkeep's Chrome profile lock file
+One answer to "where is this person in setup?", for the dashboard's setup checklist
+(#747). Every state is read from what netkeep already stores or can see without a
+probe: the database, netkeep's Chrome profile lock file
 (:func:`netkeep.services.posture.netkeep_chrome_pid`, #599) and the login item's
 plist and ``launchctl print`` (read-only, as ``/login-item`` reads it). The Keychain is
 never read. Nothing here attaches to Chrome, calls Gmail, or starts a run. The first

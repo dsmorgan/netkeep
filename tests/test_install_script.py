@@ -475,6 +475,9 @@ def test_a_failed_uv_tool_install_stops_before_setup(box: Sandbox) -> None:
     result = box.run(FAKE_UV_INSTALL_FAILS="1")
     assert result.returncode != 0
     assert "uv tool install failed" in result.stderr
+    # The update hint names the uv this ran, by its full path: a uv the script just put
+    # in ~/.local/bin may not be on PATH yet (#674).
+    assert f"'{box.bin / 'uv'} self update'" in result.stderr, result.stderr
     assert not [c for c in box.calls() if c.startswith("netkeep")]
 
 
@@ -636,6 +639,15 @@ def test_a_uv_in_local_bin_but_not_on_path_is_used(box: Sandbox) -> None:
     assert result.returncode == 0, result.stderr
     assert box.calls() == _RELEASE_CALLS
     assert f"uv is already installed: {box.home}/.local/bin/uv" in result.stdout
+
+
+def test_a_failed_install_names_a_local_bin_uv_by_its_full_path(box: Sandbox) -> None:
+    """#690 review: a bare ``uv self update`` finds no uv when ~/.local/bin isn't on PATH."""
+    (box.home / ".local" / "bin").mkdir(parents=True)
+    shutil.copy(box.templates / "uv", box.home / ".local" / "bin" / "uv")
+    result = box.run(FAKE_UV_INSTALL_FAILS="1")
+    assert result.returncode != 0
+    assert f"'{box.home}/.local/bin/uv self update'" in result.stderr, result.stderr
 
 
 # --- uv's installer environment -------------------------------------------------------

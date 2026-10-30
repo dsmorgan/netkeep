@@ -2633,6 +2633,33 @@ def test_every_protection_construction_decides_its_fix() -> None:
     assert undecided == [], f"Protection(...) at lines {undecided} has no fix decision"
 
 
+def test_only_the_auto_send_row_is_opted_in_and_it_has_a_fix(writer: Session) -> None:
+    """#674: ``opted_in`` turns an off row from a problem into a warning, which skips the
+    type's fix check. Only the manual-sends row's auto-send state may set it, in
+    ``_auto_send``, and with a fix sentence; another row setting it fails here."""
+    tree = ast.parse(Path(posture_module.__file__).read_text())
+    setters: list[tuple[str, int, bool]] = []
+    for function in ast.walk(tree):
+        if not isinstance(function, ast.FunctionDef):
+            continue
+        for node in ast.walk(function):
+            if isinstance(node, ast.Call) and any(kw.arg == "opted_in" for kw in node.keywords):
+                has_fix = any(
+                    kw.arg == "fix"
+                    and not (isinstance(kw.value, ast.Constant) and not kw.value.value)
+                    for kw in node.keywords
+                )
+                setters.append((function.name, node.lineno, has_fix))
+    assert [(name, has_fix) for name, _line, has_fix in setters] == [("_auto_send", True)]
+
+    opted = [row for row in _every_row_of_every_case(writer) if row.opted_in]
+    assert opted  # the cases build the auto-send row at all
+    for row in opted:
+        assert row.key == posture_module.KEY_MANUAL_LINKEDIN_SENDS, row.name
+        assert row.fix, f"{row.name} is opted in and has no fix"
+        assert row.severity.value == "warning", row.name
+
+
 FIXES_NAMING = re.compile(r"`netkeep ([a-z-]+(?: [a-z-]+)*)")
 BOLD = re.compile(r"\*\*([^*]+)\*\*")
 

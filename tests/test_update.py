@@ -18,6 +18,7 @@ import json
 import os
 import plistlib
 import re
+import socket
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1770,6 +1771,22 @@ def test_finish_passes_when_the_agents_serve_runs_through_the_cli(
     monkeypatch.setattr("netkeep.cli.uvicorn.Server", FakeServer)
     monkeypatch.setattr("netkeep.cli.uvicorn.Config", lambda *_a, **_k: None)
     monkeypatch.setattr("netkeep.cli.serve_lock.state", world.lock.state)
+    # #692 review: the fakes above are all that keeps this serve off a real port. A
+    # future serve that reaches uvicorn.run, or binds a socket any other way, fails here
+    # rather than listening on the plist's port for real.
+
+    def no_uvicorn_run(*_a: object, **_k: object) -> None:
+        pytest.fail("the end-to-end serve reached uvicorn.run, which would bind a real port")
+
+    real_bind = socket.socket.bind
+
+    def no_tcp_bind(self: socket.socket, address: object) -> None:
+        if self.family in (socket.AF_INET, socket.AF_INET6):
+            pytest.fail(f"the end-to-end serve bound a TCP socket to {address!r}")
+        real_bind(self, address)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("netkeep.cli.uvicorn.run", no_uvicorn_run)
+    monkeypatch.setattr(socket.socket, "bind", no_tcp_bind)
 
     def through_the_cli() -> None:
         document = plistlib.loads(world.item().plist_path.read_bytes())

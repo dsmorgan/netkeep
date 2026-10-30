@@ -1,4 +1,4 @@
-"""``/setup``: where first-run setup stands, for the dashboard's Steps tab (#651, #667, #737).
+"""``/setup``: where first-run setup stands, for the dashboard's setup checklist (#651, #747).
 
 - ``GET /setup`` answers the ordered steps, each with its state, what it waits for,
   a plain reason and the page that handles it.

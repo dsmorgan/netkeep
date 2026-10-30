@@ -853,7 +853,7 @@ async def test_the_bubble_check_never_reads_the_runs_own_tab() -> None:
 
 
 def test_the_bubble_check_opens_only_linkedin_or_loopback() -> None:
-    with pytest.raises(ValueError, match="never"):
+    with pytest.raises(ValueError, match=r"^the bubble check opens .* never"):
         PageBubbleCheck(object(), origin="https://example.invalid")  # type: ignore[arg-type]
 
 

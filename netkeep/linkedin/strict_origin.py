@@ -45,7 +45,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Final
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urljoin, urlsplit
 
 #: LinkedIn's one origin, as :meth:`Origin.__str__` rebuilds it.
 LINKEDIN_ORIGIN: Final = "https://www.linkedin.com"
@@ -162,3 +162,26 @@ def trim_path(path: str) -> str:
 def url_path(url: str) -> str:
     """The trimmed path of an absolute ``url``, or of a bare path given as is."""
     return trim_path(urlsplit(url).path if "://" in url else url)
+
+
+def on_path(url: str, path: str, *, base: str | None = None) -> bool:
+    """Whether ``url`` (absolute, or relative to ``base``) is at ``path``, same origin.
+
+    Compared after percent-decoding and case-folding, as LinkedIn's routing reads a
+    slug, and after dropping one trailing ``/``. A relative ``url`` takes ``base``'s
+    origin; an absolute one must have it. The browser and the page readers share it
+    (#719 review).
+    """
+    try:
+        split = urlsplit(urljoin(base, url) if base is not None else url)
+        if base is not None:
+            want = urlsplit(base)
+            if (split.scheme, split.hostname, split.port) != (
+                want.scheme,
+                want.hostname,
+                want.port,
+            ):
+                return False
+    except ValueError:
+        return False
+    return trim_path(unquote(split.path)).casefold() == trim_path(unquote(path)).casefold()

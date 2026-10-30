@@ -1804,10 +1804,12 @@ describe('an auto-send is not a prefill (#704)', () => {
   })
 
   it('sends a person-cancelled auto-send that opened nothing to Try again', async () => {
+    // opened: false too, so only the cancel keeps it out of the stays-due note (#722).
     await endAutoSend({
       status: 'aborted',
       stop_reason: 'not_typed',
       cancel_requested_at: '2026-09-23T10:01:00Z',
+      counts: { opened: false, typed_chars: 0 },
     })
 
     expect(await screen.findByText(TRY_AGAIN_STEP)).toBeVisible()

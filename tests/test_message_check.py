@@ -313,6 +313,12 @@ async def test_a_cancel_stops_before_the_reads() -> None:
     assert result.stopped == "cancelled" and result.snapshots == ()
 
 
+def test_the_message_check_opens_only_linkedin_or_loopback() -> None:
+    """#719 review: the refusal names the Message check, not the prefill it mirrors."""
+    with pytest.raises(ValueError, match=r"^the Message check opens .* never"):
+        PageMessageCheck(object(), origin="https://example.invalid")  # type: ignore[arg-type]
+
+
 async def test_a_check_runs_once() -> None:
     site = ScrollingSite()
     provider, _ = fake_provider(site)
