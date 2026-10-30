@@ -21,11 +21,13 @@ from netkeep.crm.filters import parse_filter
 from netkeep.crm.interactions import add_interaction
 from netkeep.models import (
     Campaign,
+    CampaignStatus,
     Contact,
     ContactList,
     ContactSnapshot,
     ContactSource,
     DoNotSendReason,
+    Enrollment,
     EnrollmentStatus,
     ImportRun,
     InteractionKind,
@@ -504,6 +506,7 @@ def _seed_next_fires(session: Session, user: User) -> int:
         email=f"held{user.id}@example.com",
         keychain_ref=f"gmail/mailbox/held-{user.id}",
         daily_cap=80,
+        armed_at=SEED_AT,
     )
     session.add(mailbox)
     session.flush()
@@ -511,7 +514,7 @@ def _seed_next_fires(session: Session, user: User) -> int:
         MailboxReplyHold(
             user_id=user.id,
             mailbox_id=mailbox.id,
-            reason="replies have not been polled recently; nothing was sent",
+            reason="replies have not been polled recently",
             held_since=SEED_AT,
         )
     )
@@ -613,6 +616,28 @@ def _seed_enrollments(session: Session, user: User) -> int:
         for n in range(2)
     ]
     campaign_service.enroll(session, user, campaign.id, now=utcnow(), contact_ids=contacts)
+    # Both are due follow-ups of a running campaign on a mailbox held for unread replies,
+    # so each row has a ``held_reason`` (#716) and the isolation test runs its join.
+    assert campaign.mailbox_id is not None
+    mailbox = session.scalars(scoped(user, Mailbox).where(Mailbox.id == campaign.mailbox_id)).one()
+    mailbox.armed_at = SEED_AT
+    session.add(
+        MailboxReplyHold(
+            user_id=user.id,
+            mailbox_id=mailbox.id,
+            reason="replies have not been polled recently",
+            held_since=SEED_AT,
+        )
+    )
+    campaign.status = CampaignStatus.ACTIVE
+    campaign.starts_at = SEED_AT
+    for enrollment in session.scalars(
+        scoped(user, Enrollment).where(Enrollment.campaign_id == campaign.id)
+    ):
+        enrollment.status = EnrollmentStatus.ACTIVE
+        enrollment.current_step = 1
+        enrollment.next_action_at = SEED_AT
+    session.flush()
     return 2
 
 

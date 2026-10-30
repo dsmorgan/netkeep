@@ -6,7 +6,7 @@ import { renderApp } from '@/test/render'
 
 import { ENROLLMENTS, campaign, campaignBackend, review } from './test-support'
 
-const HELD = 'replies have not been polled recently; nothing was sent'
+const HELD = 'replies have not been polled recently'
 
 describe('the enrollment row of a held follow-up (#716)', () => {
   it('says why it waits, and nothing on a row that is not held', async () => {

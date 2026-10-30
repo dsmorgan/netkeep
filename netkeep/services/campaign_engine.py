@@ -181,6 +181,7 @@ from netkeep.models import (
     Mailbox,
     MailboxArm,
     MailboxReplyHold,
+    MailboxStatus,
     Message,
     MessageDirection,
     MessageStatus,
@@ -1489,8 +1490,10 @@ def held_reasons(
     An enrollment is held when the tick would select it now (:func:`_selected`), its next
     step is not on LinkedIn, a step has already gone (``current_step`` set, the rows
     :func:`_due` leaves out of a held mailbox's later pages), and its campaign's mailbox
-    has a hold record that still stands (:func:`reply_holds.current`). A follow-up that
-    isn't due yet isn't held, so it has no reason.
+    has a hold record that still stands (:func:`reply_holds.current`). The mailbox must
+    be armed (for drafts or to send: the hold applies to both) and ``ok``; otherwise
+    the chooser stops before it asks, so the record may be from before. A follow-up
+    that isn't due yet isn't held, so it has no reason.
     """
     if not enrollment_ids:
         return {}
@@ -1505,6 +1508,10 @@ def held_reasons(
         )
         .join(Mailbox, and_(Mailbox.id == Campaign.mailbox_id, Mailbox.user_id == user.id))
         .where(
+            # Disarmed or not ready, the mailbox holds every step for that reason, which
+            # the page says elsewhere; the record may be from before.
+            Mailbox.armed_at.is_not(None),
+            Mailbox.status == MailboxStatus.OK,
             _not_on_linkedin(),
             Enrollment.current_step.is_not(None),
             Enrollment.id.in_(sorted(enrollment_ids)),
@@ -2961,7 +2968,8 @@ def tick_user(
         if not _record_after_send(factory, user_id, in_force, claim, outcome, clock=clock):
             return result
         result.fired.append((claim.firing, outcome))
-    _keep_reply_holds(factory, user_id, asked, clock=clock)
+    if not stopping():  # the next tick keeps the records; a stop doesn't wait for them
+        _keep_reply_holds(factory, user_id, asked, clock=clock)
     return result
 
 

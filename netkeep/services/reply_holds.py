@@ -26,14 +26,20 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from datetime import datetime
+from typing import Final
 
 from sqlalchemy.orm import Session
 
+from netkeep.db import is_writer
 from netkeep.models import Mailbox, MailboxReplyHold, User
 from netkeep.models.mailboxes import REPLY_HOLD_REASON_MAX_LENGTH
 from netkeep.scoping import get_scoped, scoped
 
 log = logging.getLogger(__name__)
+
+SENT_NOTHING: Final = "; nothing was sent"
+"""How a held send's error ends. The record leaves it off: the campaign page shows the
+reason under "Held until replies are read", which looks ahead, not back."""
 
 
 def current(hold: MailboxReplyHold, replies_polled_at: datetime | None) -> bool:
@@ -78,7 +84,11 @@ def changes(
 def keep(session: Session, user: User, answers: Mapping[int, str | None], *, now: datetime) -> None:
     """Make the records say ``answers``: a reason starts (or restarts) the mailbox's hold
     at ``now``, None deletes it. Only the answers :func:`changes` finds are written.
-    Needs a writer session."""
+    Needs a writer session: it reads, then writes."""
+    if not is_writer(session):
+        raise RuntimeError(
+            "reply_holds.keep needs a writer session; use session_scope(factory, write=True)"
+        )
     changed = changes(session, user, answers)
     if not changed:
         return
@@ -100,4 +110,5 @@ def keep(session: Session, user: User, answers: Mapping[int, str | None], *, now
 
 
 def _fit(reason: str) -> str:
-    return reason[:REPLY_HOLD_REASON_MAX_LENGTH]
+    """The reason as stored: without :data:`SENT_NOTHING`, and within the column."""
+    return reason.removesuffix(SENT_NOTHING)[:REPLY_HOLD_REASON_MAX_LENGTH]

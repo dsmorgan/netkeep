@@ -8,13 +8,15 @@ nothing the tick sent.
 
 from __future__ import annotations
 
+import random
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 import factories
 import httpx
 import pytest
-from campaign_fakes import ARMED_FOR_SEND, NOW, make_mailbox
+from campaign_fakes import ARMED_FOR_SEND, NOW, SETTINGS, make_mailbox
 from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
@@ -22,12 +24,16 @@ from test_campaign_replies import ADA, HELD_STALE, poller, set_mailbox
 from test_campaign_sender import WEEK, Mail, make_mail
 
 from netkeep.campaigns.gmail import GmailTransient
+from netkeep.config import Settings
 from netkeep.db import session_scope
 from netkeep.models import (
     Campaign,
     Enrollment,
     EnrollmentStatus,
+    Mailbox,
+    MailboxArm,
     MailboxReplyHold,
+    MailboxStatus,
     MessageStatus,
     StepMode,
     TemplateChannel,
@@ -37,8 +43,13 @@ from netkeep.models import (
 from netkeep.models.base import utcnow
 from netkeep.scoping import get_scoped, scoped
 from netkeep.services import campaign_engine as engine_module
-from netkeep.services import reply_holds
-from netkeep.services.campaign_engine import SendOutcome, Skip
+from netkeep.services import campaign_replies, reply_holds
+from netkeep.services.campaign_engine import Firing, SendOutcome, SendResult, Skip
+from netkeep.services.campaign_sender import GmailSender
+
+SHOWN = "replies have not been polled recently"
+"""The sender's reason (``HELD_STALE``) as the record keeps it and the page shows it: no
+"; nothing was sent" tail under "Held until replies are read"."""
 
 # --- through the tick ------------------------------------------------------------------
 
@@ -83,8 +94,8 @@ def held_follow_up(mail: Mail) -> tuple[int, datetime]:
 def test_a_held_follow_up_shows_why_until_the_hold_lifts(mail: Mail) -> None:
     enrollment_id, due = held_follow_up(mail)
 
-    assert holds(mail) == [(mail.mailbox.id, HELD_STALE, due)]
-    assert reasons(mail, enrollment_id) == {enrollment_id: HELD_STALE}
+    assert holds(mail) == [(mail.mailbox.id, SHOWN, due)]
+    assert reasons(mail, enrollment_id) == {enrollment_id: SHOWN}
     # Nothing on the enrollment changed (#694).
     enrollment = mail.enrollment(enrollment_id)
     assert (enrollment.not_sent_count, enrollment.not_sent_error) == (0, None)
@@ -92,7 +103,7 @@ def test_a_held_follow_up_shows_why_until_the_hold_lifts(mail: Mail) -> None:
     # Still held a minute later, inside the poll's backoff: the record is not rewritten.
     mail.gmail.fail_next("history.list", GmailTransient("down", code="unavailable"))
     mail.tick(due + timedelta(minutes=1))
-    assert holds(mail) == [(mail.mailbox.id, HELD_STALE, due)]
+    assert holds(mail) == [(mail.mailbox.id, SHOWN, due)]
 
     # The poll catches up: the follow-up goes out, and the record goes.
     later = due + timedelta(minutes=10)
@@ -112,9 +123,95 @@ def test_a_poll_that_caught_up_lifts_the_record_before_the_next_tick(mail: Mail)
     set_mailbox(mail, replies_polled_at=due + timedelta(seconds=1))
     assert reasons(mail, enrollment_id) == {}
     set_mailbox(mail, replies_polled_at=due)
-    assert reasons(mail, enrollment_id) == {enrollment_id: HELD_STALE}
+    assert reasons(mail, enrollment_id) == {enrollment_id: SHOWN}
     set_mailbox(mail, replies_polled_at=None)  # signed in again: still held
-    assert reasons(mail, enrollment_id) == {enrollment_id: HELD_STALE}
+    assert reasons(mail, enrollment_id) == {enrollment_id: SHOWN}
+
+
+def test_a_hold_that_resumes_after_a_poll_caught_up_starts_its_record_again(
+    mail: Mail,
+) -> None:
+    """#804 review: a poll catches up after the hold started, so the record reads as
+    lifted, and no tick asks meanwhile. When the replies go stale again and the tick holds
+    the follow-up for the same reason, the record starts again from that tick, and the
+    page shows it."""
+    enrollment_id, due = held_follow_up(mail)
+    caught_up = due + timedelta(minutes=1)
+    set_mailbox(mail, replies_polled_at=caught_up)
+    assert reasons(mail, enrollment_id) == {}  # lifted on read; the row is still there
+    assert holds(mail) == [(mail.mailbox.id, SHOWN, due)]
+
+    again = caught_up + campaign_replies.STALE_AFTER_POLLS * timedelta(minutes=10)
+    again += timedelta(minutes=5)
+    for _ in range(5):
+        mail.gmail.fail_next("history.list", GmailTransient("down", code="unavailable"))
+    result = mail.tick(again)
+
+    assert result.skipped()[enrollment_id] == (Skip.REPLIES_STALE.value,)
+    assert holds(mail) == [(mail.mailbox.id, SHOWN, again)]
+    assert reasons(mail, enrollment_id) == {enrollment_id: SHOWN}
+
+
+def test_keeping_the_record_needs_a_writer_session(mail: Mail) -> None:
+    """It reads, then writes: an unmarked session would skip ``BEGIN IMMEDIATE``."""
+    with session_scope(mail.factory) as session:
+        user = session.get(User, mail.user.id)
+        assert user is not None
+        with pytest.raises(RuntimeError, match="writer session"):
+            reply_holds.keep(session, user, {mail.mailbox.id: HELD_STALE}, now=NOW)
+    assert holds(mail) == []
+
+
+@dataclass
+class StopsWhenAsked:
+    """The real sender; the service starts stopping while the chooser asks the hold."""
+
+    inner: GmailSender
+    stopping: bool = False
+
+    def armed(self, session: Session, user: User, mailbox_id: int) -> MailboxArm | None:
+        return self.inner.armed(session, user, mailbox_id)
+
+    def replies_held(self, session: Session, user: User, mailbox_id: int) -> str | None:
+        self.stopping = True
+        return self.inner.replies_held(session, user, mailbox_id)
+
+    def reconcile(
+        self, factory: sessionmaker[Session], user_id: int, *, settings: Settings, now: datetime
+    ) -> None:
+        self.inner.reconcile(factory, user_id, settings=settings, now=now)
+
+    def send(self, firing: Firing) -> SendResult:
+        return self.inner.send(firing)
+
+
+def test_a_stopping_tick_leaves_the_records_to_the_next_one(mail: Mail) -> None:
+    """#804 review: a stop doesn't wait for the record; the next tick keeps it."""
+    mail.any_time()
+    mail.sender = poller(mail, every=timedelta(minutes=10))
+    enrollment_id = mail.enroll(ADA)
+    mail.tick(NOW)
+    mail.tick(NOW + timedelta(minutes=10))
+    due = NOW + WEEK
+    mail.gmail.fail_next("history.list", GmailTransient("down", code="unavailable"))
+    mail.clock.now = due
+    sender = StopsWhenAsked(mail.sender)
+
+    result = engine_module.tick_user(
+        mail.factory,
+        mail.user.id,
+        settings=SETTINGS,
+        sender=sender,
+        clock=mail.clock,
+        rng=random.Random(1),
+        stopping=lambda: sender.stopping,
+    )
+
+    assert result.skipped()[enrollment_id] == (Skip.REPLIES_STALE.value,)
+    assert holds(mail) == []
+    mail.gmail.fail_next("history.list", GmailTransient("down", code="unavailable"))
+    mail.tick(due + timedelta(minutes=1))
+    assert [(m, r) for m, r, _ in holds(mail)] == [(mail.mailbox.id, SHOWN)]
 
 
 def test_a_failure_keeping_the_record_changes_nothing_the_tick_did(
@@ -161,7 +258,7 @@ def test_the_tick_decides_the_same_with_or_without_the_record(mail: Mail) -> Non
             MailboxReplyHold(
                 user_id=mail.user.id,
                 mailbox_id=mail.mailbox.id,
-                reason=HELD_STALE,
+                reason=SHOWN,
                 held_since=due + timedelta(hours=1),
             )
         )
@@ -180,7 +277,7 @@ def _world(session: Session, user: User, *, at: datetime) -> dict[str, int]:
     """A mailbox with a hold record, and enrollments of every kind on its campaigns."""
     mailbox = make_mailbox(session, user, **ARMED_FOR_SEND)
     session.add(
-        MailboxReplyHold(user_id=user.id, mailbox_id=mailbox.id, reason=HELD_STALE, held_since=at)
+        MailboxReplyHold(user_id=user.id, mailbox_id=mailbox.id, reason=SHOWN, held_since=at)
     )
     campaign = factories.make_campaign(
         session, user, channels=(TemplateChannel.EMAIL,) * 2, mailbox_id=mailbox.id
@@ -214,7 +311,36 @@ def test_only_due_gmail_follow_ups_on_a_held_mailbox_show_a_reason(
         ids = _world(session, user, at=at)
     with session_scope(session_factory) as session:
         got = engine_module.held_reasons(session, user, list(ids.values()), now=at)
-    assert got == {ids["due_follow_up"]: HELD_STALE}
+    assert got == {ids["due_follow_up"]: SHOWN}
+
+
+@pytest.mark.parametrize(
+    ("changes", "shown"),
+    [
+        ({"send_armed_at": None}, True),  # armed for drafts: its follow-ups are held too
+        ({"armed_at": None, "send_armed_at": None}, False),  # disarmed
+        ({"status": MailboxStatus.REAUTH_REQUIRED}, False),
+        ({"status": MailboxStatus.DISABLED}, False),
+    ],
+    ids=["drafts", "disarmed", "reauth_required", "disabled"],
+)
+def test_a_disarmed_or_not_ready_mailbox_shows_no_reply_hold(
+    session_factory: sessionmaker[Session], changes: dict[str, object], shown: bool
+) -> None:
+    """#804 review: the chooser stops before the reply check on a disarmed or not-ready
+    mailbox, so its record may be from before, and arming or signing in is what releases
+    the step. A mailbox armed for drafts holds its follow-ups for replies as one armed to
+    send does."""
+    at = utcnow()
+    with session_scope(session_factory, write=True) as session:
+        user = factories.make_user(session)
+        ids = _world(session, user, at=at)
+        mailbox = session.scalars(scoped(user, Mailbox)).one()
+        for name, value in changes.items():
+            setattr(mailbox, name, value)
+    with session_scope(session_factory) as session:
+        got = engine_module.held_reasons(session, user, list(ids.values()), now=at)
+    assert got == ({ids["due_follow_up"]: SHOWN} if shown else {})
 
 
 def test_another_users_hold_record_never_shows(session_factory: sessionmaker[Session]) -> None:
@@ -230,7 +356,7 @@ def test_another_users_hold_record_never_shows(session_factory: sessionmaker[Ses
         session.flush()
         session.add(
             MailboxReplyHold(
-                user_id=theirs.id, mailbox_id=hold.mailbox_id, reason=HELD_STALE, held_since=at
+                user_id=theirs.id, mailbox_id=hold.mailbox_id, reason=SHOWN, held_since=at
             )
         )
     with session_scope(session_factory) as session:
@@ -265,7 +391,7 @@ async def test_the_campaign_page_says_why_a_due_follow_up_waits(
     expected = dict.fromkeys(
         (ids[k] for k in ("due_follow_up", "due_step_1", "not_yet_due", "ended")), None
     )
-    expected[ids["due_follow_up"]] = HELD_STALE
+    expected[ids["due_follow_up"]] = SHOWN
     assert shown == expected
     assert all(item["not_sent_error"] is None for item in body["items"])
 
@@ -280,6 +406,6 @@ async def test_the_dashboard_says_why_a_due_follow_up_waits(
     shown: Callable[[str], object] = lambda key: next(  # noqa: E731
         item["held_reason"] for item in body["items"] if item["enrollment_id"] == ids[key]
     )
-    assert shown("due_follow_up") == HELD_STALE
+    assert shown("due_follow_up") == SHOWN
     assert shown("due_step_1") is None
     assert shown("not_yet_due") is None
