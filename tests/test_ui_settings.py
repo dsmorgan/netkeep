@@ -10,6 +10,7 @@ import factories
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
+from netkeep import paths
 from netkeep.config import MenuBarSettings, Settings, load_settings
 from netkeep.db import database_url, session_scope
 from netkeep.models import User, UserKind
@@ -689,5 +690,8 @@ def test_the_menu_bar_reader_creates_nothing_before_there_is_a_database(
     assert ui_settings.show_menubar_icon(Settings(), url=database_url(data)) is True
     off = Settings(menubar=MenuBarSettings(show_icon=False))
     assert ui_settings.show_menubar_icon(off, url=database_url(data)) is False
-    assert ui_settings.show_menubar_icon(Settings()) is True  # the default data directory
+    default = paths.data_dir()  # the autouse fixture's scratch NETKEEP_DATA, never the real one
+    assert default.is_relative_to(tmp_path)
+    assert ui_settings.show_menubar_icon(Settings()) is True
     assert not data.exists()
+    assert not default.exists()
