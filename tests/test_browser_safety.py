@@ -3453,6 +3453,14 @@ RAW_SEND_NAMES = frozenset(
         "_tunnel",
         "_request",
         "_conn_request",
+        # #789 review: asyncio's socket sends, which take the socket as an argument
+        # (``loop.sock_sendall(s, ...)``), and urllib3's request sends on a pool.
+        "sock_sendall",
+        "sock_sendto",
+        "sock_sendfile",
+        "request_encode_body",
+        "request_encode_url",
+        "_make_request",
     }
 )
 
@@ -3460,6 +3468,16 @@ RAW_SEND_NAMES = frozenset(
 def _raw_send(path: Path, name: str) -> bool:
     """Whether a read of ``name`` in ``path`` is a raw send (:data:`RAW_SEND_NAMES`)."""
     return name in RAW_SEND_NAMES and not (name == "send" and _in_browser_roots(path))
+
+
+def _send_key(node: ast.Attribute) -> str:
+    """#789 review: a send read's key, with its receiver when that is a bare name
+    (``gmail.send``, ``self.sock``). A count can't see the receiver, so at an allowed site
+    ``gmail._http.connections.popitem()[1].send(...)`` would keep the count; keyed this
+    way, a chain (or another name) is a new key. Other receivers key the name alone."""
+    if isinstance(node.value, ast.Name):
+        return f"{node.value.id}.{node.attr}"
+    return node.attr
 
 
 #: The module that defines each helper. ``_send`` and ``health`` are ordinary names
@@ -3597,15 +3615,15 @@ ALLOWED_RAW_CONNECTIONS = {
     (PACKAGE / "services" / "update.py", "https_get", "request"): 1,
     # #785: the write-once connection's own socket, read to tell whether it is open before
     # a non-resendable request (it is not written to here).
-    (PACKAGE / "campaigns" / "gmail.py", "WriteOnceMixin.request", "sock"): 1,
+    (PACKAGE / "campaigns" / "gmail.py", "WriteOnceMixin.request", "self.sock"): 1,
     # Not a raw write: the Gmail API's `send` (`GmailClient.send`'s `messages().send`,
     # pinned in `ALLOWED_API_CALLS` in test_gmail_never_deletes.py). `send` counts in
-    # every file (#789), so each call of it is pinned here.
-    (PACKAGE / "services" / "campaign_sender.py", "GmailSender.send", "send"): 1,
-    (PACKAGE / "web" / "api" / "campaign_review.py", "test_send", "send"): 1,
-    # Not a raw write: the campaign engine hands a firing to its sender
-    # (`CampaignSender.send`, the Gmail sender above in production).
-    (PACKAGE / "services" / "campaign_engine.py", "_send", "send"): 1,
+    # every file (#789), so each call of it is pinned here, keyed by its receiver.
+    (PACKAGE / "services" / "campaign_sender.py", "GmailSender.send", "gmail.send"): 1,
+    (PACKAGE / "web" / "api" / "campaign_review.py", "test_send", "gmail.send"): 1,
+    # Not a raw write: the campaign engine hands a firing to its sender (the `Sender`
+    # protocol's `send`, which `GmailSender` implements in production).
+    (PACKAGE / "services" / "campaign_engine.py", "_send", "sender.send"): 1,
     # Not a send: an observed Playwright response's request, read for its method and
     # matched to the request's end (ADR 0006).
     (LINKEDIN / "observe.py", "Observation._on_response", "request"): 1,
@@ -3670,7 +3688,7 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
                     # ``socket.socket``, and so is the module read on its own.
                     add(path, where, "socket.socket")
                 elif _raw_send(path, node.attr):
-                    add(path, where, node.attr)
+                    add(path, where, _send_key(node))
             elif isinstance(node, ast.Name):
                 if node.id in imported and isinstance(node.ctx, ast.Load):
                     add(path, where, imported[node.id])
@@ -3953,6 +3971,23 @@ _OAUTH_PUT = (
                 "getattr(c.sock, 'sendmsg')([b'x'])",
             )
         ],
+        # #789 review: the same count at an allowed `send`, on a connection reached
+        # through a chain instead of the reviewed receiver.
+        (
+            PACKAGE / "services" / "campaign_engine.py",
+            "        result = sender.send(firing)",
+            "        result = sender._open().http.connections.popitem()[1].send(firing)",
+        ),
+        (
+            PACKAGE / "services" / "campaign_sender.py",
+            "gmail.send(message, thread_id=",
+            "gmail._http.connections.popitem()[1].send(message, thread_id=",
+        ),
+        (
+            PACKAGE / "web" / "api" / "campaign_review.py",
+            "ref = gmail.send(plan.message",
+            "ref = gmail._http.connections.popitem()[1].send(plan.message",
+        ),
     ],
 )
 def test_the_raw_connection_pin_catches_a_new_send_at_a_reviewed_site(
@@ -3994,6 +4029,14 @@ def test_the_raw_connection_pin_catches_a_new_send_at_a_reviewed_site(
         "def f(h, c) -> None:\n"
         "    h._request(c, 'example.invalid', 'https://example.invalid/', '/', 'PUT', b'',"
         " {}, 0, None)\n",
+        # #789 review: asyncio's socket sends, and urllib3's request sends on a pool.
+        "async def f(loop, s) -> None:\n    await loop.sock_sendall(s, b'x')\n",
+        "async def f(loop, s) -> None:\n"
+        "    await loop.sock_sendto(s, b'x', ('example.invalid', 1))\n",
+        "async def f(loop, s, fh) -> None:\n    await loop.sock_sendfile(s, fh)\n",
+        "def f(pool) -> None:\n    pool.request_encode_body('PUT', 'https://example.invalid/')\n",
+        "def f(pool) -> None:\n    pool.request_encode_url('GET', 'https://example.invalid/')\n",
+        "def f(pool, c) -> None:\n    pool._make_request(c, 'PUT', '/')\n",
     ],
 )
 def test_the_raw_connection_pin_catches_a_send_on_a_connection_from_anywhere(code: str) -> None:
@@ -4005,7 +4048,9 @@ def test_the_raw_connection_pin_catches_a_send_on_a_connection_from_anywhere(cod
     assert raw_connections(sources) != ALLOWED_RAW_CONNECTIONS
 
 
-@pytest.mark.parametrize("path", [LINKEDIN / "browser.py", LINKEDIN / "preflight.py"])
+@pytest.mark.parametrize(
+    "path", [LINKEDIN / "browser.py", LINKEDIN / "preflight.py", PACKAGE / "cli.py"]
+)
 @pytest.mark.parametrize(
     ("body", "pin"),
     [
@@ -4030,6 +4075,34 @@ def test_a_raw_send_in_a_cdp_file_fails_a_pin(path: Path, body: str, pin: str) -
         assert any((i.where.path, i.where.function) not in CDP_SENDERS for i in found)
 
 
+_COOKIE_SEND = (
+    '        reply = await session.send("Network.getCookies", {"urls": list(COOKIE_URLS)})\n'
+)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "        session.send(b'x')\n",
+        "        session.connection.send(b'x')\n",
+        "        await session.send('Network.getCookies', {'urls': []})\n",
+    ],
+)
+def test_a_raw_send_inside_an_allowed_cdp_sender_fails_the_cdp_pin(line: str) -> None:
+    """#789 review: inside a reviewed CDP sender, where the function key matches, a
+    second send changes the sender's count; one with no literal method is refused too."""
+    path = LINKEDIN / "preflight.py"
+    sources = package_sources()
+    assert sources[path].count(_COOKIE_SEND) == 1
+    sources[path] = sources[path].replace(_COOKIE_SEND, line + _COOKIE_SEND, 1)
+    assert raw_connections(sources) == ALLOWED_RAW_CONNECTIONS
+    site = (path, "_read_session_cookies")
+    hits = [i for i in cdp_sends(sources[path], path) if (i.where.path, i.where.function) == site]
+    assert len(hits) != CDP_SENDERS[site]
+    if "b'x'" in line:
+        assert any(i.method not in ALLOWED_CDP_METHODS for i in hits)
+
+
 #: #677 review: the reviewed HTTP sends, pinned whole the way the identity read's
 #: transport is (:func:`pinned_source`), by file: setup's health check, the update
 #: download, Gmail's write-once connection classes, and Gmail OAuth's one send.
@@ -4037,9 +4110,10 @@ def test_a_raw_send_in_a_cdp_file_fails_a_pin(path: Path, body: str, pin: str) -
 #: #789: and Gmail OAuth's callers of that send, since a count pin can't read an
 #: argument (``_post_form(ends, "https://example.invalid/", ...)`` in ``exchange_code``
 #: keeps every count): the two token requests, the form POST they share, the profile
-#: fetch, and where their URLs come from when they are given no endpoints (``google()``
-#: and the ``GOOGLE`` it reads). ``GOOGLE_ENDPOINTS``' URLs are pinned by value in
-#: ``test_the_scope_and_googles_endpoints_are_pinned`` (test_gmail_oauth.py).
+#: fetch, and where their URLs come from when they are given no endpoints (``google()``,
+#: the ``GOOGLE`` it reads, ``GOOGLE_ENDPOINTS`` and the ``GoogleEndpoints`` class, whose
+#: own code, a ``__post_init__`` say, could rewrite a URL that the by-value pin in
+#: test_gmail_oauth.py would read the same on both sides).
 HTTP_SEND_SITES = {
     PACKAGE / "services" / "post_install.py": frozenset({"health"}),
     PACKAGE / "services" / "update.py": frozenset({"https_get"}),
@@ -4048,6 +4122,8 @@ HTTP_SEND_SITES = {
     ),
     PACKAGE / "campaigns" / "gmail_oauth.py": frozenset(
         {
+            "GoogleEndpoints",
+            "GOOGLE_ENDPOINTS",
             "GOOGLE",
             "google",
             "exchange_code",
@@ -4165,6 +4241,18 @@ _ELSEWHERE = '"https://example.invalid/"'
             "GOOGLE = GOOGLE_ENDPOINTS\n",
             f"GOOGLE = dataclasses.replace(GOOGLE_ENDPOINTS, token_uri={_ELSEWHERE})\n",
         ),
+        # #789 review: the endpoints and their class, which the by-value pin compares
+        # with an instance of that same class.
+        (
+            'token_uri="https://oauth2.googleapis.com/token",',
+            f"token_uri={_ELSEWHERE},",
+        ),
+        (
+            "    use_system_proxy: bool = True\n",
+            "    use_system_proxy: bool = True\n\n"
+            "    def __post_init__(self) -> None:\n"
+            f"        object.__setattr__(self, 'token_uri', {_ELSEWHERE})\n",
+        ),
     ],
 )
 def test_the_whole_function_pin_reads_the_oauth_callers_arguments(old: str, new: str) -> None:
@@ -4186,6 +4274,55 @@ def test_the_http_send_site_pin_ignores_docstrings_and_comments() -> None:
     assert sources[path].count(anchor) == 1
     sources[path] = sources[path].replace(anchor, anchor + '        """Reworded."""\n  # a\n', 1)
     assert http_send_sites_source(sources) == HTTP_SEND_SITES_FILE.read_text()
+
+
+def pinned_name_stores(sources: dict[Path, str]) -> list[tuple[Path, int, str]]:
+    """#789 review: each attribute store or delete of an :data:`HTTP_SEND_SITES` name
+    (``gmail_oauth.GOOGLE = ...``, ``del m.health``), and each ``setattr`` or ``delattr``
+    with one as a literal, anywhere in the package. The whole-function pin reads only the
+    name's home file, so another module rebinding it is a send site it never sees."""
+    names = frozenset().union(*HTTP_SEND_SITES.values())
+    found = []
+    for path, source in sources.items():
+        for node in walk(parse(source)):
+            if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store | ast.Del):
+                if node.attr in names:
+                    found.append((path, node.lineno, node.attr))
+            elif (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in {"setattr", "delattr"}
+                and len(node.args) >= 2
+                and isinstance(node.args[1], ast.Constant)
+                and node.args[1].value in names
+            ):
+                found.append((path, node.lineno, str(node.args[1].value)))
+    return found
+
+
+def test_no_module_rebinds_a_pinned_send_site() -> None:
+    """Nothing in the package assigns or deletes a pinned send site's name as an
+    attribute. Tests aren't scanned, so their fakes can still replace ``GOOGLE``."""
+    assert pinned_name_stores(package_sources()) == []
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "from netkeep.campaigns import gmail_oauth\n\n\ndef f() -> None:\n"
+        "    gmail_oauth.GOOGLE = gmail_oauth.GoogleEndpoints('https://example.invalid/',"
+        " 'https://example.invalid/', 'https://example.invalid/')\n",
+        "import netkeep.campaigns.gmail_oauth as g\n\n\ndef f(x) -> None:\n    g.google = x\n",
+        "from netkeep.services import update\n\n\ndef f() -> None:\n    del update.https_get\n",
+        "def f(m, x) -> None:\n    m.GOOGLE_ENDPOINTS, m.health = x, x\n",
+        "def f(m, x) -> None:\n    setattr(m, 'GOOGLE', x)\n",
+        "def f(m) -> None:\n    delattr(m, '_post_form')\n",
+    ],
+)
+def test_the_pinned_name_store_pin_catches_a_rebinding(code: str) -> None:
+    sources = package_sources()
+    sources[PACKAGE / "services" / "chrome_launch.py"] += "\n\n" + code
+    assert pinned_name_stores(sources) != []
 
 
 #: #783: the helpers that send for a caller, each to a host the caller picks: Gmail
