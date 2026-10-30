@@ -137,34 +137,66 @@ These come straight from the spec and from production incidents on the sibling p
 
 ## Which pull requests need the maintainer's approval
 
-The test is the direction of the change, not the area it touches. A pull request
-needs the maintainer's `approved` comment on its head commit when it can make netkeep
-do more, or do something new, toward LinkedIn, Gmail, or your machine:
+Every pull request gets a review from a review agent (see `CLAUDE.md`) and needs green
+CI. Some also need the maintainer's approval: an `approved` comment for the current head
+commit. The test is the direction of the change, not the area it touches.
 
-- A new or changed send, click, keystroke, or navigation target.
-- A change to when sends happen or how many go out: timing, budgets, sending hours,
-  retries.
-- Loosening or removing a refusal, a guard, or a pin in `tests/http_send_sites.txt`.
-- New access: an OAuth scope, a Keychain entry, a LaunchAgent, or a Chrome launch or
-  attach.
-- An ADR, and publishing a release.
+### Needs approval
 
-These merge after the review agent's review and green CI, without the maintainer:
+A pull request needs approval when it can make netkeep do more, or do something new,
+toward LinkedIn, Gmail, the user's machine, or any outside service. For example:
 
-- A change that only refuses more, skips earlier, or checks harder.
-- Test-only hardening of a pin or a guard.
-- A refactor of a pinned function that keeps its behavior.
-- Read-only parsing, error handling and messages, and crash fixes.
-- Docs, UI that doesn't start an action, and dependency updates (except the
-  `cryptography` split in [ADR 0011](docs/adr/0011-installation-and-updates.md)).
+- It adds or changes a send, a click, a keystroke, or a navigation target.
+- It changes when sends happen or how many go out: timing, budgets, sending hours,
+  retries, or a new scheduler job.
+- It loosens or removes a refusal, a guard, a pin in `tests/http_send_sites.txt`, or a
+  test that pins a safety-relevant constant's literal value.
+- It turns a stop into a continue or a retry, including in error handling.
+- It changes parsing that a send, retry, or stop decision depends on (checkpoint,
+  already-sent, or reply detection), except to make netkeep stop more often.
+- It adds access: an OAuth scope, a Keychain entry, a LaunchAgent, a Chrome launch or
+  attach, a new outside destination, a non-loopback `serve` address, or a change to the
+  local API secret.
+- It adds a runtime dependency, or changes the CI workflows, the release workflow, or
+  `scripts/install.sh`.
+- It removes a confirmation, preselects a recipient, or changes what an existing control
+  does.
+- It changes the rules themselves: this section, "Safety rules that reviewers enforce",
+  `CLAUDE.md`, an ADR, or a safety limit in the spec.
+- It publishes a release.
 
-A change in the second group still needs its review to say "tightens only" or "no
-behavior change" and give the evidence: the test that pins the old behavior, or the
-diff that shows the new refusal. If the review can't, the pull request goes to the
-maintainer. A safety-area pull request merged this way gets the `safety-tightening`
-label and a one-line comment saying why, so the maintainer can audit it later. A
-docs-only or test-only commit pushed after an approval doesn't need a new one; any
-product-code commit does.
+These pull requests get the `needs-approval` and `safety` labels.
+
+### Merges after review
+
+A pull request merges without waiting for approval when it only does one or more of
+these:
+
+- It refuses more, skips earlier, or checks harder.
+- It hardens a pin or a guard in tests only.
+- It refactors a pinned function and keeps its behavior. A test that pins that behavior
+  exists on `main` and passes unchanged.
+- It changes parsing that no send, retry, or stop decision depends on, error messages,
+  or a crash fix that stops instead of continuing.
+- It changes other docs, or UI that doesn't start an action.
+- It updates a dependency, except the `cryptography` split in
+  [ADR 0011](docs/adr/0011-installation-and-updates.md). The review names any upstream
+  change to retries, timeouts, redirects, or input dispatch, and a Playwright update runs
+  the browser smoke suite.
+
+A change that matches both lists, or neither, needs approval.
+
+The review for a pull request that touches a pinned function, a guard, or the browser,
+Gmail, or scheduler code says "tightens only" or "no behavior change", and gives the
+evidence: the test on `main` that pins the old behavior, or the diff that shows the new
+refusal. If the review can't, the pull request needs approval. Before the merge, the
+merger adds the `safety-tightening` label and a one-line comment saying why, so the
+maintainer can audit it later.
+
+After an approval, a rebase that leaves the pull request's own diff unchanged doesn't
+need a new one. Neither does a commit that only changes docs or tests, unless it changes
+a pin, a guard test, `tests/http_send_sites.txt`, or the rules listed above. Any other
+commit needs a new approval.
 
 ## Code of conduct
 
