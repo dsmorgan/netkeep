@@ -52,7 +52,10 @@ then the Settings page) and, off, claims nothing and notes nothing. On, it
 waits out the spacing since the last auto-send, and claims one due ``auto_send`` step
 (:func:`netkeep.services.linkedin_steps.claim_auto_send`), which records its scheduled
 ``message_send`` run; then it runs that run like any other. When it claims nothing it
-answers :attr:`~netkeep.services.scheduler.JobOutcome.NOTHING_TO_SEND`.
+answers :attr:`~netkeep.services.scheduler.JobOutcome.NOTHING_TO_SEND`. A run its prefill
+runner refused outside active hours before it opened anything (the window closed after the
+claim) answers :attr:`~netkeep.services.scheduler.JobOutcome.OUTSIDE_HOURS_AFTER_GATE`, as
+in 5 (#720).
 
 Nothing here imports the browser: the worker arrives as a
 :class:`~netkeep.services.runs.RunExecutor` (``tests/test_browser_safety.py``).
@@ -86,6 +89,9 @@ from netkeep.services.linkedin_accounts import (
     scheduled_runs_armed,
 )
 from netkeep.services.linkedin_steps import (
+    AUTO_SEND_HOURS_UNREADABLE,
+    AUTO_SEND_OUTSIDE_HOURS,
+    NOT_STARTED_NOTE,
     auto_send_budget_warning,
     auto_send_hold,
     claim_auto_send,
@@ -543,6 +549,14 @@ def _auto_send_handler(
         await tasks.wait(task_id)
         if result() is runs.RunOutcome.RETRY_LATER:
             return JobOutcome.RETRY_LATER
+        if await off_loop(_auto_send_refused_outside_hours, factory, ctx.user_id, claimed):
+            # #720: the window closed between the claim and the run. The step was given
+            # back due; the fire counts as skipped and waits for the window's next start.
+            log.info(
+                "scheduled auto-send run %d refused outside active hours; it opened nothing",
+                claimed,
+            )
+            return JobOutcome.OUTSIDE_HOURS_AFTER_GATE
         return None
 
     return handle
@@ -565,6 +579,28 @@ def _refused_outside_hours(factory: sessionmaker[Session], user_id: int, run_id:
         except runs.RunNotFound:
             return False
         return run.status is SyncRunStatus.FAILED and run.stop_reason == REFUSED_OUTSIDE_HOURS
+
+
+def _auto_send_refused_outside_hours(
+    factory: sessionmaker[Session], user_id: int, run_id: int
+) -> bool:
+    """Whether auto-send run ``run_id`` stopped before it opened anything because of the
+    window (#720): the prefill runner's own refusal, given back as not started, with
+    :data:`AUTO_SEND_OUTSIDE_HOURS` or :data:`AUTO_SEND_HOURS_UNREADABLE`. False for a run
+    that opened a page, a run a person cancelled, and a run or user that is gone."""
+    with session_scope(factory) as session:
+        user = session.get(User, user_id)
+        if user is None:
+            return False
+        try:
+            run = runs.get_run(session, user, run_id)
+        except runs.RunNotFound:
+            return False
+        return (
+            run.status is SyncRunStatus.ABORTED
+            and run.error in (AUTO_SEND_OUTSIDE_HOURS, AUTO_SEND_HOURS_UNREADABLE)
+            and (run.notes or "").startswith(NOT_STARTED_NOTE)
+        )
 
 
 def _lost_answers(factory: sessionmaker[Session], user_id: int, run_id: int) -> int:

@@ -28,6 +28,7 @@ from netkeep.db import session_scope
 from netkeep.models import (
     Campaign,
     CampaignStatus,
+    CampaignStep,
     Contact,
     ContactEmail,
     DoNotSendReason,
@@ -60,6 +61,7 @@ from netkeep.services.campaign_engine import (
     Skip,
     activate,
 )
+from netkeep.services.campaign_guards import Verdict, check_step
 from netkeep.services.campaign_sender import GmailSender
 from netkeep.services.mailboxes import MailboxNotReady
 from netkeep.services.simulate_campaign import simulate_campaign
@@ -1110,6 +1112,47 @@ def test_held_follow_ups_never_fill_the_scan(mail: Mail, monkeypatch: pytest.Mon
     [(firing, outcome)] = result.fired
     assert firing.enrollment_id == fresh and outcome.outcome is SendOutcome.SENT
     assert result.skipped()[held_ids[0]] == (Skip.REPLIES_STALE.value,)
+    assert all(mail.enrollment(e).not_sent_count == 0 for e in held_ids)
+
+
+def test_held_follow_ups_on_one_page_never_use_up_the_scan(
+    mail: Mail, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#716: a page read before its mailbox was known to be held counts its held
+    follow-ups against nothing, so a page bigger than the scan limit still reaches the
+    step 1 behind it. Only the first held row runs the checks; the rest on the page are
+    skipped from the cached answer, as the next pages leave them out."""
+    mail.any_time()
+    mail.sender = poller(mail, every=timedelta(minutes=10))
+    held_ids = [mail.enroll(f"held{n}@example.test") for n in range(3)]
+    for minute in range(0, 60):
+        mail.tick(NOW + timedelta(minutes=minute))
+    assert len(mail.gmail.sent()) == 3
+    due = NOW + WEEK + timedelta(hours=2)  # every step 2 is due
+    for _ in range(5):
+        mail.gmail.fail_next("history.list", GmailTransient("down", code="unavailable"))
+    mail.clock.now = due
+    fresh = mail.enroll("new@example.test")
+    monkeypatch.setattr(engine_module, "SCAN_LIMIT", 2)
+    monkeypatch.setattr(engine_module, "PAGE_SIZE", 3)
+    checked: list[int] = []
+    real_check_step = check_step
+
+    def counting(
+        session: Session, user: User, enrollment: Enrollment, step: CampaignStep, *, now: datetime
+    ) -> Verdict:
+        checked.append(enrollment.id)
+        return real_check_step(session, user, enrollment, step, now=now)
+
+    monkeypatch.setattr(engine_module, "check_step", counting)
+
+    result = mail.tick(due)
+
+    [(firing, outcome)] = result.fired
+    assert firing.enrollment_id == fresh and outcome.outcome is SendOutcome.SENT
+    skipped = result.skipped()
+    assert [skipped[e] for e in held_ids] == [(Skip.REPLIES_STALE.value,)] * 3
+    assert checked == [held_ids[0], fresh]
     assert all(mail.enrollment(e).not_sent_count == 0 for e in held_ids)
 
 

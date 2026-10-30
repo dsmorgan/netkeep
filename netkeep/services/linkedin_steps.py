@@ -308,6 +308,15 @@ SEND_UNCONFIRMED_NOTE: Final = "send not confirmed: "
 BUBBLE_LEFT_OPEN_NOTE: Final = "bubble left open: "
 NOT_STARTED_NOTE: Final = "not started: "
 
+#: An auto-send's refusals by the window, before it opens anything (the gates in
+#: :func:`netkeep.services.message_send.run_prefill`, which write the same words as
+#: literals for the reason-phrase scan): the window closed, or no longer parses, after
+#: the scheduler claimed the fire. The auto-send handler reads them back (#720), so the
+#: fire counts as skipped and moves to the window's next start, as a refused run of any
+#: other kind does (#696). Here, not in message_send, which only the worker imports.
+AUTO_SEND_OUTSIDE_HOURS: Final = "outside LinkedIn's active hours"
+AUTO_SEND_HOURS_UNREADABLE: Final = "LinkedIn's active hours do not parse"
+
 # --- the auto-send hold (ADR 0008, #384 review B1) -----------------------------------
 
 #: Why auto-send stops until the person acts: an auto-send left a message bubble open in

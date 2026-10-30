@@ -665,6 +665,9 @@ async def run_prefill(
                 return changed
             try:
                 runs.refuse_if_outside_active_hours(settings.linkedin, now=now)
+            # The words of linkedin_steps.AUTO_SEND_OUTSIDE_HOURS and
+            # AUTO_SEND_HOURS_UNREADABLE, which the auto-send handler reads back (#720).
+            # Literals here, so the reason-phrase scan reads them (#383).
             except runs.OutsideActiveHours:
                 return "outside LinkedIn's active hours"
             except runs.RunError:
