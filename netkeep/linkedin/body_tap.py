@@ -327,17 +327,18 @@ class BodyTap:
         own request by when it started (#713 review): the held answer whose start is
         within :data:`PAIR_TOLERANCE_MS` of ``started_ms``, when every other held answer
         to the same request starts at least :data:`PAIR_MARGIN_MS` away. Starts count only
-        once the tap has heard every such answer's ``responseReceived``, so each has the
-        start Playwright computes: one heard only so far has just its ``wallTime`` start,
-        off from Playwright's by its queueing time, and could make another request's
-        answer look nearest (#811 review). Otherwise, with no start, an answer not yet
-        heard, none near enough, or two too near to tell apart, it is the oldest held
-        answer to the same request, as before starts.
+        once the tap has heard every such answer's ``responseReceived`` and each has a
+        start, so each has the start Playwright computes: one not heard yet has just its
+        ``wallTime`` start, off from Playwright's by its queueing time, and one without
+        times has none; either could make another request's answer look nearest (#811
+        review). Otherwise, with no start, an answer not yet heard or without times, none
+        near enough, or two too near to tell apart, it is the oldest held answer to the
+        same request, as before starts.
         """
         same = [(rid, entry) for rid, entry in self._streams.items() if entry.key == key]
         if not same:
             return None
-        if started_ms is not None and all(entry.answered for _, entry in same):
+        if started_ms is not None and all(entry.answered and entry.starts for _, entry in same):
             near = sorted((entry.distance(started_ms), rid) for rid, entry in same)
             nearest, rid = near[0]
             runner_up = near[1][0] if len(near) > 1 else math.inf
