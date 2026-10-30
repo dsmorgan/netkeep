@@ -3172,7 +3172,9 @@ def module_scope_bindings(tree: ast.Module) -> list[tuple[ast.AST, str]]:
 
 def pinned_source(source: str, pinned: frozenset[str]) -> str:
     """The functions and classes ``pinned`` names in ``source``, normalized, in file
-    order, with their docstrings (and their methods') left out.
+    order, with their docstrings (and their methods') left out. A pinned name whose one
+    binding is a module-scope assignment (#789: ``GOOGLE = GOOGLE_ENDPOINTS``) prints
+    that statement.
 
     A module-scope name bound twice (:func:`module_scope_bindings`: a second ``def``, a
     class, an assignment, an import, a loop or ``with`` target, a walrus, at the top
@@ -3189,6 +3191,8 @@ def pinned_source(source: str, pinned: frozenset[str]) -> str:
             printed.append(f"# {name} is bound a second time")
         elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
             printed.append(ast.unparse(_without_docstrings(node)))
+        elif isinstance(node, ast.Assign | ast.AnnAssign):
+            printed.append(ast.unparse(node))
     return "\n\n".join(printed) + "\n"
 
 
@@ -3421,15 +3425,43 @@ RAW_CONNECTION_NAMES = frozenset(
 #: ``from ... import Request``, and any ``<x>.Request``, is.
 WEB_REQUEST_MODULES = frozenset({"fastapi", "starlette.requests"})
 #: #677 review: a connection's raw sends. ``HTTPConnection.send`` writes bytes as they
-#: are (connecting first), but CDP sessions ``send`` too, so these are read only in a
-#: file that reaches an HTTP client module (:func:`http_clients`) or imports from one of
-#: the transport modules (:func:`transport_importers`). #785: the socket's other sends
-#: (``c.sock.sendmsg``, ``sendto``, ``sendfile``), ``makefile``, whose file object
-#: writes to the socket (``c.sock.makefile("wb").write(...)``), and ``sock`` itself,
-#: whose ``write`` and ``fileno`` (``os.write(c.sock.fileno(), ...)``) are sends too.
-HTTP_FILE_SEND_NAMES = frozenset(
-    {"send", "sendall", "sendmsg", "sendto", "sendfile", "makefile", "sock"}
+#: are (connecting first). #785: the socket's other sends (``c.sock.sendmsg``,
+#: ``sendto``, ``sendfile``), ``makefile``, whose file object writes to the socket
+#: (``c.sock.makefile("wb").write(...)``), and ``sock`` itself, whose ``write`` and
+#: ``fileno`` (``os.write(c.sock.fileno(), ...)``) are sends too. #789: the private
+#: methods that send a whole request on a connection made anywhere: http.client's
+#: ``_send_request``, ``_send_output`` and ``_tunnel`` (a ``CONNECT``), and httplib2's
+#: ``Http._request`` and ``_conn_request``.
+#:
+#: #789: read in every file, not only one that imports a transport or HTTP client
+#: module, as a connection can arrive through an object graph (a parameter, an
+#: attribute of something returned) in a file that imports nothing. The one exception
+#: is ``send`` in the CDP files (:data:`BROWSER_ROOTS`), where CDP sessions send. There
+#: the CDP pin (``test_the_one_cdp_session_is_read_only``) holds every reach of it
+#: by function, count and literal method, so a ``c.send(b"...")`` fails that pin.
+RAW_SEND_NAMES = frozenset(
+    {
+        "send",
+        "sendall",
+        "sendmsg",
+        "sendto",
+        "sendfile",
+        "makefile",
+        "sock",
+        "_send_request",
+        "_send_output",
+        "_tunnel",
+        "_request",
+        "_conn_request",
+    }
 )
+
+
+def _raw_send(path: Path, name: str) -> bool:
+    """Whether a read of ``name`` in ``path`` is a raw send (:data:`RAW_SEND_NAMES`)."""
+    return name in RAW_SEND_NAMES and not (name == "send" and _in_browser_roots(path))
+
+
 #: The module that defines each helper. ``_send`` and ``health`` are ordinary names
 #: (a handler's ``self._send``, a local ``health``), so a read of one counts only in
 #: its own file and in a file that reaches its module (:func:`reaches_netkeep_module`).
@@ -3439,12 +3471,7 @@ SEND_HELPER_HOMES = {
     "https_get": "update",
     "health": "post_install",
 }
-#: #785: the modules that hold a send site (Gmail's transport, and the homes of the send
-#: helpers). A file that reaches one gets ``.send`` counted as well: ``from
-#: netkeep.campaigns.gmail import WriteOnceConnection`` reaches a connection with no HTTP
-#: client module in the file, and its ``.send`` writes to any host.
-TRANSPORT_MODULES = frozenset({"gmail", "gmail_oauth", "post_install"})
-#: Where each of those modules, and each helper's home, lives. Two files are named
+#: Where Gmail's transport, and each helper's home, lives. Two files are named
 #: ``gmail`` (the web API's too), so a module is a path, not a stem.
 MODULE_FILES = {
     "gmail": PACKAGE / "campaigns" / "gmail.py",
@@ -3506,15 +3533,6 @@ def reaches_netkeep_module(tree: ast.AST, stem: str) -> bool:
                 ):
                     return True
     return False
-
-
-def transport_importers(sources: dict[Path, str]) -> set[Path]:
-    """The files that reach a :data:`TRANSPORT_MODULES` module (:func:`reaches_netkeep_module`)."""
-    return {
-        path
-        for path, source in sources.items()
-        if any(reaches_netkeep_module(parse(source), stem) for stem in TRANSPORT_MODULES)
-    }
 
 
 def _web_request(node: ast.ImportFrom, alias: ast.alias) -> bool:
@@ -3581,10 +3599,13 @@ ALLOWED_RAW_CONNECTIONS = {
     # a non-resendable request (it is not written to here).
     (PACKAGE / "campaigns" / "gmail.py", "WriteOnceMixin.request", "sock"): 1,
     # Not a raw write: the Gmail API's `send` (`GmailClient.send`'s `messages().send`,
-    # pinned in `ALLOWED_API_CALLS` in test_gmail_never_deletes.py). Counted because
-    # these files import from `campaigns.gmail` (`transport_importers`).
+    # pinned in `ALLOWED_API_CALLS` in test_gmail_never_deletes.py). `send` counts in
+    # every file (#789), so each call of it is pinned here.
     (PACKAGE / "services" / "campaign_sender.py", "GmailSender.send", "send"): 1,
     (PACKAGE / "web" / "api" / "campaign_review.py", "test_send", "send"): 1,
+    # Not a raw write: the campaign engine hands a firing to its sender
+    # (`CampaignSender.send`, the Gmail sender above in production).
+    (PACKAGE / "services" / "campaign_engine.py", "_send", "send"): 1,
     # Not a send: an observed Playwright response's request, read for its method and
     # matched to the request's end (ADR 0006).
     (LINKEDIN / "observe.py", "Observation._on_response", "request"): 1,
@@ -3599,11 +3620,10 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
     name read on a :data:`SOCKET_MODULES` module (or imported from it), by file and
     function. Either socket name is keyed as ``socket.<name>``. A name a ``from`` import
     binds (``from urllib.request import urlopen as u``) is a reach where it's imported
-    and at each read of it (``u(...)``), keyed by the name it was imported as. In a file
-    that reaches an HTTP client module, each :data:`HTTP_FILE_SEND_NAMES` read is one
-    too. A star import that could bind an opener (:func:`_star_reach`) is a reach."""
+    and at each read of it (``u(...)``), keyed by the name it was imported as. Each read
+    of a :data:`RAW_SEND_NAMES` name is one too, in any file (:func:`_raw_send`). A star
+    import that could bind an opener (:func:`_star_reach`) is a reach."""
     found: dict[tuple[Path, str, str], int] = {}
-    http_files = {path for path, _, _ in http_clients(sources)} | transport_importers(sources)
 
     def add(path: Path, where: str, name: str) -> None:
         found[(path, where, name)] = found.get((path, where, name), 0) + 1
@@ -3649,7 +3669,7 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
                     # ``asyncio.base_events.socket``): ``<x>.socket.socket`` is
                     # ``socket.socket``, and so is the module read on its own.
                     add(path, where, "socket.socket")
-                elif node.attr in HTTP_FILE_SEND_NAMES and path in http_files:
+                elif _raw_send(path, node.attr):
                     add(path, where, node.attr)
             elif isinstance(node, ast.Name):
                 if node.id in imported and isinstance(node.ctx, ast.Load):
@@ -3676,9 +3696,7 @@ def raw_connections(sources: dict[Path, str]) -> dict[tuple[Path, str, str], int
                 for arg in _attribute_name_arguments(node):
                     if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                         for part in arg.value.split("."):
-                            if part in opener_names or (
-                                part in HTTP_FILE_SEND_NAMES and path in http_files
-                            ):
+                            if part in opener_names or _raw_send(path, part):
                                 add(path, where, part)
                         held = node.args[0] if node.args else None
                         if isinstance(held, ast.Name) and held.id in modules:
@@ -3953,16 +3971,92 @@ def test_the_raw_connection_pin_catches_a_new_send_at_a_reviewed_site(
     assert raw_connections(sources) != ALLOWED_RAW_CONNECTIONS
 
 
+@pytest.mark.parametrize(
+    "code",
+    [
+        # A connection that arrives as a parameter, in a file that imports nothing.
+        "def f(c) -> None:\n    c.send(b'x')\n",
+        "def f(c) -> None:\n    c.sendall(b'x')\n",
+        "def f(c) -> None:\n    c.sock.write(b'x')\n",
+        "import os\n\n\ndef f(c) -> None:\n    os.write(c.sock.fileno(), b'x')\n",
+        "def f(c) -> None:\n    getattr(c, 'send')(b'x')\n",
+        "def f(c) -> None:\n    getattr(c, 'sock').sendall(b'x')\n",
+        # Through an object graph: a pooled connection on a transport something returned.
+        "def f(h) -> None:\n    h.connections['https:example.invalid'].sock.sendall(b'x')\n",
+        "from netkeep.services import campaign_sender\n\n\n"
+        "def f(s: campaign_sender.GmailSender) -> None:\n"
+        "    s._open().http.connections.popitem()[1].send(b'x')\n",
+        # The private methods that send a whole request.
+        "def f(c) -> None:\n    c._send_request('PUT', '/', None, {}, False)\n",
+        "def f(c) -> None:\n    c._send_output(b'x')\n",
+        "def f(c) -> None:\n    c._tunnel()\n",
+        "def f(h, c) -> None:\n    h._conn_request(c, '/', 'PUT', b'', {})\n",
+        "def f(h, c) -> None:\n"
+        "    h._request(c, 'example.invalid', 'https://example.invalid/', '/', 'PUT', b'',"
+        " {}, 0, None)\n",
+    ],
+)
+def test_the_raw_connection_pin_catches_a_send_on_a_connection_from_anywhere(code: str) -> None:
+    """#789: a send name counts in every file, so a connection that reaches a function
+    through a parameter or an object graph can't send from a file that names no
+    transport or HTTP client module."""
+    sources = package_sources()
+    sources[PACKAGE / "services" / "chrome_launch.py"] += "\n\n" + code
+    assert raw_connections(sources) != ALLOWED_RAW_CONNECTIONS
+
+
+@pytest.mark.parametrize("path", [LINKEDIN / "browser.py", LINKEDIN / "preflight.py"])
+@pytest.mark.parametrize(
+    ("body", "pin"),
+    [
+        ("c.send(b'x')", "cdp"),
+        ("getattr(c, 'send')(b'x')", "cdp"),
+        ("c.send('Network.getCookies', {'urls': []})", "cdp"),
+        ("c.sendall(b'x')", "raw"),
+        ("c.sock.write(b'x')", "raw"),
+        ("c._send_request('PUT', '/', None, {}, False)", "raw"),
+    ],
+)
+def test_a_raw_send_in_a_cdp_file_fails_a_pin(path: Path, body: str, pin: str) -> None:
+    """#789: in the CDP files, ``send`` is the CDP pin's (every reach by function, count
+    and literal method); the other send names are the raw-connection pin's."""
+    sources = package_sources()
+    sources[path] += f"\n\ndef _poke(c) -> None:\n    {body}\n"
+    if pin == "raw":
+        assert raw_connections(sources) != ALLOWED_RAW_CONNECTIONS
+    else:
+        assert raw_connections(sources) == ALLOWED_RAW_CONNECTIONS
+        found = list(cdp_sends(sources[path], path))
+        assert any((i.where.path, i.where.function) not in CDP_SENDERS for i in found)
+
+
 #: #677 review: the reviewed HTTP sends, pinned whole the way the identity read's
 #: transport is (:func:`pinned_source`), by file: setup's health check, the update
 #: download, Gmail's write-once connection classes, and Gmail OAuth's one send.
+#:
+#: #789: and Gmail OAuth's callers of that send, since a count pin can't read an
+#: argument (``_post_form(ends, "https://example.invalid/", ...)`` in ``exchange_code``
+#: keeps every count): the two token requests, the form POST they share, the profile
+#: fetch, and where their URLs come from when they are given no endpoints (``google()``
+#: and the ``GOOGLE`` it reads). ``GOOGLE_ENDPOINTS``' URLs are pinned by value in
+#: ``test_the_scope_and_googles_endpoints_are_pinned`` (test_gmail_oauth.py).
 HTTP_SEND_SITES = {
     PACKAGE / "services" / "post_install.py": frozenset({"health"}),
     PACKAGE / "services" / "update.py": frozenset({"https_get"}),
     PACKAGE / "campaigns" / "gmail.py": frozenset(
         {"WriteOnceMixin", "WriteOnceConnection", "WriteOnceHttp"}
     ),
-    PACKAGE / "campaigns" / "gmail_oauth.py": frozenset({"_send"}),
+    PACKAGE / "campaigns" / "gmail_oauth.py": frozenset(
+        {
+            "GOOGLE",
+            "google",
+            "exchange_code",
+            "refresh_access_token",
+            "fetch_email",
+            "_post_form",
+            "_send",
+        }
+    ),
 }
 HTTP_SEND_SITES_FILE = Path(__file__).parent / "http_send_sites.txt"
 
@@ -4037,6 +4131,51 @@ def test_the_http_send_site_pin_catches_a_change(path: Path, old: str | None, ne
     else:
         assert sources[path].count(old) == 1, old
         sources[path] = sources[path].replace(old, new, 1)
+    assert http_send_sites_source(sources) != HTTP_SEND_SITES_FILE.read_text()
+
+
+_ELSEWHERE = '"https://example.invalid/"'
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        # Another URL from a reviewed caller of the form POST, or of the send.
+        (
+            '        ends.token_uri,\n        {\n            "grant_type": "authorization_code",\n',
+            f'        {_ELSEWHERE},\n        {{\n            "grant_type": "authorization_code",\n',
+        ),
+        (
+            '        ends.token_uri,\n        {\n            "grant_type": "refresh_token",\n',
+            f'        {_ELSEWHERE},\n        {{\n            "grant_type": "refresh_token",\n',
+        ),
+        ("        ends.profile_uri,\n", f"        {_ELSEWHERE},\n"),
+        # What the token request carries, and how.
+        (
+            '            "redirect_uri": authorization.redirect_uri,\n',
+            f'            "redirect_uri": {_ELSEWHERE},\n',
+        ),
+        ('        method="POST",\n', '        method="PUT",\n'),
+        # Where the URLs come from when a caller passes no endpoints.
+        (
+            "    return GOOGLE\n",
+            f"    return GoogleEndpoints({_ELSEWHERE}, {_ELSEWHERE}, {_ELSEWHERE})\n",
+        ),
+        (
+            "GOOGLE = GOOGLE_ENDPOINTS\n",
+            f"GOOGLE = dataclasses.replace(GOOGLE_ENDPOINTS, token_uri={_ELSEWHERE})\n",
+        ),
+    ],
+)
+def test_the_whole_function_pin_reads_the_oauth_callers_arguments(old: str, new: str) -> None:
+    """#789: each of these keeps every count (the raw-connection and send-helper pins
+    pass), so only the whole-function pin on Gmail OAuth's callers catches it."""
+    sources = package_sources()
+    path = PACKAGE / "campaigns" / "gmail_oauth.py"
+    assert sources[path].count(old) == 1, old
+    sources[path] = sources[path].replace(old, new, 1)
+    assert raw_connections(sources) == ALLOWED_RAW_CONNECTIONS
+    assert send_helper_callers(sources) == ALLOWED_SEND_HELPER_CALLERS
     assert http_send_sites_source(sources) != HTTP_SEND_SITES_FILE.read_text()
 
 
@@ -4142,10 +4281,9 @@ def test_only_the_reviewed_callers_use_a_send_helper() -> None:
 
 
 def test_the_send_helper_modules_exist_and_define_their_helpers() -> None:
-    """#783 review: the modules the helper and transport rules match by name are the
+    """#783 review: the modules the helper and opener rules match by name are the
     files :data:`MODULE_FILES` gives (two files are named ``gmail``), and each helper is
     defined in its home, so a rename can't leave a rule that quietly matches nothing."""
-    assert set(MODULE_FILES) >= TRANSPORT_MODULES
     assert set(SEND_HELPER_HOMES.values()) <= set(MODULE_FILES)
     for path in MODULE_FILES.values():
         assert path in package_sources(), path

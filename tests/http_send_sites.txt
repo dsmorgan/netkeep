@@ -53,6 +53,51 @@ class WriteOnceHttp(httplib2.Http):
 
 # campaigns/gmail_oauth.py
 
+GOOGLE = GOOGLE_ENDPOINTS
+
+def google() -> GoogleEndpoints:
+    return GOOGLE
+
+def exchange_code(client: OAuthClient, authorization: Authorization, code: str, *, endpoints: GoogleEndpoints | None=None) -> Grant:
+    ends = endpoints or google()
+    body = _post_form(ends, ends.token_uri, {'grant_type': 'authorization_code', 'code': code, 'client_id': client.client_id, 'client_secret': client.client_secret, 'redirect_uri': authorization.redirect_uri, 'code_verifier': authorization.verifier})
+    granted = str(body.get('scope', '')).split()
+    if GMAIL_SCOPE not in granted:
+        raise ScopeNotGranted('Gmail access was not granted; authorize again and leave the Gmail box ticked', code='scope_not_granted')
+    refresh_token = body.get('refresh_token')
+    access_token = body.get('access_token')
+    if not isinstance(refresh_token, str) or not refresh_token:
+        raise OAuthRefused('Google returned no refresh token', code='no_refresh_token')
+    if not isinstance(access_token, str) or not access_token:
+        raise OAuthRefused('Google returned no access token', code='no_access_token')
+    return Grant(refresh_token=refresh_token, access_token=access_token)
+
+def refresh_access_token(client: OAuthClient, refresh_token: str, *, endpoints: GoogleEndpoints | None=None) -> str:
+    ends = endpoints or google()
+    body = _post_form(ends, ends.token_uri, {'grant_type': 'refresh_token', 'refresh_token': refresh_token, 'client_id': client.client_id, 'client_secret': client.client_secret})
+    access_token = body.get('access_token')
+    if not isinstance(access_token, str) or not access_token:
+        raise OAuthRefused('Google returned no access token', code='no_access_token')
+    return access_token
+
+def fetch_email(access_token: str, *, endpoints: GoogleEndpoints | None=None) -> str:
+    ends = endpoints or google()
+    request = Request(ends.profile_uri, headers={'Authorization': f'Bearer {access_token}', 'Accept': 'application/json'})
+    try:
+        body = _send(ends, request)
+    except OAuthRefused as exc:
+        if exc.code == 'http_403':
+            raise GmailApiRefused('the Gmail API refused the token; enable the Gmail API in the Cloud project (docs/gmail-setup.md, step 2)', code='gmail_api_refused') from exc
+        raise
+    email = body.get('emailAddress')
+    if not isinstance(email, str) or '@' not in email:
+        raise OAuthRefused('Gmail returned no address for the account', code='no_email')
+    return email.strip().lower()
+
+def _post_form(ends: GoogleEndpoints, url: str, fields: dict[str, str]) -> dict[str, Any]:
+    request = Request(url, data=urlencode(fields).encode(), headers={'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json'}, method='POST')
+    return _send(ends, request)
+
 def _send(ends: GoogleEndpoints, request: Request) -> dict[str, Any]:
     handlers: list[BaseHandler] = []
     if not ends.use_system_proxy:
