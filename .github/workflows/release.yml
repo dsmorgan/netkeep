@@ -88,13 +88,18 @@ jobs:
 
       # The one dependency set CI tested (ADR 0011 rule 1): runtime dependencies only,
       # each with its environment marker, so the cryptography pair (rule 2) comes out as
-      # one pin per side. No hashes: `uv tool install -c` doesn't check them
-      # (docs/design/install-options.md, option A).
+      # one pin per side, and PyObjC (ADR 0014 rule 11) for macOS only. No hashes:
+      # `uv tool install -c` doesn't check them (docs/design/install-options.md, option A).
       - name: Export the constraints file
         run: |
           uv export --frozen --no-dev --no-hashes --no-emit-project --quiet -o dist/constraints.txt
           grep -E "^cryptography==48\..*platform_machine == 'x86_64' and sys_platform == 'darwin'" dist/constraints.txt
           grep -E "^cryptography==(49|[5-9][0-9])\..*platform_machine != 'x86_64' or sys_platform != 'darwin'" dist/constraints.txt
+          grep -Ex "pyobjc-core==[0-9.]+ ; sys_platform == 'darwin'" dist/constraints.txt
+          grep -Ex "pyobjc-framework-cocoa==[0-9.]+ ; sys_platform == 'darwin'" dist/constraints.txt
+          if grep -E "^pyobjc" dist/constraints.txt | grep -vE " ; sys_platform == 'darwin'$"; then
+            echo "error: a PyObjC pin without the darwin marker"; exit 1
+          fi
 
       # The one-line installer (ADR 0011 rule 5; #686), with this release's version in
       # place of its placeholder, so each release's copy installs that release only.

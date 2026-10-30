@@ -392,3 +392,50 @@ def test_the_install_smoke_checks_the_cryptography_side_for_the_machine() -> Non
     assert 'if [ "$(uname -s)" = Darwin ] && [ "$machine" = x86_64 ]; then' in script
     assert '[ "$crypto_major" -lt 49 ] ||' in script
     assert '[ "$crypto_major" -ge 49 ] ||' in script
+
+
+# --- PyObjC, macOS only (ADR 0014 rule 11; #764) --------------------------------------
+
+_PYOBJC = ("pyobjc-core", "pyobjc-framework-cocoa")
+
+
+def test_pyproject_carries_pyobjc_for_macos_only() -> None:
+    with (ROOT / "pyproject.toml").open("rb") as f:
+        deps = tomllib.load(f)["project"]["dependencies"]
+    assert [d for d in deps if d.lower().startswith("pyobjc")] == [
+        "pyobjc-framework-Cocoa>=12.2.2; sys_platform == 'darwin'"
+    ]
+
+
+def test_the_lock_has_a_wheel_for_both_macs_for_each_pyobjc_package() -> None:
+    # An install compiles nothing on either Mac (ADR 0011): every PyObjC package has a
+    # CPython 3.12 wheel that runs on x86_64 and on arm64, which universal2 is.
+    with (ROOT / "uv.lock").open("rb") as f:
+        lock = tomllib.load(f)
+    packages = {p["name"]: p for p in lock["package"] if p["name"].startswith("pyobjc")}
+    assert sorted(packages) == sorted(_PYOBJC)
+    for name, package in packages.items():
+        wheels = [w["url"].rsplit("/", 1)[1] for w in package["wheels"]]
+        cp312 = [w for w in wheels if "-cp312-cp312-macosx_" in w]
+        assert any(w.endswith("_universal2.whl") for w in cp312) or (
+            any(w.endswith("_x86_64.whl") for w in cp312)
+            and any(w.endswith("_arm64.whl") for w in cp312)
+        ), (name, wheels)
+    (netkeep_package,) = [p for p in lock["package"] if p["name"] == "netkeep"]
+    marked = {d["name"]: d.get("marker") for d in netkeep_package["dependencies"]}
+    assert marked["pyobjc-framework-cocoa"] == "sys_platform == 'darwin'"
+
+
+def test_the_release_checks_pyobjc_is_darwin_only_in_the_constraints_file(
+    jobs: dict[str, dict[str, Any]],
+) -> None:
+    build = _runs(jobs["build"])
+    for name in _PYOBJC:
+        assert f"grep -Ex \"{name}==[0-9.]+ ; sys_platform == 'darwin'\"" in build, name
+    assert "grep -vE \" ; sys_platform == 'darwin'$\"" in build
+
+
+def test_the_install_smoke_imports_appkit_on_macos_only() -> None:
+    script = (ROOT / "scripts" / "smoke-tool-install.sh").read_text(encoding="utf-8")
+    assert "import AppKit, Foundation, objc" in script
+    assert "elif \"$python\" -I -c 'import objc' 2>/dev/null; then" in script

@@ -53,6 +53,17 @@ else
   [ "$crypto_major" -ge 49 ] || { echo "got cryptography $crypto, expected >=49"; exit 1; }
 fi
 
+# PyObjC, for the menu-bar app (ADR 0014 rule 11; #764): installed from its universal2
+# wheel on either Mac, so AppKit and Foundation import in the machine's own interpreter.
+# Anywhere else the darwin marker leaves it out.
+if [ "$(uname -s)" = Darwin ]; then
+  "$python" -I -c '
+import AppKit, Foundation, objc
+print("PyObjC", objc.__version__, AppKit.NSApplication.__name__, Foundation.NSBundle.__name__)'
+elif "$python" -I -c 'import objc' 2>/dev/null; then
+  echo "PyObjC is installed on $(uname -s), expected only on macOS"; exit 1
+fi
+
 # Offline commands: the resolved settings and paths, then the packaged migrations on an
 # empty scratch database.
 "$netkeep" config show >"$work/config.txt"
