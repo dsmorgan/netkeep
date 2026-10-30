@@ -407,7 +407,7 @@ else
 fi
 
 # The same flags `netkeep browser launch` prints, in its order; nothing else, so
-# this Chrome looks like any other. --no-first-run and --no-default-browser-check
+# this Chrome looks like any other to a page. --no-first-run and --no-default-browser-check
 # skip Chrome's first-run dialog on a fresh profile (#733).
 case $(uname -s) in
   Darwin)

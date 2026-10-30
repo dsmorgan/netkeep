@@ -958,9 +958,10 @@ def _dedicated_profile(probe: SessionProbe | None, running_pid: int | None) -> P
         key=KEY_DEDICATED_PROFILE,
         fix=(
             "The Chrome on the debug port is not netkeep's and is probably your everyday"
-            " Chrome: quit it, then click **Start Chrome** on the LinkedIn page, or change the"
+            " Chrome: quit it, then click **Start Chrome** on the LinkedIn page. Or change the"
             " debug address (`cdp_url` under `[linkedin]` in config.toml, or **Chrome debug"
-            " address** on the Settings page)."
+            " address** on the Settings page), then restart `netkeep serve`: scheduled runs"
+            " keep the old address until it restarts."
         ),
     )
 

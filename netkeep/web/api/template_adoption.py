@@ -83,7 +83,8 @@ class AdoptionOut(BaseModel):
     """The first hundred of them."""
     released: int
     """Of those, enrollments the template parked (a ``blocked:`` or ``too_long:`` reason),
-    due again once it is adopted."""
+    due again once it is adopted. A paused one, or one in a paused campaign, waits for
+    its resume."""
     kept: dict[MessageStatus, int]
     """The step's messages by status. Each keeps the text it was rendered with."""
     open_messages: list[OpenMessageOut]
@@ -113,7 +114,7 @@ class AdoptedOut(BaseModel):
     from_version: int
     to_version: int
     released: int
-    """Parked enrollments due again."""
+    """Parked enrollments released: due again, or at their resume if paused."""
     affected_total: int
     adopted_at: datetime
     campaign: CampaignOut

@@ -18,6 +18,7 @@ from netkeep.linkedin.strict_origin import (
     LINKEDIN_ORIGIN,
     NotAStrictOrigin,
     Origin,
+    on_path,
     parse_strict_origin,
     require_page_origin,
     trim_path,
@@ -191,3 +192,23 @@ def test_the_path_trims_one_slash(value: str, trimmed: str | None, path: str) ->
     if trimmed is not None:
         assert trim_path(value) == trimmed
     assert url_path(value) == path
+
+
+@pytest.mark.parametrize(
+    ("url", "path", "base", "at"),
+    [
+        ("https://www.linkedin.com/in/fake-slug-qz/", "/in/fake-slug-qz", None, True),
+        ("https://www.linkedin.com/in/Fake%2DSlug-QZ", "/in/fake-slug-qz/", None, True),
+        ("/in/fake-slug-qz", "/in/fake-slug-qz", LINKEDIN_ORIGIN, True),
+        ("/in/fake-slug-qz", "/in/another-qz", LINKEDIN_ORIGIN, False),
+        ("https://evil.example.test/in/fake-slug-qz", "/in/fake-slug-qz", LINKEDIN_ORIGIN, False),
+        ("http://www.linkedin.com/in/fake-slug-qz", "/in/fake-slug-qz", LINKEDIN_ORIGIN, False),
+        ("https://www.linkedin.com:444/in/x", "/in/x", LINKEDIN_ORIGIN, False),
+        ("https://[::1/in/x", "/in/x", None, False),
+    ],
+)
+def test_on_path_compares_the_path_on_the_same_origin(
+    url: str, path: str, base: str | None, at: bool
+) -> None:
+    """#719 review: the one path check the browser and the page readers share."""
+    assert on_path(url, path, base=base) is at

@@ -78,7 +78,6 @@ from netkeep.linkedin.browser import (
     SendClick,
     TypingEnd,
     TypingResult,
-    _on_path,
 )
 from netkeep.linkedin.classify import Outcome, classify
 from netkeep.linkedin.enrich import masked
@@ -116,7 +115,7 @@ from netkeep.linkedin.pacing import (
     scroll_back_to_top,
     scroll_like_a_person,
 )
-from netkeep.linkedin.strict_origin import LINKEDIN_ORIGIN, require_page_origin
+from netkeep.linkedin.strict_origin import LINKEDIN_ORIGIN, on_path, require_page_origin
 
 log = logging.getLogger(__name__)
 
@@ -265,7 +264,7 @@ class PagePrefill:
                 wall_url=seen,
             )
         # The tab must be on the profile, on the origin it was sent to (#698).
-        if not _on_path(page.url, path, base=self._origin):
+        if not on_path(page.url, path, base=self._origin):
             return _not_typed("the profile opened somewhere else")
         if await cancelled():
             return _not_typed("cancelled")
@@ -565,7 +564,7 @@ class PageMessageCheck:
         rng: random.Random | None = None,
     ) -> None:
         self._run = run
-        self._origin = require_page_origin(origin, reader="the prefill")
+        self._origin = require_page_origin(origin, reader="the Message check")
         self._sleep = sleep
         self._rng = rng if rng is not None else random.Random()  # noqa: S311 -- pacing
         self._used = False
@@ -587,7 +586,7 @@ class PageMessageCheck:
             return MessageCheckResult(
                 stopped=f"the page answered {landed.value}", wall=landed, wall_url=seen
             )
-        if not _on_path(page.url, path, base=self._origin):
+        if not on_path(page.url, path, base=self._origin):
             return MessageCheckResult(stopped="the profile opened somewhere else")
         if await cancelled():
             return MessageCheckResult(stopped="cancelled")
@@ -643,7 +642,7 @@ class PageBubbleCheck:
 
     def __init__(self, run: BrowserRun, *, origin: str = LINKEDIN_ORIGIN) -> None:
         self._run = run
-        self._origin = require_page_origin(origin, reader="the prefill")
+        self._origin = require_page_origin(origin, reader="the bubble check")
         self._used = False
 
     async def run(self, profile_id: str) -> BubbleCheck:

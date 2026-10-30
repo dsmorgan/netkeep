@@ -319,6 +319,50 @@ def test_whole_check_finds_nothing_in_a_whole_copy() -> None:
     assert flight.whole_check(body, endpoint=E) == flight.WholeCheck()
 
 
+def _corpus() -> list[bytes]:
+    """Whole and cut copies, each of :func:`is_whole`'s rules broken and kept, for the
+    tie between the two walks below."""
+    lines = CHILD_FIRST.splitlines(keepends=True)
+    root_first = lines[-1] + b"".join(lines[:-1])
+    root = b'0:["$","div",null,{"children":"$R9"}]\n'
+    bodies = [CHILD_FIRST, root_first, *_prefixes(CHILD_FIRST), *_prefixes(root_first)]
+    bodies += [b"".join(lines[:cut] + lines[cut + 1 :]) for cut in range(len(lines))]
+    bodies += [
+        b'1:["$","div",null,{}]\n',
+        b'5:{"stray":true}\n0:["$","div",null,{}]\n',
+        b'0:{"a":"$L5","b":"$L6"}\n7:{"x":1}\n8:{"y":2}\n',
+        b'9:R\n9:{"chunk":"$L7"}\n9:C\n7:{"leaf":1}\n0:["$","div",null,{"c":"$R9"}]\n',
+        b'9:R\n9:{"chunk":1}\n' + root,
+        b'9:R\n9:{"chunk":1}\n9:C\n' + root,
+        b'9:R\n9:{"chunk":1}\n8:C\n' + root,
+        b'9:R\n9:{"a":"$L5"}\n9:C\n' + root,
+        b'0:{"a":1}\n5:R\n5:{"x":"y"}\n5:C\n',
+        b'0:{"a":1}\n5:R\n5:{"s":"$9"}\n5:C\n',
+    ]
+    for marker in (b"$L9", b"$@9", b"$R9", b"$x9", b"$9:props:children"):
+        element = b'0:["$","div",null,{"children":"' + marker + b'"}]\n'
+        bodies += [element, b'9:{"x":1}\n' + element]
+    return bodies
+
+
+def test_whole_check_is_clean_exactly_when_is_whole() -> None:
+    """#736 review: the count and the verdict are two walks of one rule set, so a copy
+    is whole exactly when the count finds nothing, in both directions."""
+    verdicts: set[bool] = set()
+    for body in _corpus():
+        try:
+            whole = is_whole(parse_flight(body, endpoint=E), endpoint=E)
+        except RouteChanged:
+            # No model row at all: the count refuses it the same way.
+            with pytest.raises(RouteChanged):
+                flight.whole_check(body, endpoint=E)
+            continue
+        verdicts.add(whole)
+        clean = flight.whole_check(body, endpoint=E) == flight.WholeCheck()
+        assert clean is whole, body
+    assert verdicts == {True, False}  # the corpus holds both kinds
+
+
 def test_why_not_whole_names_an_unreadable_copy_by_type_only() -> None:
     body = b'0:{"a":' + _SECRET + b"\n"
     assert flight.why_not_whole(body, endpoint=E) == "not counted (RouteChanged)"

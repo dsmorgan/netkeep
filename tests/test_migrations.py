@@ -163,8 +163,17 @@ def test_fresh_database_migrates_to_head_and_matches_the_models(migration_engine
 
 
 def _normalize_sql(text_: object) -> str:
-    """Lower-case, quote-free, whitespace-free: SQLite echoes a CHECK or default as written."""
-    return re.sub(r"[\s\"'`()]+", "", "" if text_ is None else str(text_)).lower()
+    """Lower-case, quote-free, whitespace-free: SQLite echoes a CHECK or default as written.
+
+    Parentheses stay (#718 review): they are the grouping, so ``(a OR b) AND c`` and
+    ``a OR (b AND c)`` must not compare equal."""
+    return re.sub(r"[\s\"'`]+", "", "" if text_ is None else str(text_)).lower()
+
+
+def test_normalize_sql_keeps_the_grouping() -> None:
+    assert _normalize_sql("(a OR b) AND c") != _normalize_sql("a OR (b AND c)")
+    assert _normalize_sql(" \"Status\"  IN ('sent') ") == _normalize_sql("status IN (sent)")
+    assert _normalize_sql(None) == ""
 
 
 def _schema_shape(engine: Engine) -> dict[str, dict[str, Any]]:
@@ -213,7 +222,11 @@ def _schema_shape(engine: Engine) -> dict[str, dict[str, Any]]:
 def test_migrated_schema_matches_create_all_in_what_compare_metadata_cannot_see(
     tmp_path: Path,
 ) -> None:
-    """``compare_metadata`` ignores CHECKs, partial indexes and server defaults; this does not."""
+    """``compare_metadata`` ignores CHECKs, partial indexes and server defaults; this does not.
+
+    SQLite only: both databases are SQLite files in ``tmp_path``, and the partial-index
+    predicate is read from ``sqlite_where``. PostgreSQL drift in these parts is not
+    checked here."""
     migrated = make_engine(database_url(tmp_path / "migrated"))
     created = make_engine(database_url(tmp_path / "created"))
     try:

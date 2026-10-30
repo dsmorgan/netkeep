@@ -793,6 +793,8 @@ def _parse_cdp_url(url: str) -> str:
         port = parts.port
     except ValueError as exc:
         raise ValueError(example) from exc
+    # Narrower than config.toml's check (``config._check_linkedin``), which also takes
+    # ws and wss: the page sets only an http or https debug endpoint (#726 review).
     if parts.scheme not in ("http", "https") or not parts.hostname or port is None:
         raise ValueError(f"{example}, with its port")
     if not 1 <= port <= 65535:

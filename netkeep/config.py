@@ -253,6 +253,12 @@ def _check_linkedin(linkedin: LinkedInSettings, *, source: Path) -> None:
             f"{source}: linkedin.timezone {linkedin.timezone!r} is not a time zone this"
             " machine knows, such as America/New_York"
         )
+    # Wider than the Settings page on purpose (#726 review): config.toml takes every
+    # scheme the attach can use (``CDP_SCHEMES``: Chrome's debug endpoint over http or
+    # https, or its websocket over ws or wss) and any host. The page
+    # (``ui_settings._parse_cdp_url``) takes only an http or https endpoint on loopback,
+    # stored as bare ``scheme://host:port``; a websocket address, like a remote host,
+    # stays a config.toml edit.
     problem = cdp_url_problem(linkedin.cdp_url)
     if problem is not None:
         raise ConfigError(

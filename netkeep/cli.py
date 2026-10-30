@@ -5116,7 +5116,11 @@ def _adoption_lines(p: template_adoption.AdoptionPreview) -> list[str]:
     lines.extend(f"  warning: {i.message}" for i in p.warnings)
     lines.append(
         f"gets v{p.newest.version}: {p.affected_total} enrollments the step has not fired for"
-        + (f", {p.released} of them parked by the template and due again" if p.released else "")
+        + (
+            f", {p.released} of them parked by the template and due again (once resumed, if paused)"
+            if p.released
+            else ""
+        )
     )
     lines.extend(
         f"  - enrollment {e.enrollment_id}: {e.contact_name or 'unnamed contact'}"
@@ -5172,7 +5176,8 @@ def campaigns_adopt_template(
     confirming approves the step in the new version.
 
     Every message that exists, sent or in flight, keeps the text it was rendered with.
-    Enrollments the old version parked (a `blocked:` or `too_long:` reason) are due again.
+    Enrollments the old version parked (a `blocked:` or `too_long:` reason) are due again;
+    a paused one, or one in a paused campaign, waits for its resume.
     Refused for a campaign that is not active or paused, a version with a lint error, on
     another channel, or that uses {{ personal_line }}.
     """
@@ -5204,7 +5209,11 @@ def campaigns_adopt_template(
                 fingerprint_seen=shown.fingerprint,
                 now=datetime.now(UTC),
             )
-    released = f"; {result.released} parked enrollments are due again" if result.released else ""
+    released = (
+        f"; {result.released} parked enrollments are due again (once resumed, if paused)"
+        if result.released
+        else ""
+    )
     typer.echo(
         f"campaign {campaign_id} step {position} now uses v{result.to_version}"
         f" (was v{result.from_version}){released}"

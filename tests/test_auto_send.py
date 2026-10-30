@@ -2283,8 +2283,11 @@ def test_a_hold_without_a_zone_reads_as_utc(lane: Lane) -> None:
 
 
 def test_an_unreadable_hold_is_warned_about_once(
-    lane: Lane, caplog: pytest.LogCaptureFixture
+    lane: Lane, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # The warn-once memory is module-level: start this test with an empty one, so an
+    # earlier test in the process that warned about the same value can't change it.
+    monkeypatch.setattr(linkedin_steps, "_UNREADABLE_HOLDS_LOGGED", set())
     account = lane.read(lambda s, u: ensure_account(s, u).id)
     lane.write(lambda s, u: set_setting(s, u, linkedin_steps._hold_key(account), "held-once"))
     caplog.set_level(logging.DEBUG, logger="netkeep.services.linkedin_steps")

@@ -153,6 +153,10 @@ async def test_a_redirect_to_an_unmatched_url_drops_the_held_entry() -> None:
 
 
 async def test_a_redirect_to_a_matched_url_is_held_for_the_new_url() -> None:
+    """A behavior pin, not a regression test for #697: the new url's entry replaces the
+    old one whether or not :meth:`BodyTap.on_request` pops the old entry first, so this
+    passes without that fix. The unmatched-url test above is the one that fails
+    without it."""
     tap = _tap(Stream())
     other = f"{PAGINATION}&page=2"
     tap.on_request(

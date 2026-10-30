@@ -825,7 +825,7 @@ function AdoptDialog({
               ? '1 enrollment gets the new version'
               : `${p.affected_total} enrollments get the new version`}
             {p.released > 0 &&
-              `, including ${p.released} the old version blocked; they are due again`}
+              `, including ${p.released} the old version blocked; they are due again (once resumed, if paused)`}
             .
           </p>
           {p.affected.length > 0 && (
