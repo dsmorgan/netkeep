@@ -177,6 +177,28 @@ describe('ComingUpCard: campaign sends', () => {
     expect(body.getByText('and 2 more')).toBeInTheDocument()
   })
 
+  it('says why a held follow-up waits, and nothing on one that is not held (#716)', async () => {
+    renderComingUp({
+      [PATH]: json({
+        items: [
+          fire({
+            enrollment_id: 1,
+            due: PAST,
+            held_reason: 'replies have not been polled recently; nothing was sent',
+          }),
+          fire({ enrollment_id: 2, due: FUTURE, held_reason: null }),
+        ],
+        total: 2,
+      }),
+    })
+    const body = await card('Coming up')
+    const items = await body.findAllByRole('listitem')
+    expect(within(items[0]!).getByRole('note')).toHaveTextContent(
+      'Held until replies are read: replies have not been polled recently; nothing was sent',
+    )
+    expect(within(items[1]!).queryByRole('note')).toBeNull()
+  })
+
   it('says an auto-send step sends on its own, and when', async () => {
     const outlook = autoSendOutlook({ enrollment_id: 3 })
     renderComingUp({

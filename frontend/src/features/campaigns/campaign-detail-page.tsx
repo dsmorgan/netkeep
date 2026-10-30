@@ -1255,6 +1255,11 @@ function EnrollmentsCard({
                           {row.not_sent_error}
                         </span>
                       )}
+                      {row.held_reason != null && (
+                        <span role="note" className="block">
+                          Held until replies are read: {row.held_reason}
+                        </span>
+                      )}
                       {(row.replied_at !== null || row.status === 'bounced') && (
                         <Link
                           to="/inbox"

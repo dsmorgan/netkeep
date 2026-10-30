@@ -56,7 +56,7 @@ from netkeep.models import (
     User,
 )
 from netkeep.models.base import utcnow
-from netkeep.services import campaign_results, linkedin_steps
+from netkeep.services import campaign_engine, campaign_results, linkedin_steps
 from netkeep.services import campaigns as service
 from netkeep.services.campaign_engine import hours_for
 from netkeep.web.api.campaign_review import MissingOut
@@ -391,6 +391,10 @@ class EnrollmentOut(BaseModel):
     not_sent_error: str | None = None
     """Why the latest try sent nothing, or why the enrollment is blocked: a step template
     that names a removed ``me.*`` field says so (#342). None once something sends."""
+    held_reason: str | None = None
+    """Why this due Gmail follow-up waits: its mailbox's replies have not been read
+    recently, so the tick holds it (#694), and nothing on the enrollment changes (#716).
+    None when it isn't held, or isn't due yet."""
     try_again: bool = False
     """The latest LinkedIn prefill typed nothing, and the step waits for you to click
     Try again in the LinkedIn queue (#445). It has no next action until then."""
@@ -596,6 +600,9 @@ def list_enrollments(
             session, user, campaign_id, q=q, status=status, limit=limit, offset=offset
         )
         on_linkedin = linkedin_steps.linkedin_positions(session, user, campaign_id)
+        held = campaign_engine.held_reasons(
+            session, user, [row.enrollment.id for row in page.items], now=utcnow()
+        )
     return EnrollmentPageOut(
         items=[
             EnrollmentOut(
@@ -609,6 +616,7 @@ def list_enrollments(
                 exit_reason=row.enrollment.exit_reason,
                 replied_at=row.enrollment.replied_at,
                 not_sent_error=row.enrollment.not_sent_error,
+                held_reason=held.get(row.enrollment.id),
                 try_again=row.enrollment.status is EnrollmentStatus.ACTIVE
                 and (row.enrollment.current_step or 0) + 1 in on_linkedin
                 and linkedin_steps.needs_try_again(row.enrollment),

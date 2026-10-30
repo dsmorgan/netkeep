@@ -34,7 +34,15 @@ import enum
 from datetime import datetime
 from typing import Final
 
-from sqlalchemy import BigInteger, CheckConstraint, Integer, String, UniqueConstraint, text
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from netkeep.models.base import Base, TimestampMixin, UserOwned, UTCDateTime, string_enum
@@ -43,6 +51,7 @@ MAILBOX_EMAIL_MAX_LENGTH: Final = 320
 MAILBOX_LABEL_PREFIX_MAX_LENGTH: Final = 100
 MAILBOX_KEYCHAIN_REF_MAX_LENGTH: Final = 200
 MAILBOX_STATUS_REASON_MAX_LENGTH: Final = 100
+REPLY_HOLD_REASON_MAX_LENGTH: Final = 200
 
 
 class MailboxProvider(enum.StrEnum):
@@ -133,3 +142,29 @@ class Mailbox(UserOwned, TimestampMixin, Base):
         if self.armed_at is None:
             return None
         return MailboxArm.DRAFT if self.send_armed_at is None else MailboxArm.SEND
+
+
+class MailboxReplyHold(UserOwned, TimestampMixin, Base):
+    """A mailbox whose Gmail follow-ups the campaign tick holds for unread replies (#716).
+
+    Display only: nothing that decides a send reads it. The tick's chooser asks the
+    sender's own hold (``GmailSender.replies_held``, #694) and, after the tick, keeps
+    this row in step with the answer: written when a hold starts, deleted when the
+    chooser finds it lifted. A poll that reads everything after ``held_since`` lifts it
+    too (``mailboxes.replies_polled_at`` later than ``held_since``), so the row is read
+    as lifted until the next tick deletes it or starts it again. The campaign page and
+    the dashboard show ``reason`` on each due follow-up of the mailbox
+    (``campaign_engine.held_reasons``).
+    """
+
+    __tablename__ = "mailbox_reply_holds"
+    __table_args__ = (UniqueConstraint("user_id", "mailbox_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, sort_order=-100)
+    mailbox_id: Mapped[int] = mapped_column(
+        ForeignKey("mailboxes.id", ondelete="CASCADE"), nullable=False
+    )
+    # The sender's sentence, as a held send's error says it.
+    reason: Mapped[str] = mapped_column(String(REPLY_HOLD_REASON_MAX_LENGTH), nullable=False)
+    # When this hold started, by the tick's clock.
+    held_since: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)

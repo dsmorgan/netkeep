@@ -2674,6 +2674,9 @@ class NextFireOut(BaseModel):
     auto_send: bool = False
     """The step's mode is ``auto_send``: while auto-send is on, the scheduler sends it, and
     ``/linkedin/schedule``'s ``auto_send`` says when or why it waits."""
+    held_reason: str | None = None
+    """Why this due Gmail follow-up waits: its mailbox's replies have not been read
+    recently, so the tick holds it (#694, #716). None when it isn't held."""
 
 
 class NextFirePage(BaseModel):
