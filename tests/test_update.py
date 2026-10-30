@@ -19,6 +19,7 @@ import os
 import plistlib
 import re
 import socket
+import ssl
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -920,6 +921,23 @@ def test_a_download_is_https_from_github_only(url: str, monkeypatch: pytest.Monk
     monkeypatch.setattr("netkeep.services.update.http.client.HTTPSConnection", connections)
     with pytest.raises(update.UpdateError, match="only HTTPS from GitHub"):
         update.https_get(url, max_bytes=10)
+    assert connections.opened == []
+
+
+def test_a_tls_context_that_cannot_be_built_is_a_download_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Building the TLS context fails as a download, never as "could not keep the
+    constraints files" (#800 review)."""
+
+    def broken() -> ssl.SSLContext:
+        raise ssl.SSLError("no CA certificates")
+
+    connections = _Connections({})
+    monkeypatch.setattr("netkeep.services.update.http.client.HTTPSConnection", connections)
+    monkeypatch.setattr("netkeep.services.update.ssl.create_default_context", broken)
+    with pytest.raises(update.UpdateError, match=r"could not download .*no TLS context"):
+        update.https_get("https://github.com/x", max_bytes=10)
     assert connections.opened == []
 
 

@@ -403,8 +403,21 @@ describe('ConfigSections', () => {
     })
     const banner = within(await screen.findByRole('region', { name: 'Restart netkeep' }))
     expect(banner.queryByRole('button')).toBeNull()
-    expect(banner.getByText(/Only the local owner account restarts netkeep/)).toBeVisible()
+    // The owner already chose Restart when idle: say it is under way, not "ask them".
+    expect(banner.getByRole('status')).toHaveTextContent(
+      'The local owner account asked netkeep to restart; it restarts once nothing is running.',
+    )
+    expect(banner.queryByText(/Ask them to restart it/)).toBeNull()
     expect(banner.getByText(/a campaign send is in progress/)).toBeVisible()
+  })
+
+  it('tells anyone but the owner who restarts netkeep, before a restart is asked', async () => {
+    renderSections([PREFILLS], { restart_pending: true, is_owner: false })
+    const banner = within(await screen.findByRole('region', { name: 'Restart netkeep' }))
+    expect(banner.queryByRole('button')).toBeNull()
+    expect(
+      banner.getByText('Only the local owner account restarts netkeep. Ask them to restart it.'),
+    ).toBeVisible()
   })
 
   it('edits a text field and saves it trimmed', async () => {

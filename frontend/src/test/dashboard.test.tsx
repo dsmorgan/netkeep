@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { formatWhen } from '@/features/linkedin/fields'
 import { navigation } from '@/features/mailboxes/api'
 import { mailbox } from '@/features/mailboxes/test-support'
 
@@ -195,6 +196,34 @@ describe('dashboard: Needs you', () => {
       expect(document.querySelector('[data-system="linkedin"]')).toHaveAttribute('data-tone', 'ok'),
     )
     expect(calls.filter((call) => call.method !== 'GET')).toEqual([])
+  })
+
+  it('reads heat once the LinkedIn status says it tripped, and says when runs resume', async () => {
+    const resumesAt = '2099-01-02T15:40:00Z'
+    serve({
+      '/api/v1/linkedin/status': linkedinStatus({ heat_tripped: true }),
+      '/api/v1/linkedin/heat': {
+        ...(quiet()['/api/v1/linkedin/heat'] as object),
+        tripped: true,
+        resumes_at: resumesAt,
+      },
+    })
+    await renderApp('/')
+    expect(
+      await screen.findByText(
+        `Scheduled LinkedIn runs are skipped until ${formatWhen(resumesAt)}.`,
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('still shows tripped heat when the LinkedIn status read fails', async () => {
+    const calls = serve({
+      '/api/v1/linkedin/status': () => new Response('boom', { status: 500 }),
+      '/api/v1/linkedin/heat': { ...(quiet()['/api/v1/linkedin/heat'] as object), tripped: true },
+    })
+    await renderApp('/')
+    expect(await screen.findByText('LinkedIn heat is over its threshold')).toBeInTheDocument()
+    expect(calls.some((call) => call.path === '/api/v1/linkedin/heat')).toBe(true)
   })
 
   it('reads heat only while the LinkedIn status says it tripped (#752)', async () => {

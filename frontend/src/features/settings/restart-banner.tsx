@@ -125,9 +125,15 @@ export function RestartBanner({
         </div>
       )}
       {!settings.is_owner ? (
-        <p className="text-muted-foreground">
-          Only the local owner account restarts netkeep. Ask them to restart it.
-        </p>
+        waiting ? (
+          <p role="status" className="text-muted-foreground">
+            The local owner account asked netkeep to restart; it restarts once nothing is running.
+          </p>
+        ) : (
+          <p className="text-muted-foreground">
+            Only the local owner account restarts netkeep. Ask them to restart it.
+          </p>
+        )
       ) : settings.can_restart ? (
         <div className="flex flex-wrap items-center gap-2">
           {!waiting && (

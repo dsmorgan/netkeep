@@ -143,7 +143,10 @@ def https_get(
     body, and within ``deadline_s`` (:data:`_DOWNLOAD_DEADLINE_S`) for the whole download,
     redirects included, each socket operation within ``timeout_s``. :class:`UpdateError`
     on anything else."""
-    context = ssl.create_default_context()
+    try:
+        context = ssl.create_default_context()
+    except OSError as exc:  # ssl.SSLError, or unreadable CA files: a download error (#800)
+        raise UpdateError(f"could not download {url}: no TLS context: {exc}") from exc
     deadline = clock() + deadline_s
     for _ in range(_MAX_REDIRECTS + 1):
         parts = urlsplit(url)
