@@ -1546,8 +1546,14 @@ class _Chooser:
         return held
 
     def _skip_held(self, enrollment: Enrollment) -> None:
-        """A follow-up held for its mailbox's replies: nothing on it changes (#694)."""
-        self._held_skips += 1
+        """A follow-up held for its mailbox's replies: nothing on it changes (#694).
+
+        It is free against :data:`SCAN_LIMIT` only when :func:`_due` leaves it out of the
+        later pages (``current_step`` set), which bounds the free rows at a page per held
+        mailbox. A held row by step position alone (a first step numbered above 1) still
+        counts, so the bound never rests on the two meanings of "follow-up" agreeing."""
+        if enrollment.current_step is not None:
+            self._held_skips += 1
         self.skip(enrollment, Skip.REPLIES_STALE)
 
     def skip(self, enrollment: Enrollment, *reasons: str) -> None:
