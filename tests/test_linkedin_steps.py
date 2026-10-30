@@ -1544,6 +1544,34 @@ def test_an_auto_send_step_after_a_discard_naming_the_previous_send_parks(
     assert [r.trigger for r in lane.runs()] == [SyncRunTrigger.MANUAL]  # step 1's only
 
 
+@pytest.mark.parametrize(
+    "reason",
+    [
+        # Makes the step wait for Try again (#445): clearing it would loosen.
+        f"{linkedin_steps.NOT_TYPED_PREFIX} the composer did not open",
+        # Another template block with the same "blocked:" prefix.
+        TEMPLATE_ERRORS_BLOCK,
+        NO_PREVIOUS_SEND_BLOCK + " ",  # only the exact text is cleared
+    ],
+    ids=["not_typed", "template_errors", "near_miss"],
+)
+def test_a_re_due_after_a_real_send_keeps_any_other_reason(
+    session_factory: sessionmaker[Session], reason: str
+) -> None:
+    """#808 review: ``_advance`` clears only the exact "no earlier step was sent" reason
+    once a real send exists. Any other reason on file stays as it was."""
+    lane = make_lane(session_factory, channels=(EMAIL, LINKEDIN))
+    enrollment_id = lane.enroll(current_step=1, next_action_at=None)
+    _sent_step_one(lane, enrollment_id, at=NOW - timedelta(days=8))
+    _set(lane, Enrollment, enrollment_id, not_sent_error=reason, not_sent_count=1)
+    lane.write(
+        lambda s, u: engine.schedule_next(s, u, enrollment_id, settings=lane.settings, now=NOW)
+    )
+    enrollment = lane.enrollment(enrollment_id)
+    assert enrollment.next_action_at is not None  # _advance ran past its early returns
+    assert (enrollment.not_sent_error, enrollment.not_sent_count) == (reason, 1)
+
+
 def test_a_re_due_with_still_no_send_keeps_the_reason_and_parks_again(lane: Lane) -> None:
     """#808: ``_advance`` clears the reason only once a real send exists (the inbox poll's
     confirm, ``test_linkedin_replies``). A re-due with still nothing sent keeps it, and
