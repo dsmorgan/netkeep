@@ -135,6 +135,37 @@ These come straight from the spec and from production incidents on the sibling p
 - Message bodies, cookies, and tokens never appear in logs.
 - Migrations run on SQLite and PostgreSQL in CI; a construct that only one of them accepts is a CI failure.
 
+## Which pull requests need the maintainer's approval
+
+The test is the direction of the change, not the area it touches. A pull request
+needs the maintainer's `approved` comment on its head commit when it can make netkeep
+do more, or do something new, toward LinkedIn, Gmail, or your machine:
+
+- A new or changed send, click, keystroke, or navigation target.
+- A change to when sends happen or how many go out: timing, budgets, sending hours,
+  retries.
+- Loosening or removing a refusal, a guard, or a pin in `tests/http_send_sites.txt`.
+- New access: an OAuth scope, a Keychain entry, a LaunchAgent, or a Chrome launch or
+  attach.
+- An ADR, and publishing a release.
+
+These merge after the review agent's review and green CI, without the maintainer:
+
+- A change that only refuses more, skips earlier, or checks harder.
+- Test-only hardening of a pin or a guard.
+- A refactor of a pinned function that keeps its behavior.
+- Read-only parsing, error handling and messages, and crash fixes.
+- Docs, UI that doesn't start an action, and dependency updates (except the
+  `cryptography` split in [ADR 0011](docs/adr/0011-installation-and-updates.md)).
+
+A change in the second group still needs its review to say "tightens only" or "no
+behavior change" and give the evidence: the test that pins the old behavior, or the
+diff that shows the new refusal. If the review can't, the pull request goes to the
+maintainer. A safety-area pull request merged this way gets the `safety-tightening`
+label and a one-line comment saying why, so the maintainer can audit it later. A
+docs-only or test-only commit pushed after an approval doesn't need a new one; any
+product-code commit does.
+
 ## Code of conduct
 
 This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md). Be kind, be direct, assume good intent.
