@@ -71,7 +71,7 @@ import logging
 import secrets
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Final
 
 from sqlalchemy.orm import Session, selectinload
@@ -521,6 +521,22 @@ def personal_line_for(enrollment_id: int, step: CampaignStep) -> str | None:
     return None
 
 
+def previous_send_for_review(step: CampaignStep, today: date) -> date | None:
+    """The previous send's date the review and the approval render ``step`` with (#731
+    review), so the ``ago`` words are in what is shown, linted and approved.
+
+    A pending enrollment has sent nothing yet, so the real date is unknown until the
+    step before fires. The engine fires a step ``delay_days`` after the previous send at
+    the earliest, so the review uses that: ``today`` less the step's delay, which reads
+    as the step's delay in words ("6 days ago"). A send that slips later says a longer
+    gap, and the engine lints the words it renders at the fire. The first step has no
+    previous send, as at the fire, so ``None``.
+    """
+    if step.position <= 1:
+        return None
+    return today - timedelta(days=step.delay_days)
+
+
 def merge_values(
     contact: Contact,
     campaign: Campaign,
@@ -530,17 +546,19 @@ def merge_values(
     enrollment_id: int,
 ) -> MergeValues:
     """Everything one message of the step renders with for this contact: the render
-    context the engine builds at a fire, less the previous send's date."""
+    context the engine builds at a fire, with the previous send's date the review
+    stands in for it (:func:`previous_send_for_review`)."""
     return MergeValues(
         contact=contact_fields(contact, today),
         campaign_name=campaign.name,
         step_number=step.position,
         personal_line=personal_line_for(enrollment_id, step),
+        previous_send_date=previous_send_for_review(step, today),
     )
 
 
 def _render_step(template: Template | None, values: MergeValues, today: date) -> Rendered:
-    """The step as the engine renders it at a fire, less the previous send's date."""
+    """The step as the engine renders it at a fire, with ``values``' previous send."""
     if template is None:
         raise TemplateRenderError("the step's template is gone")
     subject = None if template.channel is TemplateChannel.LINKEDIN else template.subject
@@ -657,13 +675,14 @@ def message_fingerprint(
     *,
     enrollment_id: int,
 ) -> str:
-    """What one message of a step shows: the step's fingerprint, every per-contact input
-    to its render (:func:`merge_values`: the contact's merge fields and its
-    ``personal_line``) and its sendable address. The current date isn't hashed itself,
-    but a merge value that changes with it, such as ``years_since_connected`` or
-    ``last_position_change``, does undo the approval. An approval of the
-    message counts only while this is unchanged, so editing the step, its template,
-    the contact or its personal line undoes it."""
+    """What one message of a step shows: the step's fingerprint, every input to its
+    render (:func:`merge_values`: the contact's merge fields, its ``personal_line``,
+    and how long before the send the previous one was) and its sendable address. The
+    current date isn't hashed itself, but a merge value that changes with it, such as
+    ``years_since_connected`` or ``last_position_change``, does undo the approval. The
+    previous send is hashed as days before today, which does not change from day to
+    day (#731 review). An approval of the message counts only while this is unchanged,
+    so editing the step, its template, the contact or its personal line undoes it."""
     if contact is None:
         return _digest([step_print, None])
     values = merge_values(contact, campaign, step, today, enrollment_id=enrollment_id)
@@ -673,12 +692,15 @@ def message_fingerprint(
     fields = dict(values.contact)
     if fields.get("preferred_name") == fields.get("first_name"):
         fields.pop("preferred_name", None)
-    context = {
+    context: dict[str, object] = {
         "contact": fields,
         "campaign_name": values.campaign_name,
         "step_number": values.step_number,
         "personal_line": values.personal_line,
     }
+    if values.previous_send_date is not None:
+        # Only when there is one, so a first step's approvals keep the print they had.
+        context["previous_send_days"] = (today - values.previous_send_date).days
     return _digest([step_print, context, _address(contact)])
 
 
