@@ -24,6 +24,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from browser_fakes import FakeContext, FakeMouse, FakePage
+from cdp_times import request_times
 from flagship_pages import (
     CardOptions,
     document_html,
@@ -65,7 +66,15 @@ class FakeRequest:
     so a test can assert what an observation looked at.
     """
 
-    __slots__ = ("_failure", "_method", "_post_data", "_resource_type", "_url", "reads")
+    __slots__ = (
+        "_failure",
+        "_method",
+        "_post_data",
+        "_resource_type",
+        "_started_ms",
+        "_url",
+        "reads",
+    )
 
     def __init__(
         self,
@@ -75,7 +84,9 @@ class FakeRequest:
         *,
         url: str = "",
         failure: str | None = None,
+        started_ms: float = 0,
     ) -> None:
+        self._started_ms = started_ms
         self._method = method
         self._resource_type = resource_type
         self._post_data = post_data
@@ -108,6 +119,12 @@ class FakeRequest:
     def failure(self) -> str | None:
         self.reads.append("failure")
         return self._failure
+
+    @property
+    def timing(self) -> dict[str, float]:
+        """Playwright's resource timing; only ``startTime`` is filled in (#713 review)."""
+        self.reads.append("timing")
+        return {"startTime": self._started_ms}
 
 
 class FakeResponse:
@@ -354,6 +371,7 @@ class FlagshipSite(FakeContext):
         self.tap = tap
         self.cdp: FakeCdpSession | None = None
         self._request_ids = 0
+        self._sent = 0  # requests sent, for their fake CDP times
         #: Every request the page itself made: (method, path, body).
         self.requests: list[tuple[str, str, str | None]] = []
         self._next: int | None = None
@@ -563,7 +581,12 @@ class FlagshipSite(FakeContext):
         streamed: bytes | None = None,
     ) -> None:
         self.requests.append((method, urlsplit(url).path, post_data))
-        request = FakeRequest(method, resource_type, post_data)
+        # Chrome's times for this request, to the tap's session and to Playwright's, and
+        # the start Playwright computes from its own (#713 review): what pairs a read
+        # with the tap's copy.
+        self._sent += 1
+        times = request_times(self._sent)
+        request = FakeRequest(method, resource_type, post_data, started_ms=times.page_start_ms)
         cdp = self.cdp
         request_id = ""
         if cdp is not None:
@@ -572,8 +595,14 @@ class FlagshipSite(FakeContext):
             asked: dict[str, Any] = {"url": url, "method": method}
             if post_data is not None:
                 asked["postData"] = post_data
-            cdp.emit("Network.requestWillBeSent", {"requestId": request_id, "request": asked})
-            cdp.emit("Network.responseReceived", {"requestId": request_id})
+            cdp.emit(
+                "Network.requestWillBeSent",
+                {"requestId": request_id, "request": asked, **times.request_params()},
+            )
+            cdp.emit(
+                "Network.responseReceived",
+                {"requestId": request_id, "response": {"timing": times.response_timing()}},
+            )
             if streamed is not None:
                 cdp.bodies[request_id] = streamed
         tab.emit(FakeResponse(url, status, body, request, headers=headers, body_error=body_error))
