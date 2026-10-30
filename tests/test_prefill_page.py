@@ -14,6 +14,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 from messaging_dom import (
@@ -49,6 +50,7 @@ from netkeep.linkedin.browser import (
     BubbleLayout,
     BubbleRecipient,
     TypingEnd,
+    href_shape,
     message_control_refusal,
 )
 from netkeep.linkedin.classify import Outcome
@@ -1549,6 +1551,80 @@ async def test_typing_without_a_clicked_message_types_nothing() -> None:
 )
 def test_the_message_click_rule(hrefs: list[str | None], ok: bool) -> None:
     assert (message_control_refusal(hrefs, ZEPHYRINE.profile_id) is None) is ok
+
+
+def _compose_query() -> str:
+    return compose_href(ZEPHYRINE).split("?", 1)[1]
+
+
+@pytest.mark.parametrize(
+    "href",
+    [
+        compose_href(ZEPHYRINE),
+        compose_href(ZEPHYRINE, absolute=True),
+        f"https://www.linkedin.com/messaging/compose/?{_compose_query()}",
+    ],
+    ids=["relative", "absolute", "absolute, spelled out"],
+)
+def test_an_ordinary_compose_href_still_passes(href: str) -> None:
+    """#796: relative, and absolute on LinkedIn's origin, as before. (A protocol-relative
+    or upper-case spelling was refused before and still is: the rule wants the exact
+    ``https`` and host.)"""
+    assert message_control_refusal([href], ZEPHYRINE.profile_id) is None
+
+
+@pytest.mark.parametrize(
+    "authority",
+    [
+        "//",  # ///messaging/compose/: Chrome reads "messaging" as the host
+        "https:///",
+        "https:/",
+        "\\",
+        "/\\",
+        "\\\\evil.test/",
+        "https://evil.test\\@www.linkedin.com/",
+        "//evil.test\\@www.linkedin.com/",
+        "https:\\\\www.linkedin.com/",
+        "https://evil.test@www.linkedin.com/",
+        "https://@www.linkedin.com/",
+        "//evil.test@www.linkedin.com/",
+        "https://evil.test%40www.linkedin.com/",
+        "https://www.linkedin.com%2F@evil.test/",
+        "https://www.linked%69n.com/",
+        "https://www.linkedin.c\u043em/",
+        "https://evil.test/",
+        "//evil.test/",
+        "http://www.linkedin.com/",
+        "https://www.linkedin.com:444/",
+        "https://evil.test\t@www.linkedin.com/",
+        " /",
+        "\n/",
+    ],
+)
+def test_a_compose_href_a_browser_could_read_elsewhere_is_refused(authority: str) -> None:
+    """#796: everything before ``messaging/compose/`` here would let Chrome go somewhere
+    urlsplit doesn't say, or names another origin. Each is refused before the query is read."""
+    href = f"{authority}messaging/compose/?{_compose_query()}"
+    assert message_control_refusal([href], ZEPHYRINE.profile_id) is not None
+    assert href_shape(href, ZEPHYRINE.profile_id) != "verified compose"
+
+
+@pytest.mark.parametrize("bad", ["\\", "\t", " ", "\x00", "\x7f"])
+def test_a_compose_href_with_a_backslash_or_control_anywhere_is_refused(bad: str) -> None:
+    """#796: a backslash or a control character or space is refused wherever it is,
+    the query included."""
+    href = f"{compose_href(ZEPHYRINE)}&x=a{bad}b"
+    assert message_control_refusal([href], ZEPHYRINE.profile_id) is not None
+    in_path = compose_href(ZEPHYRINE).replace("/messaging/", f"/messaging{bad}/", 1)
+    assert message_control_refusal([in_path], ZEPHYRINE.profile_id) is not None
+
+
+def test_the_review_compose_example_fooled_urlsplit() -> None:
+    """``///messaging/compose/`` is LinkedIn's compose path to urlsplit alone."""
+    href = f"///messaging/compose/?{_compose_query()}"
+    split = urlsplit(href)
+    assert (split.scheme, split.netloc, split.path) == ("", "", "/messaging/compose/")
+    assert message_control_refusal([href], ZEPHYRINE.profile_id) is not None
 
 
 def test_the_prefill_literals_are_pinned() -> None:
