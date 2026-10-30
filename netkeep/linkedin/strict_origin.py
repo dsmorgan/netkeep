@@ -195,6 +195,11 @@ def reads_one_way(url: str) -> bool:
     (:func:`_authority_origin`: userinfo, an encoded, non-ASCII or empty host). A
     scheme with no authority (``https:x``, ``mailto:``) names no origin to read, so it
     is refused too. A relative reference with none of these reads one way.
+
+    This fixes where the authority starts and ends, not what the host means: the host
+    is not canonicalized (``//0x7f.1/`` passes, and Chrome reads it as ``127.0.0.1``).
+    So a caller compares the host exactly against a fixed, known name, as
+    :func:`on_origin` does, never against an IP address, a range or a suffix rule.
     """
     if any(ch in _CONTROL_OR_SPACE or ch == "\\" for ch in url):
         return False

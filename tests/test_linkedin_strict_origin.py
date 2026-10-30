@@ -19,8 +19,10 @@ from netkeep.linkedin.strict_origin import (
     LINKEDIN_ORIGIN,
     NotAStrictOrigin,
     Origin,
+    on_origin,
     on_path,
     parse_strict_origin,
+    reads_one_way,
     require_page_origin,
     trim_path,
     url_path,
@@ -279,6 +281,8 @@ def test_on_path_reads_a_non_ascii_slug_either_way() -> None:
         f"https:/in/{SLUG}/overlay/contact-info/",
         # A host that isn't ASCII.
         f"https://www.linkedin.c\u043em/in/{SLUG}/overlay/contact-info/",
+        # A plain protocol-relative url on another host.
+        f"//evil.example.test/in/{SLUG}/overlay/contact-info/",
         # Control characters and whitespace, which Chrome strips or drops.
         f"https://evil.test\t@www.linkedin.com/in/{SLUG}/overlay/contact-info/",
         f"https://evil.test\n/in/{SLUG}/overlay/contact-info/",
@@ -292,6 +296,40 @@ def test_on_path_refuses_what_a_browser_could_read_another_way(url: str) -> None
     """#796: refused as written, before the paths are compared, against either base."""
     assert on_path(url, CONTACT_INFO, base=PROFILE_URL) is False
     assert on_path(url, CONTACT_INFO, base=LINKEDIN_ORIGIN) is False
+
+
+@pytest.mark.parametrize(
+    "authority",
+    [
+        "https://www.linkedin.c\u043em",  # not ASCII
+        "https://www.linked%69n.com",  # percent-encoded
+        "https://u@www.linkedin.com",  # userinfo
+    ],
+)
+def test_an_authority_is_refused_even_against_itself(authority: str) -> None:
+    """#799 review: each rule refuses on its own, not only because the host differs
+    from LinkedIn's. The url and the base name the same authority here."""
+    url = f"{authority}/in/{SLUG}/"
+    assert reads_one_way(url) is False
+    assert reads_one_way(f"//{authority.split('://', 1)[1]}/in/{SLUG}/") is False
+    assert on_origin(url, base=authority) is False
+    assert on_origin(f"/in/{SLUG}/", base=authority) is False
+
+
+@pytest.mark.parametrize("url", [f"https:///in/{SLUG}/", f"///in/{SLUG}/", f"https:/in/{SLUG}/"])
+def test_an_empty_authority_does_not_read_one_way(url: str) -> None:
+    """``https:///in/x``: Chrome skips the slashes and reads ``in`` as the host."""
+    assert reads_one_way(url) is False
+    assert on_origin(url, base=LINKEDIN_ORIGIN) is False
+
+
+def test_a_protocol_relative_url_must_name_the_base_origin() -> None:
+    """#799 review: ``//host/...`` is compared, not taken as relative."""
+    url = f"//evil.example.test/in/{SLUG}/"
+    assert reads_one_way(url) is True
+    assert on_origin(url, base=LINKEDIN_ORIGIN) is False
+    assert on_path(url, f"/in/{SLUG}/", base=PROFILE_URL) is False
+    assert on_origin(f"//www.linkedin.com/in/{SLUG}/", base=LINKEDIN_ORIGIN) is True
 
 
 def test_the_review_example_fooled_urlsplit() -> None:

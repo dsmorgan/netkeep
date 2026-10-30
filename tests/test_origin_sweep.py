@@ -259,7 +259,12 @@ def _guarded() -> list[Path]:
     return [*sorted((ROOT / "netkeep" / "linkedin").glob("*.py")), ROOT / "netkeep" / "worker.py"]
 
 
-def _calls(tree: ast.AST) -> Counter[tuple[str, str]]:
+def _references(tree: ast.AST) -> Counter[tuple[str, str]]:
+    """Every read of a parser's name, by enclosing function: a call, and also a name
+    passed on (``map(urlsplit, ...)``) or bound to another (``split = urlsplit``),
+    bare or as an attribute (``urllib.parse.urlsplit``). The string of one
+    (``getattr(parse, "urlsplit")``) counts under ``"<string>"``, which nothing
+    reviews."""
     found: Counter[tuple[str, str]] = Counter()
 
     def walk(node: ast.AST, scope: str) -> None:
@@ -267,17 +272,15 @@ def _calls(tree: ast.AST) -> Counter[tuple[str, str]]:
             inner = scope
             if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
                 inner = f"{scope}.{child.name}" if scope else child.name
-            if isinstance(child, ast.Call):
-                func = child.func
-                name = (
-                    func.id
-                    if isinstance(func, ast.Name)
-                    else func.attr
-                    if isinstance(func, ast.Attribute)
-                    else None
-                )
-                if name in _PARSERS:
-                    found[(scope or "<module>", name)] += 1
+            where = scope or "<module>"
+            if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load):
+                if child.id in _PARSERS:
+                    found[(where, child.id)] += 1
+            elif isinstance(child, ast.Attribute) and isinstance(child.ctx, ast.Load):
+                if child.attr in _PARSERS:
+                    found[(where, child.attr)] += 1
+            elif isinstance(child, ast.Constant) and child.value in _PARSERS:
+                found[(where, "<string>")] += 1
             walk(child, inner)
 
     walk(tree, "")
@@ -292,7 +295,7 @@ def test_no_unreviewed_url_parsing() -> None:
             if isinstance(node, ast.ImportFrom) and node.module == "urllib.parse":
                 renamed = [a.name for a in node.names if a.asname and a.name in _PARSERS]
                 assert not renamed, f"{path.name} imports {renamed} under another name"
-        for (scope, name), count in _calls(tree).items():
+        for (scope, name), count in _references(tree).items():
             seen[(path.name, scope, name)] = count
     unreviewed = {key: n for key, n in seen.items() if REVIEWED.get(key, (0, ""))[0] != n}
     assert not unreviewed, (
@@ -305,6 +308,28 @@ def test_no_unreviewed_url_parsing() -> None:
 
 def test_the_guard_sees_a_new_call() -> None:
     source = "from urllib.parse import urlsplit\ndef f(u):\n    return urlsplit(u).hostname\n"
-    assert _calls(ast.parse(source)) == Counter({("f", "urlsplit"): 1})
+    assert _references(ast.parse(source)) == Counter({("f", "urlsplit"): 1})
     method = "class C:\n    def m(self, u):\n        return urllib.parse.urljoin(u, '/')\n"
-    assert _calls(ast.parse(method)) == Counter({("C.m", "urljoin"): 1})
+    assert _references(ast.parse(method)) == Counter({("C.m", "urljoin"): 1})
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("def f(hrefs):\n    return list(map(urlsplit, hrefs))\n", ("f", "urlsplit")),
+        ("def f(u):\n    split = urlsplit\n    return split(u)\n", ("f", "urlsplit")),
+        ("def f(u):\n    return getattr(parse, 'urlparse')(u)\n", ("f", "<string>")),
+        ("def f(u):\n    return getattr(urllib.parse, 'urljoin')(u, '/')\n", ("f", "<string>")),
+        ("SPLIT = urlsplit\n", ("<module>", "urlsplit")),
+    ],
+    ids=["map", "rebound", "getattr", "getattr on urllib.parse", "module alias"],
+)
+def test_the_guard_sees_a_parser_passed_on_rebound_or_named(
+    source: str, expected: tuple[str, str]
+) -> None:
+    """#799 review: a parser used without a direct call is still a reference."""
+    assert _references(ast.parse(source))[expected] == 1
+
+
+def test_a_parser_named_by_string_is_never_reviewed() -> None:
+    assert not any(name == "<string>" for _, _, name in REVIEWED)
