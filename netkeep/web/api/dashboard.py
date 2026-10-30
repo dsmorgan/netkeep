@@ -55,6 +55,9 @@ def list_next_fires(
     (P4-09), and the tick never fires it."""
     now = utcnow()
     fires, total = campaign_engine.upcoming(session, user, limit=limit, include_linkedin=True)
+    held = campaign_engine.held_reasons(
+        session, user, [fire.enrollment.id for fire in fires], now=now
+    )
     return NextFirePage(
         items=[
             NextFireOut(
@@ -69,6 +72,7 @@ def list_next_fires(
                 ready_to_prefill=fire.ready_to_prefill(now),
                 auto_send=fire.step is not None
                 and effective_mode(fire.step, fire.enrollment) is StepMode.AUTO_SEND,
+                held_reason=held.get(fire.enrollment.id),
             )
             for fire in fires
         ],

@@ -3778,5 +3778,45 @@ def test_0047_drops_the_retired_review_schema_and_downgrades_with_it_empty(
         # The downgraded schema takes the rows the old one did: a sent message with no time.
         _insert_message(connection, id=1, enrollment_id=1, contact_id=1, status="sent")
     assert _diff_against_models(migration_engine) != []  # the old schema, not the models'
+    migrations.upgrade(migration_engine)
+    assert _diff_against_models(migration_engine) == []
+
+
+# --- the reply hold record (0048, #716) ----------------------------------------------------
+
+
+def test_0048_adds_an_empty_hold_table_and_downgrades_without_it(
+    migration_engine: Engine,
+) -> None:
     migrations.upgrade(migration_engine, "0047")
+    with migration_engine.begin() as connection:
+        _seed_users(connection, 1, 2)
+        _insert_mailbox(connection, id=1)
+    migrations.upgrade(migration_engine, "0048")
+    with migration_engine.begin() as connection:
+        assert _count(connection, "mailbox_reply_holds") == 0
+        assert _count(connection, "mailboxes") == 1
+        connection.execute(
+            text(
+                "INSERT INTO mailbox_reply_holds"
+                " (user_id, mailbox_id, reason, held_since, created_at, updated_at)"
+                " VALUES (1, 1, 'replies have not been polled recently', :t, :t, :t)"
+            ),
+            {"t": STAMP},
+        )
+    # One record per mailbox and user.
+    with pytest.raises(IntegrityError), migration_engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO mailbox_reply_holds"
+                " (user_id, mailbox_id, reason, held_since, created_at, updated_at)"
+                " VALUES (1, 1, 'again', :t, :t, :t)"
+            ),
+            {"t": STAMP},
+        )
+    migrations.downgrade(migration_engine, "0047")
+    assert "mailbox_reply_holds" not in inspect(migration_engine).get_table_names()
+    with migration_engine.begin() as connection:
+        assert _count(connection, "mailboxes") == 1
+    migrations.upgrade(migration_engine)
     assert _diff_against_models(migration_engine) == []

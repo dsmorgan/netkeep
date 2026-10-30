@@ -5491,6 +5491,17 @@
             ],
             "title": "Exit Reason"
           },
+          "held_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Reason"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -11288,6 +11299,17 @@
           "enrollment_id": {
             "title": "Enrollment Id",
             "type": "integer"
+          },
+          "held_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Reason"
           },
           "ready_to_prefill": {
             "default": false,

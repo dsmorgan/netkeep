@@ -31,6 +31,8 @@ from netkeep.models import (
     InteractionKind,
     JsonValue,
     ListKind,
+    Mailbox,
+    MailboxReplyHold,
     MessageDirection,
     MessageStatus,
     RuleField,
@@ -495,11 +497,34 @@ def _seed_pins(session: Session, user: User) -> int:
 
 
 def _seed_next_fires(session: Session, user: User) -> int:
-    """Two due enrollments of ``user`` in one active email campaign (P3-12)."""
-    campaign = factories.make_campaign(session, user)
+    """Two due enrollments of ``user`` in one active email campaign (P3-12), both
+    follow-ups on a mailbox held for unread replies, so each has a ``held_reason`` (#716)."""
+    mailbox = Mailbox(
+        user_id=user.id,
+        email=f"held{user.id}@example.com",
+        keychain_ref=f"gmail/mailbox/held-{user.id}",
+        daily_cap=80,
+    )
+    session.add(mailbox)
+    session.flush()
+    session.add(
+        MailboxReplyHold(
+            user_id=user.id,
+            mailbox_id=mailbox.id,
+            reason="replies have not been polled recently; nothing was sent",
+            held_since=SEED_AT,
+        )
+    )
+    campaign = factories.make_campaign(
+        session, user, channels=(TemplateChannel.EMAIL,) * 2, mailbox_id=mailbox.id
+    )
     for _ in range(2):
         factories.make_enrollment(
-            session, campaign, factories.make_contact(session, user), next_action_at=SEED_AT
+            session,
+            campaign,
+            factories.make_contact(session, user),
+            current_step=1,
+            next_action_at=SEED_AT,
         )
     return 2
 

@@ -6161,6 +6161,8 @@ export interface components {
             email: string | null;
             /** Exit Reason */
             exit_reason: string | null;
+            /** Held Reason */
+            held_reason?: string | null;
             /** Id */
             id: number;
             /** Next Action At */
@@ -8056,6 +8058,8 @@ export interface components {
             due: string;
             /** Enrollment Id */
             enrollment_id: number;
+            /** Held Reason */
+            held_reason?: string | null;
             /**
              * Ready To Prefill
              * @default false

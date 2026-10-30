@@ -180,6 +180,7 @@ from netkeep.models import (
     EnrollmentStatus,
     Mailbox,
     MailboxArm,
+    MailboxReplyHold,
     Message,
     MessageDirection,
     MessageStatus,
@@ -190,7 +191,7 @@ from netkeep.models import (
 )
 from netkeep.models.base import utcnow
 from netkeep.scoping import get_scoped, scoped, scoped_contacts
-from netkeep.services import inbox_hold, sending_hours, ui_settings, zone_change
+from netkeep.services import inbox_hold, reply_holds, sending_hours, ui_settings, zone_change
 from netkeep.services.campaign_guards import (
     UNSENDABLE_EMAIL_STATUSES,
     ChannelReason,
@@ -1478,6 +1479,45 @@ def upcoming(
     return fires, total or 0
 
 
+def held_reasons(
+    session: Session, user: User, enrollment_ids: Collection[int], *, now: datetime
+) -> dict[int, str]:
+    """Why each of ``enrollment_ids`` that the tick holds for unread replies waits (#716):
+    enrollment id to the reason its mailbox's hold record gives. A read for the campaign
+    page and the dashboard; nothing that decides a send reads it.
+
+    An enrollment is held when the tick would select it now (:func:`_selected`), its next
+    step is not on LinkedIn, a step has already gone (``current_step`` set, the rows
+    :func:`_due` leaves out of a held mailbox's later pages), and its campaign's mailbox
+    has a hold record that still stands (:func:`reply_holds.current`). A follow-up that
+    isn't due yet isn't held, so it has no reason.
+    """
+    if not enrollment_ids:
+        return {}
+    rows = session.execute(
+        _selected(user, now)
+        .join(
+            MailboxReplyHold,
+            and_(
+                MailboxReplyHold.mailbox_id == Campaign.mailbox_id,
+                MailboxReplyHold.user_id == user.id,
+            ),
+        )
+        .join(Mailbox, and_(Mailbox.id == Campaign.mailbox_id, Mailbox.user_id == user.id))
+        .where(
+            _not_on_linkedin(),
+            Enrollment.current_step.is_not(None),
+            Enrollment.id.in_(sorted(enrollment_ids)),
+        )
+        .with_only_columns(Enrollment.id, MailboxReplyHold, Mailbox.replies_polled_at)
+    )
+    return {
+        enrollment_id: hold.reason
+        for enrollment_id, hold, polled in rows
+        if reply_holds.current(hold, polled)
+    }
+
+
 def _next_due(session: Session, user: User, now: datetime) -> datetime | None:
     """The soonest due time, or campaign start, after ``now``. LinkedIn rows count (P4-09):
     the tick then lists them as ready to prefill, and never fires them."""
@@ -1514,6 +1554,9 @@ class _Chooser:
         self.gate = gate
         self.replies = replies
         self._replies_held: dict[int, bool] = {}
+        self.replies_asked: dict[int, str | None] = {}
+        """Each mailbox's answer to :meth:`RepliesGated.replies_held` this phase, for the
+        hold record (#716) the tick keeps after its send. Nothing here reads it."""
         self._held_skips = 0
         """Rows skipped as ``replies_stale`` this phase: they don't count toward
         :data:`SCAN_LIMIT` (#716)."""
@@ -1543,6 +1586,7 @@ class _Chooser:
         if held is None:
             reason = self.replies.replies_held(self.session, self.user, mailbox_id)
             held = self._replies_held[mailbox_id] = reason is not None
+            self.replies_asked[mailbox_id] = reason
         return held
 
     def _skip_held(self, enrollment: Enrollment) -> None:
@@ -2897,6 +2941,7 @@ def tick_user(
             sender.reconcile(factory, user_id, settings=in_force, now=clock())
         except Exception:  # what it could not settle waits for the next tick
             log.exception("reconciling campaign messages failed for user %d", user_id)
+    asked: dict[int, str | None] = {}
     for _ in range(BATCH_PER_TICK):
         if stopping():
             break
@@ -2907,14 +2952,46 @@ def tick_user(
             now = clock()
             gate = sender if isinstance(sender, ArmGated) else None
             replies = sender if isinstance(sender, RepliesGated) else None
-            claim = _Chooser(session, user, in_force, now, result, rng, gate, replies).choose()
+            chooser = _Chooser(session, user, in_force, now, result, rng, gate, replies)
+            claim = chooser.choose()
+            asked.update(chooser.replies_asked)
         if claim is None:
             break
         outcome = _send(sender, claim.firing)
         if not _record_after_send(factory, user_id, in_force, claim, outcome, clock=clock):
             return result
         result.fired.append((claim.firing, outcome))
+    _keep_reply_holds(factory, user_id, asked, clock=clock)
     return result
+
+
+def _keep_reply_holds(
+    factory: sessionmaker[Session],
+    user_id: int,
+    asked: Mapping[int, str | None],
+    *,
+    clock: Callable[[], datetime],
+) -> None:
+    """Keep the per-mailbox hold records (#716) in step with what the chooser was told.
+
+    Display only, and after the tick's send is recorded: nothing here can change what the
+    tick claimed or sent. The writer session opens only when a record must change, so a
+    hold that lasts takes no write lock. A failure is logged; the next tick tries again.
+    """
+    if not asked:
+        return
+    try:
+        with session_scope(factory) as session:
+            user = session.get(User, user_id)
+            changed = {} if user is None else reply_holds.changes(session, user, asked)
+        if not changed:
+            return
+        with session_scope(factory, write=True) as session:
+            user = session.get(User, user_id)
+            if user is not None:
+                reply_holds.keep(session, user, changed, now=clock())
+    except Exception:
+        log.exception("keeping the reply hold records failed for user %d", user_id)
 
 
 def _record_after_send(

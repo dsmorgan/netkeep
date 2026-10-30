@@ -266,6 +266,11 @@ function UpcomingRow({
         </Link>
       </span>
       <span className="text-xs text-muted-foreground">{stepText(fire, autoSendOn)}</span>
+      {fire.held_reason != null && (
+        <span role="note" className="text-xs text-muted-foreground">
+          Held until replies are read: {fire.held_reason}
+        </span>
+      )}
       {autoSendOn && fire.auto_send === true && (
         <span className="text-xs text-muted-foreground">
           {autoSendStepText(outlook, fire, fetchedAt)}

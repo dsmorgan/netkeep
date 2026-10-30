@@ -80,7 +80,13 @@ from netkeep.models.lists import (
     ListMember,
     SavedView,
 )
-from netkeep.models.mailboxes import Mailbox, MailboxArm, MailboxProvider, MailboxStatus
+from netkeep.models.mailboxes import (
+    Mailbox,
+    MailboxArm,
+    MailboxProvider,
+    MailboxReplyHold,
+    MailboxStatus,
+)
 from netkeep.models.runs import SyncRun, SyncRunKind, SyncRunStatus, SyncRunTrigger
 from netkeep.models.settings import JsonValue, SettingKV
 from netkeep.models.tags import (
@@ -166,6 +172,7 @@ __all__ = [
     "Mailbox",
     "MailboxArm",
     "MailboxProvider",
+    "MailboxReplyHold",
     "MailboxStatus",
     "Message",
     "MessageDirection",
