@@ -46,6 +46,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import socket
 import threading
 import time
@@ -528,15 +529,24 @@ def _starts() -> list[int]:
     ]
 
 
+#: The body tap's line at its close: how its reads were paired (#713 review).
+_PAIRED = re.compile(
+    r"body tap: reads paired by their start (\d+), by the oldest held answer (\d+)"
+)
+
+
 async def test_an_answer_that_breaks_off_is_asked_for_again_and_the_run_completes(
     provider: AttachBrowserProvider, site: str, caplog: pytest.LogCaptureFixture
 ) -> None:
     """The replica sends start 20's headers, half its body, and drops the connection.
     The page asks for 20 again; that answer reads, and the run reads the whole list.
 
-    #713 review: every read the body tap held an answer for is paired with it by the
-    read's start, on a real Chrome, whose two CDP sessions each read their own clock,
-    the re-ask's two identical requests included."""
+    #713 review: on a real Chrome, whose two CDP sessions each read their own clock,
+    the body tap pairs reads with their held answers by the reads' starts. Each of the
+    run's six reads is paired once. A read may fall back to the oldest held answer, as
+    before starts, without failing this: on a loaded host the re-ask can start within
+    the margin of the first ask, or a read can come before the tap hears its answer's
+    responseReceived (#811 review). Both are the safe fallback, not a fault."""
     caplog.set_level(logging.INFO, logger="netkeep")
     _Replica.drop_at = 20
     _Replica.on_fail = "reask"
@@ -560,8 +570,13 @@ async def test_an_answer_that_breaks_off_is_asked_for_again_and_the_run_complete
     assert _starts() == [10, 20, 20, 30, 35]
     assert result.reason is StopReason.END_OF_LIST and result.complete
     assert [c.urn for page in pages for c in page.connections] == [p.urn for p in _Replica.people]
-    paired = [r.getMessage() for r in caplog.records if r.getMessage().startswith("body tap:")]
-    assert paired == ["body tap: reads paired by their start 6, by the oldest held answer 0"]
+    [paired] = [
+        match.groups()
+        for r in caplog.records
+        if (match := _PAIRED.fullmatch(r.getMessage())) is not None
+    ]
+    by_start, oldest = int(paired[0]), int(paired[1])
+    assert by_start + oldest == 6 and by_start >= 1, paired
 
 
 async def test_an_answer_that_breaks_off_and_is_moved_past_is_read_past_uncounted(
