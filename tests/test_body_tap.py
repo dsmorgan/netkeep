@@ -443,6 +443,37 @@ async def test_an_answer_not_yet_heard_pairs_nothing_by_start(call: str) -> None
     await tap.close()
 
 
+async def test_a_newer_answer_not_yet_heard_pairs_nothing_by_start() -> None:
+    """#811 re-review: every held answer must be heard, not only the oldest. A, the
+    oldest, is heard whole; B, newer and identical, isn't heard yet, so its only start
+    is its ``wallTime``, and the read's start falls within the tolerance of it with A
+    past the margin. Until B is heard its real start is unknown, so the oldest goes."""
+    tap = _tap(Stream())
+    _answer(tap, "A", chunks=(b"A's answer",), at=FIRST)
+    b = request_times(1, offset_s=0.009)
+    request = {"url": PAGINATION, "method": "POST", "postData": ASK}
+    tap.on_request({"requestId": "B", "request": request, **b.request_params()})
+    read_start = b.wall * 1e3 + 0.4
+    assert tap._streams["B"].distance(read_start) <= body_tap.PAIR_TOLERANCE_MS
+    assert tap._streams["A"].distance(read_start) >= body_tap.PAIR_MARGIN_MS
+    assert tap._own(("POST", PAGINATION, ASK), read_start) == "A"
+    assert tap.paired_by_start == 0
+    await tap.close()
+
+
+async def test_a_heard_answer_without_times_pairs_nothing_by_start() -> None:
+    """#811 re-review: A, the oldest, was heard, but its requestWillBeSent carried no
+    times, so it has no start at all. B, an identical answer, starts within the
+    tolerance of the read's start. A's own start is unknown, so the oldest goes."""
+    tap = _tap(Stream())
+    _answer(tap, "A", chunks=(b"A's answer",))
+    assert tap._streams["A"].answered and tap._streams["A"].starts == set()
+    _answer(tap, "B", chunks=(b"B's answer",), at=SECOND)
+    assert tap._own(("POST", PAGINATION, ASK), SECOND.page_start_ms) == "A"
+    assert tap.paired_by_start == 0
+    await tap.close()
+
+
 async def test_without_a_start_the_oldest_goes_first() -> None:
     tap = _tap(Stream())
     _answer(tap, "1", chunks=(b"first answer",), at=FIRST)
