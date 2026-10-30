@@ -27,6 +27,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from netkeep.campaigns import schedule
+from netkeep.campaigns import templates as template_service
 from netkeep.campaigns.render import LintIssue, LintRule, Part, Rendered, Severity
 from netkeep.campaigns.templates import (
     NO_PREVIOUS_SEND_BLOCK,
@@ -63,16 +64,18 @@ from netkeep.services import (
     linkedin_steps,
     runs,
     sending_hours,
+    step_mode,
     template_adoption,
 )
 from netkeep.services import campaign_engine as engine
 from netkeep.services.campaign_engine import Skip, enroll, run_tick
 from netkeep.services.campaign_guards import Reason, Verdict, check_step
-from netkeep.services.linkedin_accounts import ensure_account
+from netkeep.services.linkedin_accounts import arm_scheduled_runs, ensure_account
 from netkeep.services.linkedin_session import flag_session, record_session_evidence
 from netkeep.services.linkedin_steps import (
     PrefillClaim,
     Refusal,
+    claim_auto_send,
     claim_next,
     claim_prefill,
     discard,
@@ -1471,6 +1474,21 @@ def _set_template(lane: Lane, position: int, **fields: Any) -> None:
     lane.write(change)
 
 
+#: The lane's settings with ``[campaigns] linkedin_auto_send`` on (ADR 0008).
+_AUTO: Final = replace(
+    LANE_SETTINGS, campaigns=replace(LANE_SETTINGS.campaigns, linkedin_auto_send=True)
+)
+
+
+def _set_step_mode(lane: Lane, position: int, mode: StepMode) -> None:
+    def change(session: Session, user: User) -> None:
+        campaign = get_scoped(session, user, Campaign, lane.campaign_id)
+        assert campaign is not None
+        next(s for s in campaign.steps if s.position == position).mode = mode
+
+    lane.write(change)
+
+
 def _discard_step_one(lane: Lane) -> tuple[int, int, datetime]:
     """Step 1 prefilled, then discarded: the enrollment, the discarded message, step 2's
     due time. Nothing was sent."""
@@ -1506,11 +1524,138 @@ def test_a_linkedin_step_after_a_discard_naming_the_previous_send_parks(
     ) == ([], 0)
 
 
+def test_an_auto_send_step_after_a_discard_naming_the_previous_send_parks(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """#808 on the scheduler's auto-send claim (ADR 0008), the loosest path: parked, no
+    scheduled run, no message. The claim only writes rows; no browser is involved."""
+    lane = make_lane(session_factory, settings=_AUTO)
+    lane.write(lambda s, u: arm_scheduled_runs(s, u, now=NOW - timedelta(days=1)))
+    _set_template(lane, 2, body=_NAMES_PREVIOUS_SEND["ago"])
+    _set_step_mode(lane, 2, StepMode.AUTO_SEND)
+    enrollment_id, message_id, due = _discard_step_one(lane)
+    lane.write(lambda s, u: record_poll(s, u, due - timedelta(minutes=1)))
+    claim = lane.write(lambda s, u: claim_auto_send(s, u, now=due, settings=_AUTO))
+    assert claim is not None and claim.reasons == (Skip.NO_PREVIOUS_SEND,)
+    assert claim.message_id is None and claim.run_id is None
+    enrollment = lane.enrollment(enrollment_id)
+    assert (enrollment.next_action_at, enrollment.not_sent_error) == (None, NO_PREVIOUS_SEND_BLOCK)
+    assert [m.id for m in lane.messages(enrollment_id)] == [message_id]
+    assert [r.trigger for r in lane.runs()] == [SyncRunTrigger.MANUAL]  # step 1's only
+
+
+def test_a_re_due_with_still_no_send_keeps_the_reason_and_parks_again(lane: Lane) -> None:
+    """#808: ``_advance`` clears the reason only once a real send exists (the inbox poll's
+    confirm, ``test_linkedin_replies``). A re-due with still nothing sent keeps it, and
+    the claim parks the step again."""
+    _set_template(lane, 2, body=_NAMES_PREVIOUS_SEND["ago"])
+    enrollment_id, message_id, due = _discard_step_one(lane)
+    assert lane.claim(enrollment_id, now=due).reasons == (Skip.NO_PREVIOUS_SEND,)
+    lane.write(
+        lambda s, u: engine.schedule_next(s, u, enrollment_id, settings=lane.settings, now=due)
+    )
+    enrollment = lane.enrollment(enrollment_id)
+    assert enrollment.next_action_at is not None
+    assert enrollment.not_sent_error == NO_PREVIOUS_SEND_BLOCK
+    assert lane.claim(enrollment_id, now=due).reasons == (Skip.NO_PREVIOUS_SEND,)
+    assert [m.id for m in lane.messages(enrollment_id)] == [message_id]
+
+
 def test_the_no_previous_send_block_is_released_by_adopting_a_template() -> None:
     """The reason starts ``blocked:``, so adopting a newer template version releases it
     (#397), as it does every other block a step's template causes."""
     assert NO_PREVIOUS_SEND_BLOCK.startswith(template_adoption.PARKED_PREFIXES)
     assert len(NO_PREVIOUS_SEND_BLOCK) <= engine.ERROR_MAX_LENGTH
+
+
+def _adopt_step(lane: Lane, position: int, body: str, *, now: datetime) -> int:
+    """Edit the step's template (in use, so a new version), then adopt it as a person
+    does: preview, then adopt with the preview's fingerprint. Returns how many it released."""
+
+    def run(session: Session, user: User) -> int:
+        campaign = get_scoped(session, user, Campaign, lane.campaign_id)
+        assert campaign is not None
+        step = next(s for s in campaign.steps if s.position == position)
+        newer = template_service.update_template(session, user, step.template_id, body=body)
+        assert newer.id != step.template_id
+        shown = template_adoption.preview(session, user, campaign.id, step.id, now=now)
+        assert shown.refusal is None, shown.refusal
+        return template_adoption.adopt(
+            session, user, campaign.id, step.id, fingerprint_seen=shown.fingerprint, now=now
+        ).released
+
+    return lane.write(run)
+
+
+def test_adopting_a_version_without_the_field_releases_the_park_no_sooner(lane: Lane) -> None:
+    """#808 through a real adoption (#397): the version without ``previous_send_date``
+    makes the parked step due at the adoption, after its own due time, clears the reason,
+    and the claim then takes the new text."""
+    _set_template(lane, 2, body=_NAMES_PREVIOUS_SEND["ago"])
+    enrollment_id, _, due = _discard_step_one(lane)
+    assert lane.claim(enrollment_id, now=due).reasons == (Skip.NO_PREVIOUS_SEND,)
+
+    adopted_at = due + timedelta(hours=1)
+    assert _adopt_step(lane, 2, "Hi {{ first_name }}, a new note.", now=adopted_at) == 1
+    enrollment = lane.enrollment(enrollment_id)
+    assert (enrollment.next_action_at, enrollment.not_sent_error) == (adopted_at, None)
+    assert enrollment.next_action_at is not None and enrollment.next_action_at >= due
+    claim = lane.claim(enrollment_id, now=adopted_at)
+    assert claim.claimed, claim.reasons
+    message = lane.message(claim.message_id or 0)
+    assert message is not None and message.body_rendered == "Hi First1, a new note."
+
+
+def test_adopting_a_version_still_naming_the_field_parks_it_again(lane: Lane) -> None:
+    """#808: a released step whose new version still names the field parks at the claim."""
+    _set_template(lane, 2, body=_NAMES_PREVIOUS_SEND["ago"])
+    enrollment_id, message_id, due = _discard_step_one(lane)
+    assert lane.claim(enrollment_id, now=due).reasons == (Skip.NO_PREVIOUS_SEND,)
+
+    adopted_at = due + timedelta(hours=1)
+    assert _adopt_step(lane, 2, _NAMES_PREVIOUS_SEND["branch"], now=adopted_at) == 1
+    assert lane.claim(enrollment_id, now=adopted_at).reasons == (Skip.NO_PREVIOUS_SEND,)
+    enrollment = lane.enrollment(enrollment_id)
+    assert (enrollment.next_action_at, enrollment.not_sent_error) == (None, NO_PREVIOUS_SEND_BLOCK)
+    assert [m.id for m in lane.messages(enrollment_id)] == [message_id]
+
+
+def test_a_switch_to_auto_send_keeps_the_parked_step_a_prefill(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """#808 with #536: the park's reason on file makes the enrollment *queued* for the
+    step, so a switch to Auto-send keeps it a prefill for a person, and the auto-send
+    claim never takes it."""
+    lane = make_lane(session_factory, settings=_AUTO)
+    lane.write(lambda s, u: arm_scheduled_runs(s, u, now=NOW - timedelta(days=1)))
+    _set_template(lane, 2, body=_NAMES_PREVIOUS_SEND["ago"])
+    enrollment_id, _, due = _discard_step_one(lane)
+    assert lane.claim(enrollment_id, now=due).reasons == (Skip.NO_PREVIOUS_SEND,)
+
+    def step_two(session: Session, user: User) -> int:
+        campaign = get_scoped(session, user, Campaign, lane.campaign_id)
+        assert campaign is not None
+        return next(s.id for s in campaign.steps if s.position == 2)
+
+    step_id = lane.read(step_two)
+    shown = lane.read(
+        lambda s, u: step_mode.preview(s, u, lane.campaign_id, step_id, now=due, auto_send_on=True)
+    )
+    assert (shown.queued, shown.scheduled) == (1, 0)
+    switched = lane.write(
+        lambda s, u: step_mode.switch(
+            s,
+            u,
+            lane.campaign_id,
+            step_id,
+            mode=StepMode.AUTO_SEND,
+            confirm=True,
+            now=due,
+            auto_send_on=True,
+        )
+    )
+    assert switched.kept_prefill == 1
+    assert lane.enrollment(enrollment_id).prefill_kept_step_id == step_id
 
 
 def test_a_linkedin_step_naming_the_previous_send_after_a_real_send_is_claimed(
