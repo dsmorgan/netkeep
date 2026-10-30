@@ -7510,7 +7510,10 @@ def test_the_bubble_check_never_reaches_an_input_a_navigation_or_cdp() -> None:
         ("    closes = buttons(CLOSE_CONTROL_PATTERN)\n", "await tab.evaluate('1')"),
         ("    read = await _read_accessible_name(tab, button,", "await button.focus()"),
         ("    visible = closes.filter(visible=True)\n", "await closes.click()"),
-        ("        want = urlsplit(origin)\n", "await self._ensure_page(restore=False)"),
+        (
+            '        path = f"{PROFILE_PATH_PREFIX}{profile_id}/"\n',
+            "await self._ensure_page(restore=False)",
+        ),
     ],
 )
 def test_the_bubble_check_pin_catches_each_mutation(anchor: str, line: str) -> None:

@@ -152,7 +152,12 @@ from netkeep.linkedin.observe import (
     ResponseRule,
 )
 from netkeep.linkedin.pacing import ScrollPlan
-from netkeep.linkedin.strict_origin import LINKEDIN_ORIGIN, require_page_origin, url_path
+from netkeep.linkedin.strict_origin import (
+    LINKEDIN_ORIGIN,
+    on_origin,
+    require_page_origin,
+    url_path,
+)
 from netkeep.linkedin.voyager import ContactInfo, ProfileDetails, RouteChanged
 
 log = logging.getLogger(__name__)
@@ -587,7 +592,7 @@ class PageProfiles:
             # The tab never committed to the profile (#198 review, L3): record the
             # profile asked for, masked, rather than wherever the tab still is.
             self._url = masked(self.profile_url(self._requested))
-        tab = profile_slug(urlsplit(page.url).path) if self._on_origin(page.url) else None
+        tab = self._slug_on_origin(page.url)
         said = await self._queued_answers(tab)
         if said is not None:
             return said
@@ -683,7 +688,10 @@ class PageProfiles:
         outcome = classify(response.status, masked(target), "")
         if outcome in (Outcome.CHECKPOINT, Outcome.LOGGED_OUT):
             return Answer(outcome, masked(target))
-        renamed = profile_slug(urlsplit(target).path) if self._on_origin(target) else None
+        # #796: the Location must read one way, on the origin, before urljoin's reading
+        # of it is trusted; Chrome resolves ``///in/<slug>/`` to another host.
+        followed = on_origin(response.location or "", base=response.url)
+        renamed = self._slug_on_origin(target) if followed else None
         if renamed is not None:
             if self._in_chain(_answer_slug(response)):
                 self._redirects.append(renamed)
@@ -889,7 +897,7 @@ class PageProfiles:
         blocked = self._wall(url)
         if blocked is not None:
             return blocked
-        slug = profile_slug(urlsplit(url).path) if self._on_origin(url) else None
+        slug = self._slug_on_origin(url)
         if slug is None:
             log.warning("enrichment: the tab landed somewhere that is not a profile")
             return Answer(
@@ -907,7 +915,7 @@ class PageProfiles:
         blocked = self._wall(url)
         if blocked is not None:
             return blocked
-        slug = profile_slug(urlsplit(url).path) if self._on_origin(url) else None
+        slug = self._slug_on_origin(url)
         if slug is None or not same_slug(slug, self._slug):
             # #514: a screen was accepted by now, so this returns None here. It is
             # called anyway so that one rule decides NotFound wherever the tab is read.
@@ -931,15 +939,12 @@ class PageProfiles:
         return None
 
     def _on_origin(self, url: str) -> bool:
-        try:
-            split, want = urlsplit(url), urlsplit(self._origin)
-            return (split.scheme, split.hostname, split.port) == (
-                want.scheme,
-                want.hostname,
-                want.port,
-            )
-        except ValueError:
-            return False
+        """Whether the absolute ``url`` is on this reader's origin, read strictly (#796)."""
+        return "://" in url and on_origin(url, base=self._origin)
+
+    def _slug_on_origin(self, url: str) -> str | None:
+        """The profile slug ``url`` is at, when it is on this reader's origin."""
+        return profile_slug(urlsplit(url).path) if self._on_origin(url) else None
 
     def _require_observed(self, page: PageLike) -> None:
         """The tab a navigation, scroll, or click used must be the one being listened to."""

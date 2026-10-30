@@ -63,7 +63,13 @@ from netkeep.linkedin.observe import (
     ResponseMatch,
 )
 from netkeep.linkedin.pacing import ScrollPlan, TypingPlan, rest_pointer_like_a_person
-from netkeep.linkedin.strict_origin import on_origin, on_path, trim_path
+from netkeep.linkedin.strict_origin import (
+    on_origin,
+    on_path,
+    reads_one_way,
+    trim_path,
+    url_path,
+)
 from netkeep.logging_setup import personal, personal_exc
 from netkeep.paths import data_dir
 
@@ -1661,8 +1667,10 @@ def _css_string(value: str) -> str:
 def _is_profile_link(href: str | None, path: str, *, fold_case: bool) -> bool:
     """Whether ``href`` (relative, or on LinkedIn's own host) is exactly ``path``,
     percent-decoded, with one trailing ``/`` dropped. ``fold_case`` compares a vanity
-    slug as LinkedIn's routing reads it, case-folded; a profile id is compared exactly."""
-    if href is None:
+    slug as LinkedIn's routing reads it, case-folded; a profile id is compared exactly.
+    First :func:`~netkeep.linkedin.strict_origin.on_origin` against LinkedIn's origin
+    (#796): ``///in/<id>/``, a backslash, userinfo and the like are refused."""
+    if href is None or not on_origin(href, base=f"https://{MESSAGE_COMPOSE_HOST}"):
         return False
     try:
         split = urlsplit(href)
@@ -1766,6 +1774,10 @@ def read_card_link(href: str | None, public_id: str, profile_id: str) -> CardLin
         return _someone_else("", "unsafe path")
     if split.scheme and split.scheme.casefold() not in _WEB_SCHEMES:
         return None
+    # #796: anything Chrome could read as another origin than urlsplit does
+    # (``///in/<slug>/``, userinfo, an encoded host, a control character).
+    if not reads_one_way(href):
+        return _someone_else("", "unsafe path")
     raw = split.path
     decoded = unquote(raw)
     if "\\" in href or "\\" in unquote(href):
@@ -3789,7 +3801,7 @@ class BrowserRun:
             log.debug("prefill: no name heading (%s)", NoNameHeading.CONTACT_INFO.value)
             return None
         href = await links.get_attribute("href", timeout=MESSAGING_READ_TIMEOUT_MS)
-        expected = f"{trim_path(urlsplit(url).path)}/{CONTACT_INFO_HREF_SUFFIX}"
+        expected = f"{url_path(url)}/{CONTACT_INFO_HREF_SUFFIX}"
         if href is None or not on_path(href, expected, base=url):
             log.debug("prefill: no name heading (%s)", NoNameHeading.CONTACT_INFO_HREF.value)
             return None
@@ -4835,7 +4847,6 @@ class BrowserRun:
         and the shape of its first such dialog's close control (:func:`read_close_shape`).
 
         A failure raises :class:`BubbleCheckFailed`, fixed words only (#497)."""
-        want = urlsplit(origin)
         path = f"{PROFILE_PATH_PREFIX}{profile_id}/"
         with _bubble_step(BubbleCheckStep.TABS):
             own = self._page
@@ -4844,23 +4855,14 @@ class BrowserRun:
                 for page in self._attachment.context.pages
                 if page is not own and not page.is_closed()
             ]
-            on_origin: list[_MessagingPage] = []
+            tabs_on_origin: list[_MessagingPage] = []
             for page in pages:
-                try:
-                    seen = urlsplit(page.url)
-                    same = (seen.scheme, seen.hostname, seen.port) == (
-                        want.scheme,
-                        want.hostname,
-                        want.port,
-                    )
-                except ValueError:
-                    same = False
-                if same:
-                    on_origin.append(cast(_MessagingPage, page))
+                if on_origin(page.url, base=origin):  # #796
+                    tabs_on_origin.append(cast(_MessagingPage, page))
         with_bubble = 0
         found: list[tuple[_MessagingPage, _MessagingLocator, int, int]] = []
         with _bubble_step(BubbleCheckStep.DIALOGS):
-            for tab in on_origin:
+            for tab in tabs_on_origin:
                 dialogs = tab.get_by_role(
                     BUBBLE_ROLE, name=BUBBLE_NAME, exact=True, include_hidden=True
                 )
@@ -4878,7 +4880,7 @@ class BrowserRun:
                         mine.append(dialog)
                 if mine:
                     found.append((tab, mine[0], count, len(mine)))
-        check = BubbleCheck(len(pages), len(on_origin), with_bubble, len(found))
+        check = BubbleCheck(len(pages), len(tabs_on_origin), with_bubble, len(found))
         if not found:
             return check
         tab, dialog, count, for_contact = found[0]
