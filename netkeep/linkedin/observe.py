@@ -462,10 +462,11 @@ class Observation:
         status = response.status
         resource_type = _safe(lambda: request.resource_type) or "other"
         request_body = _safe(lambda: request.post_data)
+        started_ms = _started_ms(request)
         if 300 <= status < 400:
             # No body is read for a redirect, so no streamed copy is taken: forget it,
             # so it can't be handed to a later read of the same request (#697).
-            self._discard_streamed(method, response.url, request_body)
+            self._discard_streamed(method, response.url, request_body, started_ms)
             headers = _safe(lambda: response.headers) or {}
             location = headers.get("location") if isinstance(headers, Mapping) else None
             return ObservedResponse(
@@ -491,7 +492,7 @@ class Observation:
             body = await asyncio.wait_for(response.body(), self.limits.body_timeout_s)
         except TimeoutError:
             failure = FAILURE_TIMEOUT
-            self._discard_streamed(method, response.url, request_body)
+            self._discard_streamed(method, response.url, request_body, started_ms)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -502,7 +503,11 @@ class Observation:
             miss: str | None = NO_TAP
             if self._tap is not None:
                 streamed = await self._tap.take(
-                    method, response.url, request_body, wait_s=STREAMED_WAIT_S
+                    method,
+                    response.url,
+                    request_body,
+                    wait_s=STREAMED_WAIT_S,
+                    started_ms=started_ms,
                 )
                 miss = self._tap.last_miss if streamed is None else None
             diagnostics = self._diagnose(
@@ -516,7 +521,7 @@ class Observation:
             )
             self.unreadable.append(diagnostics)
         else:
-            self._discard_streamed(method, response.url, request_body)
+            self._discard_streamed(method, response.url, request_body, started_ms)
         finally:
             self._reading -= 1
         self._ends.pop(request, None)
@@ -535,10 +540,12 @@ class Observation:
             streamed=streamed,
         )
 
-    def _discard_streamed(self, method: str, url: str, request_body: str | None) -> None:
+    def _discard_streamed(
+        self, method: str, url: str, request_body: str | None, started_ms: float | None
+    ) -> None:
         """Forget the tap's copy of this request, if any: this read takes no copy."""
         if self._tap is not None:
-            self._tap.discard(method, url, request_body)
+            self._tap.discard(method, url, request_body, started_ms=started_ms)
 
     def _diagnose(
         self,
@@ -682,6 +689,16 @@ class Observation:
 
 def _trim(path: str) -> str:
     return path[:-1] if len(path) > 1 and path.endswith("/") else path
+
+
+def _started_ms(request: RequestLike) -> float | None:
+    """When the request started, as Playwright's ``request.timing["startTime"]`` says, in
+    milliseconds since the epoch; ``None`` when it can't be read. Read only to pair the
+    read with the body tap's copy of the same request (#713 review)."""
+    started = _safe(lambda: getattr(request, "timing")["startTime"])  # noqa: B009
+    if isinstance(started, bool) or not isinstance(started, int | float) or started <= 0:
+        return None
+    return float(started)
 
 
 def _safe[T](read: Callable[[], T]) -> T | None:

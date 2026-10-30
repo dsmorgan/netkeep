@@ -55,9 +55,18 @@ ROLES = (Role("Staff Engineer", "Fictional Robotics Co", "Full-time", "Aug 2021 
 class SiteRequest:
     """The request side of an answer: read-only, with the url the rehearsal log records."""
 
-    __slots__ = ("_method", "_post_data", "_resource_type", "_url")
+    __slots__ = ("_method", "_post_data", "_resource_type", "_started_ms", "_url")
 
-    def __init__(self, method: str, url: str, resource_type: str, post_data: str | None) -> None:
+    def __init__(
+        self,
+        method: str,
+        url: str,
+        resource_type: str,
+        post_data: str | None,
+        *,
+        started_ms: float = 0,
+    ) -> None:
+        self._started_ms = started_ms
         self._method = method
         self._url = url
         self._resource_type = resource_type
@@ -78,6 +87,11 @@ class SiteRequest:
     @property
     def post_data(self) -> str | None:
         return self._post_data
+
+    @property
+    def timing(self) -> dict[str, float]:
+        """Playwright's resource timing; only ``startTime`` is filled in (#713 review)."""
+        return {"startTime": self._started_ms}
 
 
 def navigation_timeout(url: str = "http://127.0.0.1/in/fake-lost-slug/") -> Exception:
@@ -312,6 +326,7 @@ class ProfileSite(FakeContext):
         self.tap = tap
         self.cdp: FakeCdpSession | None = None
         self._request_ids = 0
+        self._sent = 0  # requests sent, for their fake CDP times
         #: What a ``"custom"`` stream receives, by the answer's own body.
         self.custom_copies: dict[bytes, bytes] = {}
         self.profiles: dict[str, ProfilePage] = {p.person.slug.casefold(): p for p in pages}
@@ -540,7 +555,14 @@ class ProfileSite(FakeContext):
         streamed: bytes | None = None,
     ) -> None:
         self.requests.append((method, urlsplit(url).path, post_data))
-        request = SiteRequest(method, url, resource_type, post_data)
+        # Chrome's times for this request, and the start Playwright computes from them for
+        # ``request.timing`` (#713 review): what pairs a read with the tap's copy.
+        self._sent += 1
+        wall, stamp = 1_790_000_000 + self._sent / 4, 1000 + self._sent / 4
+        sent = stamp + 0.002
+        request = SiteRequest(
+            method, url, resource_type, post_data, started_ms=(sent - stamp + wall) * 1e3
+        )
         cdp = self.cdp
         request_id = ""
         if cdp is not None:
@@ -550,8 +572,14 @@ class ProfileSite(FakeContext):
             asked: dict[str, Any] = {"url": url, "method": method}
             if post_data is not None:
                 asked["postData"] = post_data
-            cdp.emit("Network.requestWillBeSent", {"requestId": request_id, "request": asked})
-            cdp.emit("Network.responseReceived", {"requestId": request_id})
+            cdp.emit(
+                "Network.requestWillBeSent",
+                {"requestId": request_id, "request": asked, "wallTime": wall, "timestamp": stamp},
+            )
+            cdp.emit(
+                "Network.responseReceived",
+                {"requestId": request_id, "response": {"timing": {"requestTime": sent}}},
+            )
             if streamed is not None:
                 cdp.bodies[request_id] = streamed
         response = FakeResponse(

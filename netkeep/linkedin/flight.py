@@ -229,7 +229,10 @@ def whole_check(body: bytes | str, *, endpoint: str) -> WholeCheck:
     :class:`RouteChanged` for a body that does not parse for any other reason.
     """
     faults = _StreamFaults()
-    payload = _parse(body, endpoint, faults)
+    try:
+        payload = _parse(body, faults)
+    except _Unreadable as exc:
+        raise RouteChanged(endpoint, exc.detail) from None
     reached: set[str] = set()
     dangling: set[str] = set()
     stack = [ROOT_ROW] if ROOT_ROW in payload.rows else []
@@ -266,8 +269,17 @@ def why_not_whole(body: bytes | str, *, endpoint: str) -> str:
     """:func:`whole_check`'s counts in fixed words, or why there are none; never raises.
 
     Only a log line reads it, so no exception from the count reaches its caller, and
-    one is named by its type alone, never its message.
+    one is named by its type alone, never its message. A copy that does not parse is
+    "not counted (RouteChanged)" without a second ``route changed:`` warning: its
+    caller only asks after its own parse of the same copy failed, or found it not
+    whole, and a failed parse already logged its one warning (#736 review).
     """
+    try:
+        _parse(body, _StreamFaults())
+    except _Unreadable:
+        return f"not counted ({RouteChanged.__name__})"
+    except Exception as exc:
+        return f"not counted ({type(exc).__name__})"
     try:
         return whole_check(body, endpoint=endpoint).describe()
     except Exception as exc:
@@ -303,21 +315,41 @@ def parse_flight(body: bytes | str, *, endpoint: str) -> FlightPayload:
     body, an ``E`` row, and a row id seen twice are all :class:`RouteChanged`. A model
     row whose id names a stream already started is that stream's next chunk, not a
     second row of that id; one after the stream's ``C`` row, or a stream start with no
-    id, is :class:`RouteChanged` too.
+    id, is :class:`RouteChanged` too, and so is a ``C`` row for a stream that has not
+    started or is already closed (#719 re-review).
     """
-    return _parse(body, endpoint, None)
+    try:
+        return _parse(body, None)
+    except _Unreadable as exc:
+        raise RouteChanged(endpoint, exc.detail) from None
 
 
-def _parse(body: bytes | str, endpoint: str, faults: _StreamFaults | None) -> FlightPayload:
-    """:func:`parse_flight`; with ``faults``, two stream rules are counted, not raised.
+class _Unreadable(Exception):
+    """Why :func:`_parse` could not read a payload, in fixed words, not yet logged.
 
-    Only :func:`whole_check` passes ``faults``: a late chunk is kept as a chunk and a
-    stream start with no id starts a stream of id ``""``, so the rest of the copy can
-    still be counted. Every other rule raises as it does for :func:`parse_flight`.
+    :class:`RouteChanged` logs itself when it is made, so :func:`_parse` raises this and
+    each public caller makes the one :class:`RouteChanged` it raises. That way
+    :func:`why_not_whole`, which only names a failure, never logs a copy's failure a
+    second time after the caller's own parse logged it (#736 review).
+    """
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+
+def _parse(body: bytes | str, faults: _StreamFaults | None) -> FlightPayload:
+    """:func:`parse_flight`, raising :class:`_Unreadable` where it raises
+    :class:`RouteChanged`; with ``faults``, two stream rules are counted, not raised.
+
+    Only :func:`whole_check` and :func:`why_not_whole` pass ``faults``: a late chunk is
+    kept as a chunk and a stream start with no id starts a stream of id ``""``, so the
+    rest of the copy can still be counted. Every other rule raises as it does for
+    :func:`parse_flight`.
     """
     data = body.encode("utf-8") if isinstance(body, str) else body
     if not data.strip():
-        raise RouteChanged(endpoint, "empty flight payload")
+        raise _Unreadable("empty flight payload")
     rows: dict[str, object] = {}
     modules: dict[str, object] = {}
     texts: dict[str, str] = {}
@@ -338,7 +370,7 @@ def _parse(body: bytes | str, endpoint: str, faults: _StreamFaults | None) -> Fl
         row_id = id_match.group().decode("ascii")
         colon = id_match.end()
         if colon >= end or data[colon] != ord(":"):
-            raise RouteChanged(endpoint, f"row {line}: no ':' after the row id")
+            raise _Unreadable(f"row {line}: no ':' after the row id")
         cursor = colon + 1
         tag_match = _TAG.match(data, cursor)
         tag = tag_match.group().decode("ascii") if tag_match else ""
@@ -346,10 +378,10 @@ def _parse(body: bytes | str, endpoint: str, faults: _StreamFaults | None) -> Fl
         if tag == "T":
             text_start, text_end = _text_bounds(data, after_tag)
             if text_end > end:
-                raise RouteChanged(endpoint, f"row {line}: a text row runs past the payload")
+                raise _Unreadable(f"row {line}: a text row runs past the payload")
             texts[row_id] = data[text_start:text_end].decode("utf-8", errors="replace")
             position = text_end
-            _mark(seen, row_id, endpoint, line)
+            _mark(seen, row_id, line)
             continue
         newline = data.find(b"\n", cursor)
         stop = end if newline == -1 else newline
@@ -359,38 +391,43 @@ def _parse(body: bytes | str, endpoint: str, faults: _StreamFaults | None) -> Fl
             tag = "R"
         if tag == "":
             if not value or value[0] not in _JSON_START:
-                raise RouteChanged(endpoint, f"row {line}: a model row that is not JSON")
+                raise _Unreadable(f"row {line}: a model row that is not JSON")
             if row_id in streams:
                 if row_id in closed:
                     if faults is None:
-                        raise RouteChanged(
-                            endpoint, f"row {line}: a stream's chunk after its close"
-                        )
+                        raise _Unreadable(f"row {line}: a stream's chunk after its close")
                     faults.late_chunks += 1
-                chunks[row_id].append(_json(value, endpoint, line))
+                chunks[row_id].append(_json(value, line))
                 continue
-            _mark(seen, row_id, endpoint, line)
-            rows[row_id] = _json(value, endpoint, line)
+            _mark(seen, row_id, line)
+            rows[row_id] = _json(value, line)
         elif tag == "I":
-            _mark(seen, row_id, endpoint, line)
-            modules[row_id] = _json(value, endpoint, line)
+            _mark(seen, row_id, line)
+            modules[row_id] = _json(value, line)
         elif tag == "E":
-            raise RouteChanged(endpoint, f"row {line}: the server sent an error row")
+            raise _Unreadable(f"row {line}: the server sent an error row")
         elif tag in ("R", "X"):
             if not row_id:
                 if faults is None:
-                    raise RouteChanged(endpoint, f"row {line}: a stream start with no row id")
+                    raise _Unreadable(f"row {line}: a stream start with no row id")
                 faults.empty_id_streams += 1
             # A start is marked like a row: a second start, or a model row of that id
             # sent before it, is a row id seen twice.
-            _mark(seen, row_id, endpoint, line)
+            _mark(seen, row_id, line)
             streams.add(row_id)
             chunks[row_id] = []
         elif tag == "C":
+            # A close names a stream this copy started and has not closed yet (#719
+            # re-review): one for a stream that never started, or a second close, is
+            # not a row a whole answer sends.
+            if row_id not in streams:
+                raise _Unreadable(f"row {line}: a stream's close with no start")
+            if row_id in closed:
+                raise _Unreadable(f"row {line}: a stream closed twice")
             closed.add(row_id)
         # Any other tag is a hint (fonts, preloads, debug info): nothing to read.
     if not rows:
-        raise RouteChanged(endpoint, "a flight payload with no model rows")
+        raise _Unreadable("a flight payload with no model rows")
     return FlightPayload(
         rows=rows,
         modules=modules,
@@ -413,14 +450,14 @@ def _text_bounds(data: bytes, cursor: int) -> tuple[int, int]:
     return comma + 1, comma + 1 + length
 
 
-def _mark(seen: set[str], row_id: str, endpoint: str, line: int) -> None:
+def _mark(seen: set[str], row_id: str, line: int) -> None:
     if row_id in seen:
-        raise RouteChanged(endpoint, f"row {line}: a row id appears twice")
+        raise _Unreadable(f"row {line}: a row id appears twice")
     seen.add(row_id)
 
 
-def _json(value: bytes, endpoint: str, line: int) -> object:
+def _json(value: bytes, line: int) -> object:
     try:
         return json.loads(value)
     except (json.JSONDecodeError, UnicodeDecodeError, RecursionError):
-        raise RouteChanged(endpoint, f"row {line}: JSON that does not parse") from None
+        raise _Unreadable(f"row {line}: JSON that does not parse") from None

@@ -7,6 +7,9 @@ are written by hand; none came from a capture.
 
 from __future__ import annotations
 
+import contextlib
+import logging
+
 import pytest
 
 from netkeep.linkedin import flight
@@ -256,9 +259,24 @@ def test_a_late_chunk_or_an_idless_stream_is_route_changed(body: bytes, detail: 
     assert detail in caught.value.detail
 
 
-def test_a_close_for_another_stream_does_not_close_this_one() -> None:
-    root = b'0:["$","div",null,{"children":"$R9"}]\n'
-    assert not _whole(b'9:R\n9:{"chunk":1}\n8:C\n' + root)
+@pytest.mark.parametrize(
+    ("body", "detail"),
+    [
+        (b'9:R\n9:{"chunk":1}\n8:C\n', "row 3: a stream's close with no start"),
+        (b'9:C\n9:R\n9:{"chunk":1}\n', "row 1: a stream's close with no start"),
+        (b'9:R\n9:{"chunk":1}\n9:C\n9:C\n', "row 4: a stream closed twice"),
+    ],
+    ids=["another-stream", "before-its-start", "twice"],
+)
+def test_a_close_for_a_stream_not_open_is_route_changed(body: bytes, detail: str) -> None:
+    """#719 re-review: a ``C`` row closes a stream this copy started and has not closed.
+    One for a stream that never started (or not yet), or a second close, is refused by
+    the parse and by the count alike, in fixed words."""
+    body += b'0:["$","div",null,{"children":"$R9"}]\n'
+    for read in (parse_flight, flight.whole_check):
+        with pytest.raises(RouteChanged) as caught:
+            read(body, endpoint=E)
+        assert caught.value.detail == detail
 
 
 def test_an_orphan_row_is_not_whole() -> None:
@@ -369,6 +387,30 @@ def test_whole_check_is_clean_exactly_when_is_whole() -> None:
 def test_why_not_whole_names_an_unreadable_copy_by_type_only() -> None:
     body = b'0:{"a":' + _SECRET + b"\n"
     assert flight.why_not_whole(body, endpoint=E) == "not counted (RouteChanged)"
+
+
+@pytest.mark.parametrize(
+    ("body", "warnings"),
+    [
+        (b'0:{"a":' + _SECRET + b"\n", 1),
+        # The count reads a late chunk the parse refuses: still one warning, the parse's.
+        (b'9:R\n9:{"a":1}\n9:C\n9:{"late":1}\n0:{"x":"$R9"}\n', 1),
+        (b'0:{"a":"$L5"}\n', 0),
+    ],
+    ids=["unparseable", "late-chunk", "parses"],
+)
+def test_why_not_whole_logs_no_second_route_changed_warning(
+    body: bytes, warnings: int, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#736 review: a caller asks why after its own parse of the copy, which logged the
+    one ``route changed:`` warning a copy that does not parse gets. Asking why logs
+    none of its own."""
+    caplog.set_level(logging.WARNING, logger="netkeep")
+    with contextlib.suppress(RouteChanged):
+        is_whole(parse_flight(body, endpoint=E), endpoint=E)
+    flight.why_not_whole(body, endpoint=E)
+    logged = [r for r in caplog.records if r.getMessage().startswith("route changed:")]
+    assert len(logged) == warnings
 
 
 def test_whole_check_leaves_parse_flight_strict() -> None:
