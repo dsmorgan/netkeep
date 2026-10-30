@@ -186,20 +186,17 @@ def _authority_origin(url: str) -> Origin | None:
         return None
 
 
-def on_path(url: str, path: str, *, base: str) -> bool:
-    """Whether ``url`` (absolute, or relative to ``base``) is at ``path`` on ``base``'s origin.
+def on_origin(url: str, *, base: str) -> bool:
+    """Whether ``url`` (absolute, or relative to ``base``) reads, unambiguously, as on
+    ``base``'s origin.
 
     ``base`` is the origin the caller expects, or a page url on it. ``url`` and
-    ``base`` are refused first, as written, wherever ``urlsplit`` and a browser could
-    read them two ways (#796): a backslash, which a browser reads as ``/``; any ASCII
+    ``base`` are refused, as written, wherever ``urlsplit`` and a browser could read
+    them two ways (#796): a backslash, which a browser reads as ``/``; any ASCII
     control character or whitespace; and an authority that is not a strict origin
-    (:func:`_authority_origin`: userinfo, an encoded or empty host). A ``url`` that
-    names an authority (a scheme, or a leading ``//``) must name ``base``'s scheme,
-    host and port exactly; one that doesn't takes ``base``'s.
-
-    Then the paths are compared after percent-decoding and case-folding, as
-    LinkedIn's routing reads a slug, and after dropping one trailing ``/``. The
-    browser and the page readers share it (#719 review).
+    (:func:`_authority_origin`: userinfo, an encoded, non-ASCII or empty host). A
+    ``url`` that names an authority (a scheme, or a leading ``//``) must name
+    ``base``'s scheme, host and port exactly; one that doesn't takes ``base``'s.
     """
     if any(ch in _CONTROL_OR_SPACE or ch == "\\" for ch in url + base):
         return False
@@ -212,7 +209,18 @@ def on_path(url: str, path: str, *, base: str) -> bool:
         return False
     names_authority = bool(relative.scheme) or url.startswith("//")
     absolute = url if relative.scheme else f"{want.scheme}:{url}"
-    if names_authority and _authority_origin(absolute) != want:
+    return not names_authority or _authority_origin(absolute) == want
+
+
+def on_path(url: str, path: str, *, base: str) -> bool:
+    """Whether ``url`` (absolute, or relative to ``base``) is at ``path`` on ``base``'s origin.
+
+    First :func:`on_origin`, which refuses anything a browser could read as another
+    origin (#796). Then the paths are compared after percent-decoding and
+    case-folding, as LinkedIn's routing reads a slug, and after dropping one trailing
+    ``/``. The browser and the page readers share it (#719 review).
+    """
+    if not on_origin(url, base=base):
         return False
     try:
         split = urlsplit(urljoin(base, url))

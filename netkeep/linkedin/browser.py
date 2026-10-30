@@ -63,7 +63,7 @@ from netkeep.linkedin.observe import (
     ResponseMatch,
 )
 from netkeep.linkedin.pacing import ScrollPlan, TypingPlan, rest_pointer_like_a_person
-from netkeep.linkedin.strict_origin import on_path, trim_path
+from netkeep.linkedin.strict_origin import on_origin, on_path, trim_path
 from netkeep.logging_setup import personal, personal_exc
 from netkeep.paths import data_dir
 
@@ -1610,9 +1610,10 @@ def message_control_refusal(hrefs: Sequence[str | None], profile_id: str) -> str
     """ADR 0007's Message click rule (decision 4), as a pure check of every control's href.
 
     ``None`` when there is at least one control and **every** control named Message
-    opens ``/messaging/compose/`` (relative, or on :data:`MESSAGE_COMPOSE_HOST`) for this
-    contact: ``profileUrn`` (decoded) ``urn:li:fsd_profile:<id>`` and ``recipient``
-    ``<id>``, with each query parameter present exactly once. Otherwise a fixed phrase.
+    opens ``/messaging/compose/`` (relative, or on :data:`MESSAGE_COMPOSE_HOST`, read as
+    :func:`~netkeep.linkedin.strict_origin.on_origin` reads it) for this contact:
+    ``profileUrn`` (decoded) ``urn:li:fsd_profile:<id>`` and ``recipient`` ``<id>``,
+    with each query parameter present exactly once. Otherwise a fixed phrase.
     """
     if not hrefs:
         return "no Message control on the page"
@@ -1623,6 +1624,11 @@ def message_control_refusal(hrefs: Sequence[str | None], profile_id: str) -> str
 
 
 def _is_contact_compose(href: str, profile_id: str) -> bool:
+    # #796: refused first wherever Chrome could read another origin than urlsplit does
+    # (``///messaging/compose/``, a backslash, userinfo, an encoded host, a control
+    # character or space); an absolute or ``//`` href must be on LinkedIn's origin.
+    if not on_origin(href, base=f"https://{MESSAGE_COMPOSE_HOST}"):
+        return False
     try:
         split = urlsplit(href)
     except ValueError:
