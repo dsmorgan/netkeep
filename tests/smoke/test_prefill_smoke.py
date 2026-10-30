@@ -847,7 +847,7 @@ async def test_without_the_scroll_back_the_sticky_header_makes_the_click_refuse(
     scroll leaves the top card's control under the sticky header and the click refuses."""
     from netkeep.linkedin.browser import MESSAGE_NOT_ON_SCREEN, BrowserRun
 
-    async def nothing(self: BrowserRun, profile_path: str, profile_id: str) -> None:
+    async def nothing(self: BrowserRun, profile_path: str, profile_id: str, *, origin: str) -> None:
         return None
 
     monkeypatch.setattr(BrowserRun, "message_cover", nothing)
