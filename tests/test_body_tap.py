@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import base64
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 import pytest
@@ -45,6 +46,28 @@ class Stream:
         return {"bufferedData": _b64(self.buffered)}
 
 
+@dataclass(frozen=True)
+class Times:
+    """One request's CDP times: ``wallTime`` and ``timestamp`` from requestWillBeSent,
+    ``requestTime`` from responseReceived's timing (none when served from the cache)."""
+
+    wall: float
+    stamp: float
+    sent: float | None
+
+    @property
+    def start_ms(self) -> float:
+        """Playwright's ``request.timing["startTime"]`` for these times, as it computes it."""
+        if self.sent is None:
+            return self.wall * 1e3
+        return (self.sent - self.stamp + self.wall) * 1e3
+
+
+#: Two identical requests' times.
+FIRST = Times(wall=1_790_000_000.125, stamp=5021.5, sent=5021.503)
+SECOND = Times(wall=1_790_000_000.375, stamp=5021.75, sent=5021.76)
+
+
 def _tap(stream: Stream, *, limit: int = 1024) -> BodyTap:
     return BodyTap(MATCH, stream=stream, max_body_bytes=limit)
 
@@ -58,12 +81,19 @@ def _answer(
     post: str | None = ASK,
     chunks: tuple[bytes, ...] = (),
     end: str | None = "failed",
+    at: Times | None = None,
 ) -> None:
     request: dict[str, Any] = {"url": url, "method": method}
     if post is not None:
         request["postData"] = post
-    tap.on_request({"requestId": rid, "request": request})
-    tap.on_response({"requestId": rid, "response": {"url": url, "status": 200}})
+    sending: dict[str, Any] = {"requestId": rid, "request": request}
+    if at is not None:
+        sending |= {"wallTime": at.wall, "timestamp": at.stamp}
+    tap.on_request(sending)
+    response: dict[str, Any] = {"url": url, "status": 200}
+    if at is not None and at.sent is not None:
+        response["timing"] = {"requestTime": at.sent}
+    tap.on_response({"requestId": rid, "response": response})
     for chunk in chunks:
         tap.on_data({"requestId": rid, "data": _b64(chunk), "dataLength": len(chunk)})
     if end == "failed":
@@ -110,22 +140,75 @@ async def test_an_answer_past_the_body_limit_is_no_copy() -> None:
     assert await tap.take("POST", PAGINATION, ASK, wait_s=1.0) is None
 
 
-async def test_the_copy_is_matched_by_request_and_the_oldest_goes_first() -> None:
+async def test_the_copy_is_matched_by_request() -> None:
     tap = _tap(Stream())
     _answer(tap, "1", chunks=(b"first ask",))
     _answer(tap, "2", post='{"startIndex":30}', chunks=(b"another start",))
-    _answer(tap, "3", chunks=(b"second ask",))
-    assert await tap.take("POST", PAGINATION, ASK, wait_s=1.0) == b"first ask"
-    assert await tap.take("POST", PAGINATION, ASK, wait_s=1.0) == b"second ask"
     assert await tap.take("POST", PAGINATION, '{"startIndex":30}', wait_s=1.0) == b"another start"
+    assert await tap.take("POST", PAGINATION, ASK, wait_s=1.0) == b"first ask"
 
 
-async def test_a_read_that_succeeded_discards_its_copy() -> None:
+async def test_identical_requests_finishing_out_of_order_each_get_their_own_copy() -> None:
+    """#713 review: two answers to the same request, the later one's read failing
+    first. Each read is paired with its own request by when it started, never the
+    oldest held answer to the same request."""
     tap = _tap(Stream())
-    _answer(tap, "1", chunks=(b"read fine",), end="finished")
-    _answer(tap, "2", chunks=(b"lost",))
-    tap.discard("POST", PAGINATION, ASK)
+    _answer(tap, "1", chunks=(b"first answer",), at=FIRST)
+    _answer(tap, "2", chunks=(b"second answer",), at=SECOND)
+    second = await tap.take("POST", PAGINATION, ASK, wait_s=1.0, started_ms=SECOND.start_ms)
+    first = await tap.take("POST", PAGINATION, ASK, wait_s=1.0, started_ms=FIRST.start_ms)
+    assert (first, second) == (b"first answer", b"second answer")
+
+
+async def test_an_answer_served_without_timing_pairs_by_its_wall_time() -> None:
+    """Playwright's start for an answer with no timing (from the cache) is the request's
+    ``wallTime``, in milliseconds."""
+    tap = _tap(Stream())
+    cached = Times(wall=FIRST.wall, stamp=FIRST.stamp, sent=None)
+    _answer(tap, "1", chunks=(b"first answer",), at=cached)
+    _answer(tap, "2", chunks=(b"second answer",), at=SECOND)
+    got = await tap.take("POST", PAGINATION, ASK, wait_s=1.0, started_ms=cached.start_ms)
+    assert got == b"first answer"
+
+
+@pytest.mark.parametrize("started_ms", [None, 1.0], ids=["no-start", "unmatched-start"])
+async def test_identical_requests_that_cant_be_told_apart_hand_over_no_copy(
+    started_ms: float | None,
+) -> None:
+    """Without a start that names one of them, the tap can't tell which held answer is
+    the read's, so it hands over none, and keeps none for a later read either."""
+    tap = _tap(Stream())
+    _answer(tap, "1", chunks=(b"first answer",), at=FIRST)
+    _answer(tap, "2", chunks=(b"second answer",), at=SECOND)
+    assert await tap.take("POST", PAGINATION, ASK, wait_s=1.0, started_ms=started_ms) is None
+    assert tap.last_miss == body_tap.MISS_AMBIGUOUS and tap._streams == {}
+    assert await tap.take("POST", PAGINATION, ASK, wait_s=0.01) is None
+    assert tap.last_miss == body_tap.MISS_NOT_MATCHED
+
+
+async def test_one_held_answer_is_the_reads_own_without_a_start() -> None:
+    tap = _tap(Stream())
+    _answer(tap, "1", chunks=(b"only answer",), at=FIRST)
+    assert await tap.take("POST", PAGINATION, ASK, wait_s=1.0) == b"only answer"
+
+
+async def test_a_read_that_succeeded_discards_its_own_copy() -> None:
+    tap = _tap(Stream())
+    _answer(tap, "1", chunks=(b"lost",), at=FIRST)
+    _answer(tap, "2", chunks=(b"read fine",), end="finished", at=SECOND)
+    tap.discard("POST", PAGINATION, ASK, started_ms=SECOND.start_ms)
+    assert list(tap._streams) == ["1"]
     assert await tap.take("POST", PAGINATION, ASK, wait_s=1.0) == b"lost"
+
+
+async def test_a_discard_that_cant_tell_its_copy_apart_forgets_them_all() -> None:
+    """So a later read is never handed the discarding read's copy in place of its own."""
+    tap = _tap(Stream())
+    _answer(tap, "1", chunks=(b"read fine",), end="finished", at=FIRST)
+    _answer(tap, "2", chunks=(b"lost",), at=SECOND)
+    _answer(tap, "3", post='{"startIndex":30}', chunks=(b"another start",))
+    tap.discard("POST", PAGINATION, ASK)
+    assert list(tap._streams) == ["3"]
 
 
 async def test_a_redirect_to_an_unmatched_url_drops_the_held_entry() -> None:
@@ -153,18 +236,23 @@ async def test_a_redirect_to_an_unmatched_url_drops_the_held_entry() -> None:
 
 
 async def test_a_redirect_to_a_matched_url_is_held_for_the_new_url() -> None:
-    """A behavior pin, not a regression test for #697: the new url's entry replaces the
-    old one whether or not :meth:`BodyTap.on_request` pops the old entry first, so this
-    passes without that fix. The unmatched-url test above is the one that fails
-    without it."""
+    """#697, #713 review: the redirect drops the old url's entry and holds the new url's
+    as the newest, so it outlives the answers held before it. The oldest held answer
+    redirects here; with the entry overwritten in place instead of dropped, it would
+    keep its old place and be the one the next answer pushes out."""
     tap = _tap(Stream())
     other = f"{PAGINATION}&page=2"
     tap.on_request(
-        {"requestId": "9", "request": {"url": PAGINATION, "method": "POST", "postData": ASK}}
+        {"requestId": "0", "request": {"url": PAGINATION, "method": "POST", "postData": ASK}}
     )
-    _answer(tap, "9", url=other, chunks=(b"the new answer",))
+    for index in range(1, body_tap.MAX_STREAMS):
+        _answer(tap, str(index), post=f'{{"startIndex":{index}}}', end=None)
+    _answer(tap, "0", url=other, chunks=(b"the new answer",))
+    _answer(tap, "next", post='{"startIndex":99}', end=None)  # one past the bound
+    assert "1" not in tap._streams and "0" in tap._streams
     assert await tap.take("POST", PAGINATION, ASK, wait_s=0.05) is None
     assert await tap.take("POST", other, ASK, wait_s=1.0) == b"the new answer"
+    await tap.close()
 
 
 async def test_held_answers_are_bounded() -> None:
