@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import logging
 from collections.abc import Mapping
 from typing import Any
 
 import pytest
+from cdp_times import RequestTimes, request_times
 
 from netkeep.linkedin import body_tap
 from netkeep.linkedin.body_tap import BodyTap
@@ -58,12 +60,22 @@ def _answer(
     post: str | None = ASK,
     chunks: tuple[bytes, ...] = (),
     end: str | None = "failed",
+    at: RequestTimes | None = None,
+    cached: bool = False,
 ) -> None:
+    """Feed the tap one answer's events. ``at``: Chrome's times for it (none without);
+    ``cached``: served from the cache, so its response carries no timing."""
     request: dict[str, Any] = {"url": url, "method": method}
     if post is not None:
         request["postData"] = post
-    tap.on_request({"requestId": rid, "request": request})
-    tap.on_response({"requestId": rid, "response": {"url": url, "status": 200}})
+    sending: dict[str, Any] = {"requestId": rid, "request": request}
+    response: dict[str, Any] = {"url": url, "status": 200}
+    if at is not None:
+        sending |= at.request_params()
+        if not cached:
+            response["timing"] = at.response_timing()
+    tap.on_request(sending)
+    tap.on_response({"requestId": rid, "response": response})
     for chunk in chunks:
         tap.on_data({"requestId": rid, "data": _b64(chunk), "dataLength": len(chunk)})
     if end == "failed":
@@ -321,3 +333,129 @@ async def test_each_take_without_a_copy_says_why(case: str, miss: str | None) ->
     got = await tap.take("POST", PAGINATION, ASK, wait_s=0.05)
     assert tap.last_miss == miss and (got is None) is (miss is not None)
     await tap.close()
+
+
+# --- #713 review: a read is paired with its own request by when it started ----------------
+
+FIRST, SECOND = request_times(1), request_times(2)
+
+
+async def test_identical_requests_finishing_out_of_order_each_get_their_own_copy() -> None:
+    """Two answers to the same request, the later one's read failing first. Each read
+    is paired with its own request by its start, within the tolerance, though the
+    page's start is never exactly the tap's (each session reads its own clock)."""
+    tap = _tap(Stream())
+    _answer(tap, "1", chunks=(b"first answer",), at=FIRST)
+    _answer(tap, "2", chunks=(b"second answer",), at=SECOND)
+    assert SECOND.page_start_ms not in tap._streams["2"].starts  # skewed, as on Chrome
+    second = await tap.take("POST", PAGINATION, ASK, wait_s=1.0, started_ms=SECOND.page_start_ms)
+    first = await tap.take("POST", PAGINATION, ASK, wait_s=1.0, started_ms=FIRST.page_start_ms)
+    assert (first, second) == (b"first answer", b"second answer")
+    assert (tap.paired_by_start, tap.paired_oldest) == (2, 0)
+
+
+async def test_an_answer_served_from_the_cache_pairs_by_its_wall_time() -> None:
+    """Playwright's start for an answer whose timing it ignores is ``wallTime`` alone."""
+    tap = _tap(Stream())
+    _answer(tap, "1", chunks=(b"first answer",), at=FIRST, cached=True)
+    _answer(tap, "2", chunks=(b"second answer",), at=SECOND)
+    cached_start = FIRST.page_wall * 1e3
+    got = await tap.take("POST", PAGINATION, ASK, wait_s=1.0, started_ms=cached_start)
+    assert got == b"first answer" and tap.paired_by_start == 1
+
+
+async def test_a_read_that_succeeded_discards_its_own_copy() -> None:
+    tap = _tap(Stream())
+    _answer(tap, "1", chunks=(b"lost",), at=FIRST)
+    _answer(tap, "2", chunks=(b"read fine",), end="finished", at=SECOND)
+    tap.discard("POST", PAGINATION, ASK, started_ms=SECOND.page_start_ms)
+    assert list(tap._streams) == ["1"]
+    assert await tap.take("POST", PAGINATION, ASK, wait_s=1.0) == b"lost"
+
+
+@pytest.mark.parametrize(
+    "newer",
+    [request_times(1), request_times(1, offset_s=0.0005)],
+    ids=["same-start", "half-a-millisecond-later"],
+)
+async def test_two_held_answers_at_one_start_go_oldest_first(newer: RequestTimes) -> None:
+    """Two held answers that started within the margin of each other can't be told
+    apart by start, even when the newer is the nearer: the oldest goes first, as before
+    starts."""
+    tap = _tap(Stream())
+    _answer(tap, "1", chunks=(b"older",), at=FIRST)
+    _answer(tap, "2", chunks=(b"newer",), at=newer)
+    got = await tap.take("POST", PAGINATION, ASK, wait_s=1.0, started_ms=newer.page_start_ms)
+    assert got == b"older"
+    assert (tap.paired_by_start, tap.paired_oldest) == (0, 1)
+
+
+async def test_a_runner_up_past_the_margin_still_pairs_by_start() -> None:
+    tap = _tap(Stream())
+    later = request_times(1, offset_s=0.006)  # 6 ms after the first: past the 5 ms margin
+    _answer(tap, "1", chunks=(b"older",), at=FIRST)
+    _answer(tap, "2", chunks=(b"newer",), at=later)
+    got = await tap.take("POST", PAGINATION, ASK, wait_s=1.0, started_ms=later.page_start_ms)
+    assert got == b"newer" and tap.paired_by_start == 1
+
+
+@pytest.mark.parametrize(
+    ("off_ms", "paired"), [(0.9, b"second answer"), (1.2, b"first answer")], ids=["in", "out"]
+)
+async def test_a_start_pairs_only_within_the_tolerance(off_ms: float, paired: bytes) -> None:
+    """Past the tolerance no held answer is the read's by start, and the oldest goes."""
+    tap = _tap(Stream())
+    _answer(tap, "1", chunks=(b"first answer",), at=FIRST)
+    _answer(tap, "2", chunks=(b"second answer",), at=SECOND)
+    start = SECOND.page_start_ms + off_ms
+    assert await tap.take("POST", PAGINATION, ASK, wait_s=1.0, started_ms=start) == paired
+
+
+async def test_without_a_start_the_oldest_goes_first() -> None:
+    tap = _tap(Stream())
+    _answer(tap, "1", chunks=(b"first answer",), at=FIRST)
+    _answer(tap, "2", chunks=(b"second answer",), at=SECOND)
+    assert await tap.take("POST", PAGINATION, ASK, wait_s=1.0) == b"first answer"
+    assert (tap.paired_by_start, tap.paired_oldest) == (0, 1)
+
+
+async def test_the_tap_works_out_playwrights_start_in_playwrights_order() -> None:
+    """``(requestTime - timestamp + wallTime) * 1e3``, as Playwright's crNetworkManager
+    computes it, and ``wallTime * 1e3`` for an answer from the cache. Written out: for
+    these times another order of the same operations gives another float."""
+    tap = _tap(Stream())
+    _answer(tap, "7", end=None, at=request_times(7))
+    assert tap._streams["7"].starts == {1793462400552.759, 1793462400551.8857}
+    await tap.close()
+
+
+def test_the_pairing_bounds_are_pinned() -> None:
+    assert body_tap.PAIR_TOLERANCE_MS == 1.0
+    assert body_tap.PAIR_MARGIN_MS == 5.0
+
+
+@pytest.mark.parametrize("bad", [None, "1793462400.4", True, [1.0]])
+async def test_times_that_are_not_numbers_are_no_start(bad: object) -> None:
+    tap = _tap(Stream())
+    tap.on_request(
+        {
+            "requestId": "1",
+            "request": {"url": PAGINATION, "method": "POST", "postData": ASK},
+            "wallTime": bad,
+            "timestamp": bad,
+        }
+    )
+    tap.on_response({"requestId": "1", "response": {"timing": {"requestTime": bad}}})
+    assert tap._streams["1"].starts == set()
+    await tap.close()
+
+
+async def test_close_says_how_reads_were_paired(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO, logger="netkeep")
+    tap = _tap(Stream())
+    _answer(tap, "1", chunks=(b"first answer",), at=FIRST)
+    _answer(tap, "2", chunks=(b"second answer",), at=SECOND)
+    await tap.take("POST", PAGINATION, ASK, wait_s=1.0, started_ms=SECOND.page_start_ms)
+    await tap.take("POST", PAGINATION, ASK, wait_s=1.0)
+    await tap.close()
+    assert "body tap: reads paired by their start 1, by the oldest held answer 1" in caplog.text

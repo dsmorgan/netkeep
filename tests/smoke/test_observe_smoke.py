@@ -529,10 +529,15 @@ def _starts() -> list[int]:
 
 
 async def test_an_answer_that_breaks_off_is_asked_for_again_and_the_run_completes(
-    provider: AttachBrowserProvider, site: str
+    provider: AttachBrowserProvider, site: str, caplog: pytest.LogCaptureFixture
 ) -> None:
     """The replica sends start 20's headers, half its body, and drops the connection.
-    The page asks for 20 again; that answer reads, and the run reads the whole list."""
+    The page asks for 20 again; that answer reads, and the run reads the whole list.
+
+    #713 review: every read the body tap held an answer for is paired with it by the
+    read's start, on a real Chrome, whose two CDP sessions each read their own clock,
+    the re-ask's two identical requests included."""
+    caplog.set_level(logging.INFO, logger="netkeep")
     _Replica.drop_at = 20
     _Replica.on_fail = "reask"
     pages: list[ConnectionsPage] = []
@@ -555,6 +560,8 @@ async def test_an_answer_that_breaks_off_is_asked_for_again_and_the_run_complete
     assert _starts() == [10, 20, 20, 30, 35]
     assert result.reason is StopReason.END_OF_LIST and result.complete
     assert [c.urn for page in pages for c in page.connections] == [p.urn for p in _Replica.people]
+    paired = [r.getMessage() for r in caplog.records if r.getMessage().startswith("body tap:")]
+    assert paired == ["body tap: reads paired by their start 6, by the oldest held answer 0"]
 
 
 async def test_an_answer_that_breaks_off_and_is_moved_past_is_read_past_uncounted(
