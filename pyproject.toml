@@ -60,6 +60,10 @@ dependencies = [
   # Template spelling warnings (#522): pure Python, its English word list ships inside
   # the package, so the check needs no system library and never fetches anything.
   "pyspellchecker==0.9.1",
+  # The menu-bar app (ADR 0014 rule 11; #764): AppKit and Foundation, through
+  # pyobjc-core. macOS only, so Linux and the container never install it. 12.2.2 ships
+  # a universal2 wheel for each CPython from 3.10 to 3.15, so neither Mac compiles it.
+  "pyobjc-framework-Cocoa>=12.2.2; sys_platform == 'darwin'",
 ]
 
 [project.optional-dependencies]
@@ -145,6 +149,11 @@ module = [
   "google_auth_httplib2",
   "httplib2",
 ]
+ignore_missing_imports = true
+
+# PyObjC ships no type information, and isn't installed on Linux at all (#764).
+[[tool.mypy.overrides]]
+module = ["objc", "objc.*", "AppKit", "AppKit.*", "Foundation", "Foundation.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
