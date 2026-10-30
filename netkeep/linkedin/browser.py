@@ -3643,6 +3643,7 @@ class BrowserRun:
         self,
         profile_path: str,
         *,
+        origin: str,
         pause_s: float,
         sleep: Callable[[float], Awaitable[None]] = _real_sleep,
     ) -> ContactInfoClick:
@@ -3680,12 +3681,12 @@ class BrowserRun:
                 "the run's tab went away before the Contact info click; aborting the run"
                 " rather than reopen it, which would be a page view nobody planned"
             )
-        if not on_path(page.url, profile_path):
+        if not on_path(page.url, profile_path, base=origin):
             return ContactInfoClick(page, False, "the tab is not on the profile")
         await sleep(pause_s)
         if page.is_closed():
             raise BrowserUnavailable("the run's tab went away before the Contact info click")
-        if not on_path(page.url, profile_path):
+        if not on_path(page.url, profile_path, base=origin):
             return ContactInfoClick(page, False, "the tab left the profile before the click")
         control = cast(_ClickablePage, page).get_by_role(
             CONTACT_INFO_ROLE, name=CONTACT_INFO_NAME, exact=True
@@ -3701,8 +3702,13 @@ class BrowserRun:
             return ContactInfoClick(page, False, "no Contact info control on the page")
         if matches > 1:
             return ContactInfoClick(page, False, "more than one Contact info control")
+        # The href resolves against the tab's url, as Chrome resolves it, so that url is
+        # read once and must still be on the profile, on ``origin`` (#796).
+        current = page.url
+        if not on_path(current, profile_path, base=origin):
+            return ContactInfoClick(page, False, "the tab left the profile before the click")
         expected = f"{trim_path(profile_path)}/{CONTACT_INFO_HREF_SUFFIX}"
-        if href is None or not on_path(href, expected, base=page.url):
+        if href is None or not on_path(href, expected, base=current):
             return ContactInfoClick(page, False, "the control opens something else")
         try:
             await control.click(delay=CONTACT_INFO_PRESS_MS, timeout=CONTACT_INFO_CLICK_TIMEOUT_MS)
@@ -3801,6 +3807,7 @@ class BrowserRun:
         profile_path: str,
         profile_id: str,
         *,
+        origin: str,
         pause_s: float,
         sleep: Callable[[float], Awaitable[None]] = _real_sleep,
     ) -> MessageClick:
@@ -3834,12 +3841,12 @@ class BrowserRun:
             )
         if self._message_clicked:
             return MessageClick(False, False, "the Message control was already clicked")
-        if not on_path(page.url, profile_path):
+        if not on_path(page.url, profile_path, base=origin):
             return MessageClick(False, False, "the tab is not on the contact's profile")
         await sleep(pause_s)
         if page.is_closed():
             raise BrowserUnavailable("the run's tab went away before the Message click")
-        if not on_path(page.url, profile_path):
+        if not on_path(page.url, profile_path, base=origin):
             return MessageClick(False, False, "the tab left the profile before the click")
         tab = cast(_MessagingPage, page)
         # Decision 3 before the click (#444): a bubble already on the page, minimized ones
@@ -3910,7 +3917,9 @@ class BrowserRun:
         self._message_click_landed = True
         return MessageClick(True, True, target=chosen)
 
-    async def message_cover(self, profile_path: str, profile_id: str) -> NotClear | None:
+    async def message_cover(
+        self, profile_path: str, profile_id: str, *, origin: str
+    ) -> NotClear | None:
         """Why :meth:`click_message` would refuse right now for want of a clear control,
         or ``None`` (#470). A read before the click, for the prefill's one scroll back up.
 
@@ -3925,7 +3934,7 @@ class BrowserRun:
         page = self._page
         if page is None or page.is_closed() or self._message_clicked:
             return None
-        if not on_path(page.url, profile_path):
+        if not on_path(page.url, profile_path, base=origin):
             return None
         tab = cast(_MessagingPage, page)
         try:
@@ -4155,7 +4164,7 @@ class BrowserRun:
         return _pseudo_hosts_of(snapshot)
 
     async def message_check_snapshot(
-        self, profile_path: str, profile_id: str, phase: str
+        self, profile_path: str, profile_id: str, phase: str, *, origin: str
     ) -> MessageCheckSnapshot:
         """Everything :meth:`click_message` would read before its click, and more, with
         no click (#473, ``netkeep linkedin message-check``). Reads only.
@@ -4180,7 +4189,7 @@ class BrowserRun:
             raise BrowserUnavailable("the run's tab went away before the Message check read it")
         tab = cast(_MessagingPage, page)
         errors: list[str] = []
-        on_profile = on_path(page.url, profile_path)
+        on_profile = on_path(page.url, profile_path, base=origin)
         try:
             bubble = "open" if await self._bubble_already_open(tab) else "none"
         except Exception as exc:

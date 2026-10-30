@@ -69,6 +69,7 @@ from netkeep.linkedin.page_messaging import (
     SEND_DWELL_SIGMA,
     PagePrefill,
 )
+from netkeep.linkedin.strict_origin import LINKEDIN_ORIGIN
 from netkeep.models import (
     CampaignStep,
     Enrollment,
@@ -1123,7 +1124,11 @@ async def test_click_send_refuses_after_a_partly_typed_body() -> None:
     async with provider.run() as run:
         await run.goto(f"https://www.linkedin.com/in/{ZEPHYRINE.slug}/")
         click = await run.click_message(
-            f"/in/{ZEPHYRINE.slug}/", ZEPHYRINE.profile_id, pause_s=0, sleep=steps.sleep
+            f"/in/{ZEPHYRINE.slug}/",
+            ZEPHYRINE.profile_id,
+            origin=LINKEDIN_ORIGIN,
+            pause_s=0,
+            sleep=steps.sleep,
         )
         assert click.clicked
         typing = await run.type_into_composer(
@@ -1289,7 +1294,11 @@ async def test_click_send_refuses_when_the_message_click_did_not_land() -> None:
     async with provider.run() as run:
         await run.goto(f"https://www.linkedin.com/in/{ZEPHYRINE.slug}/")
         click = await run.click_message(
-            f"/in/{ZEPHYRINE.slug}/", ZEPHYRINE.profile_id, pause_s=0, sleep=steps.sleep
+            f"/in/{ZEPHYRINE.slug}/",
+            ZEPHYRINE.profile_id,
+            origin=LINKEDIN_ORIGIN,
+            pause_s=0,
+            sleep=steps.sleep,
         )
         assert click.clicked
         typing = await run.type_into_composer(
@@ -2186,7 +2195,11 @@ async def test_the_close_control_is_clicked_at_most_once() -> None:
         await run.goto(f"https://www.linkedin.com/in/{ZEPHYRINE.slug}/")
         assert (
             await run.click_message(
-                f"/in/{ZEPHYRINE.slug}/", ZEPHYRINE.profile_id, pause_s=0, sleep=steps.sleep
+                f"/in/{ZEPHYRINE.slug}/",
+                ZEPHYRINE.profile_id,
+                origin=LINKEDIN_ORIGIN,
+                pause_s=0,
+                sleep=steps.sleep,
             )
         ).clicked
         await run.type_into_composer(

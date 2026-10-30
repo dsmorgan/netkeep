@@ -282,7 +282,7 @@ class PagePrefill:
         # scroll back up to it, so the run does, once; the click reads the page again
         # and refuses as before if nothing is clear. At least one step: the page may
         # have scrolled further than the plan says.
-        cover = await self._run.message_cover(path, spec.profile_id)
+        cover = await self._run.message_cover(path, spec.profile_id, origin=self._origin)
         if cover in TOP_CARD_COVERED:
             log.info(
                 "prefill: the top card's Message control is covered (%s); scrolling back up",
@@ -315,6 +315,7 @@ class PagePrefill:
             click = await self._run.click_message(
                 path,
                 spec.profile_id,
+                origin=self._origin,
                 pause_s=self._rng.uniform(*CLICK_PAUSE_RANGE_S),
                 sleep=self._sleep,
             )
@@ -594,7 +595,9 @@ class PageMessageCheck:
         loop = asyncio.get_running_loop()
         loaded = loop.time()
         since: list[float] = []
-        snapshots = [await self._run.message_check_snapshot(path, profile_id, first)]
+        snapshots = [
+            await self._run.message_check_snapshot(path, profile_id, first, origin=self._origin)
+        ]
         since.append(round(loop.time() - loaded, 1))
         scroll = scroll_like_a_person(
             self._rng,
@@ -609,8 +612,10 @@ class PageMessageCheck:
                 tuple(snapshots), tuple(since), brief_scroll_px=depth, stopped="cancelled"
             )
         # The prefill's probe comes first, as in the prefill; then the check's own read.
-        cover = await self._run.message_cover(path, profile_id)
-        snapshots.append(await self._run.message_check_snapshot(path, profile_id, brief))
+        cover = await self._run.message_cover(path, profile_id, origin=self._origin)
+        snapshots.append(
+            await self._run.message_check_snapshot(path, profile_id, brief, origin=self._origin)
+        )
         since.append(round(loop.time() - loaded, 1))
         scrolled_back = cover in TOP_CARD_COVERED
         if scrolled_back:
@@ -626,7 +631,9 @@ class PageMessageCheck:
                 )
         # The click's own pause (click_message waits it before its reads), never the click.
         await self._sleep(self._rng.uniform(*CLICK_PAUSE_RANGE_S))
-        snapshots.append(await self._run.message_check_snapshot(path, profile_id, click))
+        snapshots.append(
+            await self._run.message_check_snapshot(path, profile_id, click, origin=self._origin)
+        )
         since.append(round(loop.time() - loaded, 1))
         return MessageCheckResult(tuple(snapshots), tuple(since), cover, scrolled_back, depth)
 

@@ -48,6 +48,7 @@ from netkeep.linkedin.browser import (
     classify_click_failure,
 )
 from netkeep.linkedin.messaging import MessageOutcomeKind
+from netkeep.linkedin.strict_origin import LINKEDIN_ORIGIN
 
 VIEWPORT = (1280.0, 800.0)
 
@@ -554,7 +555,10 @@ async def test_the_scroll_back_probe_counts_the_links_own_pseudo_elements_too() 
         provider, _ = fake_provider(site)
         async with provider.run() as run:
             await run.goto(f"https://www.linkedin.com{path}")
-            assert await run.message_cover(path, ZEPHYRINE.profile_id) is expected
+            assert (
+                await run.message_cover(path, ZEPHYRINE.profile_id, origin=LINKEDIN_ORIGIN)
+                is expected
+            )
             assert site.tab.clicks == [] and not run.message_click_attempted
 
 
@@ -662,7 +666,10 @@ async def test_the_scroll_back_probe_counts_the_links_own_first_letter_too() -> 
         provider, _ = fake_provider(site)
         async with provider.run() as run:
             await run.goto(f"https://www.linkedin.com{path}")
-            assert await run.message_cover(path, ZEPHYRINE.profile_id) is expected
+            assert (
+                await run.message_cover(path, ZEPHYRINE.profile_id, origin=LINKEDIN_ORIGIN)
+                is expected
+            )
             assert site.tab.clicks == [] and not run.message_click_attempted
 
 

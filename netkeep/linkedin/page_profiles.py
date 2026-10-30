@@ -359,10 +359,12 @@ class PageProfiles:
             raise ScrollCancelled
         self._clicked = True
         if self._sleep is None:
-            click = await self._run.click_contact_info(self._path, pause_s=pause_s)
+            click = await self._run.click_contact_info(
+                self._path, origin=self._origin, pause_s=pause_s
+            )
         else:
             click = await self._run.click_contact_info(
-                self._path, pause_s=pause_s, sleep=self._sleep
+                self._path, origin=self._origin, pause_s=pause_s, sleep=self._sleep
             )
         self._require_observed(click.page)
         if not click.clicked:

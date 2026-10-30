@@ -60,6 +60,7 @@ from netkeep.linkedin.messaging import (
 )
 from netkeep.linkedin.pacing import TypeStep, TypingPlan
 from netkeep.linkedin.page_messaging import PagePrefill
+from netkeep.linkedin.strict_origin import LINKEDIN_ORIGIN
 
 BODY = "Hi Zephyrine, good to see you!"
 T0 = datetime(2026, 10, 5, 15, 0, tzinfo=UTC)
@@ -1402,7 +1403,9 @@ async def test_after_the_click_the_run_never_opens_navigates_scrolls_or_observes
     provider, _ = fake_provider(site)
     async with provider.run() as run:
         await run.goto(f"https://www.linkedin.com/in/{ZEPHYRINE.slug}/")
-        click = await run.click_message(f"/in/{ZEPHYRINE.slug}/", ZEPHYRINE.profile_id, pause_s=0)
+        click = await run.click_message(
+            f"/in/{ZEPHYRINE.slug}/", ZEPHYRINE.profile_id, origin=LINKEDIN_ORIGIN, pause_s=0
+        )
         assert click.clicked
         with pytest.raises(BrowserUnavailable):
             await run.goto("https://www.linkedin.com/feed/")
@@ -1414,12 +1417,60 @@ async def test_after_the_click_the_run_never_opens_navigates_scrolls_or_observes
             await run.observe(
                 ResponseMatch("https://www.linkedin.com", (ResponseRule("GET", "/x"),))
             )
-        again = await run.click_message(f"/in/{ZEPHYRINE.slug}/", ZEPHYRINE.profile_id, pause_s=0)
+        again = await run.click_message(
+            f"/in/{ZEPHYRINE.slug}/", ZEPHYRINE.profile_id, origin=LINKEDIN_ORIGIN, pause_s=0
+        )
         assert not again.clicked and not again.attempted
         await run.hand_over()
     assert len(site.tab.clicks) == 1 and site.new_page_calls == 1
     assert site.tab.goto_after_click == []
     assert not site.tab.is_closed()  # the provider's exit closed nothing
+
+
+@pytest.mark.parametrize("elsewhere", ["https://evil.example.test", "http://www.linkedin.com"])
+async def test_the_profile_path_on_another_origin_is_not_the_profile(elsewhere: str) -> None:
+    """#796: the click, its cover probe and the Message check each compare the tab's
+    origin with the one they are given, not only its path."""
+    site = MessagingSite(ZEPHYRINE)
+    provider, _ = fake_provider(site)
+    path = f"/in/{ZEPHYRINE.slug}/"
+    async with provider.run() as run:
+        await run.goto(f"{elsewhere}{path}")
+        assert await run.message_cover(path, ZEPHYRINE.profile_id, origin=LINKEDIN_ORIGIN) is None
+        snapshot = await run.message_check_snapshot(
+            path, ZEPHYRINE.profile_id, "first", origin=LINKEDIN_ORIGIN
+        )
+        assert not snapshot.on_profile
+        assert snapshot.verdict == "refuses: the tab is not on the contact's profile"
+        click = await run.click_message(
+            path, ZEPHYRINE.profile_id, origin=LINKEDIN_ORIGIN, pause_s=0
+        )
+    assert (click.clicked, click.attempted) == (False, False)
+    assert click.refusal == "the tab is not on the contact's profile"
+    assert site.tab.clicks == []
+
+
+async def test_the_message_click_rechecks_the_origin_after_the_pause() -> None:
+    """#796: a tab that moved to the profile's path on another origin during the pause."""
+    site = MessagingSite(ZEPHYRINE)
+    provider, _ = fake_provider(site)
+    path = f"/in/{ZEPHYRINE.slug}/"
+
+    async def pause_while_the_tab_moves(seconds: float) -> None:
+        site.tab._url = f"https://evil.example.test{path}"
+
+    async with provider.run() as run:
+        await run.goto(f"{LINKEDIN_ORIGIN}{path}")
+        click = await run.click_message(
+            path,
+            ZEPHYRINE.profile_id,
+            origin=LINKEDIN_ORIGIN,
+            pause_s=1.0,
+            sleep=pause_while_the_tab_moves,
+        )
+    assert (click.clicked, click.attempted) == (False, False)
+    assert click.refusal == "the tab left the profile before the click"
+    assert site.tab.clicks == []
 
 
 @pytest.mark.parametrize("landed", [True, False])
@@ -1435,7 +1486,9 @@ async def test_any_navigation_after_the_click_or_the_hand_over_raises_and_leaves
     profile = f"https://www.linkedin.com/in/{ZEPHYRINE.slug}/"
     async with provider.run() as run:
         await run.goto(profile)
-        click = await run.click_message(f"/in/{ZEPHYRINE.slug}/", ZEPHYRINE.profile_id, pause_s=0)
+        click = await run.click_message(
+            f"/in/{ZEPHYRINE.slug}/", ZEPHYRINE.profile_id, origin=LINKEDIN_ORIGIN, pause_s=0
+        )
         assert click.attempted and click.clicked is landed
         for attempt in range(2):
             with pytest.raises(BrowserUnavailable):
@@ -1628,7 +1681,9 @@ async def test_close_never_closes_the_tab_once_the_click_was_attempted() -> None
     provider, _ = fake_provider(site)
     async with provider.run() as run:
         await run.goto(f"https://www.linkedin.com/in/{ZEPHYRINE.slug}/")
-        click = await run.click_message(f"/in/{ZEPHYRINE.slug}/", ZEPHYRINE.profile_id, pause_s=0)
+        click = await run.click_message(
+            f"/in/{ZEPHYRINE.slug}/", ZEPHYRINE.profile_id, origin=LINKEDIN_ORIGIN, pause_s=0
+        )
         assert click.attempted and not click.clicked
     assert not site.tab.is_closed() and site.tab.close_calls == 0
 
@@ -1953,7 +2008,9 @@ async def test_a_failed_focus_still_uses_the_one_call() -> None:
     provider, _ = fake_provider(site)
     async with provider.run() as run:
         await run.goto(f"https://www.linkedin.com/in/{ZEPHYRINE.slug}/")
-        click = await run.click_message(f"/in/{ZEPHYRINE.slug}/", ZEPHYRINE.profile_id, pause_s=0)
+        click = await run.click_message(
+            f"/in/{ZEPHYRINE.slug}/", ZEPHYRINE.profile_id, origin=LINKEDIN_ORIGIN, pause_s=0
+        )
         assert click.clicked
         tab = site.tab
         composer = tab.get_by_role(
