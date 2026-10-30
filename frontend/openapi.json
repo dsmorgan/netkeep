@@ -2833,6 +2833,10 @@
             "title": "Fields",
             "type": "array"
           },
+          "is_owner": {
+            "title": "Is Owner",
+            "type": "boolean"
+          },
           "log_file": {
             "title": "Log File",
             "type": "string"
@@ -2853,6 +2857,7 @@
           "config_error",
           "restart_pending",
           "can_restart",
+          "is_owner",
           "busy",
           "restart_waiting",
           "fields"

@@ -110,6 +110,11 @@ fi
 if [ "$chosen" = "$old_default" ] && [ "$moved" = yes ]; then
   die "netkeeper's data moved to $new_default; use --data-dir \"$new_default\" (or unset NETKEEPER_DATA)"
 fi
+# An old folder that no longer exists, with no marker either: netkeep would send the
+# restore on to the new folder, past this script's in-use check and archive (#712).
+if [ "$chosen" = "$old_default" ] && [ ! -d "$old_default" ]; then
+  die "$old_default doesn't exist; netkeep's data folder is $new_default. Use --data-dir \"$new_default\" (or unset NETKEEPER_DATA)"
+fi
 
 db="$data_dir/$DB_NAME"
 archives="$data_dir/$ARCHIVES_DIRNAME"

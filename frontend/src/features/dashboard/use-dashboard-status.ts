@@ -16,7 +16,9 @@ import { buildProblems, type Problem } from './status'
 export function useDashboardStatus(): { problems: Problem[] } {
   const mailboxes = useQuery(mailboxListQuery)
   const status = useQuery(statusQuery)
-  const heat = useQuery(heatQuery)
+  // `/linkedin/status` already says whether heat tripped; heat itself is read, and
+  // polled, only for when runs resume, while it is tripped (#752).
+  const heat = useQuery({ ...heatQuery, enabled: status.data?.heat_tripped === true })
   const attention = useQuery(attentionQuery)
   const problems = buildProblems({
     mailboxes: read(mailboxes),

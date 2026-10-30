@@ -19,7 +19,8 @@ import {
  * middle of work: while a LinkedIn run, the browser, a task or a campaign send is busy
  * it refuses, and **Restart when idle** asks it to wait for that work instead. Under the
  * login item launchd starts serve again, otherwise it re-execs itself. This waits for
- * `/health` to answer with a new boot id, then refetches everything.
+ * `/health` to answer with a new boot id, then refetches everything. Only the local
+ * owner account restarts netkeep (#707), so anyone else sees why, not the buttons (#729).
  */
 type Phase =
   | { kind: 'idle' }
@@ -123,7 +124,11 @@ export function RestartBanner({
           </ul>
         </div>
       )}
-      {settings.can_restart ? (
+      {!settings.is_owner ? (
+        <p className="text-muted-foreground">
+          Only the local owner account restarts netkeep. Ask them to restart it.
+        </p>
+      ) : settings.can_restart ? (
         <div className="flex flex-wrap items-center gap-2">
           {!waiting && (
             <Button

@@ -620,7 +620,7 @@ def _flag_part(
     flag = None if isinstance(attention, Failed) else attention.flags.gmail
     if flag is None or (mailbox is not None and mailbox.status is MailboxStatus.REAUTH_REQUIRED):
         return None
-    draft = "draft" in flag.lower()
+    draft = flag is attention_service.GmailFlag.DRAFT_FLAGGED
     return Part(
         key="flag",
         label="Leftover drafts" if draft else "Needs you",

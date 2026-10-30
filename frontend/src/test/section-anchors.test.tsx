@@ -49,6 +49,7 @@ function configBody() {
     config_error: null,
     restart_pending: false,
     can_restart: true,
+    is_owner: true,
     busy: [],
     restart_waiting: false,
     fields: [PREFILLS_FIELD],
@@ -166,6 +167,16 @@ describe('section anchors (#739)', () => {
           flags: { dashboard: null, gmail: null, linkedin: null, settings: null },
           activity: { state: 'idle', label: '', run_id: null, run_kind: null },
           title_total: 0,
+        }),
+      '/api/v1/linkedin/status': () =>
+        jsonResponse({
+          session_flag: null,
+          session_flagged_at: null,
+          heat_tripped: true,
+          armed: true,
+          schedule_paused: false,
+          running_run_id: null,
+          can_start_runs: true,
         }),
       '/api/v1/linkedin/heat': () =>
         jsonResponse({

@@ -559,6 +559,25 @@ def test_a_checksum_mismatch_installs_nothing(world: World) -> None:
     assert not update.constraints_path(NEW, world.data).exists()
 
 
+def test_a_constraints_file_that_cannot_be_kept_says_failed(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An OSError keeping a download (a second update's clear_state racing this one) is a
+    "failed:" line, not a traceback, and stops before serve is touched (#717)."""
+
+    def gone(*args: object, **kwargs: object) -> None:
+        raise FileNotFoundError("the update folder went away")
+
+    monkeypatch.setattr(update, "write_atomic", gone)
+    world.install_login_item()
+    assert world.run_update() == 1
+    assert "   failed: could not keep the constraints files in" in world.text
+    assert "the update folder went away" in world.text
+    assert world.uv_calls == [] and world.backups == []
+    assert world.running == OLD, "serve was never stopped"
+    assert world.state() is None
+
+
 @pytest.mark.parametrize(
     "sums",
     [

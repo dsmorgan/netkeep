@@ -84,6 +84,7 @@ describe('dashboard: one page (#739)', () => {
       '/api/v1/attention': attention({
         counts: { inbox: 2, dashboard: 1, waiting: 1, try_again: 0, triage: 9, imports: 0 },
       }),
+      '/api/v1/linkedin/status': linkedinStatus({ heat_tripped: true }),
       '/api/v1/linkedin/heat': { ...(quiet()['/api/v1/linkedin/heat'] as object), tripped: true },
     })
     await renderApp('/')
@@ -194,5 +195,15 @@ describe('dashboard: Needs you', () => {
       expect(document.querySelector('[data-system="linkedin"]')).toHaveAttribute('data-tone', 'ok'),
     )
     expect(calls.filter((call) => call.method !== 'GET')).toEqual([])
+  })
+
+  it('reads heat only while the LinkedIn status says it tripped (#752)', async () => {
+    const calls = serve()
+    await renderApp('/')
+    await waitFor(() =>
+      expect(calls.some((call) => call.path === '/api/v1/linkedin/status')).toBe(true),
+    )
+    await screen.findByTestId('needs-you-line')
+    expect(calls.filter((call) => call.path === '/api/v1/linkedin/heat')).toEqual([])
   })
 })

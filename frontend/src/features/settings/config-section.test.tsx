@@ -83,6 +83,7 @@ function settings(fields: ConfigField[], overrides: Partial<ConfigSettings> = {}
     config_error: null,
     restart_pending: fields.some((f) => f.restart_pending),
     can_restart: true,
+    is_owner: true,
     busy: [],
     restart_waiting: false,
     fields,
@@ -391,6 +392,19 @@ describe('ConfigSections', () => {
     const banner = within(await screen.findByRole('region', { name: 'Restart netkeep' }))
     expect(banner.queryByRole('button')).toBeNull()
     expect(banner.getByText(/Stop it and start it again/)).toBeVisible()
+  })
+
+  it('offers no Restart or Cancel to anyone but the local owner (#729)', async () => {
+    renderSections([PREFILLS], {
+      restart_pending: true,
+      restart_waiting: true,
+      busy: ['a campaign send is in progress'],
+      is_owner: false,
+    })
+    const banner = within(await screen.findByRole('region', { name: 'Restart netkeep' }))
+    expect(banner.queryByRole('button')).toBeNull()
+    expect(banner.getByText(/Only the local owner account restarts netkeep/)).toBeVisible()
+    expect(banner.getByText(/a campaign send is in progress/)).toBeVisible()
   })
 
   it('edits a text field and saves it trimmed', async () => {

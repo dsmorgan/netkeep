@@ -5239,6 +5239,8 @@ export interface components {
             config_path: string | null;
             /** Fields */
             fields: components["schemas"]["ConfigFieldOut"][];
+            /** Is Owner */
+            is_owner: boolean;
             /** Log File */
             log_file: string;
             /** Restart Pending */

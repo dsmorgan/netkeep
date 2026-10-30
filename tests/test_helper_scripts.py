@@ -1573,6 +1573,32 @@ def test_reset_never_works_on_the_new_default_before_the_move(tmp_path: Path) ->
     assert not (support / "netkeeper").exists()
 
 
+@pytest.mark.parametrize("mode", [["--restore", "a.sqlite3"], [], ["--list"]])
+def test_reset_refuses_a_missing_old_folder_without_the_marker(
+    tmp_path: Path, mode: list[str]
+) -> None:
+    """--data-dir naming .../netkeeper after it is gone is refused even with no marker
+    (#712): netkeep restore would follow it to .../netkeep, past the in-use check."""
+    home = tmp_path / "home"
+    support = home / "Library" / "Application Support"
+    (support / "netkeep").mkdir(parents=True)
+    archive = tmp_path / "a.sqlite3"
+    archive.write_bytes(b"")
+    args = [str(archive) if arg == "a.sqlite3" else arg for arg in mode]
+    result = run_sh(
+        RESET,
+        *args,
+        "--data-dir",
+        str(support / "netkeeper"),
+        "--yes",
+        env={"HOME": str(home)},
+    )
+    assert result.returncode == 1
+    assert "netkeeper doesn't exist; netkeep's data folder is" in result.stderr
+    assert not (support / "netkeeper").exists()
+    assert not (support / "netkeep" / "archives").exists()
+
+
 @slow_netkeep_restore
 def test_reset_archives_then_removes_and_restore_puts_it_back(data: Path) -> None:
     db = make_db(data)

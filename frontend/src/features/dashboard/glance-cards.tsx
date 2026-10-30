@@ -112,12 +112,6 @@ function stepText(fire: NextFire, autoSendOn: boolean): string {
   return `${fire.campaign_name} · ${step}${prefill}`
 }
 
-/**
- * The LinkedIn schedule, refetched each minute like the other dashboard reads, so the
- * auto-send check's time and reason never go stale on an open page.
- */
-const dashboardScheduleQuery = { ...scheduleQuery, refetchInterval: 60_000 }
-
 // --- what happens next ------------------------------------------------------------------
 
 /** The auto-send check's row in the schedule: its kind, which no other job has. */
@@ -142,7 +136,9 @@ type Upcoming =
  */
 export function ComingUpCard() {
   const fires = useQuery(nextFiresQuery)
-  const schedule = useQuery(dashboardScheduleQuery)
+  // `scheduleQuery` refetches each minute on its own (#761), so the auto-send check's
+  // time and reason never go stale on an open page; one poll, not a second (#752).
+  const schedule = useQuery(scheduleQuery)
   const outlook = schedule.data?.auto_send ?? null
   const autoSendOn = outlook?.on === true
   const fetchedAt = new Date(fires.dataUpdatedAt)

@@ -20,6 +20,7 @@ import random
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from typing import Any, cast
 
 import pytest
@@ -2295,6 +2296,28 @@ def test_an_unreadable_hold_is_warned_about_once(
         assert lane.read(lambda s, u: linkedin_steps.auto_send_hold(s, u, account)) is not None
     warned = [r for r in caplog.records if "unreadable" in r.getMessage()]
     assert [r.levelno for r in warned] == [logging.WARNING, logging.DEBUG, logging.DEBUG]
+
+
+def _store_hold(session: Session, user: User, *, account: int, value: str) -> None:
+    set_setting(session, user, linkedin_steps._hold_key(account), value)
+
+
+def test_the_warn_once_memory_keeps_a_short_hash_not_the_value(
+    lane: Lane, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A large unreadable value costs the memory 16 characters, not its size (#724), and
+    two different values are still told apart."""
+    logged: set[tuple[int, int, str]] = set()
+    monkeypatch.setattr(linkedin_steps, "_UNREADABLE_HOLDS_LOGGED", logged)
+    account = lane.read(lambda s, u: ensure_account(s, u).id)
+    caplog.set_level(logging.DEBUG, logger="netkeep.services.linkedin_steps")
+    for value in ("x" * 100_000, "y" * 100_000):
+        lane.write(partial(_store_hold, account=account, value=value))
+        assert lane.read(lambda s, u: linkedin_steps.auto_send_hold(s, u, account)) is not None
+    assert len(logged) == 2
+    assert all(len(key) == 16 for _, _, key in logged)
+    warned = [r for r in caplog.records if "unreadable" in r.getMessage()]
+    assert [r.levelno for r in warned] == [logging.WARNING, logging.WARNING]
 
 
 def test_the_hold_is_written_for_a_run_that_already_ended(lane: Lane) -> None:

@@ -86,7 +86,7 @@ def mailbox(**overrides: Any) -> MailboxRead:
 def attention(
     *,
     dashboard: str | None = None,
-    gmail: str | None = None,
+    gmail: attention_service.GmailFlag | None = None,
     linkedin: str | None = None,
     settings: str | None = None,
     stopped: str | None = None,
