@@ -152,44 +152,53 @@ toward LinkedIn, Gmail, the user's machine, or any outside service. For example:
 - It loosens or removes a refusal, a guard, a pin in `tests/http_send_sites.txt`, or a
   test that pins a safety-relevant constant's literal value.
 - It turns a stop into a continue or a retry, including in error handling.
-- It changes parsing that a send, retry, or stop decision depends on (checkpoint,
-  already-sent, or reply detection), except to make netkeep stop more often.
+- It changes parsing that a send, its target, or a retry or stop decision depends on
+  (checkpoint, already-sent, or reply detection; a recipient address, profile URL, or
+  thread), except to make netkeep stop more often.
 - It adds access: an OAuth scope, a Keychain entry, a LaunchAgent, a Chrome launch or
   attach, a new outside destination, a non-loopback `serve` address, or a change to the
   local API secret.
 - It adds a runtime dependency, or changes the CI workflows, the release workflow, or
-  `scripts/install.sh`.
+  `scripts/install.sh`. A version update of an action in `ci.yml` counts as a dependency
+  update instead; one in `release.yml` still needs approval.
 - It removes a confirmation, preselects a recipient, or changes what an existing control
   does.
 - It changes the rules themselves: this section, "Safety rules that reviewers enforce",
-  `CLAUDE.md`, an ADR, or a safety limit in the spec.
+  `CLAUDE.md`, an ADR, or a safety rule or limit in the spec.
 - It publishes a release.
 
-These pull requests get the `needs-approval` and `safety` labels.
+When the review finds a pull request in this list, the merger adds the
+`needs-approval` and `safety` labels and asks the maintainer.
 
 ### Merges after review
 
 A pull request merges without waiting for approval when it only does one or more of
 these:
 
-- It refuses more, skips earlier, or checks harder.
+- It refuses more, stops sooner, or checks harder.
 - It hardens a pin or a guard in tests only.
 - It refactors a pinned function and keeps its behavior. A test that pins that behavior
   exists on `main` and passes unchanged.
-- It changes parsing that no send, retry, or stop decision depends on, error messages,
-  or a crash fix that stops instead of continuing.
+- It changes parsing that no send, target, retry, or stop decision depends on.
+- It changes the wording of an error message.
+- It fixes a crash by stopping instead of continuing.
 - It changes other docs, or UI that doesn't start an action.
 - It updates a dependency, except the `cryptography` split in
   [ADR 0011](docs/adr/0011-installation-and-updates.md). The review names any upstream
-  change to retries, timeouts, redirects, or input dispatch, and a Playwright update runs
-  the browser smoke suite.
+  change to retries, timeouts, redirects, or input dispatch. If such a change can make
+  netkeep send, retry, or click more, the pull request needs approval. A Playwright
+  update needs the browser smoke suite run on a real Chrome; the maintainer runs it and
+  posts the result in the pull request before the merge.
 
 A change that matches both lists, or neither, needs approval.
 
-The review for a pull request that touches a pinned function, a guard, or the browser,
-Gmail, or scheduler code says "tightens only" or "no behavior change", and gives the
-evidence: the test on `main` that pins the old behavior, or the diff that shows the new
-refusal. If the review can't, the pull request needs approval. Before the merge, the
+A pull request is in the safety scope when it touches `netkeep/linkedin/`,
+`netkeep/campaigns/`, `netkeep/services/`, `netkeep/web/api/`, `netkeep/worker.py`,
+`netkeep/chrome_*.py`, `netkeep/loopback.py`, a pinned function, a guard, secrets
+handling, or a frontend control that starts an action. Its review says "tightens only"
+or "no behavior change", and gives the evidence: the test on `main` that pins the old
+behavior, or the diff that shows the new refusal. If the review can't, the pull request
+needs approval. Before merging any safety-scope pull request without approval, the
 merger adds the `safety-tightening` label and a one-line comment saying why, so the
 maintainer can audit it later.
 
