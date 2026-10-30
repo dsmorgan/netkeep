@@ -64,6 +64,7 @@ from netkeep.linkedin.observe import (
 )
 from netkeep.linkedin.pacing import ScrollPlan, TypingPlan, rest_pointer_like_a_person
 from netkeep.linkedin.strict_origin import (
+    LINKEDIN_ORIGIN,
     on_origin,
     on_path,
     reads_one_way,
@@ -1633,7 +1634,7 @@ def _is_contact_compose(href: str, profile_id: str) -> bool:
     # #796: refused first wherever Chrome could read another origin than urlsplit does
     # (``///messaging/compose/``, a backslash, userinfo, an encoded host, a control
     # character or space); an absolute or ``//`` href must be on LinkedIn's origin.
-    if not on_origin(href, base=f"https://{MESSAGE_COMPOSE_HOST}"):
+    if not on_origin(href, base=LINKEDIN_ORIGIN):
         return False
     try:
         split = urlsplit(href)
@@ -1670,7 +1671,7 @@ def _is_profile_link(href: str | None, path: str, *, fold_case: bool) -> bool:
     slug as LinkedIn's routing reads it, case-folded; a profile id is compared exactly.
     First :func:`~netkeep.linkedin.strict_origin.on_origin` against LinkedIn's origin
     (#796): ``///in/<id>/``, a backslash, userinfo and the like are refused."""
-    if href is None or not on_origin(href, base=f"https://{MESSAGE_COMPOSE_HOST}"):
+    if href is None or not on_origin(href, base=LINKEDIN_ORIGIN):
         return False
     try:
         split = urlsplit(href)
