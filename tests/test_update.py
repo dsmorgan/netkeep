@@ -579,6 +579,35 @@ def test_a_constraints_file_that_cannot_be_kept_says_failed(
     assert world.state() is None
 
 
+def test_a_tls_context_that_cannot_be_built_says_so(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Step 1's real download fails to build its TLS context: the line says TLS, not
+    "could not keep the constraints files" (#800 review), and nothing connects."""
+
+    def no_context() -> ssl.SSLContext:
+        raise ssl.SSLError("no usable CA certificates")
+
+    connections = _Connections({})
+    monkeypatch.setattr("netkeep.services.update.http.client.HTTPSConnection", connections)
+    monkeypatch.setattr("netkeep.services.update.ssl.create_default_context", no_context)
+    latest = world.fetch
+
+    def fetch(url: str, limit: int) -> bytes:
+        if url == update.LATEST_URL:
+            return latest(url, limit)
+        return update.https_get(url, max_bytes=limit)
+
+    world.fetch = fetch  # type: ignore[method-assign]
+    world.install_login_item()
+    assert world.run_update() == 1
+    assert "   failed: could not set up TLS for the download:" in world.text
+    assert "could not keep the constraints files" not in world.text
+    assert connections.opened == []
+    assert world.uv_calls == [] and world.backups == []
+    assert world.running == OLD, "serve was never stopped"
+
+
 @pytest.mark.parametrize(
     "sums",
     [
@@ -921,23 +950,6 @@ def test_a_download_is_https_from_github_only(url: str, monkeypatch: pytest.Monk
     monkeypatch.setattr("netkeep.services.update.http.client.HTTPSConnection", connections)
     with pytest.raises(update.UpdateError, match="only HTTPS from GitHub"):
         update.https_get(url, max_bytes=10)
-    assert connections.opened == []
-
-
-def test_a_tls_context_that_cannot_be_built_is_a_download_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Building the TLS context fails as a download, never as "could not keep the
-    constraints files" (#800 review)."""
-
-    def broken() -> ssl.SSLContext:
-        raise ssl.SSLError("no CA certificates")
-
-    connections = _Connections({})
-    monkeypatch.setattr("netkeep.services.update.http.client.HTTPSConnection", connections)
-    monkeypatch.setattr("netkeep.services.update.ssl.create_default_context", broken)
-    with pytest.raises(update.UpdateError, match=r"could not download .*no TLS context"):
-        update.https_get("https://github.com/x", max_bytes=10)
     assert connections.opened == []
 
 
