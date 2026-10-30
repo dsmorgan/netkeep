@@ -39,6 +39,7 @@ from profile_site import (
     LOCATION,
     LOGIN_URL,
     ORIGIN,
+    ProfileControls,
     ProfilePage,
     ProfileSite,
     ProfileTab,
@@ -1080,6 +1081,37 @@ def test_a_scroll_step_type_is_what_the_back_up_uses() -> None:
         ({"href": "/in/x/"}, None, "opens something else"),
         # Protocol-relative: the same path on another host is not this profile's.
         ({"href": f"//evil.example.test/in/{PRIYA.slug}/overlay/contact-info/"}, None, "else"),
+        # #796: the #795 review's href. urlsplit reads its host as LinkedIn's, and Chrome,
+        # reading the backslash as '/', as evil.test. Then its encoded and bare variants.
+        (
+            {"href": f"https://evil.test\\@www.linkedin.com/in/{PRIYA.slug}/overlay/contact-info/"},
+            None,
+            "else",
+        ),
+        (
+            {"href": f"//evil.test\\@www.linkedin.com/in/{PRIYA.slug}/overlay/contact-info/"},
+            None,
+            "else",
+        ),
+        (
+            {
+                "href": f"https://evil.test%5C@www.linkedin.com/in/{PRIYA.slug}/overlay/contact-info/"
+            },
+            None,
+            "else",
+        ),
+        (
+            {"href": f"https://evil.test%40www.linkedin.com/in/{PRIYA.slug}/overlay/contact-info/"},
+            None,
+            "else",
+        ),
+        (
+            {"href": f"https://evil.test@www.linkedin.com/in/{PRIYA.slug}/overlay/contact-info/"},
+            None,
+            "else",
+        ),
+        ({"href": f"https:///in/{PRIYA.slug}/overlay/contact-info/"}, None, "else"),
+        ({"href": f"/in/{PRIYA.slug}/overlay/contact-info/\t"}, None, "else"),
         ({}, "/in/someone-else-fake/", "the tab is not on the profile"),
     ],
 )
@@ -1090,7 +1122,9 @@ async def test_the_click_method_refuses_before_it_clicks(
     provider, _ = fake_provider(site)
     async with provider.run("account-1") as run:
         await run.goto(f"{ORIGIN}/in/{PRIYA.slug}/")
-        click = await run.click_contact_info(path or f"/in/{PRIYA.slug}/", pause_s=0.0)
+        click = await run.click_contact_info(
+            path or f"/in/{PRIYA.slug}/", origin=ORIGIN, pause_s=0.0
+        )
     assert not click.clicked
     assert click.refusal is not None and refusal in click.refusal
     assert site.clicks == [] and "click" not in site.lookups
@@ -1109,9 +1143,78 @@ async def test_the_click_method_pauses_first_and_rechecks_where_the_tab_is() -> 
     async with provider.run("account-1") as run:
         await run.goto(f"{ORIGIN}/in/{PRIYA.slug}/")
         click = await run.click_contact_info(
-            f"/in/{PRIYA.slug}/", pause_s=1.25, sleep=pause_while_the_tab_moves
+            f"/in/{PRIYA.slug}/", origin=ORIGIN, pause_s=1.25, sleep=pause_while_the_tab_moves
         )
     assert order == ["pause 1.25"]  # nothing was looked up before the pause
+    assert (click.clicked, click.refusal) == (False, "the tab left the profile before the click")
+    assert site.clicks == []
+
+
+@pytest.mark.parametrize(
+    "href",
+    [
+        f"/in/{PRIYA.slug}/overlay/contact-info/",
+        "overlay/contact-info/",
+        f"{ORIGIN}/in/{PRIYA.slug}/overlay/contact-info/",
+        f"//www.linkedin.com/in/{PRIYA.slug.upper()}/overlay/contact-info?trk=x",
+    ],
+)
+async def test_the_click_method_still_clicks_an_ordinary_href(href: str) -> None:
+    """#796: relative, absolute, protocol-relative, upper case, a query: all still click."""
+    site = ProfileSite([ProfilePage(PRIYA, href=href)])
+    provider, _ = fake_provider(site)
+    async with provider.run("account-1") as run:
+        await run.goto(f"{ORIGIN}/in/{PRIYA.slug}/")
+        click = await run.click_contact_info(f"/in/{PRIYA.slug}/", origin=ORIGIN, pause_s=0.0)
+    assert click.clicked, click.refusal
+
+
+async def test_the_click_method_refuses_the_profile_path_on_another_origin() -> None:
+    """#796: the tab must be on ``origin``, not only at the profile's path."""
+    site = ProfileSite([ProfilePage(PRIYA)])
+    provider, _ = fake_provider(site)
+    async with provider.run("account-1") as run:
+        await run.goto(f"https://evil.example.test/in/{PRIYA.slug}/")
+        click = await run.click_contact_info(f"/in/{PRIYA.slug}/", origin=ORIGIN, pause_s=0.0)
+    assert (click.clicked, click.refusal) == (False, "the tab is not on the profile")
+    assert site.clicks == []
+
+
+@pytest.mark.parametrize("moved_to", ["https://evil.example.test", "http://www.linkedin.com"])
+async def test_the_click_method_rechecks_the_origin_after_the_pause(moved_to: str) -> None:
+    """#796: a tab that left for the same path on another origin during the pause."""
+    site = ProfileSite([ProfilePage(PRIYA)])
+    provider, _ = fake_provider(site)
+
+    async def pause_while_the_tab_moves(seconds: float) -> None:
+        tab_of(site)._url = f"{moved_to}/in/{PRIYA.slug}/"
+
+    async with provider.run("account-1") as run:
+        await run.goto(f"{ORIGIN}/in/{PRIYA.slug}/")
+        click = await run.click_contact_info(
+            f"/in/{PRIYA.slug}/", origin=ORIGIN, pause_s=1.0, sleep=pause_while_the_tab_moves
+        )
+    assert (click.clicked, click.refusal) == (False, "the tab left the profile before the click")
+    assert site.clicks == []
+
+
+async def test_the_click_method_resolves_the_href_against_a_tab_still_on_the_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#796: the href is read against the tab's url, so a tab that moved to another
+    origin while the control was read refuses rather than vouch for that origin's link."""
+    site = ProfileSite([ProfilePage(PRIYA, href="overlay/contact-info/")])
+    provider, _ = fake_provider(site)
+    count = ProfileControls.count
+
+    async def count_while_the_tab_moves(self: ProfileControls) -> int:
+        tab_of(site)._url = f"https://evil.example.test/in/{PRIYA.slug}/"
+        return await count(self)
+
+    monkeypatch.setattr(ProfileControls, "count", count_while_the_tab_moves)
+    async with provider.run("account-1") as run:
+        await run.goto(f"{ORIGIN}/in/{PRIYA.slug}/")
+        click = await run.click_contact_info(f"/in/{PRIYA.slug}/", origin=ORIGIN, pause_s=0.0)
     assert (click.clicked, click.refusal) == (False, "the tab left the profile before the click")
     assert site.clicks == []
 
@@ -1121,7 +1224,7 @@ async def test_the_click_method_clicks_once_with_a_persons_press() -> None:
     provider, _ = fake_provider(site)
     async with provider.run("account-1") as run:
         await run.goto(f"{ORIGIN}/in/{PRIYA.slug.upper()}/")  # the slug as the tab spells it
-        click = await run.click_contact_info(f"/in/{PRIYA.slug}/", pause_s=0.0)
+        click = await run.click_contact_info(f"/in/{PRIYA.slug}/", origin=ORIGIN, pause_s=0.0)
     assert click.clicked and click.refusal is None
     assert site.clicks == [(PRIYA.slug, 90.0, 10_000.0)]
 
@@ -1133,7 +1236,7 @@ async def test_the_click_method_never_reopens_a_lost_tab() -> None:
         await run.goto(f"{ORIGIN}/in/{PRIYA.slug}/")
         tab_of(site).user_closed_it()
         with pytest.raises(BrowserUnavailable, match="went away"):
-            await run.click_contact_info(f"/in/{PRIYA.slug}/", pause_s=0.0)
+            await run.click_contact_info(f"/in/{PRIYA.slug}/", origin=ORIGIN, pause_s=0.0)
     assert site.clicks == [] and len(site.tabs) == 1
 
 
@@ -1294,7 +1397,7 @@ async def test_the_click_method_reads_a_percent_encoded_slug() -> None:
     provider, _ = fake_provider(site)
     async with provider.run("account-1") as run:
         await run.goto(f"{ORIGIN}/in/pr%C3%ADya-fake/")
-        click = await run.click_contact_info("/in/pr\u00edya-fake/", pause_s=0.0)
+        click = await run.click_contact_info("/in/pr\u00edya-fake/", origin=ORIGIN, pause_s=0.0)
     assert click.clicked, click.refusal
 
 
@@ -1308,7 +1411,9 @@ async def test_the_click_method_rechecks_the_tab_after_the_pause() -> None:
     async with provider.run("account-1") as run:
         await run.goto(f"{ORIGIN}/in/{PRIYA.slug}/")
         with pytest.raises(BrowserUnavailable, match="before the Contact info click"):
-            await run.click_contact_info(f"/in/{PRIYA.slug}/", pause_s=1.0, sleep=the_tab_goes_away)
+            await run.click_contact_info(
+                f"/in/{PRIYA.slug}/", origin=ORIGIN, pause_s=1.0, sleep=the_tab_goes_away
+            )
     assert site.clicks == [] and site.lookups == []
 
 

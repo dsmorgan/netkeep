@@ -96,8 +96,23 @@ async def test_readable_text_inside_the_h2_refuses_and_hidden_parts_do_not() -> 
         {"contact_info": None},
         {"contact_info": f"/in/{THADDEUS.slug}/overlay/contact-info/"},
         {"contact_info": f"/in/{ZEPHYRINE.slug}/"},
+        # #796: urlsplit reads these as this profile's link; Chrome goes to evil.test.
+        {
+            "contact_info": f"https://evil.test\\@www.linkedin.com/in/{ZEPHYRINE.slug}/overlay/contact-info/"
+        },
+        {
+            "contact_info": f"https://evil.test%40www.linkedin.com/in/{ZEPHYRINE.slug}/overlay/contact-info/"
+        },
     ],
-    ids=["two h2s", "no h2", "no Contact info", "Contact info elsewhere", "not the overlay"],
+    ids=[
+        "two h2s",
+        "no h2",
+        "no Contact info",
+        "Contact info elsewhere",
+        "not the overlay",
+        "a backslash before userinfo",
+        "an encoded @",
+    ],
 )
 async def test_no_single_top_card_h2_skips_the_name_check_and_the_card_decides(
     profile: dict[str, Any],

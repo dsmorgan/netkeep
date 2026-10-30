@@ -164,27 +164,58 @@ def url_path(url: str) -> str:
     return trim_path(urlsplit(url).path if "://" in url else url)
 
 
-def on_path(url: str, path: str, *, base: str | None = None) -> bool:
-    """Whether ``url`` (absolute, or relative to ``base``) is at ``path``.
+def _authority_origin(url: str) -> Origin | None:
+    """The origin of an absolute ``url``'s authority, read strictly, else ``None``.
 
-    A path comparison, not a strict origin check: ``url`` goes through ``urlsplit``,
-    not :func:`parse_strict_origin`, so it decides nothing about where a browser may
-    navigate. The paths are compared after percent-decoding and case-folding, as
-    LinkedIn's routing reads a slug, and after dropping one trailing ``/``. With a
-    ``base``, a relative ``url`` takes its origin and an absolute one must share its
-    scheme, host and port. With ``base=None`` the origin is not compared at all: any
-    host at ``path`` matches. The browser and the page readers share it (#719 review).
+    The authority (what ``urlsplit`` calls the netloc) goes through
+    :func:`parse_strict_origin`, so userinfo is refused; so is one that is empty
+    (``https:///x``, which a browser reads by skipping the extra slashes to the next
+    segment as the host), not ASCII, or percent-encoded (``%40`` is an ``@``, and a
+    browser decodes a host before it reads it).
     """
     try:
-        split = urlsplit(urljoin(base, url) if base is not None else url)
-        if base is not None:
-            want = urlsplit(base)
-            if (split.scheme, split.hostname, split.port) != (
-                want.scheme,
-                want.hostname,
-                want.port,
-            ):
-                return False
+        split = urlsplit(url)
+    except ValueError:
+        return None
+    netloc = split.netloc
+    if not split.scheme or not netloc or not netloc.isascii() or "%" in netloc:
+        return None
+    try:
+        return parse_strict_origin(f"{split.scheme}://{netloc}")
+    except NotAStrictOrigin:
+        return None
+
+
+def on_path(url: str, path: str, *, base: str) -> bool:
+    """Whether ``url`` (absolute, or relative to ``base``) is at ``path`` on ``base``'s origin.
+
+    ``base`` is the origin the caller expects, or a page url on it. ``url`` and
+    ``base`` are refused first, as written, wherever ``urlsplit`` and a browser could
+    read them two ways (#796): a backslash, which a browser reads as ``/``; any ASCII
+    control character or whitespace; and an authority that is not a strict origin
+    (:func:`_authority_origin`: userinfo, an encoded or empty host). A ``url`` that
+    names an authority (a scheme, or a leading ``//``) must name ``base``'s scheme,
+    host and port exactly; one that doesn't takes ``base``'s.
+
+    Then the paths are compared after percent-decoding and case-folding, as
+    LinkedIn's routing reads a slug, and after dropping one trailing ``/``. The
+    browser and the page readers share it (#719 review).
+    """
+    if any(ch in _CONTROL_OR_SPACE or ch == "\\" for ch in url + base):
+        return False
+    want = _authority_origin(base)
+    if want is None:
+        return False
+    try:
+        relative = urlsplit(url)
+    except ValueError:
+        return False
+    names_authority = bool(relative.scheme) or url.startswith("//")
+    absolute = url if relative.scheme else f"{want.scheme}:{url}"
+    if names_authority and _authority_origin(absolute) != want:
+        return False
+    try:
+        split = urlsplit(urljoin(base, url))
     except ValueError:
         return False
     return trim_path(unquote(split.path)).casefold() == trim_path(unquote(path)).casefold()

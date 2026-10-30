@@ -45,6 +45,7 @@ from netkeep.linkedin.pacing import (
     scroll_like_a_person,
 )
 from netkeep.linkedin.page_messaging import BRIEF_SCROLL_DELTA_PX, SCROLL_BACK_DELTA_PX
+from netkeep.linkedin.strict_origin import LINKEDIN_ORIGIN
 
 VIEWPORT = (1280.0, 800.0)
 #: The invented layout, in document pixels: a fixed global navigation bar, and a sticky
@@ -358,12 +359,19 @@ async def test_the_probe_reads_only_and_never_after_the_click() -> None:
     async with provider.run() as run:
         await run.goto(f"https://www.linkedin.com/in/{ZEPHYRINE.slug}/")
         path = f"/in/{ZEPHYRINE.slug}/"
-        assert await run.message_cover(path, ZEPHYRINE.profile_id) is None  # at the top
+        assert (
+            await run.message_cover(path, ZEPHYRINE.profile_id, origin=LINKEDIN_ORIGIN) is None
+        )  # at the top
         await site.tab.mouse.wheel(0, COVERING_SCROLL_PX)
-        assert await run.message_cover(path, ZEPHYRINE.profile_id) is (
+        assert await run.message_cover(path, ZEPHYRINE.profile_id, origin=LINKEDIN_ORIGIN) is (
             NotClear.COVERED_BY_STICKY_HEADER
         )
-        assert await run.message_cover("/in/someone-else/", ZEPHYRINE.profile_id) is None
+        assert (
+            await run.message_cover(
+                "/in/someone-else/", ZEPHYRINE.profile_id, origin=LINKEDIN_ORIGIN
+            )
+            is None
+        )
         assert site.tab.clicks == [] and site.tab.attempts == []
         assert not run.message_click_attempted
         assert all(s.detached for s in site.geometry_sessions)
@@ -464,7 +472,9 @@ async def test_a_category_that_isnt_covered_never_scrolls_back(
     """Only a covered top card scrolls back; any other answer leaves the page alone."""
     calls = _count_scrolls(monkeypatch)
 
-    async def answer(self: BrowserRun, profile_path: str, profile_id: str) -> NotClear:
+    async def answer(
+        self: BrowserRun, profile_path: str, profile_id: str, *, origin: str
+    ) -> NotClear:
         return category
 
     monkeypatch.setattr(BrowserRun, "message_cover", answer)
@@ -482,10 +492,12 @@ async def test_the_probe_answers_nothing_once_the_message_click_was_sent() -> No
     path = f"/in/{ZEPHYRINE.slug}/"
     async with provider.run() as run:
         await run.goto(f"https://www.linkedin.com{path}")
-        click = await run.click_message(path, ZEPHYRINE.profile_id, pause_s=0.0)
+        click = await run.click_message(
+            path, ZEPHYRINE.profile_id, origin=LINKEDIN_ORIGIN, pause_s=0.0
+        )
         assert click.clicked
         sessions = len(site.geometry_sessions)
         # Scrolled under the sticky header, a probe before the click would say covered.
         await site.tab.mouse.wheel(0, COVERING_SCROLL_PX)
-        assert await run.message_cover(path, ZEPHYRINE.profile_id) is None
+        assert await run.message_cover(path, ZEPHYRINE.profile_id, origin=LINKEDIN_ORIGIN) is None
         assert len(site.geometry_sessions) == sessions  # nothing read after the click

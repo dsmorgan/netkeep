@@ -829,7 +829,7 @@ async def test_a_failure_records_only_its_type(
             session, _user(session), contact_id, now=datetime.now(UTC), settings=Settings()
         )
 
-    async def boom(self: BrowserRun, *args: object) -> None:
+    async def boom(self: BrowserRun, *args: object, **kwargs: object) -> None:
         raise ValueError(f'locator("[href={HREF}]") timed out')
 
     monkeypatch.setattr(BrowserRun, "message_check_snapshot", boom)
@@ -856,7 +856,7 @@ async def test_a_check_keeps_its_run_s_heartbeat_while_it_works(
         )
     seen: list[tuple[datetime | None, str | None]] = []
 
-    async def look(self: BrowserRun, *args: object) -> None:
+    async def look(self: BrowserRun, *args: object, **kwargs: object) -> None:
         async with asyncio.timeout(5):
             while True:
                 with session_scope(cli_db) as session:

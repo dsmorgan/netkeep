@@ -10,6 +10,7 @@ host a real browser would actually reach.
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import urljoin, urlsplit
 
 import pytest
 
@@ -194,21 +195,135 @@ def test_the_path_trims_one_slash(value: str, trimmed: str | None, path: str) ->
     assert url_path(value) == path
 
 
+SLUG = "fake-slug-qz"
+CONTACT_INFO = f"/in/{SLUG}/overlay/contact-info"
+PROFILE_URL = f"{LINKEDIN_ORIGIN}/in/{SLUG}/"
+
+
 @pytest.mark.parametrize(
     ("url", "path", "base", "at"),
     [
-        ("https://www.linkedin.com/in/fake-slug-qz/", "/in/fake-slug-qz", None, True),
-        ("https://www.linkedin.com/in/Fake%2DSlug-QZ", "/in/fake-slug-qz/", None, True),
-        ("/in/fake-slug-qz", "/in/fake-slug-qz", LINKEDIN_ORIGIN, True),
-        ("/in/fake-slug-qz", "/in/another-qz", LINKEDIN_ORIGIN, False),
-        ("https://evil.example.test/in/fake-slug-qz", "/in/fake-slug-qz", LINKEDIN_ORIGIN, False),
-        ("http://www.linkedin.com/in/fake-slug-qz", "/in/fake-slug-qz", LINKEDIN_ORIGIN, False),
+        (f"https://www.linkedin.com/in/{SLUG}/", f"/in/{SLUG}", LINKEDIN_ORIGIN, True),
+        ("https://www.linkedin.com/in/Fake%2DSlug-QZ", f"/in/{SLUG}/", LINKEDIN_ORIGIN, True),
+        (f"/in/{SLUG}", f"/in/{SLUG}", LINKEDIN_ORIGIN, True),
+        (f"/in/{SLUG}", "/in/another-qz", LINKEDIN_ORIGIN, False),
+        (f"https://evil.example.test/in/{SLUG}", f"/in/{SLUG}", LINKEDIN_ORIGIN, False),
+        (f"http://www.linkedin.com/in/{SLUG}", f"/in/{SLUG}", LINKEDIN_ORIGIN, False),
         ("https://www.linkedin.com:444/in/x", "/in/x", LINKEDIN_ORIGIN, False),
-        ("https://[::1/in/x", "/in/x", None, False),
+        ("https://[::1/in/x", "/in/x", LINKEDIN_ORIGIN, False),
     ],
 )
 def test_on_path_compares_the_path_on_the_same_origin(
-    url: str, path: str, base: str | None, at: bool
+    url: str, path: str, base: str, at: bool
 ) -> None:
     """#719 review: the one path check the browser and the page readers share."""
     assert on_path(url, path, base=base) is at
+
+
+@pytest.mark.parametrize(
+    ("url", "base"),
+    [
+        # Relative, absolute, a trailing slash or none, a query, a fragment.
+        (f"/in/{SLUG}/overlay/contact-info/", PROFILE_URL),
+        (f"/in/{SLUG}/overlay/contact-info", PROFILE_URL),
+        ("overlay/contact-info/", PROFILE_URL),
+        (f"https://www.linkedin.com/in/{SLUG}/overlay/contact-info/", PROFILE_URL),
+        (f"//www.linkedin.com/in/{SLUG}/overlay/contact-info/", PROFILE_URL),
+        (f"/in/{SLUG}/overlay/contact-info/?trk=a@b.test", PROFILE_URL),
+        (f"/in/{SLUG}/overlay/contact-info/#top", PROFILE_URL),
+        # Case: the scheme, the host and the slug.
+        (f"HTTPS://WWW.LinkedIn.com/in/{SLUG.upper()}/overlay/contact-info/", PROFILE_URL),
+        # A percent-encoded slug, and a base that is the bare origin.
+        ("/in/fake%2Dslug%2dqz/overlay/contact-info/", LINKEDIN_ORIGIN),
+        (f"/in/{SLUG}/overlay/contact-info/", LINKEDIN_ORIGIN),
+        (f"/in/{SLUG}/overlay/contact-info/", f"{LINKEDIN_ORIGIN}/"),
+    ],
+)
+def test_on_path_still_takes_an_ordinary_linkedin_url(url: str, base: str) -> None:
+    """#796: the refusals below leave every ordinary spelling of the same link alone."""
+    assert on_path(url, CONTACT_INFO, base=base) is True
+
+
+def test_on_path_reads_a_non_ascii_slug_either_way() -> None:
+    profile = "/in/pr\u00edya-fake/"
+    assert on_path(f"{LINKEDIN_ORIGIN}/in/pr%C3%ADya-fake/", profile, base=LINKEDIN_ORIGIN)
+    assert on_path(f"{LINKEDIN_ORIGIN}{profile}", profile, base=LINKEDIN_ORIGIN)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        # The #795 review's example: urlsplit reads the host as LinkedIn, Chrome as evil.test.
+        f"https://evil.test\\@www.linkedin.com/in/{SLUG}/overlay/contact-info/",
+        f"//evil.test\\@www.linkedin.com/in/{SLUG}/overlay/contact-info/",
+        # A backslash anywhere: Chrome reads it as '/'.
+        f"https:\\\\evil.test/in/{SLUG}/overlay/contact-info/",
+        f"\\\\evil.test/in/{SLUG}/overlay/contact-info/",
+        f"/\\evil.test/in/{SLUG}/overlay/contact-info/",
+        f"/in/{SLUG}\\overlay/contact-info/",
+        # Userinfo, plain or with a password.
+        f"https://evil.test@www.linkedin.com/in/{SLUG}/overlay/contact-info/",
+        f"https://evil.test:pw@www.linkedin.com/in/{SLUG}/overlay/contact-info/",
+        f"//evil.test@www.linkedin.com/in/{SLUG}/overlay/contact-info/",
+        f"https://@www.linkedin.com/in/{SLUG}/overlay/contact-info/",
+        # Encoded forms in the authority: an '@', a backslash, a slash, a host letter.
+        f"https://evil.test%40www.linkedin.com/in/{SLUG}/overlay/contact-info/",
+        f"https://www.linkedin.com%40evil.test/in/{SLUG}/overlay/contact-info/",
+        f"https://evil.test%5C@www.linkedin.com/in/{SLUG}/overlay/contact-info/",
+        f"https://evil.test%5c%40www.linkedin.com/in/{SLUG}/overlay/contact-info/",
+        f"https://www.linkedin.com%2F@evil.test/in/{SLUG}/overlay/contact-info/",
+        f"https://www.linked%69n.com/in/{SLUG}/overlay/contact-info/",
+        # An empty authority: Chrome skips the slashes and takes "in" as the host.
+        f"https:///in/{SLUG}/overlay/contact-info/",
+        f"///in/{SLUG}/overlay/contact-info/",
+        f"https:/in/{SLUG}/overlay/contact-info/",
+        # A host that isn't ASCII.
+        f"https://www.linkedin.c\u043em/in/{SLUG}/overlay/contact-info/",
+        # Control characters and whitespace, which Chrome strips or drops.
+        f"https://evil.test\t@www.linkedin.com/in/{SLUG}/overlay/contact-info/",
+        f"https://evil.test\n/in/{SLUG}/overlay/contact-info/",
+        f" /in/{SLUG}/overlay/contact-info/",
+        f"/in/{SLUG}/overlay/contact-info/\x00",
+        f"/in/{SLUG}/over lay/contact-info/",
+        f"/in/{SLUG}/overlay/contact-info/\x7f",
+    ],
+)
+def test_on_path_refuses_what_a_browser_could_read_another_way(url: str) -> None:
+    """#796: refused as written, before the paths are compared, against either base."""
+    assert on_path(url, CONTACT_INFO, base=PROFILE_URL) is False
+    assert on_path(url, CONTACT_INFO, base=LINKEDIN_ORIGIN) is False
+
+
+def test_the_review_example_fooled_urlsplit() -> None:
+    """The #795 review's href, which ``urlsplit`` alone takes as this profile's link."""
+    href = f"https://evil.test\\@www.linkedin.com/in/{SLUG}/overlay/contact-info/"
+    split = urlsplit(urljoin(PROFILE_URL, href))
+    assert split.hostname == "www.linkedin.com"
+    assert split.path == f"{CONTACT_INFO}/"
+    assert on_path(href, CONTACT_INFO, base=PROFILE_URL) is False
+
+
+@pytest.mark.parametrize(
+    "base",
+    [
+        f"https://evil.test\\@www.linkedin.com/in/{SLUG}/",
+        f"https://evil.test@www.linkedin.com/in/{SLUG}/",
+        f"https://www.linkedin.com%2F/in/{SLUG}/",
+        f"/in/{SLUG}/",
+        "",
+        "about:blank",
+        f"https://www.linkedin.com/in/{SLUG}/\t",
+    ],
+)
+def test_on_path_refuses_a_base_that_is_not_a_strict_origin(base: str) -> None:
+    """The base is held to the same rules: it must name its origin unambiguously."""
+    assert on_path(f"/in/{SLUG}/overlay/contact-info/", CONTACT_INFO, base=base) is False
+
+
+def test_on_path_requires_the_origin() -> None:
+    """#796: no caller can skip the origin. A foreign host at the right path is refused."""
+    foreign = f"https://evil.test/in/{SLUG}/"
+    assert on_path(foreign, f"/in/{SLUG}/", base=LINKEDIN_ORIGIN) is False
+    assert on_path(foreign, f"/in/{SLUG}/", base="https://evil.test") is True
+    with pytest.raises(TypeError):
+        on_path(foreign, f"/in/{SLUG}/")  # type: ignore[call-arg]
