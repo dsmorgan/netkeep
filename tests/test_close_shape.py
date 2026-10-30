@@ -782,6 +782,25 @@ async def test_the_bubble_check_reads_the_tab_that_holds_the_contact_s_bubble() 
     assert "header name longer by 8, header name starts with suffix" in report
 
 
+async def test_a_tab_whose_url_reads_two_ways_is_not_on_the_origin() -> None:
+    """#796: a tab is read only when its url is on the origin, read strictly."""
+    site = MessagingSite(PERSON)
+    ambiguous = [
+        _tab(site, _bubble(), url=url)
+        for url in (
+            "https://evil.test\\@www.linkedin.com/feed/",
+            "https://evil.test@www.linkedin.com/feed/",
+            "https://evil.test%40www.linkedin.com/feed/",
+            "https:///feed/",
+        )
+    ]
+    mine = _tab(site, _bubble())
+    found, _ = await bubble_check(site)
+    assert (found.tabs, found.on_origin, found.with_bubble, found.for_contact) == (5, 1, 1, 1)
+    assert all(tab.reads == 0 for tab in ambiguous)
+    assert_untouched(site, [*ambiguous, mine])
+
+
 async def test_no_tab_with_the_contact_s_bubble_reports_counts_only() -> None:
     site = MessagingSite(PERSON)
     tabs = [_tab(site, _bubble(member=OTHER)), _tab(site, "<main></main>")]

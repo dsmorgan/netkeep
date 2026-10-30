@@ -101,7 +101,12 @@ from netkeep.linkedin.pacing import (
     ScrollProfile,
     scroll_like_a_person,
 )
-from netkeep.linkedin.strict_origin import LINKEDIN_ORIGIN, require_page_origin, trim_path
+from netkeep.linkedin.strict_origin import (
+    LINKEDIN_ORIGIN,
+    on_origin,
+    require_page_origin,
+    trim_path,
+)
 from netkeep.linkedin.voyager import RouteChanged
 
 log = logging.getLogger(__name__)
@@ -530,18 +535,14 @@ class PageInbox:
         outcome = classify(200, url, "")
         if outcome in (Outcome.CHECKPOINT, Outcome.LOGGED_OUT):
             raise InboxReadStopped(outcome, final_url=url)
-        split = urlsplit(url)
-        want = urlsplit(self._origin)
-        same_origin = (split.scheme, split.hostname, split.port) == (
-            want.scheme,
-            want.hostname,
-            want.port,
+        # #796: the origin read strictly; the path only once it reads one way.
+        same_origin = "://" in url and on_origin(url, base=self._origin)
+        path = urlsplit(url).path if same_origin else ""
+        on_page = same_origin and (
+            trim_path(path) == trim_path(MESSAGING_PAGE_PATH)
+            or (thread and path.startswith(THREAD_PATH_PREFIX))
         )
-        path = trim_path(split.path)
-        on_page = path == trim_path(MESSAGING_PAGE_PATH) or (
-            thread and split.path.startswith(THREAD_PATH_PREFIX)
-        )
-        if not (same_origin and on_page):
+        if not on_page:
             log.warning("inbox: the tab is not on the messaging page; stopping")
             raise InboxReadStopped(Outcome.ROUTE_CHANGED, final_url=url)
 

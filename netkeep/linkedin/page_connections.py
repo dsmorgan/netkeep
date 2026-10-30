@@ -153,7 +153,12 @@ from netkeep.linkedin.pacing import (
     ScrollProfile,
     scroll_like_a_person,
 )
-from netkeep.linkedin.strict_origin import LINKEDIN_ORIGIN, require_page_origin, url_path
+from netkeep.linkedin.strict_origin import (
+    LINKEDIN_ORIGIN,
+    on_origin,
+    require_page_origin,
+    url_path,
+)
 from netkeep.linkedin.voyager import ConnectionsPageResult, ConnectionSummary, RouteChanged
 
 log = logging.getLogger(__name__)
@@ -878,13 +883,12 @@ class PageConnections:
         outcome = classify(200, url, "")
         if outcome in (Outcome.CHECKPOINT, Outcome.LOGGED_OUT):
             return SourcePage(outcome, url)
-        split = urlsplit(url)
-        want = urlsplit(self._origin)
-        on_page = (split.scheme, split.hostname, split.port) == (
-            want.scheme,
-            want.hostname,
-            want.port,
-        ) and url_path(split.path) == url_path(CONNECTIONS_PAGE_PATH)
+        # #796: the origin read strictly; the path only once it reads one way.
+        on_page = (
+            "://" in url
+            and on_origin(url, base=self._origin)
+            and url_path(urlsplit(url).path) == url_path(CONNECTIONS_PAGE_PATH)
+        )
         if not on_page:
             log.warning("connections: the tab left the connections page; stopping")
             return SourcePage(Outcome.ROUTE_CHANGED, url)

@@ -186,30 +186,46 @@ def _authority_origin(url: str) -> Origin | None:
         return None
 
 
+def reads_one_way(url: str) -> bool:
+    """Whether a browser and ``urlsplit`` read ``url``'s origin the same way (#796).
+
+    Refused, as written: a backslash, which a browser reads as ``/``; any ASCII control
+    character or whitespace, which a browser strips or drops; and, when ``url`` names
+    an authority (a scheme, or a leading ``//``), one that is not a strict origin
+    (:func:`_authority_origin`: userinfo, an encoded, non-ASCII or empty host). A
+    scheme with no authority (``https:x``, ``mailto:``) names no origin to read, so it
+    is refused too. A relative reference with none of these reads one way.
+    """
+    if any(ch in _CONTROL_OR_SPACE or ch == "\\" for ch in url):
+        return False
+    try:
+        split = urlsplit(url)
+    except ValueError:
+        return False
+    if split.scheme:
+        return _authority_origin(url) is not None
+    return not url.startswith("//") or _authority_origin(f"https:{url}") is not None
+
+
 def on_origin(url: str, *, base: str) -> bool:
     """Whether ``url`` (absolute, or relative to ``base``) reads, unambiguously, as on
     ``base``'s origin.
 
-    ``base`` is the origin the caller expects, or a page url on it. ``url`` and
-    ``base`` are refused, as written, wherever ``urlsplit`` and a browser could read
-    them two ways (#796): a backslash, which a browser reads as ``/``; any ASCII
-    control character or whitespace; and an authority that is not a strict origin
-    (:func:`_authority_origin`: userinfo, an encoded, non-ASCII or empty host). A
-    ``url`` that names an authority (a scheme, or a leading ``//``) must name
-    ``base``'s scheme, host and port exactly; one that doesn't takes ``base``'s.
+    ``base`` is the origin the caller expects, or a page url on it, and must name an
+    authority. Both must pass :func:`reads_one_way`. A ``url`` that names an authority
+    must name ``base``'s scheme, host and port exactly; one that doesn't takes
+    ``base``'s.
     """
-    if any(ch in _CONTROL_OR_SPACE or ch == "\\" for ch in url + base):
+    if not reads_one_way(base) or not reads_one_way(url):
         return False
     want = _authority_origin(base)
     if want is None:
         return False
-    try:
-        relative = urlsplit(url)
-    except ValueError:
-        return False
-    names_authority = bool(relative.scheme) or url.startswith("//")
-    absolute = url if relative.scheme else f"{want.scheme}:{url}"
-    return not names_authority or _authority_origin(absolute) == want
+    if urlsplit(url).scheme:
+        return _authority_origin(url) == want
+    if url.startswith("//"):
+        return _authority_origin(f"{want.scheme}:{url}") == want
+    return True
 
 
 def on_path(url: str, path: str, *, base: str) -> bool:

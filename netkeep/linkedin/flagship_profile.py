@@ -62,6 +62,7 @@ from netkeep.linkedin.flight import (
     is_element,
     parse_flight,
 )
+from netkeep.linkedin.strict_origin import LINKEDIN_ORIGIN, on_origin
 from netkeep.linkedin.voyager import (
     ContactInfo,
     EducationEntry,
@@ -813,7 +814,9 @@ def parse_contact_info(body: bytes | str, *, slug: str) -> ContactInfo:
     if not profile_links:
         raise RouteChanged(endpoint, "an overlay that does not say whose profile it is")
     for url in profile_links:
-        linked = profile_slug(urlsplit(url).path)
+        # #796: the link must read one way, on LinkedIn's origin, before its path is.
+        on_linkedin = on_origin(url, base=LINKEDIN_ORIGIN)
+        linked = profile_slug(urlsplit(url).path) if on_linkedin else None
         if linked is None or not same_slug(linked, slug):
             raise RouteChanged(endpoint, "an overlay for another profile than the tab's")
     emails = _emails(payload, sections.get(SECTION_EMAIL, []), endpoint=endpoint)
