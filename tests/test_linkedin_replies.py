@@ -31,6 +31,7 @@ from inbox_fakes import (
 )
 from sqlalchemy.orm import Session, sessionmaker
 
+from netkeep.campaigns.templates import NO_PREVIOUS_SEND_BLOCK
 from netkeep.config import LinkedInSettings, Settings
 from netkeep.crm import inbox_apply
 from netkeep.crm.interactions import add_interaction
@@ -1001,6 +1002,50 @@ def test_a_prefill_discarded_then_sent_is_sent_and_a_reply_stops_the_next_step(
     assert (enrollment.status, enrollment.next_action_at) == (EnrollmentStatus.REPLIED, None)
     assert not world.tick(discarded_due + timedelta(days=1)).fired
     assert [m.channel for m in world.messages(enrollment_id)] == [LINKEDIN, LINKEDIN]
+
+
+def test_a_discarded_prefill_seen_sent_clears_the_no_previous_send_reason(
+    linkedin_first: World,
+) -> None:
+    """#808: step 2 names ``previous_send_date`` and parks after step 1's discard. When
+    the inbox then shows the discarded prefill went out, step 2 is due from that send, and
+    the stale "no earlier step was sent" reason goes with the park. It then sends with
+    the date filled in."""
+    world = linkedin_first
+
+    def setup(session: Session, user: User) -> None:
+        campaign = get_scoped(session, user, Campaign, world.campaign_id)
+        assert campaign is not None
+        step = campaign.steps[1]
+        step.delay_days = 1
+        step.template.body = "Hi {{ first_name }}, it has been {{ previous_send_date | ago }}."
+
+    world.write(setup)
+    enrollment_id = world.enroll()
+    message_id = world.prefill(enrollment_id)
+    _discard(world, message_id, NOW + timedelta(minutes=1))
+    due = world.enrollment(enrollment_id).next_action_at
+    assert due is not None
+    world.write(lambda s, u: record_poll(s, u, due - timedelta(seconds=30)))
+    parked = world.tick(due)
+    assert parked.fired == []
+    assert parked.skipped()[enrollment_id] == (engine.Skip.NO_PREVIOUS_SEND.value,)
+    assert world.enrollment(enrollment_id).not_sent_error == NO_PREVIOUS_SEND_BLOCK
+
+    sent_at = NOW + timedelta(minutes=5)
+    thread, _ = you_sent(ADA, sent_at)
+    world.apply(thread, polled_at=due + timedelta(hours=1))
+    assert world.message(message_id).status is MessageStatus.SENT
+    enrollment = world.enrollment(enrollment_id)
+    assert enrollment.not_sent_error is None
+    assert enrollment.next_action_at is not None and enrollment.next_action_at >= due
+
+    goes = max(enrollment.next_action_at, due + timedelta(hours=1))
+    world.write(lambda s, u: record_poll(s, u, goes - timedelta(seconds=30)))
+    result = world.tick(goes)
+    [(firing, _)] = result.fired
+    assert (firing.enrollment_id, firing.step_position) == (enrollment_id, 2)
+    assert "it has been ." not in firing.body
 
 
 def test_a_discarded_prefill_with_no_send_stays_discarded(linkedin_first: World) -> None:

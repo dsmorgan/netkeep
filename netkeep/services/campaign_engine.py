@@ -2047,6 +2047,14 @@ def _advance(
     enrollment.next_action_at = follow_up_due(
         settings, user, upcoming, latest, hours_for(session, user)
     )
+    if (
+        enrollment.not_sent_error == NO_PREVIOUS_SEND_BLOCK
+        and _latest_sent(session, user, enrollment.id) is not None
+    ):
+        # A send seen after the park, as the inbox poll confirms a discarded prefill
+        # the person sent anyway (#808): the stored reason no longer says why it waits.
+        # Only the text: the due time above is what decides the step.
+        enrollment.not_sent_error = None
     session.flush()
 
 
