@@ -165,8 +165,18 @@ from netkeep.campaigns.compose import (
     message_id_candidates,
     message_id_for,
 )
-from netkeep.campaigns.render import MergeValues, TemplateRenderError, render
-from netkeep.campaigns.templates import activation_errors, block_reason, contact_fields
+from netkeep.campaigns.render import (
+    MergeValues,
+    TemplateRenderError,
+    render,
+    uses_previous_send_date,
+)
+from netkeep.campaigns.templates import (
+    NO_PREVIOUS_SEND_BLOCK,
+    activation_errors,
+    block_reason,
+    contact_fields,
+)
 from netkeep.config import Settings
 from netkeep.crm.contacts import sendable_email
 from netkeep.db import RECORD_RETRY_WAITS_S, is_lock_timeout, is_writer, session_scope
@@ -272,6 +282,9 @@ class Skip(enum.StrEnum):
     SPACING = "spacing"
     TEMPLATE_ERRORS = "template_errors"
     RENDER_FAILED = "render_failed"
+    NO_PREVIOUS_SEND = "no_previous_send"
+    """A step after the first whose template names ``previous_send_date``, with no earlier
+    step sent (an earlier prefill was discarded): parked, never sent empty (#808)."""
     NO_ADDRESS = "no_address"
     MAILBOX_ADDRESS = "mailbox_address"
     MAILBOX_DISARMED = "mailbox_disarmed"
@@ -1898,6 +1911,16 @@ class _Chooser:
             # Said on the enrollment, so the campaign page shows why nothing sends (#342).
             enrollment.not_sent_error = blocked
             self.park(enrollment, Skip.TEMPLATE_ERRORS)
+            return None
+        if (
+            latest is None
+            and step.position > 1
+            and uses_previous_send_date(template.channel, template.subject, template.body)
+        ):
+            # The delay counted from a discarded prefill, but the date counts real sends
+            # only: it would render empty, or take a branch's ``else`` (#808).
+            enrollment.not_sent_error = NO_PREVIOUS_SEND_BLOCK
+            self.park(enrollment, Skip.NO_PREVIOUS_SEND)
             return None
         contact = session.scalars(
             scoped_contacts(user)

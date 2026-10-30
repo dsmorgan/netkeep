@@ -1397,6 +1397,13 @@ def uses_personal_line(channel: TemplateChannel, subject: str | None, body: str)
     return PERSONAL_LINE in fields_used(channel, subject, body)
 
 
+def uses_previous_send_date(channel: TemplateChannel, subject: str | None, body: str) -> bool:
+    """Whether a template names ``{{ previous_send_date }}`` anywhere: printed, through
+    ``ago``, or in a branch. With no earlier send it renders empty or takes the ``else``
+    branch, so a fire after the first step parks it rather than send that (#808)."""
+    return PREVIOUS_SEND_DATE in fields_used(channel, subject, body)
+
+
 # --- render -----------------------------------------------------------------
 
 
