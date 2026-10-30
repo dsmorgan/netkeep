@@ -53,6 +53,16 @@ class WriteOnceHttp(httplib2.Http):
 
 # campaigns/gmail_oauth.py
 
+@dataclass(frozen=True, slots=True)
+class GoogleEndpoints:
+    auth_uri: str
+    token_uri: str
+    profile_uri: str
+    timeout_s: float = 20.0
+    use_system_proxy: bool = True
+
+GOOGLE_ENDPOINTS: Final = GoogleEndpoints(auth_uri='https://accounts.google.com/o/oauth2/v2/auth', token_uri='https://oauth2.googleapis.com/token', profile_uri='https://gmail.googleapis.com/gmail/v1/users/me/profile')
+
 GOOGLE = GOOGLE_ENDPOINTS
 
 def google() -> GoogleEndpoints:
