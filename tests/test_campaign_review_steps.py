@@ -718,3 +718,147 @@ def test_a_message_whose_render_has_a_lint_error_cannot_be_approved(
             now=NOW,
         )
         assert [row.enrollment_id for row in approved] == [good[0].enrollment_id]
+
+
+# --- #731 review: the ago words are in what the review shows and an approval covers ------
+
+
+AGO_BODY = "Hi {{ first_name }}{{ personal_line }}, it has been {{ previous_send_date | ago }}"
+
+
+def _two_step_linkedin(
+    factory: sessionmaker[Session], *, body: str, second_delay: int = 6
+) -> tuple[User, int, list[int]]:
+    """A two-step LinkedIn campaign under review whose steps both render ``body``, with
+    one contact, Ada, enrolled. The second step waits ``second_delay`` days."""
+    with session_scope(factory, write=True) as session:
+        user = factories.make_user(session)
+        campaign = factories.make_campaign(
+            session,
+            user,
+            channels=(TemplateChannel.LINKEDIN, TemplateChannel.LINKEDIN),
+            status=CampaignStatus.REVIEWING,
+        )
+        for step in campaign.steps:
+            template = get_scoped(session, user, Template, step.template_id)
+            assert template is not None
+            template.subject, template.body = None, body
+        campaign.steps[1].delay_days = second_delay
+        contact = factories.make_contact(session, user, first_name="Ada", connected_on=None)
+        factories.make_enrollment(session, campaign, contact, status=EnrollmentStatus.PENDING)
+        return user, campaign.id, [step.id for step in campaign.steps]
+
+
+def _only_message(
+    factory: sessionmaker[Session], user: User, campaign_id: int, step_id: int, now: datetime
+) -> campaign_review.MessagePreview:
+    with session_scope(factory) as session:
+        review = campaign_review.review_step(session, user, campaign_id, step_id, now=now)
+    # A per-message step pages through its blocked messages too, so one may be in both.
+    [message] = {m.enrollment_id: m for m in (*review.messages, *review.blocked)}.values()
+    return message
+
+
+def test_the_review_shows_the_ago_words_for_the_steps_delay(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """A pending enrollment has sent nothing, so the review stands in the earliest the
+    previous send can be: the step's delay before today. The first step has none, as
+    at its fire."""
+    user, campaign_id, (first, second) = _two_step_linkedin(session_factory, body=AGO_BODY)
+    assert _only_message(session_factory, user, campaign_id, first, NOW).body == (
+        "Hi Ada, it has been "
+    )
+    assert _only_message(session_factory, user, campaign_id, second, NOW).body == (
+        "Hi Ada, it has been 6 days ago"
+    )
+
+
+def test_a_message_approval_covers_the_ago_words(
+    session_factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The message's fingerprint hashes how long before the send the previous one was,
+    as days before today: the same tomorrow, and different for another gap with the
+    step itself unchanged."""
+    user, campaign_id, (_, second) = _two_step_linkedin(session_factory, body=AGO_BODY)
+    shown = _only_message(session_factory, user, campaign_id, second, NOW)
+    tomorrow = _only_message(session_factory, user, campaign_id, second, NOW + timedelta(days=1))
+    assert tomorrow.fingerprint == shown.fingerprint
+    monkeypatch.setattr(
+        campaign_review,
+        "previous_send_for_review",
+        lambda step, today: today - timedelta(days=step.delay_days + 1),
+    )
+    other_gap = _only_message(session_factory, user, campaign_id, second, NOW)
+    assert (other_gap.body or "").endswith(
+        "last week"
+    ) and other_gap.fingerprint != shown.fingerprint
+
+
+def test_a_first_steps_message_fingerprint_is_unchanged(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """A step with no previous send hashes nothing new, so its approvals still count."""
+    user, campaign_id, (first, _) = _two_step_linkedin(session_factory, body=AGO_BODY)
+    message = _only_message(session_factory, user, campaign_id, first, NOW)
+    with session_scope(session_factory) as session:
+        campaign = campaign_review.get_campaign(session, user, campaign_id)
+        step = campaign.steps[0]
+        template = get_scoped(session, user, Template, step.template_id)
+        contact = get_scoped(session, user, Contact, message.contact_id)
+        assert template is not None and contact is not None
+        values = campaign_review.merge_values(
+            contact, campaign, step, NOW.date(), enrollment_id=message.enrollment_id
+        )
+        fields = dict(values.contact)
+        fields.pop("preferred_name", None)
+        before = campaign_review._digest(
+            [
+                campaign_review.step_fingerprint(step, template, campaign),
+                {
+                    "contact": fields,
+                    "campaign_name": values.campaign_name,
+                    "step_number": values.step_number,
+                    "personal_line": values.personal_line,
+                },
+                campaign_review._address(contact),
+            ]
+        )
+    assert message.fingerprint == before
+
+
+def test_ago_words_that_make_a_message_too_slow_to_type_block_its_approval(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """The review lints what the send would type, the ago words too: a message the
+    words push past the typing-time limit is blocked, and its approval refused."""
+    from netkeep.linkedin.pacing import TYPING_LINT_SECONDS, typing_expected_seconds
+
+    words = 1
+    while (
+        typing_expected_seconds("Hi Ada, " + "word " * words + "it has been 6 days ago")
+        <= TYPING_LINT_SECONDS
+    ):
+        words += 1
+    filler = "word " * words
+    without = "Hi Ada, " + filler + "it has been "
+    assert typing_expected_seconds(without) <= TYPING_LINT_SECONDS  # fits without them
+    body = "Hi {{ first_name }}{{ personal_line }}, " + filler + "it has been "
+    user, campaign_id, (_, second) = _two_step_linkedin(
+        session_factory, body=body + "{{ previous_send_date | ago }}"
+    )
+    message = _only_message(session_factory, user, campaign_id, second, NOW)
+    assert message.body == without + "6 days ago"
+    assert message.blocked is not None and message.blocked.startswith("lint error:")
+    with (
+        session_scope(session_factory, write=True) as session,
+        pytest.raises(campaign_review.ReviewConflict, match="can't be approved: lint error"),
+    ):
+        campaign_review.approve_messages(
+            session,
+            user,
+            campaign_id,
+            second,
+            {message.enrollment_id: message.fingerprint},
+            now=NOW,
+        )
