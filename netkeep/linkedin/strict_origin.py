@@ -165,12 +165,15 @@ def url_path(url: str) -> str:
 
 
 def on_path(url: str, path: str, *, base: str | None = None) -> bool:
-    """Whether ``url`` (absolute, or relative to ``base``) is at ``path``, same origin.
+    """Whether ``url`` (absolute, or relative to ``base``) is at ``path``.
 
-    Compared after percent-decoding and case-folding, as LinkedIn's routing reads a
-    slug, and after dropping one trailing ``/``. A relative ``url`` takes ``base``'s
-    origin; an absolute one must have it. The browser and the page readers share it
-    (#719 review).
+    A path comparison, not a strict origin check: ``url`` goes through ``urlsplit``,
+    not :func:`parse_strict_origin`, so it decides nothing about where a browser may
+    navigate. The paths are compared after percent-decoding and case-folding, as
+    LinkedIn's routing reads a slug, and after dropping one trailing ``/``. With a
+    ``base``, a relative ``url`` takes its origin and an absolute one must share its
+    scheme, host and port. With ``base=None`` the origin is not compared at all: any
+    host at ``path`` matches. The browser and the page readers share it (#719 review).
     """
     try:
         split = urlsplit(urljoin(base, url) if base is not None else url)

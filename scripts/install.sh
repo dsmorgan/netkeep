@@ -152,7 +152,7 @@ netkeep_install() {
     say "uv tool install --python 3.12 --managed-python -c $constraints netkeep==$netkeep_version"
     if [ "$dry_run" = 0 ]; then
         "$uv" tool install --python 3.12 --managed-python -c "$constraints" "netkeep==$netkeep_version" ||
-            die "uv tool install failed. If your uv is old, update it with '$uv self update' and run this again."
+            die "uv tool install failed. If your uv is old, update it, then run this again: \"$uv\" self update"
     fi
 
     # --- 4. netkeep setup -----------------------------------------------------------------
