@@ -5175,7 +5175,7 @@ export interface components {
              * Group
              * @enum {string}
              */
-            group: "linkedin_budgets" | "linkedin_hours" | "linkedin_runs" | "campaigns" | "backup" | "logs" | "updates";
+            group: "linkedin_budgets" | "linkedin_hours" | "linkedin_runs" | "campaigns" | "backup" | "logs" | "updates" | "menubar";
             /** Help */
             help: string;
             /** Key */

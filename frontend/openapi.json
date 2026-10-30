@@ -2627,7 +2627,8 @@
               "campaigns",
               "backup",
               "logs",
-              "updates"
+              "updates",
+              "menubar"
             ],
             "title": "Group",
             "type": "string"

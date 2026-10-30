@@ -177,6 +177,14 @@ class UpdateSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class MenuBarSettings:
+    """``[menubar]``: whether Run at login, ``netkeep setup`` and ``netkeep update`` add
+    the menu-bar job beside ``serve`` (ADR 0014, rule 8; #763). macOS only."""
+
+    show_icon: bool = True
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     """Every section of ``config.toml``. ``source_path`` is None when defaults were used."""
 
@@ -187,6 +195,7 @@ class Settings:
     backup: BackupSettings = field(default_factory=BackupSettings)
     logs: LogSettings = field(default_factory=LogSettings)
     updates: UpdateSettings = field(default_factory=UpdateSettings)
+    menubar: MenuBarSettings = field(default_factory=MenuBarSettings)
     source_path: Path | None = field(default=None, metadata=_SKIP)
     # A deprecated [me] section's values, when the file had one (see LegacyMe).
     legacy_me: LegacyMe | None = field(default=None, metadata=_SKIP)
