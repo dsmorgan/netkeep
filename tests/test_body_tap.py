@@ -411,6 +411,38 @@ async def test_a_start_pairs_only_within_the_tolerance(off_ms: float, paired: by
     assert await tap.take("POST", PAGINATION, ASK, wait_s=1.0, started_ms=start) == paired
 
 
+@pytest.mark.parametrize("call", ["take", "discard"])
+async def test_an_answer_not_yet_heard_pairs_nothing_by_start(call: str) -> None:
+    """#811 review, as reproduced on Chrome 156: the read's own answer A queued 9.4 ms,
+    and the tap hasn't heard its responseReceived yet, so A's only start is its
+    ``wallTime``, 9.4 ms from the read's. B, an identical request that started 9.1 ms
+    after A and was heard whole, is within the tolerance of the read's start. Pairing
+    by start would pick B; until A is heard, the oldest (A, the read's own) goes, as
+    before starts."""
+    tap = _tap(Stream())
+    a = request_times(1)
+    queued = RequestTimes(
+        wall=a.wall,
+        stamp=a.stamp,
+        sent=a.stamp + 0.0094,
+        page_wall=a.page_wall,
+        page_stamp=a.page_stamp,
+    )
+    b = request_times(1, offset_s=0.0091)
+    request = {"url": PAGINATION, "method": "POST", "postData": ASK}
+    tap.on_request({"requestId": "A", "request": request, **queued.request_params()})
+    _answer(tap, "B", chunks=(b"B's answer",), at=b)
+    assert abs(tap._streams["B"].distance(queued.page_start_ms)) <= body_tap.PAIR_TOLERANCE_MS
+    if call == "discard":
+        tap.discard("POST", PAGINATION, ASK, started_ms=queued.page_start_ms)
+    else:  # A's own copy, not streaming yet, so none; B's is never handed over
+        got = await tap.take("POST", PAGINATION, ASK, wait_s=0.01, started_ms=queued.page_start_ms)
+        assert got is None and tap.last_miss == body_tap.MISS_NOT_STARTED
+    assert list(tap._streams) == ["B"]  # B's copy stays for B's own read
+    assert tap.paired_by_start == 0
+    await tap.close()
+
+
 async def test_without_a_start_the_oldest_goes_first() -> None:
     tap = _tap(Stream())
     _answer(tap, "1", chunks=(b"first answer",), at=FIRST)
