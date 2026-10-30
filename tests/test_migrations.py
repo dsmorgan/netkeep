@@ -3780,3 +3780,19 @@ def test_0047_drops_the_retired_review_schema_and_downgrades_with_it_empty(
     assert _diff_against_models(migration_engine) != []  # the old schema, not the models'
     migrations.upgrade(migration_engine, "0047")
     assert _diff_against_models(migration_engine) == []
+
+
+def test_the_browser_lock_takes_account_one_before_any_table_exists(
+    migration_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#728 re-review: before `netkeep db upgrade` each backend says a table is missing
+    its own way (SQLite's "no such table", PostgreSQL's ``UndefinedTable``), and the
+    browser lock reads both as account 1. Reads only: nothing attaches here."""
+    from netkeep import cli as cli_module
+    from netkeep.linkedin.activity_lock import SINGLE_ACCOUNT_KEY
+
+    url = migration_engine.url.render_as_string(hide_password=False)
+    if migration_engine.url.get_backend_name() == "sqlite":
+        Path(migration_engine.url.database or "").touch()  # a file, with no tables yet
+    monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
+    assert cli_module._browser_lock_key() == SINGLE_ACCOUNT_KEY

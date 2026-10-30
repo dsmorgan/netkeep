@@ -707,6 +707,79 @@ def test_posture_probe_refuses_and_attaches_nothing_when_the_schema_is_unreadabl
     assert "can't read the database to find which account's browser lock" in result.output
 
 
+def test_a_postgresql_database_with_no_tables_takes_account_one(
+    cli_db: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#728 re-review: before `db upgrade`, PostgreSQL says a table is missing with a
+    programming error, ``UndefinedTable`` (42P01). That is SQLite's "no such table":
+    account 1, as `serve` would take, not a refusal."""
+    import psycopg.errors
+    from sqlalchemy import exc
+
+    from netkeep.linkedin.activity_lock import SINGLE_ACCOUNT_KEY
+
+    def no_tables(*args: object) -> None:
+        raise exc.ProgrammingError(
+            "SELECT ...", {}, psycopg.errors.UndefinedTable('relation "users" does not exist')
+        )
+
+    monkeypatch.setattr(cli_module, "local_owner", no_tables)
+    assert cli_module._browser_lock_key() == SINGLE_ACCOUNT_KEY
+    assert cli_module.PG_UNDEFINED_TABLE == "42P01"
+
+
+@pytest.mark.parametrize(
+    "orig",
+    ["UndefinedColumn", "InsufficientPrivilege", "SyntaxError", "plain"],
+)
+def test_every_other_postgresql_programming_error_still_refuses(
+    cli_db: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch, orig: str
+) -> None:
+    """#728 re-review: only a missing table means a fresh install. A missing column
+    (code a migration ahead) or any other programming error leaves the account
+    unknown, so no lock key is taken and nothing attaches."""
+    import psycopg.errors
+    from sqlalchemy import exc
+
+    cause = Exception("x") if orig == "plain" else getattr(psycopg.errors, orig)("x")
+
+    def unreadable(*args: object) -> int:
+        raise exc.ProgrammingError("SELECT ...", {}, cause)
+
+    monkeypatch.setattr(cli_module, "account_id_for", unreadable)
+    with session_scope(cli_db, write=True) as session:
+        ensure_account(session, _user(session))
+    with pytest.raises(typer.Exit) as refused:
+        cli_module._browser_lock_key()
+    assert refused.value.exit_code == 1
+
+
+def test_preflight_on_postgresql_before_db_upgrade_attaches_under_account_one(
+    cli_db: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Preflight keys its lock by account 1 and goes on. The provider and the preflight
+    are fakes, so nothing reaches a browser."""
+    import psycopg.errors
+    from sqlalchemy import exc
+
+    from netkeep.linkedin.activity_lock import SINGLE_ACCOUNT_KEY
+
+    def no_tables(*args: object) -> None:
+        raise exc.ProgrammingError("SELECT ...", {}, psycopg.errors.UndefinedTable("x"))
+
+    keys: list[str] = []
+
+    async def preflight(provider: object, account: str) -> object:
+        keys.append(account)
+        raise RuntimeError("stop here: the test only wants the key")
+
+    monkeypatch.setattr(cli_module, "local_owner", no_tables)
+    monkeypatch.setattr(cli_module, "_provider", lambda settings: object())
+    monkeypatch.setattr(cli_module, "run_preflight", preflight)
+    CliRunner().invoke(cli, ["preflight"])
+    assert keys == [SINGLE_ACCOUNT_KEY]
+
+
 def test_the_refusal_marks_the_database_error_personal_in_the_log_file(
     cli_db: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
 ) -> None:
