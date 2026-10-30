@@ -587,7 +587,11 @@ def _auto_send_refused_outside_hours(
     """Whether auto-send run ``run_id`` stopped before it opened anything because of the
     window (#720): the prefill runner's own refusal, given back as not started, with
     :data:`AUTO_SEND_OUTSIDE_HOURS` or :data:`AUTO_SEND_HOURS_UNREADABLE`. False for a run
-    that opened a page, a run a person cancelled, and a run or user that is gone."""
+    that opened a page, a run a person cancelled, and a run or user that is gone.
+
+    The not-started note is the test: only
+    :func:`~netkeep.services.linkedin_steps.give_back_not_started` writes it, and it
+    always ends the run ``aborted``, so the status adds nothing to check."""
     with session_scope(factory) as session:
         user = session.get(User, user_id)
         if user is None:
@@ -596,11 +600,9 @@ def _auto_send_refused_outside_hours(
             run = runs.get_run(session, user, run_id)
         except runs.RunNotFound:
             return False
-        return (
-            run.status is SyncRunStatus.ABORTED
-            and run.error in (AUTO_SEND_OUTSIDE_HOURS, AUTO_SEND_HOURS_UNREADABLE)
-            and (run.notes or "").startswith(NOT_STARTED_NOTE)
-        )
+        return run.error in (AUTO_SEND_OUTSIDE_HOURS, AUTO_SEND_HOURS_UNREADABLE) and (
+            run.notes or ""
+        ).startswith(NOT_STARTED_NOTE)
 
 
 def _lost_answers(factory: sessionmaker[Session], user_id: int, run_id: int) -> int:

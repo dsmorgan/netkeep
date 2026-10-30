@@ -8,11 +8,13 @@ Nothing here reaches Gmail or Google.
 
 from __future__ import annotations
 
+import random
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from types import SimpleNamespace
+from typing import cast
 
 import factories
 import pytest
@@ -1154,6 +1156,20 @@ def test_held_follow_ups_on_one_page_never_use_up_the_scan(
     assert [skipped[e] for e in held_ids] == [(Skip.REPLIES_STALE.value,)] * 3
     assert checked == [held_ids[0], fresh]
     assert all(mail.enrollment(e).not_sent_count == 0 for e in held_ids)
+
+
+def test_only_a_held_row_the_query_leaves_out_is_free_against_the_scan() -> None:
+    """#801 review: a held row is free against SCAN_LIMIT only with ``current_step`` set,
+    what ``_due`` leaves out of later pages. A row held by step position alone (a first
+    step numbered above 1) still counts, so the free rows stay a page per held mailbox."""
+    result = engine_module.TickResult(user_id=1)
+    chooser = engine_module._Chooser(
+        cast(Session, None), cast(User, None), SETTINGS, NOW, result, random.Random(0)
+    )
+    chooser._skip_held(cast(Enrollment, SimpleNamespace(id=1, current_step=1)))
+    chooser._skip_held(cast(Enrollment, SimpleNamespace(id=2, current_step=None)))
+    assert chooser._held_skips == 1
+    assert result.skipped() == {1: (Skip.REPLIES_STALE.value,), 2: (Skip.REPLIES_STALE.value,)}
 
 
 # --- arming and users --------------------------------------------------------------------------
