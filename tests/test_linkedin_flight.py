@@ -322,6 +322,9 @@ def test_whole_check_finds_nothing_in_a_whole_copy() -> None:
 def _corpus() -> list[bytes]:
     """Whole and cut copies, each of :func:`is_whole`'s rules broken and kept, for the
     tie between the two walks below."""
+    # Left out on purpose: a late chunk (after its stream's close) and an empty-id
+    # stream start. ``parse_flight`` refuses both, so ``is_whole`` gives no verdict to
+    # tie the count to; test_whole_check_leaves_parse_flight_strict covers them.
     lines = CHILD_FIRST.splitlines(keepends=True)
     root_first = lines[-1] + b"".join(lines[:-1])
     root = b'0:["$","div",null,{"children":"$R9"}]\n'

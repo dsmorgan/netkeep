@@ -477,7 +477,7 @@ def test_a_failed_uv_tool_install_stops_before_setup(box: Sandbox) -> None:
     assert "uv tool install failed" in result.stderr
     # The update hint names the uv this ran, by its full path: a uv the script just put
     # in ~/.local/bin may not be on PATH yet (#674).
-    assert f"'{box.bin / 'uv'} self update'" in result.stderr, result.stderr
+    assert f'"{box.bin / "uv"}" self update' in result.stderr, result.stderr
     assert not [c for c in box.calls() if c.startswith("netkeep")]
 
 
@@ -647,7 +647,18 @@ def test_a_failed_install_names_a_local_bin_uv_by_its_full_path(box: Sandbox) ->
     shutil.copy(box.templates / "uv", box.home / ".local" / "bin" / "uv")
     result = box.run(FAKE_UV_INSTALL_FAILS="1")
     assert result.returncode != 0
-    assert f"'{box.home}/.local/bin/uv self update'" in result.stderr, result.stderr
+    assert f'"{box.home}/.local/bin/uv" self update' in result.stderr, result.stderr
+
+
+def test_a_failed_install_quotes_a_uv_path_with_a_space(box: Sandbox) -> None:
+    """#795 review: the hint is pasted into a shell, so a path with a space is quoted."""
+    spaced = box.root / "my tools"
+    spaced.mkdir()
+    shutil.copy(box.templates / "uv", spaced / "uv")
+    result = box.run(FAKE_UV_INSTALL_FAILS="1", PATH=f"{spaced}:{box.path}")
+    assert result.returncode != 0
+    hint = result.stderr.strip().splitlines()[-1]
+    assert hint.endswith(f'run this again: "{spaced}/uv" self update'), result.stderr
 
 
 # --- uv's installer environment -------------------------------------------------------

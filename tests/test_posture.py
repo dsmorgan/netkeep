@@ -2636,20 +2636,32 @@ def test_every_protection_construction_decides_its_fix() -> None:
 def test_only_the_auto_send_row_is_opted_in_and_it_has_a_fix(writer: Session) -> None:
     """#674: ``opted_in`` turns an off row from a problem into a warning, which skips the
     type's fix check. Only the manual-sends row's auto-send state may set it, in
-    ``_auto_send``, and with a fix sentence; another row setting it fails here."""
+    ``_auto_send``, and with a fix sentence; another row setting it fails here.
+
+    The scan walks the whole module, so a call in an ``async def``, a lambda, a class
+    body or module-level code is found too; each is named by its innermost enclosing
+    ``def`` (``<module>`` for none). ``opted_in`` passed through ``**kwargs`` hides from
+    it, which the fix-decision test above already refuses for ``Protection``."""
     tree = ast.parse(Path(posture_module.__file__).read_text())
+    owner: dict[ast.AST, str] = {}
+
+    def claim(node: ast.AST, name: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            inner = (
+                child.name if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef) else name
+            )
+            owner[child] = inner
+            claim(child, inner)
+
+    claim(tree, "<module>")
     setters: list[tuple[str, int, bool]] = []
-    for function in ast.walk(tree):
-        if not isinstance(function, ast.FunctionDef):
-            continue
-        for node in ast.walk(function):
-            if isinstance(node, ast.Call) and any(kw.arg == "opted_in" for kw in node.keywords):
-                has_fix = any(
-                    kw.arg == "fix"
-                    and not (isinstance(kw.value, ast.Constant) and not kw.value.value)
-                    for kw in node.keywords
-                )
-                setters.append((function.name, node.lineno, has_fix))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and any(kw.arg == "opted_in" for kw in node.keywords):
+            has_fix = any(
+                kw.arg == "fix" and not (isinstance(kw.value, ast.Constant) and not kw.value.value)
+                for kw in node.keywords
+            )
+            setters.append((owner[node], node.lineno, has_fix))
     assert [(name, has_fix) for name, _line, has_fix in setters] == [("_auto_send", True)]
 
     opted = [row for row in _every_row_of_every_case(writer) if row.opted_in]
