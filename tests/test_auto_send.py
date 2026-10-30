@@ -677,6 +677,23 @@ async def test_outside_active_hours_nothing_is_sent(lane: Lane) -> None:
     assert a.site.navigations == []
     _no_send(a)
     _given_back_unopened(a, "outside LinkedIn's active hours")
+    # The words the auto-send handler reads back (#720).
+    assert a.run().error == linkedin_steps.AUTO_SEND_OUTSIDE_HOURS
+
+
+async def test_active_hours_that_dont_parse_send_nothing(
+    lane: Lane, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unparseable(*args: Any, **kwargs: Any) -> None:
+        raise runs.RunError("bad window")
+
+    a = Auto(lane)  # claimed while the window still read; it stops parsing after
+    monkeypatch.setattr(runs, "refuse_if_outside_active_hours", unparseable)
+    await a.execute()
+    assert a.site.navigations == []
+    _no_send(a)
+    _given_back_unopened(a, linkedin_steps.AUTO_SEND_HOURS_UNREADABLE)
+    assert a.run().error == linkedin_steps.AUTO_SEND_HOURS_UNREADABLE
 
 
 async def test_a_flag_raised_while_typing_stops_the_click_and_leaves_it_prefilled(
@@ -928,6 +945,75 @@ async def test_after_a_restart_is_triggered_the_fire_claims_nothing(lane: Lane) 
     assert await _fire(lane, AUTO, tasks) is scheduler.JobOutcome.RETRY_LATER
     assert lane.runs() == [] and lane.messages(enrollment_id) == []
     assert lane.enrollment(enrollment_id).next_action_at == NOW
+
+
+class _RefusedByItsRunner:
+    """Ends the claimed auto-send run as its prefill runner ends a refusal before the
+    navigation (``message_send.run_prefill``'s ``spend``): ``not_typed``, nothing opened.
+    ``cancel`` first asks the run to stop, as a person's Cancel would (#708)."""
+
+    def __init__(self, lane: Lane, reason: str, *, cancel: bool = False) -> None:
+        self.lane = lane
+        self.reason = reason
+        self.cancel = cancel
+
+    async def execute(self, run_id: int, user_id: int) -> runs.RunOutcome:
+        from netkeep.linkedin.messaging import MessageOutcome
+
+        if self.cancel:
+            self.lane.write(lambda s, u: runs.request_cancel(s, u, run_id, now=NOW))
+        message_send.record(
+            self.lane.factory,
+            user_id,
+            run_id,
+            MessageOutcome(MessageOutcomeKind.NOT_TYPED, self.reason, None, 0),
+            settings=AUTO,
+            now=NOW,
+            click_attempted=False,
+            clicked=False,
+            budget_spent=False,
+            opened=False,
+        )
+        return runs.RunOutcome.DONE
+
+
+@pytest.mark.parametrize(
+    ("reason", "cancel", "expected"),
+    [
+        (
+            linkedin_steps.AUTO_SEND_OUTSIDE_HOURS,
+            False,
+            scheduler.JobOutcome.OUTSIDE_HOURS_AFTER_GATE,
+        ),
+        (
+            linkedin_steps.AUTO_SEND_HOURS_UNREADABLE,
+            False,
+            scheduler.JobOutcome.OUTSIDE_HOURS_AFTER_GATE,
+        ),
+        ("heat is too high", False, None),
+        (linkedin_steps.AUTO_SEND_OUTSIDE_HOURS, True, None),
+    ],
+)
+async def test_an_auto_send_its_runner_refused_outside_hours_is_skipped(
+    lane: Lane, reason: str, cancel: bool, expected: scheduler.JobOutcome | None
+) -> None:
+    """#720: the window closed between the scheduler's claim and the run. The runner gives
+    the step back due, and the handler answers ``outside_hours_after_gate``, so the fire
+    counts as skipped and waits for the window's next start, not one interval. Any other
+    refusal, or a run a person cancelled (its step parked for Try again), still counts."""
+    enrollment_id = lane.enroll(contact=dict(CONTACT))
+    lane.write(lambda s, u: record_poll(s, u, NOW - timedelta(minutes=1)))
+    executor = _RefusedByItsRunner(lane, reason, cancel=cancel)
+    account = lane.read(lambda s, u: ensure_account(s, u).id)
+    ctx = scheduler.JobContext(lane.user_id, account, scheduler.JobKind.AUTO_SEND, NOW, False)
+    handler = scheduled_runs._auto_send_handler(
+        lane.factory, cast(Any, executor), TaskRunner(EventBus()), AUTO, clock=lambda: NOW
+    )
+    assert await handler(ctx) is expected
+    [run] = lane.runs()
+    assert run.status is SyncRunStatus.ABORTED and run.error == reason
+    if not cancel:
+        assert lane.enrollment(enrollment_id).next_action_at == NOW  # given back, due
 
 
 class _RefusesAtSubmit(_SeenTasks):

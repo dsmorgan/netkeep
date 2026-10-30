@@ -221,7 +221,9 @@ review, in another campaign ...) is checked again this much later."""
 SCAN_LIMIT: Final = 500
 """At most this many due enrollments are looked at in one tick. The rest wait a minute.
 Blocked and LinkedIn rows, and follow-ups on a mailbox held for its replies (#694), are
-left out of the query, so they never use it up."""
+left out of the query, so they never use it up. The held follow-ups a page read before
+their mailbox was known to be held don't count either (#716): at most a page of them
+per held mailbox, since the next pages leave that mailbox's follow-ups out."""
 
 PAGE_SIZE: Final = 50
 """Due enrollments are read this many at a time, each page leaving out what is blocked."""
@@ -1512,6 +1514,9 @@ class _Chooser:
         self.gate = gate
         self.replies = replies
         self._replies_held: dict[int, bool] = {}
+        self._held_skips = 0
+        """Rows skipped as ``replies_stale`` this phase: they don't count toward
+        :data:`SCAN_LIMIT` (#716)."""
         self.session = session
         self.user = user
         self.settings = settings
@@ -1539,6 +1544,11 @@ class _Chooser:
             reason = self.replies.replies_held(self.session, self.user, mailbox_id)
             held = self._replies_held[mailbox_id] = reason is not None
         return held
+
+    def _skip_held(self, enrollment: Enrollment) -> None:
+        """A follow-up held for its mailbox's replies: nothing on it changes (#694)."""
+        self._held_skips += 1
+        self.skip(enrollment, Skip.REPLIES_STALE)
 
     def skip(self, enrollment: Enrollment, *reasons: str) -> None:
         self.result.decisions.append(Decision(enrollment.id, False, tuple(reasons)))
@@ -1578,7 +1588,7 @@ class _Chooser:
         for enrollment_id in _linkedin_due(self.session, self.user, self.now):
             self.result.decisions.append(Decision(enrollment_id, False, (Skip.READY_TO_PREFILL,)))
         seen: list[int] = []
-        while claimed is None and len(seen) < SCAN_LIMIT:
+        while claimed is None and len(seen) - self._held_skips < SCAN_LIMIT:
             page = _due(
                 self.session,
                 self.user,
@@ -1641,6 +1651,15 @@ class _Chooser:
             self.skip(
                 enrollment, Skip.CAMPAIGN_BLOCKED, *self.blocks.mailboxes[campaign.mailbox_id][0]
             )
+            return None
+        if (
+            step.position > 1
+            and campaign.mailbox_id is not None
+            and self._replies_held.get(campaign.mailbox_id) is True
+        ):
+            # Another follow-up on this page already found its mailbox held (#716): skip
+            # this one before the checks, as the next pages leave it out of the query.
+            self._skip_held(enrollment)
             return None
         arm: MailboxArm | None = MailboxArm.SEND
         if self.gate is not None:
@@ -1767,7 +1786,7 @@ class _Chooser:
             return None
         # The same for Gmail's replies (#694): a follow-up waits for them to be read.
         if step.position > 1 and self._replies_stale(campaign.mailbox_id):
-            self.skip(enrollment, Skip.REPLIES_STALE)
+            self._skip_held(enrollment)
             return None
         mode = StepMode.DRAFT if arm is MailboxArm.DRAFT else step.mode
         return self._claim(campaign, enrollment, step, latest, mode)
