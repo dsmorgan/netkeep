@@ -164,7 +164,7 @@ class MailboxReplyHold(UserOwned, TimestampMixin, Base):
     mailbox_id: Mapped[int] = mapped_column(
         ForeignKey("mailboxes.id", ondelete="CASCADE"), nullable=False
     )
-    # The sender's sentence, as a held send's error says it.
+    # The sender's sentence, as a held send's error says it, without "; nothing was sent".
     reason: Mapped[str] = mapped_column(String(REPLY_HOLD_REASON_MAX_LENGTH), nullable=False)
     # When this hold started, by the tick's clock.
     held_since: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)

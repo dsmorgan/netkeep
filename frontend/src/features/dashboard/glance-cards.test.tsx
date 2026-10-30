@@ -184,7 +184,7 @@ describe('ComingUpCard: campaign sends', () => {
           fire({
             enrollment_id: 1,
             due: PAST,
-            held_reason: 'replies have not been polled recently; nothing was sent',
+            held_reason: 'replies have not been polled recently',
           }),
           fire({ enrollment_id: 2, due: FUTURE, held_reason: null }),
         ],
@@ -194,7 +194,7 @@ describe('ComingUpCard: campaign sends', () => {
     const body = await card('Coming up')
     const items = await body.findAllByRole('listitem')
     expect(within(items[0]!).getByRole('note')).toHaveTextContent(
-      'Held until replies are read: replies have not been polled recently; nothing was sent',
+      'Held until replies are read: replies have not been polled recently',
     )
     expect(within(items[1]!).queryByRole('note')).toBeNull()
   })
