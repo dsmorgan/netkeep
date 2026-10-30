@@ -4,8 +4,8 @@ import { describe, expect, it } from 'vitest'
 
 import { jsonResponse, mockFetch } from '@/test/fetch'
 
-import type { LoginItem } from './api'
-import { LoginItemSection } from './login-item-section'
+import type { ConfigField, ConfigSettings, LoginItem } from './api'
+import { LoginItemSection, MENUBAR_ICON_KEY } from './login-item-section'
 
 const REGISTERED =
   'Registered. netkeep will start by itself the next time you log in to this Mac. Nothing changes now, because netkeep is already running.'
@@ -33,12 +33,68 @@ const OFF: LoginItem = {
   },
 }
 
-function renderSection(initial: LoginItem, onPut?: (enabled: boolean) => Response) {
+const MENUBAR_HELP =
+  'While netkeep runs at login, an icon in the menu bar shows its status. macOS 26 can also hide the icon, but hiding it there leaves the menu-bar app running: turning this off is what stops it.'
+
+const MENUBAR: ConfigField = {
+  key: MENUBAR_ICON_KEY,
+  group: 'menubar',
+  label: 'Show menu-bar icon',
+  help: MENUBAR_HELP,
+  kind: 'bool',
+  applies: 'now',
+  applies_note: 'Saved for the menu-bar app.',
+  minimum: null,
+  maximum: null,
+  warn_above: null,
+  value: true,
+  default: true,
+  ui_value: null,
+  file_value: null,
+  source: 'default',
+  editable: true,
+  locked_reason: null,
+  confirm_text: null,
+  restart_pending: false,
+  stored_unreadable: false,
+  warnings: [],
+  notes: [],
+}
+
+function config(menubar: ConfigField): ConfigSettings {
+  return {
+    config_path: null,
+    log_file: '/data/logs/netkeep.log',
+    config_changed: false,
+    config_error: null,
+    restart_pending: false,
+    can_restart: true,
+    busy: [],
+    restart_waiting: false,
+    fields: [menubar],
+  }
+}
+
+function renderSection(
+  initial: LoginItem,
+  onPut?: (enabled: boolean) => Response,
+  menubar: ConfigField = MENUBAR,
+) {
   const puts: boolean[] = []
   const repairs: boolean[] = []
   const builds: boolean[] = []
+  const settingsPuts: unknown[] = []
+  let current = config(menubar)
   mockFetch(async (request) => {
     const { pathname } = new URL(request.url)
+    if (pathname === '/api/v1/settings/config') {
+      if (request.method === 'GET') return jsonResponse(current)
+      const body = (await request.json()) as { values: Record<string, unknown> }
+      settingsPuts.push(body.values)
+      const on = body.values[MENUBAR_ICON_KEY]
+      current = config({ ...current.fields[0]!, value: on, ui_value: on, source: 'ui' })
+      return jsonResponse(current)
+    }
     if (!pathname.startsWith('/api/v1/login-item'))
       return jsonResponse({ detail: 'unexpected' }, 500)
     if (pathname === '/api/v1/login-item/launcher') {
@@ -80,7 +136,7 @@ function renderSection(initial: LoginItem, onPut?: (enabled: boolean) => Respons
       <LoginItemSection />
     </QueryClientProvider>,
   )
-  return { puts, repairs, builds }
+  return { puts, repairs, builds, settingsPuts }
 }
 
 describe('LoginItemSection', () => {
@@ -183,5 +239,63 @@ describe('LoginItemSection', () => {
     expect(await screen.findByText('Repaired.')).toBeInTheDocument()
     expect(repairs).toEqual([true])
     expect(puts).toEqual([])
+  })
+
+  describe('Show menu-bar icon', () => {
+    it('is on with no stored value and saves off on its own', async () => {
+      const { settingsPuts, puts } = renderSection(OFF)
+      const box = await screen.findByRole('checkbox', { name: 'Show menu-bar icon' })
+      expect(box).toBeChecked()
+      expect(
+        screen.getByText(/hiding it there leaves the menu-bar app running/),
+      ).toBeInTheDocument()
+      fireEvent.click(box)
+      await waitFor(() => expect(settingsPuts).toEqual([{ [MENUBAR_ICON_KEY]: false }]))
+      await waitFor(() => expect(box).not.toBeChecked())
+      expect(puts).toEqual([])
+    })
+
+    it('is shown while Run at login is off too', async () => {
+      renderSection(OFF)
+      expect(
+        await screen.findByRole('checkbox', { name: 'Start netkeep when I log in' }),
+      ).not.toBeChecked()
+      expect(await screen.findByRole('checkbox', { name: 'Show menu-bar icon' })).toBeEnabled()
+    })
+
+    it('shows a value config.toml sets locked, with the reason', async () => {
+      renderSection(OFF, undefined, {
+        ...MENUBAR,
+        value: false,
+        file_value: false,
+        source: 'file',
+        editable: false,
+        locked_reason: 'Set in /etc/nk.toml, which wins over this page.',
+      })
+      const box = await screen.findByRole('checkbox', { name: 'Show menu-bar icon' })
+      expect(box).not.toBeChecked()
+      expect(box).toHaveAttribute('aria-disabled', 'true')
+      expect(screen.getByText(/which wins over this page/)).toBeInTheDocument()
+    })
+
+    it('shows a refusal from the server', async () => {
+      renderSection(OFF)
+      const box = await screen.findByRole('checkbox', { name: 'Show menu-bar icon' })
+      mockFetch(async () => jsonResponse({ detail: 'menubar.show_icon: nope' }, 422))
+      fireEvent.click(box)
+      expect(await screen.findByRole('alert')).toHaveTextContent('nope')
+    })
+
+    it('is hidden off macOS', async () => {
+      const { settingsPuts } = renderSection({
+        ...OFF,
+        supported: false,
+        unsupported_reason: 'Run at login needs macOS.',
+        launcher: { ...OFF.launcher, supported: false },
+      })
+      await screen.findByText('Run at login needs macOS.')
+      expect(screen.queryByText('Show menu-bar icon')).not.toBeInTheDocument()
+      expect(settingsPuts).toEqual([])
+    })
   })
 })

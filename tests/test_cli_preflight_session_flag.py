@@ -561,6 +561,8 @@ def test_preflight_with_a_checkpoint_flag_never_opens_a_writer(
         return session_scope(factory, write=write)
 
     monkeypatch.setattr("netkeep.cli.session_scope", recording_session_scope)
+    # The Settings page's values are read in ui_settings (#763), outside the CLI module.
+    monkeypatch.setattr("netkeep.services.ui_settings.session_scope", recording_session_scope)
 
     result = CliRunner().invoke(cli, ["preflight"])
 

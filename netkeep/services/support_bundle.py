@@ -238,6 +238,7 @@ SETTINGS_ALLOWLIST: Final[tuple[str, ...]] = (
     "logs.max_mb",
     "logs.keep",
     "updates.check_daily",
+    "menubar.show_icon",
 )
 """Every ``Settings`` value the bundle includes. A field not named here never goes in:
 ``tests/test_support_bundle.py`` fails when ``config.py`` gains one that is in neither

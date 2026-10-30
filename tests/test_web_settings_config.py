@@ -519,6 +519,30 @@ async def test_the_daily_update_check_is_the_owners_alone(
         assert ui_settings.stored(session, other) == {}
 
 
+async def test_the_menu_bar_icon_round_trips_and_is_the_owners_alone(
+    running_app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    """#763: on with no row, stored by a PUT, and read-only (403 on a write) for anyone
+    but the local owner, whose value alone decides the menu-bar job."""
+    key = "menubar.show_icon"
+    factory: sessionmaker[Session] = running_app.state.session_factory
+    with session_scope(factory, write=True) as session:
+        other_id = factories.make_user(session).id
+    field = _field((await client.get(URL)).json(), key)
+    assert (field["value"], field["source"], field["group"]) == (True, "default", "menubar")
+    saved = await _put(client, {key: False})
+    assert saved.status_code == 200
+    assert _field(saved.json(), key)["value"] is False
+    assert _field((await client.get(URL)).json(), key)["source"] == "ui"
+    with acting_as(running_app, other_id):
+        assert _field((await client.get(URL)).json(), key)["editable"] is False
+        assert (await _put(client, {key: True})).status_code == 403
+    with session_scope(factory) as session:
+        other = session.get(User, other_id)
+        assert other is not None
+        assert ui_settings.stored(session, other) == {}
+
+
 async def test_only_the_owner_sees_the_chrome_profile_path(
     running_app: FastAPI, client: httpx.AsyncClient
 ) -> None:

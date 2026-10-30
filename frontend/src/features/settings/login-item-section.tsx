@@ -6,7 +6,17 @@ import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 
-import { buildLauncherApp, loginItemQuery, repairLoginItem, setLoginItem } from './api'
+import {
+  buildLauncherApp,
+  configSettingsQuery,
+  loginItemQuery,
+  repairLoginItem,
+  saveConfigSettings,
+  setLoginItem,
+} from './api'
+
+/** The Settings value that decides whether the menu-bar job runs beside `serve` (#763). */
+export const MENUBAR_ICON_KEY = 'menubar.show_icon'
 
 /** The check steps, on the project's site, since the app serves no docs of its own. */
 export const LOGIN_ITEM_TROUBLESHOOTING_URL =
@@ -23,8 +33,9 @@ function message(error: unknown): string {
  * while this server runs registers the agent for the next login rather than starting a
  * second copy; the answer's message says so.
  *
- * Below it, the launcher app (#754): whether `~/Applications/netkeep.app` exists and which
- * netkeep it runs, with a button that builds or rebuilds it.
+ * On macOS, the Show menu-bar icon switch (#763) follows it, and below that the launcher
+ * app (#754): whether `~/Applications/netkeep.app` exists and which netkeep it runs, with a
+ * button that builds or rebuilds it.
  */
 export function LoginItemSection() {
   const id = useId()
@@ -129,6 +140,7 @@ export function LoginItemSection() {
                 Log: <code className="font-mono text-xs break-all">{item.log_path}</code>
               </p>
             )}
+            {item.supported && <MenuBarIconSwitch />}
             {item.launcher.supported && (
               <div className="space-y-2 border-t pt-3">
                 <h3 className="font-heading font-bold">Launcher app</h3>
@@ -166,5 +178,48 @@ export function LoginItemSection() {
         )}
       </CardContent>
     </Card>
+  )
+}
+
+/**
+ * Show menu-bar icon (#763; ADR 0014, rules 8 and 9): a Settings value like the config
+ * cards' ones, shown here because it decides the login item's second job. It saves on its
+ * own, with the backend's words for what it does; a value config.toml sets shows locked,
+ * with the file's path. The card shows it on macOS only: elsewhere there is no menu bar.
+ */
+function MenuBarIconSwitch() {
+  const id = useId()
+  const current = useQuery(configSettingsQuery)
+  const queryClient = useQueryClient()
+  const save = useMutation({
+    mutationFn: (on: boolean) => saveConfigSettings({ [MENUBAR_ICON_KEY]: on }),
+    onSuccess: (data) => queryClient.setQueryData(configSettingsQuery.queryKey, data),
+  })
+  if (current.isPending) return null
+  if (current.isError) return <p role="alert">{message(current.error)}</p>
+  const field = current.data.fields.find((f) => f.key === MENUBAR_ICON_KEY)
+  if (field === undefined) return null
+  return (
+    <div className="space-y-1.5 border-t pt-3" role="group" aria-label={field.label}>
+      <div className="flex items-center gap-2">
+        <Checkbox
+          id={id}
+          checked={field.value === true}
+          disabled={!field.editable || save.isPending}
+          onCheckedChange={(checked) => {
+            save.reset()
+            save.mutate(checked === true)
+          }}
+        />
+        <Label htmlFor={id}>{field.label}</Label>
+      </div>
+      <p className="text-muted-foreground">
+        {field.help} {field.applies_note}
+      </p>
+      {field.locked_reason !== null && (
+        <p className="text-muted-foreground">{field.locked_reason}</p>
+      )}
+      {save.isError && <p role="alert">{message(save.error)}</p>}
+    </div>
   )
 }

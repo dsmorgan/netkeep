@@ -41,7 +41,7 @@ A test pins this table: the menu-bar module may call nothing else. The confirmat
 ## Jobs, the preference, and Quit
 
 - **Labels:** the menu-bar job's label is the login item's label (`fun.tnkr.netkeep`, or `fun.tnkr.netkeep.<hash>` for another data directory) plus a fixed `.menubar` suffix. It runs the helper bundle's script. `KeepAlive` uses `SuccessfulExit: false`, so launchd restarts the menu bar after a crash but not after Quit.
-- **The preference:** **Show menu-bar icon** is stored like the other Settings values, in `settings_kv`, default on. The plist alone can't hold it, because Run at login off removes both plists.
+- **The preference:** **Show menu-bar icon** is stored like the other Settings values, in `settings_kv`, default on. The plist alone can't hold it, because Run at login off removes both plists. It's `menubar.show_icon` (#763): `config.toml` wins as for every value, only the local owner's value counts, and the Settings page shows it in the Run at login card, on macOS only. `setup`, `update`, and the Run at login switch read it with `ui_settings.show_menubar_icon`, which needs no request and creates no database.
 
 | Action | Preference on | Preference off |
 |---|---|---|

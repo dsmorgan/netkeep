@@ -60,17 +60,21 @@ import zoneinfo
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, fields, is_dataclass, replace
 from datetime import UTC, date, time
+from pathlib import Path
 from typing import Any, Final, Literal
 from urllib.parse import urlsplit
 
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from netkeep.config import Settings
+from netkeep.db import database_url, make_engine, make_session_factory, session_scope
 from netkeep.logging_setup import personal_exc
 from netkeep.loopback import LOOPBACK_HOSTS, host_of
 from netkeep.models import JsonValue, SettingKV, User
 from netkeep.models.base import utcnow
-from netkeep.scoping import scoped
+from netkeep.scoping import install_scope_guard, scoped
 from netkeep.services import budgets, zone_change
 from netkeep.services.budgets import (
     HARD_MAX_PER_DAY,
@@ -87,6 +91,7 @@ from netkeep.services.setting_checks import (
     weekend_multiplier_warnings,
 )
 from netkeep.services.settings_kv import delete_setting, get_setting, set_setting
+from netkeep.services.users import local_owner
 
 log = logging.getLogger(__name__)
 
@@ -103,6 +108,7 @@ Group = Literal[
     "backup",
     "logs",
     "updates",
+    "menubar",
 ]
 Source = Literal["default", "ui", "file"]
 
@@ -150,6 +156,10 @@ class FieldSpec:
 
 
 AUTO_SEND_KEY: Final = "campaigns.linkedin_auto_send"
+
+MENUBAR_ICON_KEY: Final = "menubar.show_icon"
+"""Run at login, ``setup`` and ``update`` add the menu-bar job only while it is on
+(ADR 0014, rule 8). On by default; macOS only, so the page shows it only there (#763)."""
 
 START_CHROME_KEY: Final = "linkedin.start_chrome_at_startup"
 """``serve`` starts netkeep's Chrome once it is listening (#599). Off by default."""
@@ -542,6 +552,22 @@ FIELDS: Final[tuple[FieldSpec, ...]] = (
         applies="now",
         applies_note="Applies at serve's next check, within an hour. Off makes no request.",
     ),
+    FieldSpec(
+        key=MENUBAR_ICON_KEY,
+        group="menubar",
+        label="Show menu-bar icon",
+        help=(
+            "While netkeep runs at login, an icon in the menu bar shows netkeep's status,"
+            " colored like the LinkedIn, Gmail and netkeep chips, and its menu opens"
+            " netkeep. macOS 26 can also hide the icon, in System Settings > Menu Bar, but"
+            " hiding it there leaves the menu-bar app running: turning this off is what"
+            " stops it."
+        ),
+        kind="bool",
+        applies="now",
+        # #767 rewrites this note when the switch adds and removes the menu-bar job.
+        applies_note="Saved for the menu-bar app, which this version doesn't install yet.",
+    ),
 )
 
 BY_KEY: Final[dict[str, FieldSpec]] = {spec.key: spec for spec in FIELDS}
@@ -698,6 +724,61 @@ def auto_send_on(session: Session, user: User, base: Settings) -> bool:
     sets the key, else the Settings page, else off. Read where a send decides, never kept:
     off applies from the next read. Read-only."""
     return resolve(session, user, base).campaigns.linkedin_auto_send
+
+
+# --- the local owner's values, outside a request ------------------------------------
+
+
+def owner_settings(session: Session, base: Settings) -> Settings:
+    """``base`` with the local owner's Settings-page values, or ``base`` itself before
+    there is an owner: what acts for the whole install reads these. Read-only."""
+    owner = local_owner(session)
+    return base if owner is None else resolve(session, owner, base)
+
+
+def owner_settings_from_database(base: Settings, url: str | None = None) -> Settings:
+    """:func:`owner_settings`, for a command with no session open. It opens the database
+    at ``url`` (default :func:`netkeep.db.database_url`) to read, and creates nothing: no
+    database yet (a SQLite file that does not exist), no ``settings_kv`` table, or no
+    local user leaves ``base`` as it is."""
+    url = database_url() if url is None else url
+    parsed = make_url(url)
+    if parsed.get_backend_name() == "sqlite" and (
+        not parsed.database or not Path(parsed.database).is_file()
+    ):
+        return base
+    engine = make_engine(url)
+    try:
+        with engine.connect() as connection:
+            if not sa_inspect(connection).has_table("settings_kv"):
+                return base
+        factory = make_session_factory(engine)
+        install_scope_guard(factory)
+        with session_scope(factory) as session:
+            return owner_settings(session, base)
+    finally:
+        engine.dispose()
+
+
+def show_menubar_icon(
+    base: Settings, *, session: Session | None = None, url: str | None = None
+) -> bool:
+    """Whether the menu-bar job belongs beside ``serve`` (ADR 0014, rule 8; #763): the
+    local owner's **Show menu-bar icon**, ``config.toml``'s ``menubar.show_icon`` when it
+    sets it, and on by default, before there is a database or an owner.
+
+    The one reader for ``netkeep setup``, ``netkeep update`` and the Run at login switch,
+    none of which has a request's user. The switch passes its own ``session``; a command
+    passes neither, and the database at ``url`` (default
+    :func:`netkeep.db.database_url`) is read as :func:`owner_settings_from_database`
+    says. ``base`` is the file's settings. Read-only.
+    """
+    settings = (
+        owner_settings_from_database(base, url)
+        if session is None
+        else owner_settings(session, base)
+    )
+    return settings.menubar.show_icon
 
 
 # --- validating -------------------------------------------------------------------

@@ -8,10 +8,11 @@ from typing import Any
 
 import factories
 import pytest
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
-from netkeep.config import Settings
-from netkeep.models import User
+from netkeep.config import MenuBarSettings, Settings, load_settings
+from netkeep.db import database_url, session_scope
+from netkeep.models import User, UserKind
 from netkeep.services import ui_settings
 from netkeep.services.settings_kv import get_setting, set_setting
 
@@ -587,3 +588,106 @@ def test_a_time_zone_the_file_sets_is_locked(session: Session, user: User) -> No
     pinned = _pinned(linkedin__timezone="Asia/Tokyo")
     with pytest.raises(ui_settings.SettingsRefused):
         ui_settings.write(session, user, pinned, {"linkedin.timezone": "Europe/Berlin"})
+
+
+# --- Show menu-bar icon (#763) -------------------------------------------------------
+
+MENUBAR = "menubar.show_icon"
+
+
+def test_the_menu_bar_icon_is_on_with_no_row() -> None:
+    """ADR 0014, rule 8: on by default, a switch, the owner's alone."""
+    assert MenuBarSettings() == MenuBarSettings(show_icon=True)
+    spec = ui_settings.BY_KEY[MENUBAR]
+    assert (spec.kind, spec.group, spec.label) == ("bool", "menubar", "Show menu-bar icon")
+    view = _view(ui_settings.describe(Settings(), {}), MENUBAR)
+    assert (view.value, view.default, view.source, view.editable) == (True, True, "default", True)
+
+
+def test_the_menu_bar_help_says_macos_can_hide_it_and_this_stops_it() -> None:
+    """Rule 9 and #760's amendment: macOS doesn't tell the process it was hidden."""
+    help_text = ui_settings.BY_KEY[MENUBAR].help
+    assert "macOS 26 can also hide the icon" in help_text
+    assert "leaves the menu-bar app running" in help_text
+    assert "turning this off is what stops it" in help_text
+
+
+def test_the_menu_bar_icon_round_trips_through_the_page(session: Session, user: User) -> None:
+    ui_settings.write(session, user, Settings(), {MENUBAR: False})
+    assert get_setting(session, user, ui_settings.KEY_PREFIX + MENUBAR) is False
+    assert ui_settings.resolve(session, user, Settings()).menubar.show_icon is False
+    view = _view(ui_settings.describe(Settings(), ui_settings.stored(session, user)), MENUBAR)
+    assert (view.value, view.ui_value, view.source) == (False, False, "ui")
+    ui_settings.write(session, user, Settings(), {MENUBAR: None})
+    assert ui_settings.resolve(session, user, Settings()).menubar.show_icon is True
+
+
+def test_config_toml_wins_over_the_menu_bar_switch(
+    session: Session, user: User, tmp_path: Path
+) -> None:
+    config = tmp_path / "config.toml"
+    config.write_text("[menubar]\nshow_icon = false\n")
+    base = load_settings(config)
+    assert base.menubar.show_icon is False and ui_settings.file_sets(base, MENUBAR)
+    set_setting(session, user, ui_settings.KEY_PREFIX + MENUBAR, True)
+    assert ui_settings.resolve(session, user, base).menubar.show_icon is False
+    view = _view(ui_settings.describe(base, ui_settings.stored(session, user)), MENUBAR)
+    assert (view.value, view.source, view.editable) == (False, "file", False)
+    with pytest.raises(ui_settings.SettingsRefused, match="the file wins"):
+        ui_settings.write(session, user, base, {MENUBAR: True})
+
+
+def test_a_stored_menu_bar_value_that_is_not_a_switch_is_ignored(
+    session: Session, user: User
+) -> None:
+    set_setting(session, user, ui_settings.KEY_PREFIX + MENUBAR, "off")
+    assert ui_settings.resolve(session, user, Settings()).menubar.show_icon is True
+    with pytest.raises(ui_settings.SettingsRefused, match="true or false"):
+        ui_settings.write(session, user, Settings(), {MENUBAR: "off"})
+
+
+# The reader `netkeep setup`, `netkeep update` and the Run at login switch call (#767).
+
+
+def test_the_menu_bar_reader_returns_the_local_owners_value(
+    session_factory: sessionmaker[Session], tmp_path: Path
+) -> None:
+    """Against the database file in tmp_path, with no session of the caller's: the
+    owner's value, never another user's."""
+    url = database_url(tmp_path)
+    assert ui_settings.show_menubar_icon(Settings(), url=url) is True  # no owner yet
+    with session_scope(session_factory, write=True) as session:
+        owner = factories.make_user(session)
+        other = factories.make_user(session, kind=UserKind.LOCAL)
+        ui_settings.write(session, other, Settings(), {MENUBAR: False})
+    assert ui_settings.show_menubar_icon(Settings(), url=url) is True
+    with session_scope(session_factory, write=True) as session:
+        ui_settings.write(session, owner, Settings(), {MENUBAR: False})
+    assert ui_settings.show_menubar_icon(Settings(), url=url) is False
+    with session_scope(session_factory) as session:
+        assert ui_settings.show_menubar_icon(Settings(), session=session) is False
+
+
+def test_the_menu_bar_reader_lets_config_toml_win(
+    session_factory: sessionmaker[Session], tmp_path: Path
+) -> None:
+    with session_scope(session_factory, write=True) as session:
+        owner = factories.make_user(session)
+        ui_settings.write(session, owner, Settings(), {MENUBAR: True})
+    config = tmp_path / "config.toml"
+    config.write_text("[menubar]\nshow_icon = false\n")
+    base = load_settings(config)
+    assert ui_settings.show_menubar_icon(base, url=database_url(tmp_path)) is False
+
+
+def test_the_menu_bar_reader_creates_nothing_before_there_is_a_database(
+    tmp_path: Path,
+) -> None:
+    """`netkeep setup` can run before `serve` made the database: on by default, the
+    file's value when it sets one, and no database file appears."""
+    data = tmp_path / "no-data-yet"
+    assert ui_settings.show_menubar_icon(Settings(), url=database_url(data)) is True
+    off = Settings(menubar=MenuBarSettings(show_icon=False))
+    assert ui_settings.show_menubar_icon(off, url=database_url(data)) is False
+    assert ui_settings.show_menubar_icon(Settings()) is True  # the default data directory
+    assert not data.exists()

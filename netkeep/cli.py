@@ -21,7 +21,6 @@ from zoneinfo import ZoneInfo
 
 import typer
 import uvicorn
-from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import OperationalError, ProgrammingError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
@@ -495,26 +494,9 @@ def _with_log_rotation(settings: Settings) -> Settings:
 
 def _with_settings_page(settings: Settings) -> Settings:
     """``settings`` with the local user's Settings-page values, when there are any to
-    read: no database yet (a SQLite file that does not exist), no ``settings_kv``
-    table, or no local user leaves them as they are, and creates nothing."""
-    url = database_url()
-    parsed = make_url(url)
-    if parsed.get_backend_name() == "sqlite" and (
-        not parsed.database or not Path(parsed.database).is_file()
-    ):
-        return settings
-    engine = make_engine(url)
-    try:
-        with engine.connect() as connection:
-            if not sa_inspect(connection).has_table("settings_kv"):
-                return settings
-        factory = make_session_factory(engine)
-        install_scope_guard(factory)
-        with session_scope(factory) as session:
-            user = local_owner(session)
-            return settings if user is None else ui_settings.resolve(session, user, settings)
-    finally:
-        engine.dispose()
+    read: no database yet, no ``settings_kv`` table, or no local user leaves them as they
+    are, and creates nothing (:func:`ui_settings.owner_settings_from_database`)."""
+    return ui_settings.owner_settings_from_database(settings)
 
 
 def _display_url(url: str) -> str:

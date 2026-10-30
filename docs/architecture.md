@@ -1293,6 +1293,9 @@ keep = 5
 
 [updates]
 check_daily = true
+
+[menubar]
+show_icon = true
 ```
 
 ## Appendix C: default pacing and budget values
