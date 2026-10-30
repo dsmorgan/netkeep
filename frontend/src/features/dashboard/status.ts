@@ -25,7 +25,10 @@ export interface Problem extends Target {
 export interface StatusReads {
   mailboxes: Read<Mailbox[]>
   status: Read<LinkedInStatus>
-  /** Only when it resumes: whether heat tripped is `status.heat_tripped` (#752). */
+  /**
+   * When heat resumes. Whether it tripped is `status.heat_tripped` (#752), unless the
+   * status read failed: then this read says, as it did before.
+   */
   heat: Read<Heat>
   attention: Attention | undefined
 }
@@ -81,10 +84,14 @@ export function buildProblems(reads: StatusReads): Problem[] {
       mailboxId: mailbox.id,
     })
   }
-  if (status?.heat_tripped === true) {
-    // The heat read says when runs resume, and is read only while heat is tripped; one
-    // that hasn't caught up yet (still says not tripped) has no time to give.
-    const heat = reads.heat.state === 'ok' ? reads.heat.data : undefined
+  const heat = reads.heat.state === 'ok' ? reads.heat.data : undefined
+  // The status read says whether heat tripped, and the heat read, read only while it is
+  // tripped, says when runs resume. A heat read that hasn't caught up yet (still says
+  // not tripped) has no time to give. With the status read failed, the heat read decides
+  // alone, so a failed status never hides heat (#800 review).
+  const heatTripped =
+    reads.status.state === 'error' ? heat?.tripped === true : status?.heat_tripped === true
+  if (heatTripped) {
     const resumesAt = heat?.tripped === true ? heat.resumes_at : null
     problems.push({
       key: 'heat',

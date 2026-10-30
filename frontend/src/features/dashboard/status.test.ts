@@ -88,6 +88,14 @@ describe('buildProblems', () => {
     expect(buildProblems(reads({ heat: ok(heat(true)) }))).toEqual([])
   })
 
+  it('reads heat alone when the status read failed, so heat still shows', () => {
+    const failed = { state: 'error' } as const
+    const [problem] = buildProblems(reads({ status: failed, heat: ok(heat(true)) }))
+    expect(problem?.key).toBe('heat')
+    expect(buildProblems(reads({ status: failed, heat: ok(heat()) }))).toEqual([])
+    expect(buildProblems(reads({ status: { state: 'pending' }, heat: ok(heat(true)) }))).toEqual([])
+  })
+
   it('says a logged-out session has its own fix', () => {
     const [problem] = buildProblems(
       reads({ status: ok(linkedinStatus({ session_flag: 'logged_out' })) }),
