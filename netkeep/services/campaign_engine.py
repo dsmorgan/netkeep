@@ -1924,7 +1924,8 @@ class _Chooser:
             # The date counts real sends in this enrollment only: the first step never has
             # one, and a later step's delay may have counted from a discarded prefill. It
             # would render empty, or take a branch's ``else`` (#808). The review refuses a
-            # first step like this; this is the backstop for one reordered or adopted since.
+            # first step like this; this is the backstop for a campaign approved or
+            # activated before that check.
             enrollment.not_sent_error = NO_PREVIOUS_SEND_BLOCK
             self.park(enrollment, Skip.NO_PREVIOUS_SEND)
             return None

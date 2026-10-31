@@ -511,7 +511,8 @@ def first_step_errors(row: Template, position: int) -> list[LintIssue]:
     enrollment, so the field renders empty ("my note from .") or takes the ``else``
     branch, even for a contact written to some other way. The review lints with this
     and refuses an approval, and the engine parks such a step at the fire
-    (``no_previous_send``), the backstop for a step reordered or adopted since."""
+    (``no_previous_send``), the backstop for a campaign approved or activated before
+    this check."""
     if position > 1:
         return []
     # A LinkedIn subject is never analysed or rendered (#448), so it names nothing here.
