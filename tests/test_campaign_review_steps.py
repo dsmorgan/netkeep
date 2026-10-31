@@ -858,12 +858,12 @@ def test_the_longest_ago_words_that_make_a_message_too_slow_to_type_block_its_ap
     session_factory: sessionmaker[Session],
 ) -> None:
     """The review shows the step's delay in words, but lints the longest words ago says
-    for a realistic gap, "12 months ago": a message that fits with the shown words but
+    for any gap, "over a year ago": a message that fits with the shown words but
     not with those is blocked, and its approval refused. One character shorter, it
     fits, so the worst case is no longer than that."""
     from netkeep.linkedin.pacing import TYPING_LINT_SECONDS, typing_expected_seconds
 
-    longest = "12 months ago"  # LONGEST_AGO_GAP_DAYS's words
+    longest = "over a year ago"  # LONGEST_AGO_GAP_DAYS's words
     for size in range(1, 4000):
         filler = ("word " * 800)[:size]
         if typing_expected_seconds(f"Hi Ada, {filler}it has been {longest}") > TYPING_LINT_SECONDS:
@@ -928,7 +928,7 @@ def test_a_template_that_compares_the_previous_send_lints_the_branch_shown_too(
     """#731 re-review: a comparison with ``previous_send_date`` can take one branch with
     the stand-in and another with the worst case. Ada moved 30 days ago: after the
     stand-in (6 days ago) the review shows the ``else`` branch, too slow to type, while
-    the worst case (364 days ago) takes the short one. An error in either render
+    the worst case (390 days ago) takes the short one. An error in either render
     blocks the message, and its approval is refused."""
     from netkeep.linkedin.pacing import TYPING_LINT_SECONDS, typing_expected_seconds
 

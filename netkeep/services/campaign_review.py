@@ -541,7 +541,7 @@ def previous_send_for_review(step: CampaignStep, today: date) -> date | None:
 def lint_values(values: MergeValues, today: date) -> MergeValues:
     """``values`` with the worst-case previous send the review lints, if there is one:
     :data:`~netkeep.campaigns.render.LONGEST_AGO_GAP_DAYS` before ``today``, whose
-    ``ago`` words are the longest the filter says for a realistic gap, so a message the
+    ``ago`` words are the longest the filter says for any gap, so a message the
     real words could push past a LinkedIn length or typing-time limit is blocked,
     whatever the gap turns out to be (#731 review)."""
     if values.previous_send_date is None:
