@@ -19,13 +19,14 @@ from netkeep.campaigns.render import (
     ALLOWED_TESTS,
     CONTACT_FIELDS,
     LINKEDIN_MESSAGE_MAX_CHARS,
-    LONGEST_AGO_DATE,
+    LONGEST_AGO_GAP_DAYS,
     MAX_INT_BITS,
     MAX_LITERAL_CHARS,
     MAX_NESTING,
     MAX_OUTPUT_CHARS,
     MAX_TRUNCATE_LENGTH,
     PLACEHOLDER_EXAMPLES,
+    REALISTIC_GAP_YEARS,
     FieldGroup,
     LintIssue,
     LintRule,
@@ -481,28 +482,21 @@ def test_ago_refuses_a_datetime(sent: datetime) -> None:
     assert ago(date(2026, 9, 24), today=TODAY) == "2 days ago"
 
 
-@pytest.mark.parametrize(
-    ("today", "longest"), [(TODAY, "2027 years ago"), (date.max, "10005 years ago")]
-)
-def test_the_longest_ago_words_are_the_earliest_dates(today: date, longest: str) -> None:
-    """#731 review: the review lints a later step with LONGEST_AGO_DATE's words as the
-    worst case for the real gap, so no gap may say more characters or words, or take
-    longer to type. A change to ``ago`` that lengthens any phrase fails here. Every day
-    is checked up to three years, then every 97th: the years branch changes only once
-    a year."""
-    assert date(1, 1, 1) == LONGEST_AGO_DATE
-    assert ago(LONGEST_AGO_DATE, today=today) == longest
-    most = (today - LONGEST_AGO_DATE).days
-    phrases = {
-        ago(today - timedelta(days=days), today=today)
-        for days in (*range(1100), *range(1100, most, 97), most)
-    }
-    assert longest in phrases
+def test_the_longest_ago_words_for_a_realistic_gap() -> None:
+    """#731 review: the review lints a later step with LONGEST_AGO_GAP_DAYS's words as
+    the worst case for the real gap, so no gap under 100 years may say more characters
+    or words, or take longer to type. A change to ``ago`` that lengthens any phrase
+    fails here. Three-digit years, from 100 years, are longer, and left out."""
+    assert (LONGEST_AGO_GAP_DAYS, REALISTIC_GAP_YEARS) == (364, 100)
+    longest = ago(TODAY - timedelta(days=364), today=TODAY)
+    assert longest == "12 months ago"
+    phrases = {ago(TODAY - timedelta(days=days), today=TODAY) for days in range(36_500)}
     for words in phrases:
         assert len(words) <= len(longest), words
         assert len(words.split()) <= len(longest.split()), words
         seconds = pacing.typing_expected_seconds(f"Hi, {words}.")
         assert seconds <= pacing.typing_expected_seconds(f"Hi, {longest}."), words
+    assert ago(TODAY - timedelta(days=36_500), today=TODAY) == "100 years ago"
 
 
 def test_ago_of_nothing_is_empty_and_of_a_non_date_is_an_error() -> None:

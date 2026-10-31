@@ -78,7 +78,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from netkeep.campaigns.compose import ComposeError, build_message
 from netkeep.campaigns.render import (
-    LONGEST_AGO_DATE,
+    LONGEST_AGO_GAP_DAYS,
     LintIssue,
     MergeValues,
     Rendered,
@@ -530,7 +530,7 @@ def previous_send_for_review(step: CampaignStep, today: date) -> date | None:
     step before fires. The engine fires a step ``delay_days`` after the previous send at
     the earliest, so the review uses that: ``today`` less the step's delay, which reads
     as the step's delay in words ("6 days ago"). A send that slips later says a longer
-    gap, so the lint uses the longest words instead (:func:`lint_values`). The first
+    gap, so the lint checks the longest words too (:func:`lint_values`). The first
     step has no previous send, as at the fire, so ``None``.
     """
     if step.position <= 1:
@@ -538,15 +538,15 @@ def previous_send_for_review(step: CampaignStep, today: date) -> date | None:
     return today - timedelta(days=step.delay_days)
 
 
-def lint_values(values: MergeValues) -> MergeValues:
-    """``values`` as the review lints them and an approval is checked against: with a
-    previous send, it is the one whose ``ago`` words are the longest the filter says
-    (:data:`~netkeep.campaigns.render.LONGEST_AGO_DATE`), so a message the real words
-    could push past a LinkedIn length or typing-time limit is blocked, whatever the gap
-    turns out to be (#731 review)."""
+def lint_values(values: MergeValues, today: date) -> MergeValues:
+    """``values`` with the worst-case previous send the review lints, if there is one:
+    :data:`~netkeep.campaigns.render.LONGEST_AGO_GAP_DAYS` before ``today``, whose
+    ``ago`` words are the longest the filter says for a realistic gap, so a message the
+    real words could push past a LinkedIn length or typing-time limit is blocked,
+    whatever the gap turns out to be (#731 review)."""
     if values.previous_send_date is None:
         return values
-    return replace(values, previous_send_date=LONGEST_AGO_DATE)
+    return replace(values, previous_send_date=today - timedelta(days=LONGEST_AGO_GAP_DAYS))
 
 
 def merge_values(
@@ -577,6 +577,21 @@ def _render_step(template: Template | None, values: MergeValues, today: date) ->
     return render(template.channel, subject, template.body, values, today=today)
 
 
+def _render_and_lint(
+    template: Template | None, values: MergeValues, today: date
+) -> tuple[Rendered, tuple[LintIssue, ...]]:
+    """The step as the review shows it (``values``' stand-in), and the issues the review
+    and an approval check: the worst case's (:func:`lint_values`), then each of the shown
+    render's that the worst case lacks. A template that compares ``previous_send_date``
+    with another date can take one branch with the stand-in and another with the worst
+    case, so an error in either blocks (#731 re-review)."""
+    shown = _render_step(template, values, today)
+    worst = _render_step(template, lint_values(values, today), today)
+    found = {(i.rule, i.severity, i.field) for i in worst.issues}
+    extra = tuple(i for i in shown.issues if (i.rule, i.severity, i.field) not in found)
+    return shown, (*worst.issues, *extra)
+
+
 @dataclass(frozen=True, slots=True)
 class MessagePreview:
     """One pending enrollment's message for one step, rendered as the engine would.
@@ -584,7 +599,9 @@ class MessagePreview:
     ``blocked`` says why it cannot be sent (it fails to render, has a lint
     error, or a guard excludes the contact), or is None. ``subject`` and ``body`` show
     the previous send's stand-in (:func:`previous_send_for_review`); ``issues`` and
-    ``blocked`` come from the lint's render (:func:`lint_values`). ``approved`` is whether
+    ``blocked`` come from both that render and the worst case's
+    (:func:`_render_and_lint`), so a length or typing-time issue counts the longest
+    ``ago`` words while ``body`` shows the step delay's. ``approved`` is whether
     an approval covers it: the step's, or for a ``personal_line`` step its own,
     never for a blocked message of a step approved as a whole. ``fingerprint`` is
     what approving this one message is checked against (:func:`approve_messages`).
@@ -784,12 +801,11 @@ def _render_messages(
         else:
             values = merge_values(contact, campaign, step, today, enrollment_id=enrollment.id)
             try:
-                rendered = _render_step(template, values, today)
-                linted = _render_step(template, lint_values(values), today)
+                rendered, issues = _render_and_lint(template, values, today)
             except TemplateRenderError as exc:
                 blocked = f"does not render: {exc}"
             else:
-                subject, body, issues = rendered.subject, rendered.body, linted.issues
+                subject, body = rendered.subject, rendered.body
                 errors = [i for i in issues if i.severity is Severity.ERROR]
                 if errors:
                     blocked = f"lint error: {errors[0].message}"
@@ -931,21 +947,21 @@ def _check_sendable(
     """Refuse (:class:`ReviewConflict`) a message that can't be sent as it renders: the
     contact is gone, it does not render, or its render has a lint error, such as a
     LinkedIn message a merge value made multi-line (P4-11). Approving it would cover
-    nothing the engine could send. It renders as the review lints (:func:`lint_values`):
-    with the longest ``ago`` words, not the stand-in shown. ``today`` is the user's
-    local day, as the engine renders with (#709)."""
+    nothing the engine could send. It lints as the review does (:func:`_render_and_lint`):
+    the stand-in shown and the worst-case ``ago`` words, an error in either refusing it.
+    ``today`` is the user's local day, as the engine renders with (#709)."""
     where = f"enrollment {enrollment_id}'s message for step {step.position}"
     if contact is None:
         raise ReviewConflict(f"{where} can't be approved: the contact is gone")
     try:
-        rendered = _render_step(
+        _, issues = _render_and_lint(
             template,
-            lint_values(merge_values(contact, campaign, step, today, enrollment_id=enrollment_id)),
+            merge_values(contact, campaign, step, today, enrollment_id=enrollment_id),
             today,
         )
     except TemplateRenderError as exc:
         raise ReviewConflict(f"{where} can't be approved: it does not render: {exc}") from exc
-    errors = [i for i in rendered.issues if i.severity is Severity.ERROR]
+    errors = [i for i in issues if i.severity is Severity.ERROR]
     if errors:
         raise ReviewConflict(f"{where} can't be approved: lint error: {errors[0].message}")
 

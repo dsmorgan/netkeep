@@ -778,12 +778,18 @@ def ago(value: object, *, today: date) -> str:
     return f"{days // 365} years ago"
 
 
-LONGEST_AGO_DATE: Final = date.min
-"""The previous send's date whose ``ago`` words are the longest the filter says on any
-given day: the earliest date there is. The years branch is the only one that grows, so
-the most years say the most (four digits, such as "2027 years ago"), and no shorter gap says more
-characters or more words (pinned in the tests). The review lints a step's messages with
-it, a worst case for words the real send can't know yet (#731 review)."""
+LONGEST_AGO_GAP_DAYS: Final = 364
+"""A gap in days whose ``ago`` words are the longest the filter says for any gap under
+:data:`REALISTIC_GAP_YEARS` years: "12 months ago", 13 characters and 3 words. The
+30-day months say two digits from 300 to 364 days ("10 months ago" ties with it), while
+the years say at most "99 years ago", 12 characters, so no gap in that range says more
+characters or more words (pinned in the tests). The review lints a later step's
+messages with the previous send this many days before today, a worst case for words
+the real send can't know yet (#731 review)."""
+
+REALISTIC_GAP_YEARS: Final = 100
+"""How long ago a previous send can realistically be: under this many years, so the
+three-digit years ("100 years ago") are left out of :data:`LONGEST_AGO_GAP_DAYS`."""
 
 
 # --- lint -------------------------------------------------------------------
