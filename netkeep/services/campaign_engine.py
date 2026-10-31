@@ -176,6 +176,7 @@ from netkeep.campaigns.templates import (
     activation_errors,
     block_reason,
     contact_fields,
+    first_step_errors,
 )
 from netkeep.config import Settings
 from netkeep.crm.contacts import sendable_email
@@ -283,8 +284,9 @@ class Skip(enum.StrEnum):
     TEMPLATE_ERRORS = "template_errors"
     RENDER_FAILED = "render_failed"
     NO_PREVIOUS_SEND = "no_previous_send"
-    """A step after the first whose template names ``previous_send_date``, with no earlier
-    step sent (an earlier prefill was discarded): parked, never sent empty (#808)."""
+    """A step whose template names ``previous_send_date``, with no earlier step sent: the
+    first step, which never has one, or a later step whose earlier prefill was discarded
+    (#808). Parked, never sent empty."""
     NO_ADDRESS = "no_address"
     MAILBOX_ADDRESS = "mailbox_address"
     MAILBOX_DISARMED = "mailbox_disarmed"
@@ -683,7 +685,11 @@ def activate(
         raise CampaignEngineError(f"campaign {campaign_id} has email steps and no mailbox")
     for step in steps:
         template = get_scoped(session, user, Template, step.template_id)
-        if template is None or activation_errors(template):
+        if (
+            template is None
+            or activation_errors(template)
+            or first_step_errors(template, step.position)
+        ):
             raise CampaignEngineError(f"step {step.position}'s template has lint errors")
     start = max(starts_at, now)
     first_due = first_step_due(settings, user, steps[0], start, hours_for(session, user))
@@ -1912,13 +1918,13 @@ class _Chooser:
             enrollment.not_sent_error = blocked
             self.park(enrollment, Skip.TEMPLATE_ERRORS)
             return None
-        if (
-            latest is None
-            and step.position > 1
-            and uses_previous_send_date(template.channel, template.subject, template.body)
+        if latest is None and uses_previous_send_date(
+            template.channel, template.subject, template.body
         ):
-            # The delay counted from a discarded prefill, but the date counts real sends
-            # only: it would render empty, or take a branch's ``else`` (#808).
+            # The date counts real sends in this enrollment only: the first step never has
+            # one, and a later step's delay may have counted from a discarded prefill. It
+            # would render empty, or take a branch's ``else`` (#808). The review refuses a
+            # first step like this; this is the backstop for one reordered or adopted since.
             enrollment.not_sent_error = NO_PREVIOUS_SEND_BLOCK
             self.park(enrollment, Skip.NO_PREVIOUS_SEND)
             return None

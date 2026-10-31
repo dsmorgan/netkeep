@@ -70,6 +70,7 @@ from netkeep.services import (
 from netkeep.services import campaign_engine as engine
 from netkeep.services.campaign_engine import Skip, enroll, run_tick
 from netkeep.services.campaign_guards import Reason, Verdict, check_step
+from netkeep.services.campaigns import CampaignConflict
 from netkeep.services.linkedin_accounts import arm_scheduled_runs, ensure_account
 from netkeep.services.linkedin_session import flag_session, record_session_evidence
 from netkeep.services.linkedin_steps import (
@@ -1706,20 +1707,131 @@ def test_a_linkedin_step_naming_the_previous_send_after_a_real_send_is_claimed(
     assert message.body_rendered.endswith(" weeks ago.")
 
 
-def test_a_first_linkedin_step_naming_the_previous_send_is_not_parked(lane: Lane) -> None:
-    """#808 parks a step after the first only: step 1 never has a previous send."""
-    _set_template(lane, 1, body=_NAMES_PREVIOUS_SEND["branch"])
+@pytest.mark.parametrize("body", _NAMES_PREVIOUS_SEND.values(), ids=_NAMES_PREVIOUS_SEND.keys())
+def test_a_first_linkedin_step_naming_the_previous_send_parks(lane: Lane, body: str) -> None:
+    """Step 1 never has a previous send, so its template naming ``previous_send_date``
+    would type a hole ("it has been .") or the ``else`` branch. The review refuses it;
+    this is the backstop for one reordered or adopted since: parked, nothing typed."""
+    _set_template(lane, 1, body=body)
     enrollment_id = lane.enroll()
-    assert lane.claim(enrollment_id).claimed
+    claim = lane.claim(enrollment_id)
+    assert claim.reasons == (Skip.NO_PREVIOUS_SEND,)
+    assert claim.message_id is None and claim.run_id is None
+    enrollment = lane.enrollment(enrollment_id)
+    assert (enrollment.next_action_at, enrollment.not_sent_error) == (None, NO_PREVIOUS_SEND_BLOCK)
+    assert lane.messages(enrollment_id) == [] and lane.runs() == []
 
 
-def test_a_first_email_step_naming_the_previous_send_is_not_parked(
+def test_a_first_auto_send_step_naming_the_previous_send_parks(
     session_factory: sessionmaker[Session],
 ) -> None:
-    """#808 parks a step after the first only, on the tick too."""
+    """The scheduler's auto-send claim parks step 1 too: no scheduled run, no message."""
+    lane = make_lane(session_factory, settings=_AUTO)
+    lane.write(lambda s, u: arm_scheduled_runs(s, u, now=NOW - timedelta(days=1)))
+    _sent_hours(lane, any_time=True)
+    _set_template(lane, 1, body=_NAMES_PREVIOUS_SEND["ago"])
+    _set_step_mode(lane, 1, StepMode.AUTO_SEND)
+    enrollment_id = lane.enroll()
+    lane.write(lambda s, u: record_poll(s, u, NOW - timedelta(minutes=1)))
+    claim = lane.write(lambda s, u: claim_auto_send(s, u, now=NOW, settings=_AUTO))
+    assert claim is not None and claim.reasons == (Skip.NO_PREVIOUS_SEND,)
+    assert claim.message_id is None and claim.run_id is None
+    assert lane.enrollment(enrollment_id).not_sent_error == NO_PREVIOUS_SEND_BLOCK
+    assert lane.messages(enrollment_id) == [] and lane.runs() == []
+
+
+def test_a_first_linkedin_step_without_the_field_is_claimed(lane: Lane) -> None:
+    """The park is for the field only: step 1 with any other text is claimed."""
+    _set_template(lane, 1, body="Hi {{ first_name }}, it has been a while.")
+    enrollment_id = lane.enroll()
+    claim = lane.claim(enrollment_id)
+    assert claim.claimed, claim.reasons
+    message = lane.message(claim.message_id or 0)
+    assert message is not None and message.body_rendered == "Hi First1, it has been a while."
+
+
+def test_a_parked_first_step_is_released_by_adopting_a_version_without_the_field(
+    lane: Lane,
+) -> None:
+    """The fix the reason names: a version without ``previous_send_date``, adopted, makes
+    step 1 due again, and the claim takes the new text."""
+    _set_template(lane, 1, body=_NAMES_PREVIOUS_SEND["ago"])
+    enrollment_id = lane.enroll()
+    assert lane.claim(enrollment_id).reasons == (Skip.NO_PREVIOUS_SEND,)
+    adopted_at = NOW + timedelta(hours=1)
+    assert _adopt_step(lane, 1, "Hi {{ first_name }}, a first note.", now=adopted_at) == 1
+    enrollment = lane.enrollment(enrollment_id)
+    assert (enrollment.next_action_at, enrollment.not_sent_error) == (adopted_at, None)
+    claim = lane.claim(enrollment_id, now=adopted_at)
+    assert claim.claimed, claim.reasons
+    message = lane.message(claim.message_id or 0)
+    assert message is not None and message.body_rendered == "Hi First1, a first note."
+
+
+@pytest.mark.parametrize(("position", "refused"), [(1, True), (2, False)])
+def test_adopting_a_version_naming_the_field_is_refused_on_the_first_step(
+    lane: Lane, position: int, refused: bool
+) -> None:
+    """Adoption lints the new version as the review does: on step 1, naming
+    ``previous_send_date`` is an error that refuses it; on step 2 it is allowed."""
+    body = _NAMES_PREVIOUS_SEND["ago"]
+
+    def run(session: Session, user: User) -> str | None:
+        campaign = get_scoped(session, user, Campaign, lane.campaign_id)
+        assert campaign is not None
+        step = next(s for s in campaign.steps if s.position == position)
+        newer = template_service.update_template(session, user, step.template_id, body=body)
+        assert newer.id != step.template_id
+        shown = template_adoption.preview(session, user, campaign.id, step.id, now=NOW)
+        assert bool(shown.errors) is refused
+        if refused:
+            with pytest.raises(CampaignConflict, match="lint errors"):
+                template_adoption.adopt(
+                    session, user, campaign.id, step.id, fingerprint_seen=shown.fingerprint, now=NOW
+                )
+        return shown.refusal
+
+    refusal = lane.write(run)
+    if refused:
+        assert refusal == "v2 has lint errors (missing_value); fix the template first"
+    else:
+        assert refusal is None
+
+
+@pytest.mark.parametrize(
+    ("subject", "body"),
+    [
+        ("Hello", _NAMES_PREVIOUS_SEND["ago"]),
+        ("Hello", _NAMES_PREVIOUS_SEND["branch"]),
+        ("Hello", _NAMES_PREVIOUS_SEND["date"]),
+        ("Since {{ previous_send_date | ago }}", "Hi {{ first_name }}"),
+    ],
+    ids=["ago", "branch", "date", "subject"],
+)
+def test_a_first_email_step_naming_the_previous_send_parks(
+    session_factory: sessionmaker[Session], subject: str, body: str
+) -> None:
+    """The tick parks an email step 1 whose template names ``previous_send_date``, in its
+    body or its subject, rather than send "it has been ." (the review refuses it first)."""
     lane = make_lane(session_factory, channels=(EMAIL, LINKEDIN))
     _sent_hours(lane, any_time=True)
-    _set_template(lane, 1, body=_NAMES_PREVIOUS_SEND["branch"])
+    _set_template(lane, 1, subject=subject, body=body)
+    enrollment_id = lane.enroll()
+    result = _tick(lane, NOW)
+    assert result.fired == []
+    assert result.skipped()[enrollment_id] == (Skip.NO_PREVIOUS_SEND.value,)
+    enrollment = lane.enrollment(enrollment_id)
+    assert (enrollment.next_action_at, enrollment.not_sent_error) == (None, NO_PREVIOUS_SEND_BLOCK)
+    assert lane.messages(enrollment_id) == []
+    assert _tick(lane, NOW + timedelta(days=1)).fired == []
+
+
+def test_a_first_email_step_without_the_field_fires(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """The park is for the field only: an email step 1 with any other text fires."""
+    lane = make_lane(session_factory, channels=(EMAIL, LINKEDIN))
+    _sent_hours(lane, any_time=True)
     enrollment_id = lane.enroll()
     result = _tick(lane, NOW)
     assert [(f.enrollment_id, f.step_position) for f, _ in result.fired] == [(enrollment_id, 1)]

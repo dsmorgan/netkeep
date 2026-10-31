@@ -39,9 +39,9 @@ runs, and the LinkedIn ones besides. It refuses with the reasons when:
 - the template has lint errors, the body does not render or renders empty, or the
   rendered message has an error for this contact (``rendered_errors``: the enrollment
   is parked with ``not_sent_error`` "blocked: <rules>");
-- the step comes after the first, no earlier step was sent (one was discarded), and
-  the template names ``previous_send_date`` (``no_previous_send``, #808): parked with
-  ``not_sent_error`` "blocked: ...", as the email engine parks it;
+- no earlier step was sent (it is the first step, or an earlier one was discarded),
+  and the template names ``previous_send_date`` (``no_previous_send``, #808): parked
+  with ``not_sent_error`` "blocked: ...", as the email engine parks it;
 - the run cannot be recorded (:func:`netkeep.services.runs.create_run`: one running
   run per account; a ``message_send`` run is never scheduled, and is recorded only
   with the claim's gate token, :data:`netkeep.services.runs.MESSAGE_SEND_GATE`).
@@ -1139,13 +1139,9 @@ class _Claimer:
             # Said on the enrollment, as the email engine does (#342).
             enrollment.not_sent_error = blocked
             return self.park(enrollment, Skip.TEMPLATE_ERRORS)
-        if (
-            latest is None
-            and step.position > 1
-            and uses_previous_send_date(template.channel, None, template.body)
-        ):
-            # As the email engine (#808): the delay counted from a discarded prefill, but
-            # the date counts real sends only, so it would render empty.
+        if latest is None and uses_previous_send_date(template.channel, None, template.body):
+            # As the email engine (#808): the date counts real sends only, so on the first
+            # step, or after a discarded prefill, it would render empty.
             enrollment.not_sent_error = NO_PREVIOUS_SEND_BLOCK
             return self.park(enrollment, Skip.NO_PREVIOUS_SEND)
         contact = session.scalars(

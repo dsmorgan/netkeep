@@ -44,7 +44,9 @@ adopted it and when (``campaign_steps.template_adopted_*``).
   never rendered, and a message that renders too long to type is blocked for its
   contact, listed in the preview, and parked at the claim. The step's mode
   does not matter: a ``prefill`` and an ``auto_send`` step take the same checks, and
-  every check a claim runs still runs at each fire;
+  every check a claim runs still runs at each fire. On the campaign's first step, a
+  version that names ``previous_send_date`` has a lint error too
+  (:func:`~netkeep.campaigns.templates.first_step_errors`), as in the review;
 - the newer version does not use ``{{ personal_line }}``: its messages are approved
   one by one in the review (#339), which an active campaign has left.
 
@@ -370,7 +372,10 @@ def preview(
         raise CampaignConflict(f"step {step.position}'s template is gone")
     newest = template_service.newest_version(session, user, current)
     issues = lint(newest.channel, newest.subject, newest.body)
-    errors = tuple(i for i in issues if i.severity is Severity.ERROR)
+    errors = (
+        *(i for i in issues if i.severity is Severity.ERROR),
+        *template_service.first_step_errors(newest, step.position),
+    )
     warnings = tuple(i for i in issues if i.severity is not Severity.ERROR)
     affected = _affected(session, user, step)
     contacts = campaign_review._contacts(session, user, [e.contact_id for e in affected[:LIST_MAX]])

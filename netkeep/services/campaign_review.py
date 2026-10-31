@@ -88,7 +88,12 @@ from netkeep.campaigns.render import (
     render,
     uses_personal_line,
 )
-from netkeep.campaigns.templates import activation_errors, contact_fields, spelling_warnings
+from netkeep.campaigns.templates import (
+    activation_errors,
+    contact_fields,
+    first_step_errors,
+    spelling_warnings,
+)
 from netkeep.config import Settings
 from netkeep.crm import lists as crm_lists
 from netkeep.crm.contacts import sendable_email
@@ -785,6 +790,7 @@ def _render_messages(
     policy = GuardPolicy(contacted_within_days=campaign.contacted_within_days_guard)
     step_print = step_fingerprint(step, template, campaign)
     per_message = is_per_message(template)
+    first_step = () if template is None else tuple(first_step_errors(template, step.position))
     out: list[MessagePreview] = []
     for enrollment in pending:
         contact = contacts.get(enrollment.contact_id)
@@ -811,6 +817,10 @@ def _render_messages(
                     blocked = f"lint error: {errors[0].message}"
                 elif step.channel is TemplateChannel.EMAIL and not subject:
                     blocked = "renders with no subject"
+        if first_step:  # an error of the step, whatever the contact (_lint_errors)
+            issues = (*issues, *first_step)
+            if blocked is None:
+                blocked = f"lint error: {first_step[0].message}"
         if blocked is None and verdict.reason is not None:
             label = reason_label(
                 verdict.reason, contacted_within_days=campaign.contacted_within_days_guard
@@ -913,6 +923,7 @@ def approve_step(
             f"step {step.position} uses {{{{ personal_line }}}}, so each of its messages"
             " is approved on its own"
         )
+    _refuse_first_step(step, template)
     fingerprint = step_fingerprint(step, template, campaign)
     if fingerprint_seen != fingerprint:
         raise ReviewStale(
@@ -933,6 +944,17 @@ def approve_step(
     session.flush()
     log.info("campaign %d: step %d approved", campaign_id, step.position)
     return row
+
+
+def _refuse_first_step(step: CampaignStep, template: Template | None) -> None:
+    """Refuse (:class:`ReviewConflict`) approving any message of a step whose template has
+    an error only at the step's position (:func:`~netkeep.campaigns.templates.first_step_errors`):
+    a first step that names ``previous_send_date``, which every message renders empty."""
+    errors = [] if template is None else first_step_errors(template, step.position)
+    if errors:
+        raise ReviewConflict(
+            f"step {step.position} can't be approved: lint error: {errors[0].message}"
+        )
 
 
 def _check_sendable(
@@ -989,6 +1011,7 @@ def approve_messages(
             f"step {step.position} is approved as a whole; only a step that uses"
             " {{ personal_line }} has its messages approved one by one"
         )
+    _refuse_first_step(step, template)
     ids = sorted(seen)
     if not ids or len(ids) > APPROVE_MAX:
         raise ReviewConflict(f"approve between 1 and {APPROVE_MAX} messages at a time")
@@ -1097,7 +1120,8 @@ def _lint_errors(
         template = _template(session, user, step)
         if template is None:
             raise ReviewConflict(f"step {step.position}'s template is gone")
-        out.append((step.position, tuple(activation_errors(template))))
+        errors = (*activation_errors(template), *first_step_errors(template, step.position))
+        out.append((step.position, errors))
     return tuple(out)
 
 

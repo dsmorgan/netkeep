@@ -42,11 +42,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
 from netkeep.campaigns.render import (
+    PREVIOUS_SEND_DATE,
     FieldGroup,
     LintIssue,
     LintRule,
     MergeField,
     MergeValues,
+    Part,
     Rendered,
     Severity,
     fields_used,
@@ -54,6 +56,7 @@ from netkeep.campaigns.render import (
     merge_fields,
     placeholder_example,
     render,
+    uses_previous_send_date,
 )
 from netkeep.campaigns.spelling import spelling_issues
 from netkeep.crm.positions import last_position_change
@@ -495,9 +498,36 @@ NO_PREVIOUS_SEND_BLOCK: Final = (
     "blocked: no earlier step was sent to this contact, so the template's"
     f" previous_send_date has no value; {FIX_ADVICE}"
 )
-"""Why the engine parked a step after the first whose template names ``previous_send_date``
-when no earlier step was sent (#808): an earlier step's prefill was discarded, so the
-date, its ``ago`` words, or a branch on it would come out wrong."""
+"""Why the engine parked a step whose template names ``previous_send_date`` when no
+earlier step was sent: a campaign's first step, which never has one, or a later step
+whose earlier prefill was discarded (#808). The date, its ``ago`` words, or a branch on
+it would come out wrong."""
+
+
+def first_step_errors(row: Template, position: int) -> list[LintIssue]:
+    """The lint errors ``row`` has only as the template of a campaign's step at
+    ``position``: on the first step, naming ``previous_send_date`` anywhere (printed,
+    through ``ago``, or in a branch). The first step never has a previous send in its
+    enrollment, so the field renders empty ("my note from .") or takes the ``else``
+    branch, even for a contact written to some other way. The review lints with this
+    and refuses an approval, and the engine parks such a step at the fire
+    (``no_previous_send``), the backstop for a step reordered or adopted since."""
+    if position > 1:
+        return []
+    subject = None if row.channel is TemplateChannel.LINKEDIN else row.subject
+    if not uses_previous_send_date(row.channel, subject, row.body):
+        return []
+    in_body = uses_previous_send_date(row.channel, None, row.body)
+    return [
+        LintIssue(
+            LintRule.MISSING_VALUE,
+            Severity.ERROR,
+            Part.BODY if in_body else Part.SUBJECT,
+            f"`{PREVIOUS_SEND_DATE}` has no value on a campaign's first step, so it renders"
+            " empty; use it in a later step only",
+            PREVIOUS_SEND_DATE,
+        )
+    ]
 
 
 def block_reason(row: Template | None) -> str | None:
