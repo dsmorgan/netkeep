@@ -26,7 +26,6 @@ from netkeep.campaigns.render import (
     MAX_OUTPUT_CHARS,
     MAX_TRUNCATE_LENGTH,
     PLACEHOLDER_EXAMPLES,
-    REALISTIC_GAP_YEARS,
     FieldGroup,
     LintIssue,
     LintRule,
@@ -452,11 +451,11 @@ def test_a_link_lint_already_refused_is_not_reported_twice() -> None:
         (28, "last month"),
         (59, "last month"),
         (60, "2 months ago"),
-        (364, "12 months ago"),
-        (365, "last year"),
-        (729, "last year"),
-        (730, "2 years ago"),
-        (3650, "10 years ago"),
+        (359, "11 months ago"),
+        (360, "a year ago"),
+        (389, "a year ago"),
+        (390, "over a year ago"),
+        (3650, "over a year ago"),
     ],
 )
 def test_ago_phrasing(days: int, words: str) -> None:
@@ -482,21 +481,22 @@ def test_ago_refuses_a_datetime(sent: datetime) -> None:
     assert ago(date(2026, 9, 24), today=TODAY) == "2 days ago"
 
 
-def test_the_longest_ago_words_for_a_realistic_gap() -> None:
+def test_the_longest_ago_words_bound_every_gap() -> None:
     """#731 review: the review lints a later step with LONGEST_AGO_GAP_DAYS's words as
-    the worst case for the real gap, so no gap under 100 years may say more characters
-    or words, or take longer to type. A change to ``ago`` that lengthens any phrase
-    fails here. Three-digit years, from 100 years, are longer, and left out."""
-    assert (LONGEST_AGO_GAP_DAYS, REALISTIC_GAP_YEARS) == (364, 100)
-    longest = ago(TODAY - timedelta(days=364), today=TODAY)
-    assert longest == "12 months ago"
-    phrases = {ago(TODAY - timedelta(days=days), today=TODAY) for days in range(36_500)}
+    the worst case for the real gap, so no gap may say more characters or words, or
+    take longer to type. A change to ``ago`` that lengthens any phrase fails here. Every
+    phrase is reached by 390 days; the gaps run well past it, to ten years."""
+    assert LONGEST_AGO_GAP_DAYS == 390
+    longest = ago(TODAY - timedelta(days=390), today=TODAY)
+    assert longest == "over a year ago"
+    phrases = {ago(TODAY - timedelta(days=days), today=TODAY) for days in range(3_651)}
+    # today, yesterday, 2-6 days, last week, 2-3 weeks, last month, 2-11 months, 2 years
+    assert len(phrases) == 23
     for words in phrases:
         assert len(words) <= len(longest), words
         assert len(words.split()) <= len(longest.split()), words
         seconds = pacing.typing_expected_seconds(f"Hi, {words}.")
         assert seconds <= pacing.typing_expected_seconds(f"Hi, {longest}."), words
-    assert ago(TODAY - timedelta(days=36_500), today=TODAY) == "100 years ago"
 
 
 def test_ago_of_nothing_is_empty_and_of_a_non_date_is_an_error() -> None:

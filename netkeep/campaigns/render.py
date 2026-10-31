@@ -740,19 +740,22 @@ def ago(value: object, *, today: date) -> str:
     value renders as an empty string, like any missing field. A date on or after
     ``today`` is "today".
 
-    ======== ===================
+    ======== ===============================
     days     phrasing
-    ======== ===================
+    ======== ===============================
     0        today
     1        yesterday
     2-6      N days ago
     7-13     last week
     14-27    N weeks ago
     28-59    last month
-    60-364   N months ago (30-day months)
-    365-729  last year
-    730+     N years ago (365-day years)
-    ======== ===================
+    60-359   N months ago (2 to 11, 30-day months)
+    360-389  a year ago (12 months)
+    390+     over a year ago
+    ======== ===============================
+
+    The phrases are a fixed set, so the longest, "over a year ago", bounds what any
+    gap says (:data:`LONGEST_AGO_GAP_DAYS`).
     """
     if value is None or isinstance(value, Undefined) or value == "":
         return ""
@@ -771,25 +774,19 @@ def ago(value: object, *, today: date) -> str:
         return f"{days // 7} weeks ago"
     if days < 60:
         return "last month"
-    if days < 365:
+    if days < 360:
         return f"{days // 30} months ago"
-    if days < 730:
-        return "last year"
-    return f"{days // 365} years ago"
+    if days < 390:
+        return "a year ago"
+    return "over a year ago"
 
 
-LONGEST_AGO_GAP_DAYS: Final = 364
-"""A gap in days whose ``ago`` words are the longest the filter says for any gap under
-:data:`REALISTIC_GAP_YEARS` years: "12 months ago", 13 characters and 3 words. The
-30-day months say two digits from 300 to 364 days ("10 months ago" ties with it), while
-the years say at most "99 years ago", 12 characters, so no gap in that range says more
-characters or more words (pinned in the tests). The review lints a later step's
-messages with the previous send this many days before today, a worst case for words
-the real send can't know yet (#731 review)."""
-
-REALISTIC_GAP_YEARS: Final = 100
-"""How long ago a previous send can realistically be: under this many years, so the
-three-digit years ("100 years ago") are left out of :data:`LONGEST_AGO_GAP_DAYS`."""
+LONGEST_AGO_GAP_DAYS: Final = 390
+"""A gap in days whose ``ago`` words are the longest the filter says for any gap: "over
+a year ago", 15 characters and 4 words. Every other phrase is shorter and has fewer
+words (pinned in the tests). The review lints a later step's messages with the
+previous send this many days before today, a worst case for words the real send can't
+know yet (#731 review)."""
 
 
 # --- lint -------------------------------------------------------------------
