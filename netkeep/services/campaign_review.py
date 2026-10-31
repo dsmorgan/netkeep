@@ -70,7 +70,7 @@ import json
 import logging
 import secrets
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from typing import Any, Final
 
@@ -78,6 +78,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from netkeep.campaigns.compose import ComposeError, build_message
 from netkeep.campaigns.render import (
+    LONGEST_AGO_DATE,
     LintIssue,
     MergeValues,
     Rendered,
@@ -522,19 +523,30 @@ def personal_line_for(enrollment_id: int, step: CampaignStep) -> str | None:
 
 
 def previous_send_for_review(step: CampaignStep, today: date) -> date | None:
-    """The previous send's date the review and the approval render ``step`` with (#731
-    review), so the ``ago`` words are in what is shown, linted and approved.
+    """The previous send's date the review shows ``step`` with (#731 review), so the
+    ``ago`` words are in what is shown.
 
     A pending enrollment has sent nothing yet, so the real date is unknown until the
     step before fires. The engine fires a step ``delay_days`` after the previous send at
     the earliest, so the review uses that: ``today`` less the step's delay, which reads
     as the step's delay in words ("6 days ago"). A send that slips later says a longer
-    gap, and the engine lints the words it renders at the fire. The first step has no
-    previous send, as at the fire, so ``None``.
+    gap, so the lint uses the longest words instead (:func:`lint_values`). The first
+    step has no previous send, as at the fire, so ``None``.
     """
     if step.position <= 1:
         return None
     return today - timedelta(days=step.delay_days)
+
+
+def lint_values(values: MergeValues) -> MergeValues:
+    """``values`` as the review lints them and an approval is checked against: with a
+    previous send, it is the one whose ``ago`` words are the longest the filter says
+    (:data:`~netkeep.campaigns.render.LONGEST_AGO_DATE`), so a message the real words
+    could push past a LinkedIn length or typing-time limit is blocked, whatever the gap
+    turns out to be (#731 review)."""
+    if values.previous_send_date is None:
+        return values
+    return replace(values, previous_send_date=LONGEST_AGO_DATE)
 
 
 def merge_values(
@@ -570,7 +582,9 @@ class MessagePreview:
     """One pending enrollment's message for one step, rendered as the engine would.
 
     ``blocked`` says why it cannot be sent (it fails to render, has a lint
-    error, or a guard excludes the contact), or is None. ``approved`` is whether
+    error, or a guard excludes the contact), or is None. ``subject`` and ``body`` show
+    the previous send's stand-in (:func:`previous_send_for_review`); ``issues`` and
+    ``blocked`` come from the lint's render (:func:`lint_values`). ``approved`` is whether
     an approval covers it: the step's, or for a ``personal_line`` step its own,
     never for a blocked message of a step approved as a whole. ``fingerprint`` is
     what approving this one message is checked against (:func:`approve_messages`).
@@ -675,14 +689,15 @@ def message_fingerprint(
     *,
     enrollment_id: int,
 ) -> str:
-    """What one message of a step shows: the step's fingerprint, every input to its
-    render (:func:`merge_values`: the contact's merge fields, its ``personal_line``,
-    and how long before the send the previous one was) and its sendable address. The
-    current date isn't hashed itself, but a merge value that changes with it, such as
-    ``years_since_connected`` or ``last_position_change``, does undo the approval. The
-    previous send is hashed as days before today, which does not change from day to
-    day (#731 review). An approval of the message counts only while this is unchanged,
-    so editing the step, its template, the contact or its personal line undoes it."""
+    """What one message of a step shows: the step's fingerprint, every per-contact input
+    to its render (:func:`merge_values`: the contact's merge fields and its
+    ``personal_line``) and its sendable address. The current date isn't hashed itself,
+    but a merge value that changes with it, such as ``years_since_connected`` or
+    ``last_position_change``, does undo the approval. The previous send's stand-in
+    isn't hashed (#731 review): it is the step's delay, which the step's fingerprint
+    already holds, and the real gap is unknown until the step before fires. An
+    approval of the message counts only while this is unchanged, so editing the step,
+    its template, the contact or its personal line undoes it."""
     if contact is None:
         return _digest([step_print, None])
     values = merge_values(contact, campaign, step, today, enrollment_id=enrollment_id)
@@ -692,15 +707,12 @@ def message_fingerprint(
     fields = dict(values.contact)
     if fields.get("preferred_name") == fields.get("first_name"):
         fields.pop("preferred_name", None)
-    context: dict[str, object] = {
+    context = {
         "contact": fields,
         "campaign_name": values.campaign_name,
         "step_number": values.step_number,
         "personal_line": values.personal_line,
     }
-    if values.previous_send_date is not None:
-        # Only when there is one, so a first step's approvals keep the print they had.
-        context["previous_send_days"] = (today - values.previous_send_date).days
     return _digest([step_print, context, _address(contact)])
 
 
@@ -770,16 +782,14 @@ def _render_messages(
         if contact is None:
             blocked = "the contact is gone"
         else:
+            values = merge_values(contact, campaign, step, today, enrollment_id=enrollment.id)
             try:
-                rendered = _render_step(
-                    template,
-                    merge_values(contact, campaign, step, today, enrollment_id=enrollment.id),
-                    today,
-                )
+                rendered = _render_step(template, values, today)
+                linted = _render_step(template, lint_values(values), today)
             except TemplateRenderError as exc:
                 blocked = f"does not render: {exc}"
             else:
-                subject, body, issues = rendered.subject, rendered.body, rendered.issues
+                subject, body, issues = rendered.subject, rendered.body, linted.issues
                 errors = [i for i in issues if i.severity is Severity.ERROR]
                 if errors:
                     blocked = f"lint error: {errors[0].message}"
@@ -921,15 +931,16 @@ def _check_sendable(
     """Refuse (:class:`ReviewConflict`) a message that can't be sent as it renders: the
     contact is gone, it does not render, or its render has a lint error, such as a
     LinkedIn message a merge value made multi-line (P4-11). Approving it would cover
-    nothing the engine could send. ``today`` is the user's local day, as the engine
-    renders with (#709)."""
+    nothing the engine could send. It renders as the review lints (:func:`lint_values`):
+    with the longest ``ago`` words, not the stand-in shown. ``today`` is the user's
+    local day, as the engine renders with (#709)."""
     where = f"enrollment {enrollment_id}'s message for step {step.position}"
     if contact is None:
         raise ReviewConflict(f"{where} can't be approved: the contact is gone")
     try:
         rendered = _render_step(
             template,
-            merge_values(contact, campaign, step, today, enrollment_id=enrollment_id),
+            lint_values(merge_values(contact, campaign, step, today, enrollment_id=enrollment_id)),
             today,
         )
     except TemplateRenderError as exc:
@@ -1105,7 +1116,10 @@ def prepare_test_send(
     #342) and addressed to the campaign mailbox's own address, never a contact's.
 
     Before the self contact is first created, the contact fields have no value and
-    render empty, each with a missing-value warning, as any contact's would.
+    render empty, each with a missing-value warning, as any contact's would. A step
+    after the first renders with the review's previous-send stand-in
+    (:func:`previous_send_for_review`), so the test shows the ``ago`` words the
+    review does (#731 review).
 
     Refused (:class:`ReviewConflict`) unless the mailbox is ``ok`` and armed, for
     drafts or for send. Whether it is drafted or sent is decided just before the
@@ -1140,6 +1154,7 @@ def prepare_test_send(
                 contact=contact_fields(you, today),
                 campaign_name=campaign.name,
                 step_number=step.position,
+                previous_send_date=previous_send_for_review(step, today),
             ),
             today,
         )
