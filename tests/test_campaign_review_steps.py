@@ -954,8 +954,14 @@ def test_an_approved_later_step_message_still_counts_the_next_day(
     session_factory: sessionmaker[Session],
 ) -> None:
     """The stand-in moves with today, but the fingerprint leaves it out, so a message
-    approved today still counts for the activation gate tomorrow."""
+    approved today still counts for the activation gate tomorrow. Step 1 doesn't name
+    ``previous_send_date``: there it is a lint error, which refuses the approval."""
     user, campaign_id, (first, second) = _two_step_linkedin(session_factory, body=AGO_BODY)
+    with session_scope(session_factory, write=True) as session:
+        step = campaign_review.step_at(session, user, campaign_id, 1)
+        template = get_scoped(session, user, Template, step.template_id)
+        assert template is not None
+        template.body = "Hi {{ first_name }}{{ personal_line }}, a first note"
     for step_id in (first, second):
         message = _only_message(session_factory, user, campaign_id, step_id, NOW)
         _approve(session_factory, user, campaign_id, step_id, message)
