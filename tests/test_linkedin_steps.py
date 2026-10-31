@@ -1711,7 +1711,8 @@ def test_a_linkedin_step_naming_the_previous_send_after_a_real_send_is_claimed(
 def test_a_first_linkedin_step_naming_the_previous_send_parks(lane: Lane, body: str) -> None:
     """Step 1 never has a previous send, so its template naming ``previous_send_date``
     would type a hole ("it has been .") or the ``else`` branch. The review refuses it;
-    this is the backstop for one reordered or adopted since: parked, nothing typed."""
+    this is the backstop for a campaign approved or activated before that check:
+    parked, nothing typed."""
     _set_template(lane, 1, body=body)
     enrollment_id = lane.enroll()
     claim = lane.claim(enrollment_id)
