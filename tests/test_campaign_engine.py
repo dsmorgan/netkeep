@@ -1785,6 +1785,41 @@ def test_activate_is_refused_over_a_template_with_lint_errors(
         )
 
 
+@pytest.mark.parametrize(("position", "refused"), [(1, True), (2, False)])
+def test_activate_is_refused_over_a_first_step_naming_the_previous_send(
+    session_factory: sessionmaker[Session], position: int, refused: bool
+) -> None:
+    """The review refuses it first; the engine's own check refuses it too. The first step
+    never has a previous send, so ``previous_send_date`` would render empty; a later step
+    may name it."""
+    world = make_world(session_factory, status=CampaignStatus.REVIEWING, approved_at=NOW)
+
+    def name_it(session: Session) -> None:
+        campaign = get_scoped(session, world.user, Campaign, world.campaign.id)
+        assert campaign is not None
+        step = next(s for s in campaign.steps if s.position == position)
+        step.template.body = "Hi {{ first_name }}, since {{ previous_send_date | ago }}"
+
+    world.write(name_it)
+
+    def go(session: Session) -> Campaign:
+        return activate(
+            session,
+            world.user,
+            world.campaign.id,
+            settings=SETTINGS,
+            now=NOW,
+            starts_at=NOW,
+            gate=REVIEW_GATE,
+        )
+
+    if refused:
+        with pytest.raises(CampaignEngineError, match="step 1's template has lint errors"):
+            world.write(go)
+    else:
+        assert world.write(go).status is CampaignStatus.ACTIVE
+
+
 # --- users ---------------------------------------------------------------------------------
 
 
