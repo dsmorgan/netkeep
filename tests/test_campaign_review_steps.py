@@ -20,7 +20,7 @@ from campaign_fakes import ARMED_FOR_SEND, NOW, SETTINGS, FakeSender, make_mailb
 from sqlalchemy.orm import Session, sessionmaker
 
 from netkeep.campaigns import templates as template_service
-from netkeep.campaigns.render import LONGEST_AGO_DATE, LintIssue, LintRule, Severity, ago, lint
+from netkeep.campaigns.render import LintIssue, LintRule, Severity, lint
 from netkeep.campaigns.templates import activation_errors
 from netkeep.crm import do_not_send
 from netkeep.crm import lists as list_service
@@ -727,10 +727,15 @@ AGO_BODY = "Hi {{ first_name }}{{ personal_line }}, it has been {{ previous_send
 
 
 def _two_step_linkedin(
-    factory: sessionmaker[Session], *, body: str, second_delay: int = 6
+    factory: sessionmaker[Session],
+    *,
+    body: str,
+    second_delay: int = 6,
+    positions: tuple[dict[str, Any], ...] = (),
 ) -> tuple[User, int, list[int]]:
     """A two-step LinkedIn campaign under review whose steps both render ``body``, with
-    one contact, Ada, enrolled. The second step waits ``second_delay`` days."""
+    one contact, Ada (with ``positions``), enrolled. The second step waits
+    ``second_delay`` days."""
     with session_scope(factory, write=True) as session:
         user = factories.make_user(session)
         campaign = factories.make_campaign(
@@ -744,7 +749,9 @@ def _two_step_linkedin(
             assert template is not None
             template.subject, template.body = None, body
         campaign.steps[1].delay_days = second_delay
-        contact = factories.make_contact(session, user, first_name="Ada", connected_on=None)
+        contact = factories.make_contact(
+            session, user, first_name="Ada", connected_on=None, positions=positions
+        )
         factories.make_enrollment(session, campaign, contact, status=EnrollmentStatus.PENDING)
         return user, campaign.id, [step.id for step in campaign.steps]
 
@@ -850,27 +857,41 @@ def test_a_message_fingerprint_is_unchanged_so_no_approval_resets(
 def test_the_longest_ago_words_that_make_a_message_too_slow_to_type_block_its_approval(
     session_factory: sessionmaker[Session],
 ) -> None:
-    """The review shows the step's delay in words, but lints the longest words ago can
-    say: a message that fits with the shown words but not with the longest is blocked,
-    and its approval refused."""
+    """The review shows the step's delay in words, but lints the longest words ago says
+    for a realistic gap, "12 months ago": a message that fits with the shown words but
+    not with those is blocked, and its approval refused. One character shorter, it
+    fits, so the worst case is no longer than that."""
     from netkeep.linkedin.pacing import TYPING_LINT_SECONDS, typing_expected_seconds
 
-    longest = ago(LONGEST_AGO_DATE, today=NOW.date())  # four digits of years, any zone
+    longest = "12 months ago"  # LONGEST_AGO_GAP_DAYS's words
     for size in range(1, 4000):
         filler = ("word " * 800)[:size]
         if typing_expected_seconds(f"Hi Ada, {filler}it has been {longest}") > TYPING_LINT_SECONDS:
             break
     shown = f"Hi Ada, {filler}it has been 6 days ago"
     assert typing_expected_seconds(shown) <= TYPING_LINT_SECONDS  # fits with the shown words
-    body = "Hi {{ first_name }}{{ personal_line }}, " + filler + "it has been "
-    user, campaign_id, (_, second) = _two_step_linkedin(
-        session_factory, body=body + "{{ previous_send_date | ago }}"
-    )
-    message = _only_message(session_factory, user, campaign_id, second, NOW)
-    assert message.body == shown
-    assert message.blocked is not None and message.blocked.startswith("lint error:")
+
+    def message(filler: str) -> tuple[User, int, int, campaign_review.MessagePreview]:
+        body = "Hi {{ first_name }}{{ personal_line }}, " + filler + "it has been "
+        user, campaign_id, (_, second) = _two_step_linkedin(
+            session_factory, body=body + "{{ previous_send_date | ago }}"
+        )
+        return (
+            user,
+            campaign_id,
+            second,
+            _only_message(session_factory, user, campaign_id, second, NOW),
+        )
+
+    user, campaign_id, second, slow = message(filler)
+    assert slow.body == shown
+    assert slow.blocked is not None and slow.blocked.startswith("lint error:")
     with pytest.raises(campaign_review.ReviewConflict, match="can't be approved: lint error"):
-        _approve(session_factory, user, campaign_id, second, message)
+        _approve(session_factory, user, campaign_id, second, slow)
+
+    user, campaign_id, second, fits = message(filler[:-1])
+    assert fits.blocked is None
+    _approve(session_factory, user, campaign_id, second, fits)
 
 
 def test_a_template_that_branches_on_the_previous_send_is_approved_on_its_sent_branch(
@@ -899,6 +920,34 @@ def test_a_template_that_branches_on_the_previous_send_is_approved_on_its_sent_b
     assert opening.blocked is not None and opening.blocked.startswith("lint error:")
     with pytest.raises(campaign_review.ReviewConflict, match="can't be approved: lint error"):
         _approve(session_factory, user, campaign_id, first, opening)
+
+
+def test_a_template_that_compares_the_previous_send_lints_the_branch_shown_too(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """#731 re-review: a comparison with ``previous_send_date`` can take one branch with
+    the stand-in and another with the worst case. Ada moved 30 days ago: after the
+    stand-in (6 days ago) the review shows the ``else`` branch, too slow to type, while
+    the worst case (364 days ago) takes the short one. An error in either render
+    blocks the message, and its approval is refused."""
+    from netkeep.linkedin.pacing import TYPING_LINT_SECONDS, typing_expected_seconds
+
+    words = 1
+    while typing_expected_seconds("Hi Ada, " + "word " * words) <= TYPING_LINT_SECONDS:
+        words += 1
+    body = (
+        "Hi {{ first_name }}{{ personal_line }}, {% if last_position_change >"
+        " previous_send_date %}congrats on the move.{% else %}" + "word " * words + "{% endif %}"
+    )
+    moved = {"company": "Acme", "started_on": NOW.date() - timedelta(days=30)}
+    user, campaign_id, (_, second) = _two_step_linkedin(
+        session_factory, body=body, positions=(moved,)
+    )
+    later = _only_message(session_factory, user, campaign_id, second, NOW)
+    assert later.body == "Hi Ada, " + "word " * words
+    assert later.blocked is not None and later.blocked.startswith("lint error:")
+    with pytest.raises(campaign_review.ReviewConflict, match="can't be approved: lint error"):
+        _approve(session_factory, user, campaign_id, second, later)
 
 
 def test_an_approved_later_step_message_still_counts_the_next_day(
