@@ -778,6 +778,14 @@ def ago(value: object, *, today: date) -> str:
     return f"{days // 365} years ago"
 
 
+LONGEST_AGO_DATE: Final = date.min
+"""The previous send's date whose ``ago`` words are the longest the filter says on any
+given day: the earliest date there is. The years branch is the only one that grows, so
+the most years say the most (four digits, such as "2027 years ago"), and no shorter gap says more
+characters or more words (pinned in the tests). The review lints a step's messages with
+it, a worst case for words the real send can't know yet (#731 review)."""
+
+
 # --- lint -------------------------------------------------------------------
 
 

@@ -20,7 +20,7 @@ from campaign_fakes import ARMED_FOR_SEND, NOW, SETTINGS, FakeSender, make_mailb
 from sqlalchemy.orm import Session, sessionmaker
 
 from netkeep.campaigns import templates as template_service
-from netkeep.campaigns.render import LintIssue, LintRule, Severity, lint
+from netkeep.campaigns.render import LONGEST_AGO_DATE, LintIssue, LintRule, Severity, ago, lint
 from netkeep.campaigns.templates import activation_errors
 from netkeep.crm import do_not_send
 from netkeep.crm import lists as list_service
@@ -720,7 +720,7 @@ def test_a_message_whose_render_has_a_lint_error_cannot_be_approved(
         assert [row.enrollment_id for row in approved] == [good[0].enrollment_id]
 
 
-# --- #731 review: the ago words are in what the review shows and an approval covers ------
+# --- #731 review: the review shows the ago words and lints the longest ones -----------
 
 
 AGO_BODY = "Hi {{ first_name }}{{ personal_line }}, it has been {{ previous_send_date | ago }}"
@@ -759,6 +759,25 @@ def _only_message(
     return message
 
 
+def _approve(
+    factory: sessionmaker[Session],
+    user: User,
+    campaign_id: int,
+    step_id: int,
+    message: campaign_review.MessagePreview,
+    now: datetime = NOW,
+) -> None:
+    with session_scope(factory, write=True) as session:
+        campaign_review.approve_messages(
+            session,
+            user,
+            campaign_id,
+            step_id,
+            {message.enrollment_id: message.fingerprint},
+            now=now,
+        )
+
+
 def test_the_review_shows_the_ago_words_for_the_steps_delay(
     session_factory: sessionmaker[Session],
 ) -> None:
@@ -774,12 +793,12 @@ def test_the_review_shows_the_ago_words_for_the_steps_delay(
     )
 
 
-def test_a_message_approval_covers_the_ago_words(
+def test_a_message_fingerprint_leaves_the_gap_out(
     session_factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The message's fingerprint hashes how long before the send the previous one was,
-    as days before today: the same tomorrow, and different for another gap with the
-    step itself unchanged."""
+    """The stand-in is the step's delay, which the step's fingerprint already holds, so a
+    message's fingerprint doesn't hash the gap: the same tomorrow, and the same for
+    another gap with the step unchanged."""
     user, campaign_id, (_, second) = _two_step_linkedin(session_factory, body=AGO_BODY)
     shown = _only_message(session_factory, user, campaign_id, second, NOW)
     tomorrow = _only_message(session_factory, user, campaign_id, second, NOW + timedelta(days=1))
@@ -790,20 +809,21 @@ def test_a_message_approval_covers_the_ago_words(
         lambda step, today: today - timedelta(days=step.delay_days + 1),
     )
     other_gap = _only_message(session_factory, user, campaign_id, second, NOW)
-    assert (other_gap.body or "").endswith(
-        "last week"
-    ) and other_gap.fingerprint != shown.fingerprint
+    assert other_gap.body == "Hi Ada, it has been last week"
+    assert other_gap.fingerprint == shown.fingerprint
 
 
-def test_a_first_steps_message_fingerprint_is_unchanged(
-    session_factory: sessionmaker[Session],
+@pytest.mark.parametrize("index", [0, 1], ids=["first step", "later step"])
+def test_a_message_fingerprint_is_unchanged_so_no_approval_resets(
+    session_factory: sessionmaker[Session], index: int
 ) -> None:
-    """A step with no previous send hashes nothing new, so its approvals still count."""
-    user, campaign_id, (first, _) = _two_step_linkedin(session_factory, body=AGO_BODY)
-    message = _only_message(session_factory, user, campaign_id, first, NOW)
+    """The fingerprint is the digest it was before the ago words were shown, for every
+    step, so no per-message approval given before the upgrade is undone."""
+    user, campaign_id, step_ids = _two_step_linkedin(session_factory, body=AGO_BODY)
+    message = _only_message(session_factory, user, campaign_id, step_ids[index], NOW)
     with session_scope(session_factory) as session:
         campaign = campaign_review.get_campaign(session, user, campaign_id)
-        step = campaign.steps[0]
+        step = campaign.steps[index]
         template = get_scoped(session, user, Template, step.template_id)
         contact = get_scoped(session, user, Contact, message.contact_id)
         assert template is not None and contact is not None
@@ -827,38 +847,100 @@ def test_a_first_steps_message_fingerprint_is_unchanged(
     assert message.fingerprint == before
 
 
-def test_ago_words_that_make_a_message_too_slow_to_type_block_its_approval(
+def test_the_longest_ago_words_that_make_a_message_too_slow_to_type_block_its_approval(
     session_factory: sessionmaker[Session],
 ) -> None:
-    """The review lints what the send would type, the ago words too: a message the
-    words push past the typing-time limit is blocked, and its approval refused."""
+    """The review shows the step's delay in words, but lints the longest words ago can
+    say: a message that fits with the shown words but not with the longest is blocked,
+    and its approval refused."""
     from netkeep.linkedin.pacing import TYPING_LINT_SECONDS, typing_expected_seconds
 
-    words = 1
-    while (
-        typing_expected_seconds("Hi Ada, " + "word " * words + "it has been 6 days ago")
-        <= TYPING_LINT_SECONDS
-    ):
-        words += 1
-    filler = "word " * words
-    without = "Hi Ada, " + filler + "it has been "
-    assert typing_expected_seconds(without) <= TYPING_LINT_SECONDS  # fits without them
+    longest = ago(LONGEST_AGO_DATE, today=NOW.date())  # four digits of years, any zone
+    for size in range(1, 4000):
+        filler = ("word " * 800)[:size]
+        if typing_expected_seconds(f"Hi Ada, {filler}it has been {longest}") > TYPING_LINT_SECONDS:
+            break
+    shown = f"Hi Ada, {filler}it has been 6 days ago"
+    assert typing_expected_seconds(shown) <= TYPING_LINT_SECONDS  # fits with the shown words
     body = "Hi {{ first_name }}{{ personal_line }}, " + filler + "it has been "
     user, campaign_id, (_, second) = _two_step_linkedin(
         session_factory, body=body + "{{ previous_send_date | ago }}"
     )
     message = _only_message(session_factory, user, campaign_id, second, NOW)
-    assert message.body == without + "6 days ago"
+    assert message.body == shown
     assert message.blocked is not None and message.blocked.startswith("lint error:")
-    with (
-        session_scope(session_factory, write=True) as session,
-        pytest.raises(campaign_review.ReviewConflict, match="can't be approved: lint error"),
-    ):
-        campaign_review.approve_messages(
+    with pytest.raises(campaign_review.ReviewConflict, match="can't be approved: lint error"):
+        _approve(session_factory, user, campaign_id, second, message)
+
+
+def test_a_template_that_branches_on_the_previous_send_is_approved_on_its_sent_branch(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """Before #731's review, every step rendered with no previous send, so a template
+    that branches on it was reviewed and linted on its ``else``, and an ``else`` too slow
+    to type refused the approval. A later step now renders the branch it sends, so its
+    approval succeeds; the first step still has no previous send, as at its fire, and
+    is still refused."""
+    from netkeep.linkedin.pacing import TYPING_LINT_SECONDS, typing_expected_seconds
+
+    words = 1
+    while typing_expected_seconds("Hi Ada, " + "word " * words) <= TYPING_LINT_SECONDS:
+        words += 1
+    body = (
+        "Hi {{ first_name }}{{ personal_line }}, {% if previous_send_date %}good to talk"
+        " again.{% else %}" + "word " * words + "{% endif %}"
+    )
+    user, campaign_id, (first, second) = _two_step_linkedin(session_factory, body=body)
+    later = _only_message(session_factory, user, campaign_id, second, NOW)
+    assert later.body == "Hi Ada, good to talk again." and later.blocked is None
+    _approve(session_factory, user, campaign_id, second, later)
+    assert _only_message(session_factory, user, campaign_id, second, NOW).approved
+    opening = _only_message(session_factory, user, campaign_id, first, NOW)
+    assert opening.blocked is not None and opening.blocked.startswith("lint error:")
+    with pytest.raises(campaign_review.ReviewConflict, match="can't be approved: lint error"):
+        _approve(session_factory, user, campaign_id, first, opening)
+
+
+def test_an_approved_later_step_message_still_counts_the_next_day(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """The stand-in moves with today, but the fingerprint leaves it out, so a message
+    approved today still counts for the activation gate tomorrow."""
+    user, campaign_id, (first, second) = _two_step_linkedin(session_factory, body=AGO_BODY)
+    for step_id in (first, second):
+        message = _only_message(session_factory, user, campaign_id, step_id, NOW)
+        _approve(session_factory, user, campaign_id, step_id, message)
+    for at in (NOW, NOW + timedelta(days=1)):
+        with session_scope(session_factory) as session:
+            campaign = campaign_review.get_campaign(session, user, campaign_id)
+            gaps = campaign_review.missing(session, user, campaign, now=at)
+        assert "message_approvals" not in {gap.requirement for gap in gaps}, at
+
+
+def test_an_email_test_send_of_a_later_step_shows_the_reviews_ago_words(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """The test send renders with the review's stand-in, so it shows the words the
+    review does, not an empty ago."""
+    with session_scope(session_factory, write=True) as session:
+        user = factories.make_user(session)
+        mailbox = make_mailbox(session, user, **ARMED_FOR_SEND)
+        campaign = factories.make_campaign(
             session,
             user,
-            campaign_id,
-            second,
-            {message.enrollment_id: message.fingerprint},
-            now=NOW,
+            channels=(TemplateChannel.EMAIL, TemplateChannel.EMAIL),
+            status=CampaignStatus.REVIEWING,
+            mailbox_id=mailbox.id,
         )
+        for step in campaign.steps:
+            template = get_scoped(session, user, Template, step.template_id)
+            assert template is not None
+            template.body = "It has been {{ previous_send_date | ago }}, {{ first_name }}."
+        campaign.steps[1].delay_days = 6
+        update_self_contact(session, user, {"first_name": "Selfie"})
+        first, second = (
+            campaign_review.prepare_test_send(session, user, campaign.id, step.id, today=NOW.date())
+            for step in campaign.steps
+        )
+    assert first.message.get_content().strip() == "It has been , Selfie."
+    assert second.message.get_content().strip() == "It has been 6 days ago, Selfie."
