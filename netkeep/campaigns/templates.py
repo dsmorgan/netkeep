@@ -514,8 +514,8 @@ def first_step_errors(row: Template, position: int) -> list[LintIssue]:
     (``no_previous_send``), the backstop for a step reordered or adopted since."""
     if position > 1:
         return []
-    subject = None if row.channel is TemplateChannel.LINKEDIN else row.subject
-    if not uses_previous_send_date(row.channel, subject, row.body):
+    # A LinkedIn subject is never analysed or rendered (#448), so it names nothing here.
+    if not uses_previous_send_date(row.channel, row.subject, row.body):
         return []
     in_body = uses_previous_send_date(row.channel, None, row.body)
     return [
