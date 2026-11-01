@@ -70,6 +70,47 @@ function encodeMultipart(form: FormData): { body: string; contentType: string } 
   return { body: parts.join(''), contentType: `multipart/form-data; boundary=${boundary}` }
 }
 
+/** A `name="..."` parameter's value in a `Content-Disposition` line, or null. */
+function dispositionParam(line: string, param: string): string | null {
+  const match = new RegExp(`;\\s*${param}="([^"]*)"`).exec(line)
+  return match?.[1] ?? null
+}
+
+/**
+ * A fake backend's read of an upload: the `multipart/form-data` body that
+ * `encodeMultipart` built, parsed back by hand into a jsdom `FormData`.
+ *
+ * Not `request.formData()`: Node 25's parser asserts that each part it makes
+ * is its own `File`, and under jsdom it isn't, so every upload test failed
+ * there while passing on Node 22 (#746 re-review, via #674). This reads only
+ * what `encodeMultipart` writes, which is all a test's upload ever is.
+ */
+export async function readMultipart(request: Request): Promise<FormData> {
+  const contentType = request.headers.get('content-type') ?? ''
+  const boundary = /boundary=(.+)$/.exec(contentType)?.[1]
+  if (boundary === undefined) throw new Error(`no multipart boundary in ${contentType}`)
+  const text = await request.text()
+  const form = new FormData()
+  for (const part of text.split(`--${boundary}`).slice(1)) {
+    if (part.startsWith('--')) break // the closing delimiter
+    const split = part.indexOf('\r\n\r\n')
+    if (split === -1) throw new Error('a multipart part with no blank line after its headers')
+    const headers = part.slice(0, split).split('\r\n')
+    const value = part.slice(split + 4).replace(/\r\n$/, '')
+    const disposition = headers.find((h) => /^content-disposition:/i.test(h)) ?? ''
+    const name = dispositionParam(disposition, 'name')
+    if (name === null) throw new Error('a multipart part with no field name')
+    const filename = dispositionParam(disposition, 'filename')
+    if (filename === null) {
+      form.append(name, value)
+    } else {
+      const type = headers.find((h) => /^content-type:/i.test(h))?.replace(/^[^:]*:\s*/, '')
+      form.append(name, new File([value], filename, { type: type ?? '' }))
+    }
+  }
+  return form
+}
+
 /**
  * Node's `Request` rejects relative URLs, but the app uses them: the client's
  * `baseUrl` is empty and a browser resolves against the page origin. Resolve

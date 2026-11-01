@@ -484,13 +484,27 @@ def test_ago_refuses_a_datetime(sent: datetime) -> None:
 def test_the_longest_ago_words_bound_every_gap() -> None:
     """#731 review: the review lints a later step with LONGEST_AGO_GAP_DAYS's words as
     the worst case for the real gap, so no gap may say more characters or words, or
-    take longer to type. A change to ``ago`` that lengthens any phrase fails here. Every
-    phrase is reached by 390 days; the gaps run well past it, to ten years."""
+    take longer to type. The gaps run over every past date a ``date`` can hold, plus a
+    future one, so every branch of ``ago`` is reached, and the phrase set is pinned
+    whole: a change to ``ago`` that adds, rewords or lengthens any phrase fails here."""
     assert LONGEST_AGO_GAP_DAYS == 390
     longest = ago(TODAY - timedelta(days=390), today=TODAY)
     assert longest == "over a year ago"
-    phrases = {ago(TODAY - timedelta(days=days), today=TODAY) for days in range(3_651)}
-    # today, yesterday, 2-6 days, last week, 2-3 weeks, last month, 2-11 months, 2 years
+    phrases = {ago(TODAY - timedelta(days=d), today=TODAY) for d in range(-1, TODAY.toordinal())}
+    phrases.add(ago(date.max, today=TODAY))  # the furthest future date
+    # 23 phrases: today, yesterday, 2-6 days ago (5), last week, 2-3 weeks ago (2),
+    # last month, 2-11 months ago (10), a year ago, over a year ago.
+    assert phrases == {
+        "today",
+        "yesterday",
+        *(f"{n} days ago" for n in range(2, 7)),
+        "last week",
+        *(f"{n} weeks ago" for n in range(2, 4)),
+        "last month",
+        *(f"{n} months ago" for n in range(2, 12)),
+        "a year ago",
+        "over a year ago",
+    }
     assert len(phrases) == 23
     for words in phrases:
         assert len(words) <= len(longest), words
