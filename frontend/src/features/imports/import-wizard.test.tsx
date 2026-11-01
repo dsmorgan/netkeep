@@ -845,11 +845,9 @@ describe('the archive shape: a zip, or a lone message/invitation file (P1-21)', 
 
     const upload = calls.find((call) => call.path === '/api/v1/imports/archive')
     expect(upload?.method).toBe('POST')
-    // Not `toBeInstanceOf(File)`: the request that carried it was built by
-    // Node's real `Request`, which parses its own `multipart/form-data` body
-    // back into its own `File` class — a different one than the jsdom global
-    // this test file sees, even though it is the same file in every way that
-    // matters to the app. `.name` is what the endpoint actually reads.
+    // The fake backend parses the multipart body back by hand (`readMultipart`
+    // in `@/test/fetch`), so this is a new `File`, not the one the test chose.
+    // `.name` is what the endpoint actually reads.
     const uploaded = (upload?.body as FormData).get('file') as ({ name?: unknown } & Blob) | null
     expect(uploaded).not.toBeNull()
     expect(uploaded?.name).toBe('export.zip')

@@ -4,7 +4,7 @@
  * Only the test files import this. Everyone in it is invented: `.example`
  * addresses and reserved `555-01xx` numbers, never a real person (CLAUDE.md).
  */
-import { jsonResponse, registerFileContent } from '@/test/fetch'
+import { jsonResponse, readMultipart, registerFileContent } from '@/test/fetch'
 
 import type {
   ArchiveImportResult,
@@ -331,7 +331,7 @@ function queryComplaint(call: Call): string | null {
  *
  * `POST /imports/archive` (P1-20/P1-21) is the one route that sends
  * `multipart/form-data` rather than a JSON body — `call.body` comes back as
- * the parsed `FormData` for it, so `(call.body as FormData).get('file')` reads
+ * the parsed `FormData` for it (`readMultipart`), so `(call.body as FormData).get('file')` reads
  * the uploaded file, the same way a fake for it reads what was actually sent.
  */
 export function backend(handlers: Record<string, Handler>, calls: Call[] = []) {
@@ -341,7 +341,7 @@ export function backend(handlers: Record<string, Handler>, calls: Call[] = []) {
     if (request.method !== 'GET') {
       const contentType = request.headers.get('content-type') ?? ''
       if (contentType.startsWith('multipart/form-data')) {
-        body = await request.formData()
+        body = await readMultipart(request)
       } else {
         const raw = await request.text()
         body = raw === '' ? undefined : JSON.parse(raw)
