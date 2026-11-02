@@ -5455,6 +5455,11 @@ class BrowserRun:
             await _detach_quietly(session.detach)
 
 
+#: #819: how long one tab's color-scheme reset may take, in seconds. It's one CDP round
+#: trip; a hung renderer must not stall the attach or the run's first navigation.
+MEDIA_RESET_TIMEOUT_S: Final = 3.0
+
+
 class _MediaPage(Protocol):
     """The one Playwright ``Page`` call :func:`follow_system_color_scheme` makes (#819)."""
 
@@ -5477,12 +5482,14 @@ async def follow_system_color_scheme(page: PageLike) -> None:
     the run's tab keeps Playwright's focus emulation, which keeps a background tab
     rendering (:meth:`BrowserRun._open_tab`).
 
-    A failure is logged, not raised: the tab keeps Playwright's light default, as it
-    did before #819, and the run goes on.
+    A failure, or a tab that doesn't answer within :data:`MEDIA_RESET_TIMEOUT_S`, is
+    logged, not raised: the tab keeps Playwright's light default, as it did before
+    #819, and the run goes on. A cancel still propagates.
     """
     try:
-        # Playwright reads "null" as no override: Chrome's own value, the system's.
-        await cast(_MediaPage, page).emulate_media(color_scheme="null")
+        async with asyncio.timeout(MEDIA_RESET_TIMEOUT_S):
+            # Playwright reads "null" as no override: Chrome's own value, the system's.
+            await cast(_MediaPage, page).emulate_media(color_scheme="null")
     except Exception as exc:
         log.debug("could not hand a tab's color scheme back to the system: %s", personal_exc(exc))
 
