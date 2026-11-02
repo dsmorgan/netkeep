@@ -21,10 +21,13 @@ import os
 import subprocess
 import sys
 import threading
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
 
 import pytest
+from browser_guard import isolated_cdp
 
 from netkeep.linkedin.browser import AttachBrowserProvider, BrowserUnavailable
 from netkeep.linkedin.preflight import LoginState, preflight
@@ -159,6 +162,56 @@ async def test_a_run_adds_no_browser_and_no_context(
     if before is not None and after is not None:
         assert after <= before, f"browser processes went from {before} to {after}"
     assert not hasattr(provider, "launch")
+
+
+#: #819: what a tab reports for the dark color scheme.
+PREFERS_DARK = "() => matchMedia('(prefers-color-scheme: dark)').matches"
+
+
+@asynccontextmanager
+async def _tabs_without_emulation() -> AsyncIterator[Any]:
+    """Opens tabs the way a person or the UI does, through a test-only connection that
+    emulates nothing (``no_defaults``), so they report the system's own color scheme."""
+    from playwright.async_api import async_playwright
+
+    # A raw connect skips the guarded connector: refuse a personal Chrome first.
+    cdp_url = isolated_cdp(CDP_URL)
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.connect_over_cdp(cdp_url, no_defaults=True)
+        opened: list[Any] = []
+
+        async def open_tab(url: str) -> Any:
+            page = await browser.contexts[0].new_page()
+            opened.append(page)
+            await page.goto(url)
+            return page
+
+        try:
+            yield open_tab
+        finally:
+            for page in opened:
+                if not page.is_closed():
+                    await page.close()
+            await browser.close()
+
+
+async def test_attached_tabs_keep_the_systems_color_scheme(
+    provider: AttachBrowserProvider, site: str
+) -> None:
+    """#819: during a run, the UI's tab, a tab opened mid-run, and the run's own tab all
+    report the system's color scheme, not Playwright's light default. Only a dark system
+    tells the two apart, so a light one skips."""
+    async with _tabs_without_emulation() as open_tab:
+        ui = await open_tab(f"{site}/")
+        if not await ui.evaluate(PREFERS_DARK):
+            pytest.skip("the system theme is light, Playwright's default too: set it to dark")
+        async with provider.run() as run:
+            page = await run.goto(f"{site}/")
+            assert await page.evaluate(PREFERS_DARK), "the run's tab turned light"
+            assert await ui.evaluate(PREFERS_DARK), "a tab open before the attach turned light"
+            later = await open_tab(f"{site}/")
+            assert await later.evaluate(PREFERS_DARK), "a tab opened mid-run turned light"
+        assert await ui.evaluate(PREFERS_DARK), "the tab stayed light after the run"
 
 
 async def test_preflight_reads_the_real_profile(provider: AttachBrowserProvider) -> None:
