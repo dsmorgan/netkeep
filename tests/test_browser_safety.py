@@ -149,6 +149,10 @@ ALLOWED_CONTEXT_MUTATIONS = frozenset(
         (LINKEDIN / "preflight.py", "_read_session_cookies", "new_cdp_session"),
         # #624: which process the attached Chrome is, for the dedicated-profile check.
         (LINKEDIN / "browser.py", "read_browser_pid", "new_browser_cdp_session"),
+        # #819: hands each tab's prefers-color-scheme back to the system, undoing the
+        # light default connect_over_cdp puts on every tab it attaches to. Its one
+        # argument is pinned by `test_the_one_media_call_only_clears_the_color_scheme`.
+        (LINKEDIN / "browser.py", "follow_system_color_scheme", "emulate_media"),
     }
 )
 #: What the body tap's session may send, each named as a literal at its one call,
@@ -6140,6 +6144,53 @@ def test_connect_scanner_catches_an_attach() -> None:
     assert not list(connect_calls("browser = await pw.chromium.connect(url)\n"))
 
 
+# --- #819: the attach hands every tab's color scheme back to the system ------------------
+
+
+def media_calls(source: str) -> list[tuple[str, list[str], list[tuple[str | None, object]]]]:
+    """Every ``x.emulate_media(...)`` in ``source``: where, its positional arguments, and
+    its keywords with their literal values (an AST dump when not a literal)."""
+    found: list[tuple[str, list[str], list[tuple[str | None, object]]]] = []
+    for where, call in _calls_named(source, "emulate_media"):
+        keywords: list[tuple[str | None, object]] = [
+            (
+                k.arg,
+                k.value.value if isinstance(k.value, ast.Constant) else ast.dump(k.value),
+            )
+            for k in call.keywords
+        ]
+        found.append((where, [ast.unparse(a) for a in call.args], keywords))
+    return found
+
+
+def test_the_one_media_call_only_clears_the_color_scheme() -> None:
+    """#819: one ``emulate_media`` in the package, and it only clears the color scheme
+    (``"null"``, no override). Never a forced ``dark``, ``light``, ``print``, or another
+    media feature: what the tab reports is the system's own, as before the attach."""
+    found = [
+        (path, where, args, keywords)
+        for path in python_files(PACKAGE)
+        for where, args, keywords in media_calls(read_source(path))
+    ]
+    assert found == [
+        (LINKEDIN / "browser.py", "follow_system_color_scheme", [], [("color_scheme", "null")])
+    ]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "await page.emulate_media(color_scheme='dark')",
+        "await page.emulate_media(color_scheme='null', media='print')",
+        "await page.emulate_media(color_scheme=scheme)",
+        "await page.emulate_media('screen')",
+    ],
+)
+def test_the_media_call_pin_catches_another_override(line: str) -> None:
+    source = f"async def follow_system_color_scheme(page, scheme):\n    {line}\n"
+    assert media_calls(source) != [("follow_system_color_scheme", [], [("color_scheme", "null")])]
+
+
 # --- ADR 0007: the prefill's pins (#382) -------------------------------------------------
 
 #: The one key the prefill may press, as a literal at its one call (ADR 0007, "Keys").
@@ -6471,6 +6522,9 @@ TAB_SCAN_NAMES = ("pages", "contexts")
 #:   and never the run's own.
 #: - ``AttachBrowserProvider._attach`` and preflight's ``read_session``: take or count
 #:   the contexts, and read no tab.
+#: - ``_follow_system_color_scheme_everywhere`` (#819): every tab, by design, and reads
+#:   none of them. Each gets one ``emulate_media(color_scheme="null")``, which clears the
+#:   light default the attach itself put on it; no URL, title, or content is read.
 #: - ``services/connections_sync.py``: not a tab at all. ``pages`` there is the sync's
 #:   count of result pages (``SyncRunReport.pages``, ``SyncResult.pages``, a progress
 #:   event's ``pages``); it's listed so that it's on record, not exempt by location.
@@ -6478,6 +6532,7 @@ TAB_SCANS = {
     (LINKEDIN / "browser.py", "BrowserRun._open_tab", "pages"): 2,
     (LINKEDIN / "browser.py", "BrowserRun.bubble_check", "pages"): 1,
     (LINKEDIN / "browser.py", "AttachBrowserProvider._attach", "contexts"): 1,
+    (LINKEDIN / "browser.py", "_follow_system_color_scheme_everywhere", "pages"): 1,
     (LINKEDIN / "preflight.py", "read_session", "contexts"): 1,
     (PACKAGE / "services" / "connections_sync.py", "SyncRunReport.counts", "pages"): 2,
     (

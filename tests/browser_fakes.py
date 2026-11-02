@@ -14,7 +14,7 @@ review three weeks later.
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -123,6 +123,11 @@ class FakePage:
         self.match_boxes: dict[str, list[Mapping[str, float] | None]] = {}
         self.locator_calls: list[str] = []
         self.locator_error: Exception | None = None
+        #: #819: each ``emulate_media`` call's keywords, with how many navigations the tab
+        #: had made by then, so a test can tell a reset before the first ``goto``.
+        self.media_calls: list[tuple[dict[str, Any], int]] = []
+        #: What the next ``emulate_media`` raises, once (a tab closed under it).
+        self.media_error: Exception | None = None
 
     def locator(self, selector: str) -> FakeLocator:
         self.locator_calls.append(selector)
@@ -162,6 +167,13 @@ class FakePage:
             error, self._evaluate_error = self._evaluate_error, None
             raise error
         return self.context.evaluate_result
+
+    async def emulate_media(self, **kwargs: Any) -> None:
+        assert not self._closed, "emulated media on a closed tab"
+        if self.media_error is not None:
+            error, self.media_error = self.media_error, None
+            raise error
+        self.media_calls.append((dict(kwargs), len(self.goto_calls)))
 
     def fail_next_evaluate(self, error: Exception) -> None:
         """Arm one failed in-page evaluate, the way :meth:`fail_next_goto` arms a navigation."""
@@ -282,6 +294,24 @@ class FakeContext:
         self.last_cookies_urls: str | Sequence[str] | None = None
         #: Names of the cookies the most recent ``cookies()`` call handed back.
         self.last_cookies_returned: list[str] = []
+        #: #819: the handlers ``on`` registered, by event. Playwright's ``"page"`` fires
+        #: for every new tab, the run's and anyone else's; here ``new_page`` and
+        #: :meth:`open_tab_elsewhere` fire it.
+        self.listeners: dict[str, list[Callable[[FakePage], Awaitable[None]]]] = {}
+
+    def on(self, event: str, f: Callable[[FakePage], Awaitable[None]]) -> None:
+        self.listeners.setdefault(event, []).append(f)
+
+    async def _opened(self, page: FakePage) -> None:
+        self.pages.append(page)
+        for handler in self.listeners.get("page", []):
+            await handler(page)
+
+    async def open_tab_elsewhere(self) -> FakePage:
+        """A tab that isn't the run's: one you, the UI, or a page's popup opens."""
+        page = FakePage(self)
+        await self._opened(page)
+        return page
 
     async def new_page(self) -> PageLike:
         self.new_page_calls += 1
@@ -290,7 +320,7 @@ class FakeContext:
         page = FakePage(self)
         if self.page_goto_error is not None:
             page.fail_next_goto(self.page_goto_error)
-        self.pages.append(page)
+        await self._opened(page)
         return page
 
     async def cookies(self, urls: str | Sequence[str] | None = None) -> Sequence[Mapping[str, Any]]:

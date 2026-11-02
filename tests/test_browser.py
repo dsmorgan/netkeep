@@ -92,6 +92,123 @@ async def test_the_provider_can_only_attach() -> None:
     assert not hasattr(provider, "attach"), "a public attach() is a route around the lock"
 
 
+# --- #819: every tab keeps the system's color scheme --------------------------
+
+#: What each tab is asked, and all it is asked: clear the color-scheme override.
+SYSTEM_SCHEME = {"color_scheme": "null"}
+
+
+async def test_the_attach_hands_every_open_tab_back_to_the_system_theme() -> None:
+    """#819: ``connect_over_cdp`` puts a light ``prefers-color-scheme`` on every tab it
+    attaches to. The attach clears it on each one, the UI's and yours too, and asks
+    nothing else of them: no navigation, no evaluate."""
+    context = FakeContext()
+    ui, yours = FakePage(context), FakePage(context)
+    context.pages.extend([ui, yours])
+    provider = make_provider(FakeConnector([FakeBrowser([context])]))
+
+    async with provider.run():
+        for tab in (ui, yours):
+            assert tab.media_calls == [(SYSTEM_SCHEME, 0)]
+            assert tab.goto_calls == [] and tab.evaluate_calls == []
+            assert not tab.is_closed()
+    assert list(context.listeners) == ["page"]
+
+
+async def test_a_tab_opened_while_attached_follows_the_system_theme_too() -> None:
+    """A tab that opens during the run, such as a new UI window, starts with the attach's
+    light default; the attach's listener clears it."""
+    context = FakeContext()
+    provider = make_provider(FakeConnector([FakeBrowser([context])]))
+
+    async with provider.run():
+        tab = await context.open_tab_elsewhere()
+    assert tab.media_calls == [(SYSTEM_SCHEME, 0)]
+    assert tab.goto_calls == []
+
+
+async def test_the_runs_tab_follows_the_system_theme_before_its_first_navigation() -> None:
+    """LinkedIn never sees the light default: the run's own tab is cleared before its
+    first ``goto``, by the run itself, whether or not the listener got there first."""
+    connector = FakeConnector()
+    provider = make_provider(connector)
+    context = connector.browsers[0].context_list[0]
+
+    async with provider.run() as run:
+        context.listeners.clear()  # the explicit reset alone, not the listener's
+        await run.goto(LOCAL_PAGE)
+    page = only_page(context)
+    assert page.media_calls == [(SYSTEM_SCHEME, 0)]
+    assert page.goto_calls == [LOCAL_PAGE]
+
+
+async def test_a_reopened_tab_follows_the_system_theme_before_it_is_restored() -> None:
+    connector = FakeConnector()
+    provider = make_provider(connector)
+    context = connector.browsers[0].context_list[0]
+
+    async with provider.run() as run:
+        await run.goto(LOCAL_PAGE)
+        context.pages[0].user_closed_it()
+        await run.ensure_page()
+    reopened = context.pages[1]
+    assert reopened.goto_calls == [LOCAL_PAGE]
+    assert reopened.media_calls and all(gotos == 0 for _, gotos in reopened.media_calls)
+    assert {tuple(kw.items()) for kw, _ in reopened.media_calls} == {(("color_scheme", "null"),)}
+
+
+async def test_a_reattach_hands_the_new_connections_tabs_back_too() -> None:
+    """A reattach is a new connection, with its own light default on every tab."""
+    lost, found = FakeContext(), FakeContext()
+    ui = FakePage(found)
+    found.pages.append(ui)
+    connector = FakeConnector([FakeBrowser([lost]), FakeBrowser([found])])
+    provider = make_provider(connector)
+
+    async with provider.run() as run:
+        await run.ensure_page()
+        connector.browsers[0].connected = False
+        lost.pages[0].user_closed_it()
+        lost.new_page_error = RuntimeError("Target closed")
+        await run.ensure_page()
+    assert ui.media_calls == [(SYSTEM_SCHEME, 0)]
+    assert list(found.listeners) == ["page"]
+
+
+async def test_a_tab_that_refuses_the_reset_does_not_stop_the_run() -> None:
+    """The reset is how a tab looks, not what the run does: a failure leaves that tab
+    on Playwright's light default, as before #819, and the run goes on."""
+    context = FakeContext()
+    closing = FakePage(context)
+    closing.media_error = RuntimeError("Target page, context or browser has been closed")
+    other = FakePage(context)
+    context.pages.extend([closing, other])
+    provider = make_provider(FakeConnector([FakeBrowser([context])]))
+
+    async with provider.run() as run:
+        page = await run.goto(LOCAL_PAGE)
+        assert not page.is_closed()
+    assert closing.media_calls == []
+    assert other.media_calls == [(SYSTEM_SCHEME, 0)]
+
+
+async def test_a_context_without_tab_events_still_attaches() -> None:
+    """A context that can't take the listener still gets its open tabs reset."""
+
+    class NoEvents(FakeContext):
+        def on(self, event: str, f: object) -> None:
+            raise RuntimeError("no events here")
+
+    context = NoEvents()
+    ui = FakePage(context)
+    context.pages.append(ui)
+    provider = make_provider(FakeConnector([FakeBrowser([context])]))
+
+    async with provider.run() as run:
+        await run.ensure_page()
+    assert ui.media_calls == [(SYSTEM_SCHEME, 0)]
+
+
 # --- the run's tab -----------------------------------------------------------
 
 

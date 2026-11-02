@@ -2603,8 +2603,10 @@ class ContextLike(Protocol):
 
     #: The tabs open in this context, ours and the user's, the UI's and setup's
     #: included (ADR 0012). Read-only: netkeep counts them, reads only LinkedIn's,
-    #: and closes its own, never anyone else's. Every read is pinned in
-    #: ``tests/test_browser_safety.py`` (#634).
+    #: and closes its own, never anyone else's. The one exception is #819's: the attach
+    #: hands each tab's color scheme back to the system, undoing the attach's own
+    #: override, and reads nothing (:func:`follow_system_color_scheme`). Every read is
+    #: pinned in ``tests/test_browser_safety.py`` (#634).
     @property
     def pages(self) -> Sequence[PageLike]: ...
 
@@ -5304,6 +5306,9 @@ class BrowserRun:
             page = await self._open_tab()
         except Exception as exc:
             page = await self._reopen_after_reattach(exc)
+        # #819: before the tab's first navigation, so LinkedIn never sees the light
+        # default. The attach's listener does this too, but not in a pinned order.
+        await follow_system_color_scheme(page)
         self._page = page
         # A new tab's pointer is wherever Playwright's virtual one starts -- not
         # wherever the lost tab's happened to be rested (#192).
@@ -5450,6 +5455,53 @@ class BrowserRun:
             await _detach_quietly(session.detach)
 
 
+class _MediaPage(Protocol):
+    """The one Playwright ``Page`` call :func:`follow_system_color_scheme` makes (#819)."""
+
+    async def emulate_media(self, *, color_scheme: str) -> None: ...
+
+
+class _PageEvents(Protocol):
+    """How :func:`_follow_system_color_scheme_everywhere` hears of a new tab (#819)."""
+
+    def on(self, event: str, f: Callable[[PageLike], Awaitable[None]]) -> None: ...
+
+
+async def follow_system_color_scheme(page: PageLike) -> None:
+    """Hand ``prefers-color-scheme`` on one tab back to Chrome, and so to the system (#819).
+
+    ``connect_over_cdp`` emulates a light ``prefers-color-scheme`` on every tab it
+    attaches to, the UI's included, until it detaches: a dark system turned the UI light
+    for the whole run. This clears that one override. The tab then reports what it
+    reported before the attach, as a person's own browser does. Nothing else changes:
+    the run's tab keeps Playwright's focus emulation, which keeps a background tab
+    rendering (:meth:`BrowserRun._open_tab`).
+
+    A failure is logged, not raised: the tab keeps Playwright's light default, as it
+    did before #819, and the run goes on.
+    """
+    try:
+        # Playwright reads "null" as no override: Chrome's own value, the system's.
+        await cast(_MediaPage, page).emulate_media(color_scheme="null")
+    except Exception as exc:
+        log.debug("could not hand a tab's color scheme back to the system: %s", personal_exc(exc))
+
+
+async def _follow_system_color_scheme_everywhere(context: ContextLike) -> None:
+    """:func:`follow_system_color_scheme` on every tab in ``context``, the ones open now
+    and the ones that open while attached (#819).
+
+    Every tab, not only LinkedIn's: the attach put the override on all of them, the
+    UI's and yours included, and this takes it off. It reads no URL or content, and
+    sends nothing a page can see but its own system theme. Logged, never raised.
+    """
+    try:
+        cast(_PageEvents, context).on("page", follow_system_color_scheme)
+    except Exception as exc:
+        log.debug("could not follow new tabs' color scheme: %s", personal_exc(exc))
+    await asyncio.gather(*(follow_system_color_scheme(page) for page in list(context.pages)))
+
+
 @runtime_checkable
 class BrowserProvider(Protocol):
     """How the extractor gets a browser. ``attach`` is the only way there is.
@@ -5531,6 +5583,7 @@ class AttachBrowserProvider:
             # driving this Chrome; we still take the first and touch nothing else.
             log.warning("the attached Chrome has %d contexts; reusing the first", len(contexts))
         log.debug("attached to Chrome %s at %s", connection.browser.version, self.cdp_url)
+        await _follow_system_color_scheme_everywhere(contexts[0])
         return Attachment(
             browser=connection.browser,
             context=contexts[0],
