@@ -13,6 +13,7 @@ review three weeks later.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
@@ -128,6 +129,8 @@ class FakePage:
         self.media_calls: list[tuple[dict[str, Any], int]] = []
         #: What the next ``emulate_media`` raises, once (a tab closed under it).
         self.media_error: Exception | None = None
+        #: ``emulate_media`` never returns: a renderer that hangs.
+        self.media_hangs = False
 
     def locator(self, selector: str) -> FakeLocator:
         self.locator_calls.append(selector)
@@ -173,6 +176,8 @@ class FakePage:
         if self.media_error is not None:
             error, self.media_error = self.media_error, None
             raise error
+        if self.media_hangs:
+            await asyncio.Event().wait()
         self.media_calls.append((dict(kwargs), len(self.goto_calls)))
 
     def fail_next_evaluate(self, error: Exception) -> None:

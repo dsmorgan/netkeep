@@ -192,6 +192,44 @@ async def test_a_tab_that_refuses_the_reset_does_not_stop_the_run() -> None:
     assert other.media_calls == [(SYSTEM_SCHEME, 0)]
 
 
+def test_the_reset_time_limit_is_three_seconds() -> None:
+    assert browser.MEDIA_RESET_TIMEOUT_S == 3.0
+
+
+async def test_a_tab_that_never_answers_the_reset_does_not_block_the_attach(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A hung renderer costs at most the time limit: the attach goes on, that tab stays
+    light, and the other tabs and the run's own are still reset."""
+    monkeypatch.setattr(browser, "MEDIA_RESET_TIMEOUT_S", 0.05)
+    context = FakeContext()
+    hung, other = FakePage(context), FakePage(context)
+    hung.media_hangs = True
+    context.pages.extend([hung, other])
+    provider = make_provider(FakeConnector([FakeBrowser([context])]))
+
+    async with asyncio.timeout(BUSY_TIMEOUT_S):
+        async with provider.run() as run:
+            page = cast(FakePage, await run.goto(LOCAL_PAGE))
+    assert hung.media_calls == []
+    assert other.media_calls == [(SYSTEM_SCHEME, 0)]
+    assert page.media_calls and page.goto_calls == [LOCAL_PAGE]
+
+
+async def test_a_cancel_during_the_reset_still_cancels(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The time limit swallows only its own timeout: a cancel from outside goes through."""
+    monkeypatch.setattr(browser, "MEDIA_RESET_TIMEOUT_S", 60.0)
+    context = FakeContext()
+    hung = FakePage(context)
+    hung.media_hangs = True
+
+    task = asyncio.create_task(browser.follow_system_color_scheme(hung))
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
 async def test_a_context_without_tab_events_still_attaches() -> None:
     """A context that can't take the listener still gets its open tabs reset."""
 
