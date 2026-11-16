@@ -389,7 +389,8 @@ def test_on_manual_a_check_now_reads_a_mailbox_its_last_one_failed_on(
     sender._poll_replies(mail.factory, mail.user.id, NOW + timedelta(minutes=1))
     assert sender.replies_retry_at(mail.user.id)  # backing off after the failure
     sender.request_replies_poll(mail.user.id)
-    sender._poll_replies(mail.factory, mail.user.id, NOW + timedelta(minutes=2))
+    # Inside the backoff (retry at NOW + 2 min), as the Automatic twin below.
+    sender._poll_replies(mail.factory, mail.user.id, NOW + timedelta(minutes=1, seconds=30))
     assert skipped == [frozenset(), frozenset()]  # never left out
 
 
