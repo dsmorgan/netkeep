@@ -326,6 +326,12 @@ def _handler(
         except _SchedulePaused:
             log.info("scheduled %s not started: the schedule is paused", run_kind.value)
             return JobOutcome.PAUSED_AFTER_GATE
+        except runs.QuickChecksOnly:
+            # #829: moved to quick checks between the scheduler's gate and here.
+            log.info(
+                "scheduled %s not started: LinkedIn now runs quick checks only", run_kind.value
+            )
+            return JobOutcome.QUICK_CHECKS_AFTER_GATE
         except runs.ScheduledRunsDisarmed:
             log.error(
                 "scheduled %s reached a disarmed account %d past the scheduler's arm gate;"

@@ -331,6 +331,42 @@ def test_a_held_follow_up_on_manual_reads_no_reply(
     assert [call for call in mail.gmail.calls if "reply poll" in call[1]]
 
 
+def test_on_manual_a_held_follow_up_says_to_click_check_now_and_a_partial_check_says_so(
+    session_factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#829: on Manual the hold names the fix. A Check now that read only part of the
+    mailbox says to click it again, and stays partial until a full read, since no poll
+    of its own finishes it."""
+    from netkeep.services import campaign_sender
+
+    mail = make_mail(session_factory, modes=(StepMode.DRAFT,) * 2, same_thread=(False, True))
+    set_mailbox(mail, send_armed_at=None, replies_polled_at=None)
+    sender = poller(mail, every=timedelta(days=1))
+    box = mail.mailbox.id
+
+    def held() -> str | None:
+        return mail.read(lambda s: sender.replies_held(s, mail.user, box))
+
+    assert held() == campaign_sender.MANUAL_HELD
+    script = iter(
+        [
+            replies.RepliesPolled(behind=frozenset({box})),  # a Check now, cut short
+            replies.RepliesPolled(),  # the interval's own poll: reads nothing on Manual
+            replies.RepliesPolled(caught_up=frozenset({box})),  # Check now again
+        ]
+    )
+    monkeypatch.setattr(replies, "poll_replies", lambda *a, **k: next(script))
+    sender.request_replies_poll(mail.user.id)
+    sender._poll_replies(mail.factory, mail.user.id, NOW)
+    assert sender.replies_partial(mail.user.id) == {box}
+    assert held() == campaign_sender.MANUAL_HELD_PARTIAL
+    sender._poll_replies(mail.factory, mail.user.id, NOW + timedelta(days=1))
+    assert sender.replies_partial(mail.user.id) == {box}
+    sender.request_replies_poll(mail.user.id)
+    sender._poll_replies(mail.factory, mail.user.id, NOW + timedelta(days=1, minutes=1))
+    assert sender.replies_partial(mail.user.id) == frozenset()
+
+
 def test_an_automatic_mailbox_is_polled_on_the_interval(
     session_factory: sessionmaker[Session],
 ) -> None:

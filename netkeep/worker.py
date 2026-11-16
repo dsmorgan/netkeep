@@ -127,7 +127,11 @@ from netkeep.services.connections_sync import sync_connections
 from netkeep.services.enrichment import enrich_contacts
 from netkeep.services.events import Event, EventBus
 from netkeep.services.inbox_poll import poll_inbox
-from netkeep.services.linkedin_accounts import local_account_id, scheduled_runs_armed
+from netkeep.services.linkedin_accounts import (
+    full_upkeep,
+    local_account_id,
+    scheduled_runs_armed,
+)
 from netkeep.services.posture import SessionProbe
 from netkeep.services.scheduled_runs import REFUSED_OUTSIDE_HOURS, ServeExtractor
 from netkeep.services.tasks import SubmitRefused
@@ -574,6 +578,20 @@ class BrowserWorker:
             ):
                 log.error("scheduled run %d reached the worker on a disarmed account", run_id)
                 return "disarmed", "scheduled runs are disarmed for this account"
+            if (
+                facts.trigger is SyncRunTrigger.SCHEDULED
+                and facts.kind in runs.FULL_UPKEEP_RUN_KINDS
+                and not full_upkeep(session, user, facts.account_id)
+            ):
+                # #829: the third depth check, after the scheduler's gate and create_run:
+                # a move to quick checks between the run's record and its start.
+                log.warning(
+                    "scheduled %s run %d reached the worker while LinkedIn runs quick checks"
+                    " only; it did not start",
+                    facts.kind.value,
+                    run_id,
+                )
+                return "quick_checks", "scheduled LinkedIn runs are quick checks only"
             if (
                 facts.trigger is SyncRunTrigger.SCHEDULED
                 and facts.kind in _ROUTE_BREAKER_KINDS

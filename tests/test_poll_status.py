@@ -291,6 +291,33 @@ def test_replies_on_manual_run_only_on_check_now(world: World) -> None:
     assert status.mailboxes[0].state is S.DUE
 
 
+def test_a_partial_check_now_on_manual_says_to_click_it_again(world: World) -> None:
+    for session, user in world.write():
+        mailbox_id = _mailbox(session, user, send=False).id
+    serving = replace(_serving(replies=NOW), replies_partial=frozenset({mailbox_id}))
+
+    status = world.status(serving=serving)
+
+    assert status.mailboxes[0].state is S.MANUAL
+    assert status.mailboxes[0].reason == f"me@example.test: {service.MANUAL_PARTIAL}"
+    assert status.checks[0].state is S.MANUAL
+    assert status.checks[0].reason == f"me@example.test: {service.MANUAL_PARTIAL}"
+
+
+def test_manual_still_names_a_mailbox_it_cannot_open(world: World) -> None:
+    """A locked Keychain shows at the check, on Manual too (#829 review)."""
+    for session, user in world.write():
+        mailbox_id = _mailbox(session, user, send=False).id
+    serving = replace(_serving(replies=NOW), replies_not_ready={mailbox_id: "keychain_unavailable"})
+
+    replies = world.status(serving=serving).checks[0]
+
+    assert replies.state is S.MANUAL
+    assert replies.reason is not None
+    assert replies.reason.startswith(service.MANUAL_REPLIES)
+    assert "Keychain is locked" in replies.reason
+
+
 def test_check_now_is_allowed_on_manual_and_refused_on_off(world: World) -> None:
     for session, user in world.write():
         mailbox = _mailbox(session, user, send=False)

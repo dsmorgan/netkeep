@@ -257,10 +257,21 @@ def test_a_scheduled_full_upkeep_run_is_refused_at_quick_checks(
     automation.set_linkedin(
         writer, user, Position.AUTOMATIC, ScheduleDepth.QUICK, confirm=True, now=NOW
     )
-    with pytest.raises(runs.ScheduledRunsDisarmed, match="quick checks"):
+    with pytest.raises(runs.QuickChecksOnly, match="quick checks"):
         runs.create_run(writer, user, kind, trigger=SyncRunTrigger.SCHEDULED, now=NOW)
     # A run a person starts is not the schedule's: depth doesn't touch it.
     run = runs.create_run(writer, user, kind, trigger=SyncRunTrigger.MANUAL, now=NOW)
+    assert run.id is not None
+
+
+@pytest.mark.parametrize("kind", [SyncRunKind.CONNECTIONS_INCREMENTAL, SyncRunKind.INBOX])
+def test_quick_checks_still_record_the_quick_kinds(
+    writer: Session, user: User, kind: SyncRunKind
+) -> None:
+    automation.set_linkedin(
+        writer, user, Position.AUTOMATIC, ScheduleDepth.QUICK, confirm=True, now=NOW
+    )
+    run = runs.create_run(writer, user, kind, trigger=SyncRunTrigger.SCHEDULED, now=NOW)
     assert run.id is not None
 
 
@@ -487,6 +498,19 @@ async def test_put_needs_the_csrf_header(running_app: FastAPI, client: httpx.Asy
     assert response.status_code == 403
     for session, user in _local(running_app):
         assert automation.linkedin_state(session, user).position is Position.MANUAL
+
+
+async def test_the_old_arm_endpoint_takes_linkedin_out_of_off(
+    running_app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    off = await client.put("/api/v1/automation/linkedin", json={"position": "off"}, headers=CSRF)
+    assert off.json()["linkedin"]["position"] == "off"
+    armed = await client.post("/api/v1/linkedin/schedule/arm", json={"confirm": True}, headers=CSRF)
+    assert armed.status_code == 200 and armed.json()["armed"] is True
+    switch = (await client.get("/api/v1/automation")).json()["linkedin"]
+    assert switch["position"] == "automatic"
+    for session, user in _local(running_app):
+        assert not linkedin_off(session, user)
 
 
 async def test_put_gmail_automatic_is_409_with_the_reason_until_ready(

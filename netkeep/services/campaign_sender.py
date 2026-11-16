@@ -329,6 +329,17 @@ def is_scheduled(gmail: Gmail, rfc822_message_ids: str | Sequence[str], *, purpo
     return any(gmail.search(query, max_results=1, purpose=purpose) for query in queries)
 
 
+#: Why a follow-up on Gmail on Manual (#829) waits: no reply check runs on its own there.
+MANUAL_HELD: Final = "Waiting for a reply check: click Check now"
+MANUAL_HELD_PARTIAL: Final = (
+    "Waiting for a reply check: the last Check now read only part of the mailbox;"
+    " click Check now again"
+)
+MANUAL_HELD_NOT_READY: Final = (
+    "Waiting for a reply check: the mailbox wasn't ready at the last one; click Check now"
+)
+
+
 class GmailSender:
     """The engine's Gmail sender and reconciler. See the module docstring.
 
@@ -374,6 +385,9 @@ class GmailSender:
         # Mailboxes seen not ready whose poll has not caught up since: their follow-ups
         # wait for it, however recent the last good poll.
         self._replies_catch_up: dict[int, set[int]] = {}
+        # Mailboxes a person's Check now read only part of (the read budget, or a failed
+        # read), #829: on Manual nothing reads them again until the next Check now.
+        self._replies_partial: dict[int, set[int]] = {}
         # A person's "Check now" (#409), per user: when it was first asked for. The lock
         # makes a press's check-and-set one step, since requests run on worker threads.
         self._replies_requested: dict[int, datetime] = {}
@@ -431,6 +445,11 @@ class GmailSender:
     def _poll_soon(self, user_id: int, mailbox_id: int) -> None:
         """Poll this one mailbox at the next tick, leaving the others on their interval."""
         self._replies_due.setdefault(user_id, set()).add(mailbox_id)
+
+    def replies_partial(self, user_id: int) -> frozenset[int]:
+        """The mailboxes a person's Check now read only part of, and nothing has read in
+        full since (#829). On Manual they wait for the next Check now. Read-only."""
+        return frozenset(self._replies_partial.get(user_id, ()))
 
     def replies_poll_requested(self, user_id: int) -> bool:
         """Whether a person asked for ``user_id``'s reply poll on the next tick (#409) and
@@ -513,11 +532,15 @@ class GmailSender:
         but not one the contact sent as a fresh email (#694). Each hold asks for a poll of
         this mailbox alone at the next tick. A first step has nothing to be replied to
         yet, so the caller asks only for a later one."""
+        mailbox = get_scoped(session, user, Mailbox, mailbox_id)
+        # Gmail on Manual (#829): no poll runs on its own, so the person is told to ask.
+        manual = mailbox is not None and mailbox.arm is MailboxArm.DRAFT
         if mailbox_id in self._replies_catch_up.get(user.id, ()):
             # Not ready since its last good poll (#413): a reply may have come meanwhile.
             self._poll_soon(user.id, mailbox_id)
+            if manual:
+                return MANUAL_HELD_NOT_READY
             return "replies have not been read since the mailbox was ready again; nothing was sent"
-        mailbox = get_scoped(session, user, Mailbox, mailbox_id)
         polled = None if mailbox is None else mailbox.replies_polled_at
         try:
             limit = replies.STALE_AFTER_POLLS * self.replies_every_of(user.id)
@@ -529,6 +552,10 @@ class GmailSender:
         if polled is not None and self._clock() - polled <= limit:
             return None
         self._poll_soon(user.id, mailbox_id)  # not the user's other mailboxes
+        if manual:
+            if mailbox_id in self._replies_partial.get(user.id, ()):
+                return MANUAL_HELD_PARTIAL
+            return MANUAL_HELD
         return "replies have not been polled recently; nothing was sent"
 
     def _replies_stale(self, firing: Firing) -> str | None:
@@ -891,6 +918,10 @@ class GmailSender:
         # A due mailbox still in its backoff was not polled: it stays due.
         waiting = set(skip) if only is None else due - only
         self._replies_due[user_id] = waiting | polled.retry
+        partial = self._replies_partial.setdefault(user_id, set())
+        partial -= polled.caught_up
+        if not scheduled:
+            partial |= polled.behind | polled.failed
         self._settle(user_id, polled, only=only, skip=skip, now=now, every=every)
 
     def _retry_at(self, user_id: int, mailbox_id: int) -> datetime:

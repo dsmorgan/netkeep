@@ -669,6 +669,37 @@ async def test_the_worker_refuses_a_scheduled_run_on_a_disarmed_account(
         assert (stored.status, stored.stop_reason) == (SyncRunStatus.FAILED, "disarmed")
 
 
+@pytest.mark.parametrize("kind", [SyncRunKind.CONNECTIONS_FULL, SyncRunKind.ENRICH])
+async def test_the_worker_refuses_a_scheduled_full_upkeep_run_at_quick_checks(
+    session_factory: Any, settings: Settings, kind: SyncRunKind
+) -> None:
+    """#829: armed, but moved to quick checks after the run was recorded: it never
+    attaches, and says why."""
+    import factories
+
+    from netkeep.models import ScheduleDepth
+    from netkeep.worker import BrowserWorker
+
+    provider, connector = fake_provider()
+    with session_scope(session_factory, write=True) as session:
+        user = factories.make_user(session)
+        arm_scheduled_runs(session, user, now=START)
+        run = runs.create_run(session, user, kind, trigger=SyncRunTrigger.SCHEDULED, now=START)
+        ensure_account(session, user).scheduled_depth = ScheduleDepth.QUICK
+        run_id, user_id = run.id, user.id
+    worker = BrowserWorker(provider, session_factory, settings.linkedin)
+
+    outcome = await worker.execute(run_id, user_id)
+
+    assert outcome is runs.RunOutcome.DONE
+    assert connector.attaches == 0
+    with session_scope(session_factory) as session:
+        owner = session.get(User, user_id)
+        assert owner is not None
+        stored = runs.get_run(session, owner, run_id)
+        assert (stored.status, stored.stop_reason) == (SyncRunStatus.FAILED, "quick_checks")
+
+
 async def test_the_worker_refuses_a_scheduled_connections_run_with_the_breaker_tripped(
     session_factory: Any, settings: Settings
 ) -> None:

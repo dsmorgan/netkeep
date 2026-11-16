@@ -127,6 +127,24 @@ async def test_check_now_sets_the_flag_and_never_opens_gmail(
     assert sender.drafts_poll_requested_at(user_id) is not None
 
 
+async def test_check_now_on_manual_is_taken_and_shows_due(
+    running_app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    """#829: Gmail on Manual (armed for drafts only) has no scheduled reply check; Check
+    now is how it runs, so the endpoint takes it and the check reads due."""
+    user_id = _local_user(running_app, send=False)
+    sender = _serve(running_app)
+    before = _replies((await client.get("/api/v1/poll-status")).json())
+    assert before["state"] == "manual"
+
+    response = await client.post(URL, headers=CSRF)
+
+    assert response.status_code == 202, response.text
+    assert sender.replies_poll_requested(user_id)
+    after = _replies((await client.get("/api/v1/poll-status")).json())
+    assert after["state"] == "due" and after["requested"] is True
+
+
 async def test_check_now_needs_the_csrf_header(
     running_app: FastAPI, client: httpx.AsyncClient
 ) -> None:

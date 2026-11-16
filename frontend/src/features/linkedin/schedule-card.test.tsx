@@ -270,6 +270,10 @@ describe('ScheduleCard', () => {
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Unpause schedule' }))
+    // Unpausing lets runs reach LinkedIn on their own again, so it asks first (#829).
+    const dialog = await screen.findByRole('alertdialog')
+    expect(calls.some((call) => call.path.endsWith('/unpause'))).toBe(false)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Unpause schedule' }))
     expect(await screen.findByRole('button', { name: 'Pause schedule' })).toBeInTheDocument()
     expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual(
       expect.arrayContaining([

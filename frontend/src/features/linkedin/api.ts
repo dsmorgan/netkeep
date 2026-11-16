@@ -340,8 +340,11 @@ export async function pauseSchedule(): Promise<Schedule> {
   return data
 }
 
+/** Unpause the schedule. Needs `confirm: true` (#829): runs start on their own again. */
 export async function unpauseSchedule(): Promise<Schedule> {
-  const { data, error, response } = await api.POST('/api/v1/linkedin/schedule/unpause')
+  const { data, error, response } = await api.POST('/api/v1/linkedin/schedule/unpause', {
+    body: { confirm: true },
+  })
   if (data === undefined) {
     throw apiError(error, response, 'POST /api/v1/linkedin/schedule/unpause')
   }

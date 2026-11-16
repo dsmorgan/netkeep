@@ -347,6 +347,8 @@ describe('ComingUpCard: scheduled LinkedIn runs', () => {
     expect(body.queryByText(/2099/)).not.toBeInTheDocument()
 
     fireEvent.click(body.getByRole('button', { name: 'Unpause schedule' }))
+    const dialog = await screen.findByRole('alertdialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Unpause schedule' }))
     expect(await body.findByRole('button', { name: 'Pause schedule' })).toBeInTheDocument()
     expect(seen).toContain(`${SCHEDULE}/unpause`)
     expect((await body.findAllByRole('listitem')).length).toBe(2)

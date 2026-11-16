@@ -1117,7 +1117,7 @@ def test_each_step_names_the_budget_it_spends() -> None:
     [
         ("/api/v1/linkedin/schedule/disarm", None),
         ("/api/v1/linkedin/schedule/pause", None),
-        ("/api/v1/linkedin/schedule/unpause", None),
+        ("/api/v1/linkedin/schedule/unpause", {"confirm": True}),
         ("/api/v1/linkedin/schedule/arm", {"confirm": True}),
     ],
 )

@@ -156,6 +156,10 @@ NOT_WIRED: Final = "This check isn't running yet: netkeep serve doesn't schedule
 MANUAL_REPLIES: Final = (
     "Gmail is on Manual, so netkeep checks replies only when you click Check now"
 )
+MANUAL_PARTIAL: Final = (
+    "The last Check now read only part of the mailbox; on Manual nothing reads the rest"
+    " until you click Check now again"
+)
 QUICK_CHECKS: Final = (
     "LinkedIn runs quick checks only; this runs with Quick checks and a weekly full sync"
 )
@@ -212,6 +216,9 @@ class Serving:
     """Mailboxes the running sender polls again at the next tick, alone (#413)."""
     replies_not_ready: Mapping[int, str] = field(default_factory=dict)
     """Mailboxes the running sender's last poll could not open, with the code (#413)."""
+    replies_partial: frozenset[int] = frozenset()
+    """Mailboxes a person's Check now read only part of (#829): on Manual they wait for
+    the next Check now."""
     replies_retry_at: Mapping[int, datetime] = field(default_factory=dict)
     """Due mailboxes still in their backoff after a failed poll, with their retry time:
     neither the next tick nor a "Check now" reads them before it (#409). The full
@@ -287,6 +294,8 @@ def _mailbox_poll(
         # Manual (#829): no scheduled poll; a person's Check now runs at the next tick.
         if serving.replies_requested_at is not None:
             state = CheckState.DUE
+        elif mailbox.id in serving.replies_partial:
+            state, reason = CheckState.MANUAL, f"{mailbox.email}: {MANUAL_PARTIAL}"
         else:
             state, reason = CheckState.MANUAL, MANUAL_REPLIES
     elif mailbox.id in serving.replies_due:
@@ -377,13 +386,6 @@ def _gmail_replies(
     if gate is not None:
         return replace(base, state=gate[0], reason=gate[1], last_at=_stored_last(polls))
     requested_at = serving.replies_requested_at
-    if not any(m.arm is MailboxArm.SEND for m in mailboxes):
-        # Manual (#829): replies are read only on Check now.
-        if requested_at is None:
-            return replace(
-                base, state=CheckState.MANUAL, reason=MANUAL_REPLIES, last_at=_stored_last(polls)
-            )
-        return replace(base, last_at=_stored_last(polls), requested_at=requested_at)
     stuck = [m for m in mailboxes if m.arm is not None and m.status is not MailboxStatus.OK]
     reasons = [_needs_sign_in(stuck)] if stuck else []
     reasons += [
@@ -391,6 +393,23 @@ def _gmail_replies(
         for p in polls
         if p.state is CheckState.BLOCKED and p.mailbox_id in serving.replies_not_ready and p.reason
     ]
+    if not any(m.arm is MailboxArm.SEND for m in mailboxes):
+        # Manual (#829): replies are read only on Check now. A mailbox it can't read, or
+        # one the last Check now read only part of, is named too.
+        partial = [p.reason for p in polls if p.mailbox_id in serving.replies_partial and p.reason]
+        if requested_at is None:
+            return replace(
+                base,
+                state=CheckState.MANUAL,
+                reason="; ".join([*(partial or [MANUAL_REPLIES]), *reasons]),
+                last_at=_stored_last(polls),
+            )
+        return replace(
+            base,
+            last_at=_stored_last(polls),
+            requested_at=requested_at,
+            reason="; ".join(reasons) or None,
+        )
     reason = "; ".join(reasons) or None
     state, next_at = _next(
         serving.replies_polled_at, every, now, requested=requested_at is not None

@@ -15,8 +15,10 @@ maps to Manual, and every pause key is deleted. An armed account without one map
 Automatic with the full schedule; a disarmed one maps to Manual. Gmail needs no new
 column: its switch is the mailboxes' existing arming (sending, drafts, not armed).
 
-The downgrade drops the three columns. It doesn't restore a pause: those accounts
-stay disarmed, which runs less, not more.
+The downgrade first disarms every armed account at ``quick``: 0048's code knows no
+depth and would fire the full sync and enrichment, which nobody confirmed. Then it drops
+the three columns. It restores no pause, and Off becomes plain disarmed; both run less,
+not more.
 
 Revision ID: 0049
 Revises: 0048
@@ -88,6 +90,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Quick checks only: without the depth column, armed would mean full upkeep.
+    op.execute(
+        f"UPDATE {TABLE} SET scheduled_runs_armed_at = NULL"  # noqa: S608
+        " WHERE scheduled_depth = 'quick' AND scheduled_runs_armed_at IS NOT NULL"
+    )
     with op.batch_alter_table(TABLE) as batch:
         batch.drop_constraint(DEPTH_CONSTRAINT, type_="check")
         batch.drop_column("automation_changed_at")

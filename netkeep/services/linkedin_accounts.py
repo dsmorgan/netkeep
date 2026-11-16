@@ -211,7 +211,9 @@ def pause_schedule(session: Session, user: User, *, now: datetime) -> LinkedInAc
     return account
 
 
-def unpause_schedule(session: Session, user: User) -> LinkedInAccount:
+def unpause_schedule(
+    session: Session, user: User, *, now: datetime | None = None
+) -> LinkedInAccount:
     """Let ``user``'s account's scheduled runs start again. Nothing missed is replayed.
 
     Every due fire the scheduler met while paused was skipped and its cadence
@@ -221,6 +223,8 @@ def unpause_schedule(session: Session, user: User) -> LinkedInAccount:
     _require_writer(session, "unpause_schedule")
     account = ensure_account(session, user)
     if delete_setting(session, user, _pause_key(account.id)):
+        if now is not None:
+            account.automation_changed_at = now
         log.warning(
             "scheduled LinkedIn runs unpaused for account %d (user %d)", account.id, user.id
         )

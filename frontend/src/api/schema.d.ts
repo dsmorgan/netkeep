@@ -2812,7 +2812,9 @@ export interface paths {
         put?: never;
         /**
          * Unpause Linkedin Schedule
-         * @description Let scheduled runs start again; each kind waits for its next due time.
+         * @description Let scheduled runs start again; each kind waits for its next due time. Needs
+         *     ``confirm: true``: on an armed account it moves LinkedIn from Manual to Automatic
+         *     (#829), which does more.
          */
         post: operations["unpause_linkedin_schedule"];
         delete?: never;
@@ -16213,7 +16215,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleArmIn"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -16223,6 +16229,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ScheduleOut"];
                 };
+            };
+            /** @description confirm was not true */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

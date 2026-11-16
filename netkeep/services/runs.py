@@ -315,8 +315,12 @@ class RunAlreadyRunning(RunError):
 
 
 class ScheduledRunsDisarmed(RunError):
-    """A scheduled run was asked for while the account's scheduled runs are disarmed, or
-    (#829) for a full-upkeep kind while the schedule runs quick checks only."""
+    """A scheduled run was asked for while the account's scheduled runs are disarmed."""
+
+
+class QuickChecksOnly(RunError):
+    """A scheduled full-upkeep run was asked for while the schedule runs quick checks
+    only (#829): the depth moved between the scheduler's gate and the record."""
 
 
 #: The run kinds a schedule records only at full upkeep depth (#829); the scheduler's
@@ -513,7 +517,7 @@ def create_run(
         and kind in FULL_UPKEEP_RUN_KINDS
         and not full_upkeep(session, user, account.id)
     ):
-        raise ScheduledRunsDisarmed(
+        raise QuickChecksOnly(
             f"scheduled LinkedIn runs are quick checks only, so no scheduled {kind.value} run"
             " starts"
         )

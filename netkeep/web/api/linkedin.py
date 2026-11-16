@@ -722,12 +722,24 @@ def pause_linkedin_schedule(
     return _schedule_out(request, session, user)
 
 
-@router.post("/schedule/unpause", operation_id="unpause_linkedin_schedule")
+@router.post(
+    "/schedule/unpause",
+    operation_id="unpause_linkedin_schedule",
+    responses={422: {"description": "confirm was not true"}},
+)
 def unpause_linkedin_schedule(
-    request: Request, user: CurrentUser, session: SessionDep
+    body: ScheduleArmIn, request: Request, user: CurrentUser, session: SessionDep
 ) -> ScheduleOut:
-    """Let scheduled runs start again; each kind waits for its next due time."""
-    unpause_schedule(session, user)
+    """Let scheduled runs start again; each kind waits for its next due time. Needs
+    ``confirm: true``: on an armed account it moves LinkedIn from Manual to Automatic
+    (#829), which does more."""
+    if not body.confirm:
+        raise HTTPException(
+            status_code=422,
+            detail="unpausing lets netkeep visit LinkedIn on its own schedule again;"
+            " send confirm: true",
+        )
+    unpause_schedule(session, user, now=utcnow())
     session.commit()  # the change stands before anything is read back for display
     return _schedule_out(request, session, user)
 

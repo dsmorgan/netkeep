@@ -534,6 +534,13 @@ class _Race:
             pause_schedule(session, self.owner, now=NOW)
         return await self.served[FIRST.kind](ctx)
 
+    async def quick_then_handle(self, ctx: scheduler.JobContext) -> scheduler.JobOutcome | None:
+        from netkeep.models import ScheduleDepth
+
+        with session_scope(self.factory, write=True) as session:
+            ensure_account(session, self.owner).scheduled_depth = ScheduleDepth.QUICK
+        return await self.served[FIRST.kind](ctx)
+
     async def disarm_then_handle(self, ctx: scheduler.JobContext) -> scheduler.JobOutcome | None:
         with session_scope(self.factory, write=True) as session:
             disarm_scheduled_runs(session, self.owner)
@@ -625,6 +632,21 @@ async def test_a_disarm_after_the_gate_is_skipped_with_its_own_reason(
 
     assert raced is not None and not raced.fired
     assert raced.skipped_reason == "disarmed_after_gate"
+    assert raced.next_due == race.due + scheduler.FIRST_SETUP_RETRY
+    assert race.fired_once() is False and race.recorded_runs() == 0
+
+
+async def test_quick_checks_after_the_gate_are_skipped_with_their_own_reason(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """#829: a move to quick checks between the gate and the record starts nothing, and
+    says so as itself, not as a disarm."""
+    race = _Race(session_factory)
+
+    raced = await race.poll(race.due, race.quick_then_handle)
+
+    assert raced is not None and not raced.fired
+    assert raced.skipped_reason == "quick_checks_after_gate"
     assert raced.next_due == race.due + scheduler.FIRST_SETUP_RETRY
     assert race.fired_once() is False and race.recorded_runs() == 0
 
@@ -764,7 +786,13 @@ async def test_the_schedule_pause_survives_a_restart_and_unpause_lets_runs_start
         assert _rows(bare_engine) == []
 
         async with client_for(app) as client:
-            unpaused = await client.post("/api/v1/linkedin/schedule/unpause", headers=HEADERS)
+            refused = await client.post(
+                "/api/v1/linkedin/schedule/unpause", json={"confirm": False}, headers=HEADERS
+            )
+            assert refused.status_code == 422  # #829: Manual to Automatic asks first
+            unpaused = await client.post(
+                "/api/v1/linkedin/schedule/unpause", json={"confirm": True}, headers=HEADERS
+            )
         assert unpaused.json()["paused"] is False and unpaused.json()["paused_at"] is None
         # The first-setup full sync, skipped while paused, is offered again within the hour.
         await drive(app, clock, clock.at + scheduler.FIRST_SETUP_RETRY + timedelta(hours=1))
