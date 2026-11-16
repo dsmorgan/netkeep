@@ -24,6 +24,8 @@ import {
 } from './api'
 import { DepthChoice } from './depth-choice'
 import { JobList } from './job-list'
+import { FailureList } from './read-failure'
+import { failures } from './read-failures'
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -106,11 +108,6 @@ export interface LinkedInControl {
   dialog: ReactNode
 }
 
-/** Why the dialog can't confirm yet: a read it needs failed. */
-function readFailure(what: string, error: unknown): string {
-  return `Couldn’t read ${what}: ${message(error)}. Close this and try again.`
-}
-
 /**
  * The LinkedIn switch's state and moves (#829). Moving left is one click; a move to
  * Automatic, or from quick checks to the weekly full sync, opens a dialog that lists
@@ -160,16 +157,25 @@ export function useLinkedInAutomation(): LinkedInControl {
   const jobs =
     asking === null ? [] : toAutomatic ? [...QUICK_JOBS, ...(depth === 'full' ? full : [])] : full
   const needsBudget = depth === 'full'
+  // One rule for every read the dialog shows: pending or failed, Confirm waits.
   const failed =
     asking === null
-      ? null
-      : automation.isRefetchError
-        ? readFailure('the switch', automation.error)
-        : config.isError
-          ? readFailure('your settings', config.error)
-          : needsBudget && budget.isError
-            ? readFailure('the LinkedIn budget', budget.error)
-            : null
+      ? []
+      : failures([
+          { key: 'switch', what: 'the switch', query: automation, needed: true },
+          {
+            key: 'config',
+            what: 'your active hours and auto-send setting',
+            query: config,
+            needed: true,
+          },
+          {
+            key: 'budget',
+            what: 'the profile-visit limit and notes',
+            query: budget,
+            needed: needsBudget,
+          },
+        ])
   const waiting = automation.isFetching || config.isPending || (needsBudget && budget.isPending)
 
   const dialog = (
@@ -184,8 +190,8 @@ export function useLinkedInAutomation(): LinkedInControl {
       confirmVariant="default"
       confirmLabel={toAutomatic ? 'Turn on Automatic' : 'Add the full sync'}
       pending={move.isPending}
-      confirmDisabled={waiting || failed !== null}
-      error={move.isError ? message(move.error) : failed}
+      confirmDisabled={waiting || failed.length > 0}
+      error={move.isError ? message(move.error) : null}
       onConfirm={() =>
         asking === null
           ? Promise.resolve()
@@ -209,6 +215,7 @@ export function useLinkedInAutomation(): LinkedInControl {
             />
           )}
           <JobList items={jobs} />
+          <FailureList items={failed} />
           {depth === 'full' && (
             <>
               <RiskWarning text={budget.data?.risk_warning} />
@@ -275,10 +282,8 @@ export function useGmailAutomation(): GmailControl {
       : (state.blocked_reason ?? 'Automatic isn’t available yet.')
 
   const gmailFailed = !asking
-    ? null
-    : automation.isRefetchError
-      ? readFailure('the switch', automation.error)
-      : blockedReason
+    ? []
+    : failures([{ key: 'switch', what: 'the switch', query: automation, needed: true }])
   const choose = (position: Position) => {
     if (state === undefined || move.isPending || position === state.position) return
     move.reset()
@@ -304,8 +309,8 @@ export function useGmailAutomation(): GmailControl {
       confirmVariant="default"
       confirmLabel="Turn on Automatic"
       pending={move.isPending}
-      confirmDisabled={automation.isFetching || gmailFailed !== null}
-      error={move.isError ? message(move.error) : gmailFailed}
+      confirmDisabled={automation.isFetching || gmailFailed.length > 0 || blockedReason !== null}
+      error={move.isError ? message(move.error) : blockedReason}
       onConfirm={() => move.mutateAsync({ position: 'automatic', confirm: true })}
     >
       <p className="text-foreground">
@@ -318,6 +323,7 @@ export function useGmailAutomation(): GmailControl {
           `checks replies ${replyEvery}`,
         ]}
       />
+      <FailureList items={gmailFailed} />
       <p>Moving back to Manual or Off takes one click, any time.</p>
     </ConfirmDialog>
   )

@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { describe, expect, it, vi } from 'vitest'
 
 import { dashboardKeys } from '@/features/dashboard/api'
+import { createQueryClient } from '@/api/query-client'
 import { linkedinKeys } from '@/features/linkedin/api'
 import { mailboxKeys } from '@/features/mailboxes/api'
 import {
@@ -24,7 +25,11 @@ import { automation, BLOCKED_REASON, configWith } from './test-support'
  * Settings › Automation against a fake backend that keeps the switch's state: each
  * `PUT` answers the state it moved to, unless the test's handler says otherwise.
  */
-function renderCard(start: Automation = automation(), handlers: Record<string, Handler> = {}) {
+function renderCard(
+  start: Automation = automation(),
+  handlers: Record<string, Handler> = {},
+  { appRetries = false }: { appRetries?: boolean } = {},
+) {
   let state = start
   const calls: Call[] = []
   mockFetch(
@@ -75,7 +80,10 @@ function renderCard(start: Automation = automation(), handlers: Record<string, H
       calls,
     ),
   )
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  // The app's own retry policy (two more tries for a 5xx) when a test asks for it.
+  const queryClient = appRetries
+    ? createQueryClient({ defaultOptions: { queries: { retryDelay: 0 } } })
+    : new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
     <QueryClientProvider client={queryClient}>
       <AutomationCard />
@@ -419,50 +427,117 @@ describe('Settings › Automation (#829)', () => {
     expect(puts('gmail').map((call) => call.body)).toEqual([{ position: 'off', confirm: false }])
   })
 
-  it('keeps Turn on Automatic disabled until the settings and budget answer', async () => {
-    renderCard(undefined, {
-      'GET /api/v1/settings/config': () => new Promise<Response>(() => {}),
+  describe.each([
+    {
+      read: 'settings',
+      route: 'GET /api/v1/settings/config',
+      ok: () => jsonResponse(configWith()),
+      // Shown once the other read (the budget) answers.
+      other: 'profile refreshes, up to 60 a day',
+      failure: 'Couldn’t load your active hours and auto-send setting: boom',
+    },
+    {
+      read: 'budget',
+      route: 'GET /api/v1/linkedin/budget',
+      ok: () => jsonResponse(BUDGET),
+      other: /within active hours \(08:30–21:30\)/,
+      failure: 'Couldn’t load the profile-visit limit and notes: boom',
+    },
+  ])('the $read read Turn on Automatic waits for', ({ route, ok, other, failure }) => {
+    it('keeps Confirm disabled while it is pending, and a click sends nothing', async () => {
+      let release: (response: Response) => void = () => {}
+      const { puts } = renderCard(undefined, {
+        [route]: () =>
+          new Promise<Response>((resolve) => {
+            release = resolve
+          }),
+      })
+      fireEvent.click(
+        (await group('LinkedIn automation')).getByRole('radio', { name: 'Automatic' }),
+      )
+      const dialog = await screen.findByRole('alertdialog')
+      await within(dialog).findByText(other)
+      const confirm = within(dialog).getByRole('button', { name: 'Turn on Automatic' })
+      expect(confirm).toBeDisabled()
+      fireEvent.click(confirm)
+      expect(puts('linkedin')).toEqual([])
+
+      act(() => release(ok()))
+      await waitFor(() => expect(confirm).toBeEnabled())
     })
-    fireEvent.click((await group('LinkedIn automation')).getByRole('radio', { name: 'Automatic' }))
-    const dialog = await screen.findByRole('alertdialog')
-    // The budget answers; the settings never do.
-    await within(dialog).findByText('profile refreshes, up to 60 a day')
-    expect(within(dialog).getByRole('button', { name: 'Turn on Automatic' })).toBeDisabled()
+
+    it('keeps Confirm disabled when it fails, after the app’s retries, and says why', async () => {
+      let reads = 0
+      const { puts } = renderCard(
+        undefined,
+        {
+          [route]: () => {
+            reads += 1
+            return jsonResponse({ detail: 'boom' }, 500)
+          },
+        },
+        { appRetries: true },
+      )
+      fireEvent.click(
+        (await group('LinkedIn automation')).getByRole('radio', { name: 'Automatic' }),
+      )
+      const dialog = await screen.findByRole('alertdialog')
+      const alert = await within(dialog).findByRole('alert')
+      expect(alert).toHaveTextContent(failure)
+      expect(reads).toBe(3)
+      const confirm = within(dialog).getByRole('button', { name: 'Turn on Automatic' })
+      expect(confirm).toBeDisabled()
+      fireEvent.click(confirm)
+      expect(puts('linkedin')).toEqual([])
+      // Cancel stays available.
+      expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeEnabled()
+    })
+
+    it('recovers with Try again', async () => {
+      let fail = true
+      const { puts } = renderCard(undefined, {
+        [route]: () => (fail ? jsonResponse({ detail: 'boom' }, 500) : ok()),
+      })
+      fireEvent.click(
+        (await group('LinkedIn automation')).getByRole('radio', { name: 'Automatic' }),
+      )
+      const dialog = await screen.findByRole('alertdialog')
+      const alert = await within(dialog).findByRole('alert')
+      fail = false
+      fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+
+      await waitFor(() => expect(within(dialog).queryByRole('alert')).toBeNull())
+      const confirm = within(dialog).getByRole('button', { name: 'Turn on Automatic' })
+      await waitFor(() => expect(confirm).toBeEnabled())
+      fireEvent.click(confirm)
+      await waitFor(() => expect(puts('linkedin')).toHaveLength(1))
+    })
   })
 
-  it('keeps Turn on Automatic disabled until the budget answers, for profile refreshes', async () => {
-    renderCard(undefined, {
-      'GET /api/v1/linkedin/budget': () => new Promise<Response>(() => {}),
+  it('needs no budget for quick checks: a failed budget read doesn’t block them', async () => {
+    const { puts } = renderCard(automation({ linkedin: { depth: 'quick' } }), {
+      'GET /api/v1/linkedin/budget': () => jsonResponse({ detail: 'boom' }, 500),
     })
     fireEvent.click((await group('LinkedIn automation')).getByRole('radio', { name: 'Automatic' }))
     const dialog = await screen.findByRole('alertdialog')
-    await within(dialog).findByText(/within active hours \(08:30–21:30\)/)
-    expect(within(dialog).getByRole('button', { name: 'Turn on Automatic' })).toBeDisabled()
-  })
-
-  it('says so, and stays disabled, when a read the dialog needs fails', async () => {
-    const { puts } = renderCard(undefined, {
-      'GET /api/v1/settings/config': () => jsonResponse({ detail: 'settings are locked' }, 500),
-    })
-    fireEvent.click((await group('LinkedIn automation')).getByRole('radio', { name: 'Automatic' }))
-    const dialog = await screen.findByRole('alertdialog')
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
-      'Couldn’t read your settings: settings are locked',
-    )
     const confirm = within(dialog).getByRole('button', { name: 'Turn on Automatic' })
-    expect(confirm).toBeDisabled()
+    await waitFor(() => expect(confirm).toBeEnabled())
+    expect(within(dialog).queryByRole('alert')).toBeNull()
     fireEvent.click(confirm)
-    expect(puts('linkedin')).toEqual([])
+    await waitFor(() => expect(puts('linkedin')).toHaveLength(1))
   })
 
-  it('says so, and stays disabled, when the budget read fails', async () => {
-    renderCard(undefined, {
-      'GET /api/v1/linkedin/budget': () => jsonResponse({ detail: 'budget unreadable' }, 500),
+  it('blocks again when a full-depth choice in the dialog needs the failed budget', async () => {
+    renderCard(automation({ linkedin: { depth: 'quick' } }), {
+      'GET /api/v1/linkedin/budget': () => jsonResponse({ detail: 'boom' }, 500),
     })
     fireEvent.click((await group('LinkedIn automation')).getByRole('radio', { name: 'Automatic' }))
     const dialog = await screen.findByRole('alertdialog')
+    fireEvent.click(
+      within(dialog).getByRole('radio', { name: 'Quick checks and a weekly full sync' }),
+    )
     expect(await within(dialog).findByRole('alert')).toHaveTextContent(
-      'Couldn’t read the LinkedIn budget',
+      'Couldn’t load the profile-visit limit and notes',
     )
     expect(within(dialog).getByRole('button', { name: 'Turn on Automatic' })).toBeDisabled()
   })
