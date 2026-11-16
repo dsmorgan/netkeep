@@ -673,12 +673,12 @@ describe('a campaign with a LinkedIn step (#383)', () => {
       const notice = screen.queryByText('Email replies aren’t watched')
       if (shown) {
         expect(notice).toBeVisible()
-        expect(screen.getByText(/No mailbox is armed.*Arm a mailbox/)).toBeVisible()
+        expect(screen.getByText(/Gmail is Off.*Move Gmail to Manual or Automatic/)).toBeVisible()
       } else expect(notice).toBeNull()
     },
   )
 
-  it('says to arm the campaign’s own mailbox when that one is disarmed (#571)', async () => {
+  it('says Gmail is Off for the campaign’s own mailbox when that one is (#571, #829)', async () => {
     mockFetch(
       campaignBackend(
         {
@@ -700,9 +700,11 @@ describe('a campaign with a LinkedIn step (#383)', () => {
     await renderApp('/campaigns/5')
 
     expect(
-      await screen.findByText(/This campaign’s mailbox, me@sender\.example, isn’t armed/),
+      await screen.findByText(/Gmail is Off for this campaign’s mailbox, me@sender\.example/),
     ).toBeVisible()
-    expect(screen.getByText(/Arm that mailbox in Settings → Gmail/)).toBeVisible()
+    expect(
+      screen.getByText(/Move Gmail to Manual or Automatic in Settings › Automation/),
+    ).toBeVisible()
   })
 
   it('never says so for an email-only campaign', async () => {

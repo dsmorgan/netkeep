@@ -32,3 +32,19 @@ export function automation({
 export const BLOCKED_REASON =
   "netkeep hasn't found one of its own drafts on someone@example.test by its Message-ID yet" +
   ' (waiting: no draft yet; send a test from a campaign’s review)'
+
+/**
+ * Just the `GET /settings/config` fields the LinkedIn dialog reads: the active hours
+ * and auto-send. The rest of the answer is left out; the dialog reads only `fields`.
+ */
+export function configWith({
+  hours = ['08:30', '21:30'],
+  autoSend = false,
+}: { hours?: [string, string]; autoSend?: boolean } = {}) {
+  return {
+    fields: [
+      { key: 'linkedin.active_hours', value: hours },
+      { key: 'campaigns.linkedin_auto_send', value: autoSend },
+    ],
+  }
+}

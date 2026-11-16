@@ -380,20 +380,22 @@ describe('Check now', () => {
     expect(within(gmail).getByText('The check hasn’t run yet')).toBeInTheDocument()
   })
 
+  // The API's refusal for Check now while Gmail is Off (#829), shown as it comes.
+  const GMAIL_OFF =
+    'Gmail is Off, so netkeep doesn’t read it; move Gmail to Manual or Automatic first'
+
   it('shows a refusal with its reason and does not get stuck', async () => {
     renderWith(
       <GmailCheck />,
       () => pollStatus(),
-      () => jsonResponse({ detail: 'No mailbox is armed, so netkeep doesn’t read Gmail' }, 409),
+      () => jsonResponse({ detail: GMAIL_OFF }, 409),
     )
     const gmail = await gmailRegion()
     const button = within(gmail).getByRole('button', { name: 'Check now' })
 
     fireEvent.click(button)
 
-    expect(await within(gmail).findByRole('alert')).toHaveTextContent(
-      'No mailbox is armed, so netkeep doesn’t read Gmail',
-    )
+    expect(await within(gmail).findByRole('alert')).toHaveTextContent(GMAIL_OFF)
     await waitFor(() => expect(button).toBeEnabled())
   })
 

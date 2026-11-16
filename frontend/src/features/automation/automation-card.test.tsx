@@ -16,7 +16,7 @@ import { jsonResponse, mockFetch } from '@/test/fetch'
 
 import type { Automation, GmailMove, LinkedInMove } from './api'
 import { AutomationCard } from './automation-card'
-import { automation, BLOCKED_REASON } from './test-support'
+import { automation, BLOCKED_REASON, configWith } from './test-support'
 
 /**
  * Settings › Automation against a fake backend that keeps the switch's state: each
@@ -30,6 +30,7 @@ function renderCard(start: Automation = automation(), handlers: Record<string, H
       {
         'GET /api/v1/automation': () => jsonResponse(state),
         'GET /api/v1/linkedin/budget': () => jsonResponse(BUDGET),
+        'GET /api/v1/settings/config': () => jsonResponse(configWith()),
         'GET /api/v1/poll-status': () =>
           jsonResponse({
             background_running: true,
@@ -151,12 +152,14 @@ describe('Settings › Automation (#829)', () => {
       name: 'Let netkeep use LinkedIn on its own?',
     })
     expect(dialog).toHaveTextContent('from Manual to Automatic: full upkeep')
+    expect(await within(dialog).findByText(/within active hours \(08:30–21:30\)/)).toBeVisible()
+    expect(dialog).toHaveTextContent('auto-send, a separate setting that stays off')
     const list = within(within(dialog).getByRole('list', { name: 'Starts on its own' }))
     expect(list.getAllByRole('listitem').map((item) => item.textContent)).toEqual([
       'checks for new connections',
       'LinkedIn inbox checks',
       'a weekly full sync',
-      'profile refreshes',
+      'profile refreshes, up to 60 a day',
     ])
     expect(
       await within(dialog).findByRole('note', { name: 'Profile-visit risk' }),
@@ -189,6 +192,16 @@ describe('Settings › Automation (#829)', () => {
     expect(within(dialog).queryByRole('note')).toBeNull()
   })
 
+  it('says auto-send is on when it is, since no position turns it off', async () => {
+    renderCard(undefined, {
+      'GET /api/v1/settings/config': () => jsonResponse(configWith({ autoSend: true })),
+    })
+    fireEvent.click((await group('LinkedIn automation')).getByRole('radio', { name: 'Automatic' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(await within(dialog).findByText(/a separate setting, on now/)).toBeVisible()
+    expect(dialog).not.toHaveTextContent('never sends')
+  })
+
   it('sends nothing when the dialog is cancelled', async () => {
     const { puts } = renderCard()
     const linkedin = await group('LinkedIn automation')
@@ -212,11 +225,13 @@ describe('Settings › Automation (#829)', () => {
 
     fireEvent.click(depth.getByRole('radio', { name: 'Quick checks and a weekly full sync' }))
     const dialog = await screen.findByRole('alertdialog', { name: 'Add the weekly full sync?' })
+    await within(dialog).findByText('profile refreshes, up to 60 a day')
     expect(
       within(dialog)
         .getAllByRole('listitem')
         .map((item) => item.textContent),
-    ).toEqual(['a weekly full sync', 'profile refreshes'])
+    ).toEqual(['a weekly full sync', 'profile refreshes, up to 60 a day'])
+    expect(dialog).toHaveTextContent('Going back to quick checks takes one click')
     expect(await within(dialog).findByRole('note', { name: 'Profile views' })).toBeInTheDocument()
     expect(puts('linkedin')).toEqual([])
 

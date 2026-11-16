@@ -268,6 +268,17 @@ describe('StartRunCard', () => {
     expect(renders - before).toBeLessThan(20)
   })
 
+  it('shows the refusal for LinkedIn Off as the API words it (#829)', async () => {
+    const off =
+      'LinkedIn is Off, so netkeep starts no LinkedIn run; move LinkedIn to Manual or' +
+      ' Automatic first (Settings, Automation)'
+    renderCard({ 'POST /api/v1/linkedin/runs': () => jsonResponse({ detail: off }, 409) })
+    fireEvent.click(await screen.findByRole('button', { name: 'Start run' }))
+    const dialog = await screen.findByRole('alertdialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Start run' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(off)
+  })
+
   it('retries after an instant 409, from the same dialog (confirm-dialog guard)', async () => {
     let attempts = 0
     const { calls } = renderCard({

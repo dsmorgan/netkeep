@@ -261,18 +261,18 @@ function useLinkedInFacts(campaign: Campaign): {
 }
 
 /**
- * Why a LinkedIn campaign's email replies aren't watched (#571): no mailbox is armed, or,
- * for a campaign with its own mailbox, that mailbox isn't; arming another doesn't help.
+ * Why a LinkedIn campaign's email replies aren't watched (#571): Gmail is Off (#829), for
+ * every mailbox or for the campaign's own one, so nothing reads its replies.
  */
 function repliesUnwatchedText(campaign: Campaign): string {
   const which =
     campaign.mailbox_id === null
-      ? 'No mailbox is armed'
-      : `This campaign’s mailbox, ${campaign.mailbox_email ?? 'its own'}, isn’t armed`
-  const arm = campaign.mailbox_id === null ? 'a mailbox' : 'that mailbox'
+      ? 'Gmail is Off'
+      : `Gmail is Off for this campaign’s mailbox, ${campaign.mailbox_email ?? 'its own'}`
   return (
     `${which}, so a contact who answers by email isn’t seen as replied and still gets the ` +
-    `next LinkedIn steps. Arm ${arm} in Settings → Gmail to watch for their email replies.`
+    'next LinkedIn steps. Move Gmail to Manual or Automatic in Settings › Automation to ' +
+    'watch for their email replies.'
   )
 }
 
