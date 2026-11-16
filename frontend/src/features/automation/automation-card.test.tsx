@@ -514,6 +514,105 @@ describe('Settings › Automation (#829)', () => {
     })
   })
 
+  it('waits for fresh settings when the dialog opens again, not the cached ones', async () => {
+    let reads = 0
+    let release: (response: Response) => void = () => {}
+    renderCard(undefined, {
+      'GET /api/v1/settings/config': () => {
+        reads += 1
+        if (reads === 1) return jsonResponse(configWith())
+        return new Promise<Response>((resolve) => {
+          release = resolve
+        })
+      },
+    })
+    const linkedin = await group('LinkedIn automation')
+    fireEvent.click(linkedin.getByRole('radio', { name: 'Automatic' }))
+    let dialog = await screen.findByRole('alertdialog')
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: 'Turn on Automatic' })).toBeEnabled(),
+    )
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+
+    fireEvent.click(linkedin.getByRole('radio', { name: 'Automatic' }))
+    dialog = await screen.findByRole('alertdialog')
+    // The cached hours show at once, but the fresh read is still on its way.
+    await within(dialog).findByText(/within active hours \(08:30–21:30\)/)
+    await waitFor(() => expect(reads).toBe(2))
+    const confirm = within(dialog).getByRole('button', { name: 'Turn on Automatic' })
+    expect(confirm).toBeDisabled()
+
+    act(() => release(jsonResponse(configWith({ autoSend: true }))))
+    await waitFor(() => expect(confirm).toBeEnabled())
+    expect(dialog).toHaveTextContent('a separate setting, on now')
+  })
+
+  it('keeps Confirm disabled when Try again fails again', async () => {
+    let reads = 0
+    const { puts } = renderCard(undefined, {
+      'GET /api/v1/settings/config': () => {
+        reads += 1
+        return jsonResponse({ detail: `boom ${reads}` }, 500)
+      },
+    })
+    fireEvent.click((await group('LinkedIn automation')).getByRole('radio', { name: 'Automatic' }))
+    const dialog = await screen.findByRole('alertdialog')
+    const alert = await within(dialog).findByRole('alert')
+    expect(alert).toHaveTextContent('boom 1')
+
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+
+    expect(await within(dialog).findByText(/boom 2/)).toBeInTheDocument()
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: 'Try again' })).toBeEnabled(),
+    )
+    const confirm = within(dialog).getByRole('button', { name: 'Turn on Automatic' })
+    expect(confirm).toBeDisabled()
+    fireEvent.click(confirm)
+    expect(puts('linkedin')).toEqual([])
+  })
+
+  it('holds Confirm, and says it is trying, while Try again is on its way', async () => {
+    let reads = 0
+    let release: (response: Response) => void = () => {}
+    const { puts } = renderCard(undefined, {
+      'GET /api/v1/settings/config': () => {
+        reads += 1
+        if (reads === 1) return jsonResponse(configWith())
+        if (reads === 2) return jsonResponse({ detail: 'boom' }, 500)
+        return new Promise<Response>((resolve) => {
+          release = resolve
+        })
+      },
+    })
+    const linkedin = await group('LinkedIn automation')
+    // The first dialog caches good settings.
+    fireEvent.click(linkedin.getByRole('radio', { name: 'Automatic' }))
+    let dialog = await screen.findByRole('alertdialog')
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: 'Turn on Automatic' })).toBeEnabled(),
+    )
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+
+    // Reopened, the fresh read fails; Try again is then held in flight.
+    fireEvent.click(linkedin.getByRole('radio', { name: 'Automatic' }))
+    dialog = await screen.findByRole('alertdialog')
+    const alert = await within(dialog).findByRole('alert')
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+
+    const trying = await within(dialog).findByRole('button', { name: 'Trying again…' })
+    expect(trying).toBeDisabled()
+    const confirm = within(dialog).getByRole('button', { name: 'Turn on Automatic' })
+    expect(confirm).toBeDisabled()
+    fireEvent.click(confirm)
+    expect(puts('linkedin')).toEqual([])
+
+    act(() => release(jsonResponse(configWith())))
+    await waitFor(() => expect(confirm).toBeEnabled())
+  })
+
   it('needs no budget for quick checks: a failed budget read doesn’t block them', async () => {
     const { puts } = renderCard(automation({ linkedin: { depth: 'quick' } }), {
       'GET /api/v1/linkedin/budget': () => jsonResponse({ detail: 'boom' }, 500),
