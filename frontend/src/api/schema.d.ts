@@ -24,6 +24,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/automation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Automation */
+        get: operations["get_automation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/automation/gmail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Gmail Automation
+         * @description Move the Gmail switch for every connected mailbox. Applies from the campaign
+         *     engine's next claim; what is already in the sender's hands is not recalled.
+         */
+        put: operations["set_gmail_automation"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/automation/linkedin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Linkedin Automation
+         * @description Move the LinkedIn switch. Automatic arms the schedule; Manual and Off disarm it.
+         *     A run already going is not cancelled.
+         */
+        put: operations["set_linkedin_automation"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/autotag-rules": {
         parameters: {
             query?: never;
@@ -4559,6 +4618,11 @@ export interface components {
             /** Resumed */
             resumed: boolean;
         };
+        /** AutomationOut */
+        AutomationOut: {
+            gmail: components["schemas"]["GmailAutomationOut"];
+            linkedin: components["schemas"]["LinkedInAutomationOut"];
+        };
         /** AutotagRuleCreate */
         AutotagRuleCreate: {
             /**
@@ -5153,7 +5217,7 @@ export interface components {
          * @description Where a check stands. Only ``scheduled`` carries a next time.
          * @enum {string}
          */
-        CheckState: "scheduled" | "due" | "idle" | "paused" | "outside_hours" | "blocked" | "off" | "not_running" | "not_wired";
+        CheckState: "scheduled" | "due" | "idle" | "paused" | "outside_hours" | "blocked" | "off" | "manual" | "not_running" | "not_wired";
         /** ConfigFieldOut */
         ConfigFieldOut: {
             /**
@@ -6283,6 +6347,25 @@ export interface components {
             /** Timezone */
             timezone: string;
         };
+        /** GmailAutomationIn */
+        GmailAutomationIn: {
+            /**
+             * Confirm
+             * @default false
+             */
+            confirm: boolean;
+            position: components["schemas"]["Position"];
+        };
+        /** GmailAutomationOut */
+        GmailAutomationOut: {
+            /** Automatic Ready */
+            automatic_ready: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Changed At */
+            changed_at: string | null;
+            position: components["schemas"]["Position"];
+        };
         /** GmailLeftoverDraftOut */
         GmailLeftoverDraftOut: {
             /**
@@ -7299,6 +7382,23 @@ export interface components {
          * @enum {string}
          */
         LinkKind: "website" | "twitter" | "github" | "other";
+        /** LinkedInAutomationIn */
+        LinkedInAutomationIn: {
+            /**
+             * Confirm
+             * @default false
+             */
+            confirm: boolean;
+            depth?: components["schemas"]["ScheduleDepth"] | null;
+            position: components["schemas"]["Position"];
+        };
+        /** LinkedInAutomationOut */
+        LinkedInAutomationOut: {
+            /** Changed At */
+            changed_at: string | null;
+            depth: components["schemas"]["ScheduleDepth"];
+            position: components["schemas"]["Position"];
+        };
         /**
          * LinkedInStatusOut
          * @description The LinkedIn page's banner: the session flag, heat, arming, and any running run.
@@ -8368,6 +8468,12 @@ export interface components {
             mailboxes: components["schemas"]["MailboxPollOut"][];
         };
         /**
+         * Position
+         * @description Where a service's switch stands, left to right.
+         * @enum {string}
+         */
+        Position: "off" | "manual" | "automatic";
+        /**
          * PossibleDuplicateOut
          * @description Another contact that may be the same person (#363). A hint; nothing merges on its own.
          *
@@ -9048,6 +9154,12 @@ export interface components {
             /** Confirm */
             confirm: boolean;
         };
+        /**
+         * ScheduleDepth
+         * @description How much an armed LinkedIn schedule runs (#829, "How thorough").
+         * @enum {string}
+         */
+        ScheduleDepth: "quick" | "full";
         /**
          * ScheduleOut
          * @description Whether scheduled runs may fire, and when each kind is next due.
@@ -10527,6 +10639,102 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["AttentionOut"];
                 };
+            };
+        };
+    };
+    get_automation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutomationOut"];
+                };
+            };
+        };
+    };
+    set_gmail_automation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GmailAutomationIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutomationOut"];
+                };
+            };
+            /** @description Not allowed now; the detail says why */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The move does more and confirm was not true */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    set_linkedin_automation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinkedInAutomationIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutomationOut"];
+                };
+            };
+            /** @description Not allowed now; the detail says why */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The move does more and confirm was not true */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

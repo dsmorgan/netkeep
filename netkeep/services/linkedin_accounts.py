@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from sqlalchemy.orm import Session
 
 from netkeep.db import is_writer
-from netkeep.models import DEFAULT_ACCOUNT_LABEL, LinkedInAccount, User
+from netkeep.models import DEFAULT_ACCOUNT_LABEL, LinkedInAccount, ScheduleDepth, User
 from netkeep.scoping import scoped
 from netkeep.services.settings_kv import delete_setting, get_setting, set_setting
 from netkeep.services.users import local_owner
@@ -90,28 +90,60 @@ def scheduled_runs_armed(session: Session, user: User, account_id: int) -> bool:
 def arm_scheduled_runs(session: Session, user: User, *, now: datetime) -> LinkedInAccount:
     """Let ``user``'s account's scheduled runs fire. A person's act, never a default.
 
-    Arming an armed account changes nothing (it keeps the first arming time).
+    Arming an armed account changes nothing (it keeps the first arming time). Arming
+    takes the account out of Off (#829): Off is always disarmed.
     """
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("now must be timezone-aware")
     _require_writer(session, "arm_scheduled_runs")
     account = ensure_account(session, user)
+    if account.automation_off_at is not None:
+        account.automation_off_at = None
+        account.automation_changed_at = now
     if account.scheduled_runs_armed_at is None:
         account.scheduled_runs_armed_at = now
+        account.automation_changed_at = now
         log.warning("scheduled LinkedIn runs ARMED for account %d (user %d)", account.id, user.id)
     return account
 
 
-def disarm_scheduled_runs(session: Session, user: User) -> LinkedInAccount:
-    """Stop ``user``'s account's scheduled runs from firing. Manual runs are unaffected."""
+def disarm_scheduled_runs(
+    session: Session, user: User, *, now: datetime | None = None
+) -> LinkedInAccount:
+    """Stop ``user``'s account's scheduled runs from firing. Manual runs are unaffected.
+    ``now``, when given, dates the change for the automation switch (#829)."""
     _require_writer(session, "disarm_scheduled_runs")
     account = ensure_account(session, user)
     if account.scheduled_runs_armed_at is not None:
         account.scheduled_runs_armed_at = None
+        if now is not None:
+            account.automation_changed_at = now
         log.warning(
             "scheduled LinkedIn runs disarmed for account %d (user %d)", account.id, user.id
         )
     return account
+
+
+# --- the automation switch's own state (#829) -----------------------------------
+
+
+def full_upkeep(session: Session, user: User, account_id: int) -> bool:
+    """Whether ``account_id``'s schedule fires the full upkeep kinds (the full sync and
+    enrichment), not only the quick checks. Read-only. ``False`` for an account id
+    ``user`` has no row for: the side that runs less."""
+    depth = session.scalar(
+        scoped(user, LinkedInAccount)
+        .with_only_columns(LinkedInAccount.scheduled_depth)
+        .where(LinkedInAccount.id == account_id)
+    )
+    return depth is ScheduleDepth.FULL
+
+
+def linkedin_off(session: Session, user: User) -> bool:
+    """Whether a person turned LinkedIn Off (#829): runs a person starts are refused too.
+    Read-only. ``False`` before the account has a row: nobody can have turned it off."""
+    account = find_account(session, user)
+    return account is not None and account.automation_off_at is not None
 
 
 # --- the schedule paused: armed, but no new scheduled run starts (#324) ---------
@@ -174,6 +206,7 @@ def pause_schedule(session: Session, user: User, *, now: datetime) -> LinkedInAc
     account = ensure_account(session, user)
     if not schedule_paused(session, user, account.id):
         set_setting(session, user, _pause_key(account.id), now.isoformat())
+        account.automation_changed_at = now
         log.warning("scheduled LinkedIn runs paused for account %d (user %d)", account.id, user.id)
     return account
 

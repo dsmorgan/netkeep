@@ -147,6 +147,7 @@ from netkeep.models import (
     InteractionKind,
     LiConversation,
     Mailbox,
+    MailboxArm,
     MessageDirection,
     MessageStatus,
     TemplateChannel,
@@ -922,9 +923,12 @@ def poll_replies(
     label: Labeler | None = None,
     only: Collection[int] | None = None,
     skip: Collection[int] = (),
+    scheduled: bool = False,
 ) -> RepliesPolled:
     """One poll of every armed mailbox of the user (the module), or of those in ``only``,
     leaving out those in ``skip`` (a "Check now" skips one still in its backoff, #409).
+    A ``scheduled`` poll (no person asked for it) reads only the mailboxes armed to send:
+    Gmail on Manual reads replies only on Check now (#829).
     Blocking. Says how each mailbox it looked at ended (:class:`RepliesPolled`). A
     mailbox that is not ready is skipped, not counted against the others, so it never
     makes the healthy ones poll again before their interval (#413).
@@ -938,6 +942,11 @@ def poll_replies(
         if user is None:
             return RepliesPolled()
         work = reply_work(session, user, now=now)
+        if scheduled:
+            sending = {
+                m.id for m in armed_mailboxes(session, user).values() if m.arm is MailboxArm.SEND
+            }
+            work = [mailbox for mailbox in work if mailbox.mailbox_id in sending]
     if only is not None:
         work = [mailbox for mailbox in work if mailbox.mailbox_id in only]
     work = [mailbox for mailbox in work if mailbox.mailbox_id not in skip]

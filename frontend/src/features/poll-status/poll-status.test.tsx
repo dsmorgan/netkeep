@@ -19,6 +19,7 @@ import {
   nextText,
   repliesText,
   STATE_TEXT,
+  canCheckNow,
 } from './format'
 import { RepliesChecked } from './replies-checked'
 
@@ -193,6 +194,14 @@ describe('format', () => {
     }
     expect(checkSummary(check({ state: 'paused', last_at: null }), NOW)).toBe('paused')
     expect(checkSummary(check({ state: 'outside_hours' }), NOW)).toContain('outside active hours')
+  })
+
+  it('offers Check now while a check runs, and on Manual, where it is the only way', () => {
+    expect(canCheckNow({ state: 'scheduled' })).toBe(true)
+    expect(canCheckNow({ state: 'due' })).toBe(true)
+    expect(canCheckNow({ state: 'manual' })).toBe(true)
+    expect(canCheckNow({ state: 'off' })).toBe(false)
+    expect(canCheckNow({ state: 'blocked' })).toBe(false)
   })
 
   it('calls a waiting check now late only after three minutes, and never without a time', () => {

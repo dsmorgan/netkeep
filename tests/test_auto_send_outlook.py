@@ -1078,9 +1078,11 @@ def test_every_gate_reason_an_auto_send_fire_meets_maps() -> None:
             and isinstance(n.value, ast.Name)
             and n.value.id == "JobKind"
         }
-        assert kinds or "_ROUTE_BREAKER_KINDS" in names, ast.unparse(node.test)
+        sets = {"_ROUTE_BREAKER_KINDS", "FULL_UPKEEP_KINDS"}
+        assert kinds or sets & names, ast.unparse(node.test)
         assert "AUTO_SEND" not in kinds, ast.unparse(node.test)
     assert scheduler.JobKind.AUTO_SEND not in scheduler._ROUTE_BREAKER_KINDS
+    assert scheduler.JobKind.AUTO_SEND not in scheduler.FULL_UPKEEP_KINDS
     assert set(auto_send_outlook.GATE) == general
 
 
