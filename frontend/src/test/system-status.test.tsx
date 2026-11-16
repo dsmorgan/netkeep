@@ -209,6 +209,22 @@ describe('the top bar’s status chips (#751)', () => {
     await waitFor(() => expect(reads).toBeGreaterThan(before))
   })
 
+  it('asks first when ArrowRight moves the popover’s switch to Automatic (#829)', async () => {
+    const calls = serve({ [AUTOMATION]: automation() })
+    await renderApp('/contacts')
+    fireEvent.click(await chip('linkedin', 'ok'))
+    const popover = await screen.findByRole('dialog')
+    const manual = within(
+      await within(popover).findByRole('radiogroup', { name: 'LinkedIn automation' }),
+    ).getByRole('radio', { name: 'Manual' })
+
+    act(() => manual.focus())
+    fireEvent.keyDown(manual, { key: 'ArrowRight' })
+
+    expect(await screen.findByRole('alertdialog')).toBeInTheDocument()
+    expect(calls.some((call) => call.method === 'PUT')).toBe(false)
+  })
+
   it('asks before turning Gmail to Automatic from its popover', async () => {
     const calls = serve({
       [AUTOMATION]: automation({ linkedin: { position: 'automatic' } }),

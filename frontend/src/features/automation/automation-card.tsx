@@ -1,13 +1,10 @@
-import { Radio } from '@base-ui/react/radio'
-import { RadioGroup } from '@base-ui/react/radio-group'
 import { useId } from 'react'
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { toneClasses } from '@/components/ui/tone'
-import { cn } from '@/lib/utils'
 
-import { DEPTH_LABEL, type Depth, type Position } from './api'
+import type { Position } from './api'
 import { AutomationLadder } from './automation-switch'
+import { DepthChoice } from './depth-choice'
 import {
   useGmailAutomation,
   useLinkedInAutomation,
@@ -19,12 +16,6 @@ const LINKEDIN_LINES: Record<Position, string> = {
   off: 'Leaves LinkedIn alone',
   manual: 'Runs when you click Start',
   automatic: 'Runs on its own, within active hours',
-}
-
-const DEPTH_LINE: Record<Depth, string> = {
-  quick:
-    'New connections and the LinkedIn inbox. You run a full sync yourself when you want removed connections noticed.',
-  full: 'Adds the weekly full sync and profile refreshes for stale contacts. More time on LinkedIn each week.',
 }
 
 function gmailLines(replyEvery: string): Record<Position, string> {
@@ -106,58 +97,6 @@ function LinkedInSection({ control }: { control: LinkedInControl }) {
         </>
       )}
     </section>
-  )
-}
-
-function DepthChoice({
-  value,
-  onChoose,
-  busy,
-}: {
-  value: Depth
-  onChoose: (depth: Depth) => void
-  busy: boolean
-}) {
-  const id = useId()
-  return (
-    <div className={cn(toneClasses('ok'), 'nk-flat flex flex-col gap-2 rounded-lg px-4 py-3.5')}>
-      <p id={id} className="text-sm font-extrabold text-ok-ink">
-        How thorough
-      </p>
-      <RadioGroup
-        aria-labelledby={id}
-        aria-busy={busy || undefined}
-        value={value}
-        readOnly={busy}
-        onValueChange={(next) => onChoose(next as Depth)}
-        className="flex flex-col gap-1"
-      >
-        {(['quick', 'full'] as const).map((depth) => (
-          <Radio.Root
-            key={depth}
-            value={depth}
-            aria-labelledby={`${id}-${depth}`}
-            aria-describedby={`${id}-${depth}-line`}
-            className="group flex min-h-11 cursor-pointer items-start gap-2.5 rounded-md py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <span
-              aria-hidden="true"
-              className="mt-0.5 inline-flex size-4.5 shrink-0 items-center justify-center rounded-full border-2 border-muted-foreground group-data-checked:border-ok-ink"
-            >
-              <span className="size-2 rounded-full group-data-checked:bg-ok-ink" />
-            </span>
-            <span className="flex flex-col gap-0.5">
-              <span id={`${id}-${depth}`} className="text-sm font-bold">
-                {DEPTH_LABEL[depth]}
-              </span>
-              <span id={`${id}-${depth}-line`} className="text-xs text-muted-foreground">
-                {DEPTH_LINE[depth]}
-              </span>
-            </span>
-          </Radio.Root>
-        ))}
-      </RadioGroup>
-    </div>
   )
 }
 
