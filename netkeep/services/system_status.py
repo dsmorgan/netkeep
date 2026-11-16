@@ -428,6 +428,7 @@ CHECK_TONE: Final[Mapping[poll_service.CheckState, Tone]] = {
     poll_service.CheckState.OFF: "off",
     poll_service.CheckState.NOT_RUNNING: "off",
     poll_service.CheckState.NOT_WIRED: "off",
+    poll_service.CheckState.MANUAL: "ok",
 }
 """A background check's tone. A check that waits on its own (outside active hours,
 nothing to look at) is working as set up. One that ``netkeep serve`` doesn't run is off
@@ -442,6 +443,7 @@ STATE_TEXT: Final[Mapping[poll_service.CheckState, str]] = {
     poll_service.CheckState.OFF: "off",
     poll_service.CheckState.NOT_RUNNING: "not running",
     poll_service.CheckState.NOT_WIRED: "not running yet",
+    poll_service.CheckState.MANUAL: "when you click Check now",
 }
 """What a check that has no next time says instead. Never a time."""
 
