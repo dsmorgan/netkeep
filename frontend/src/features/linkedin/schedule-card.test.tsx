@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
-import { automation } from '@/features/automation/test-support'
+import { automation, configWith } from '@/features/automation/test-support'
 import { jsonResponse, mockFetch } from '@/test/fetch'
 
 import { ScheduleCard } from './schedule-card'
@@ -16,6 +16,7 @@ function renderCard(handlers: Record<string, Handler> = {}) {
         'GET /api/v1/automation': () => jsonResponse(automation()),
         'GET /api/v1/linkedin/schedule': () => jsonResponse(SCHEDULE_ARMED),
         'GET /api/v1/linkedin/budget': () => jsonResponse(BUDGET),
+        'GET /api/v1/settings/config': () => jsonResponse(configWith()),
         ...handlers,
       },
       calls,
@@ -76,6 +77,37 @@ describe('ScheduleCard (#829)', () => {
       depth: 'full',
       confirm: true,
     })
+  })
+
+  it('works from the keyboard: ArrowRight from Manual asks first and sends nothing', async () => {
+    const { calls } = renderCard()
+    const manual = (await radios()).getByRole('radio', { name: 'Manual' })
+    expect(manual).toHaveAttribute('tabindex', '0')
+
+    act(() => manual.focus())
+    fireEvent.keyDown(manual, { key: 'ArrowRight' })
+
+    expect(
+      await screen.findByRole('alertdialog', { name: 'Let netkeep use LinkedIn on its own?' }),
+    ).toBeInTheDocument()
+    expect(calls.some((call) => call.method === 'PUT')).toBe(false)
+  })
+
+  it('works from the keyboard: ArrowLeft from Manual turns Off at once', async () => {
+    const { calls } = renderCard({
+      'PUT /api/v1/automation/linkedin': () =>
+        jsonResponse(automation({ linkedin: { position: 'off' } })),
+    })
+    const manual = (await radios()).getByRole('radio', { name: 'Manual' })
+    act(() => manual.focus())
+    fireEvent.keyDown(manual, { key: 'ArrowLeft' })
+    await waitFor(() =>
+      expect(calls.find((call) => call.method === 'PUT')?.body).toEqual({
+        position: 'off',
+        confirm: false,
+      }),
+    )
+    expect(screen.queryByRole('alertdialog')).toBeNull()
   })
 
   it('asks before checking the weekly full sync box', async () => {

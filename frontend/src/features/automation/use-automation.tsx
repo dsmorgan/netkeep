@@ -22,6 +22,7 @@ import {
   type Depth,
   type Position,
 } from './api'
+import { DepthChoice } from './depth-choice'
 import { JobList } from './job-list'
 
 function message(error: unknown): string {
@@ -88,7 +89,8 @@ function autoSendText(config: ConfigSettings | undefined): string {
 
 interface Target {
   position: Position
-  depth: Depth
+  /** The depth the person picked in the dialog; null follows the stored one. */
+  depth: Depth | null
 }
 
 export interface LinkedInControl {
@@ -104,11 +106,22 @@ export interface LinkedInControl {
   dialog: ReactNode
 }
 
+/** Why the dialog can't confirm yet: a read it needs failed. */
+function readFailure(what: string, error: unknown): string {
+  return `Couldn’t read ${what}: ${message(error)}. Close this and try again.`
+}
+
 /**
  * The LinkedIn switch's state and moves (#829). Moving left is one click; a move to
  * Automatic, or from quick checks to the weekly full sync, opens a dialog that lists
  * what will start on its own, with the budget's risk warning and the profile-view
  * notice when profile refreshes are part of it, and sends `confirm: true`.
+ *
+ * Opening the dialog reads the switch again, and the dialog confirms only once that
+ * read, the settings (active hours, auto-send) and, for profile refreshes, the budget
+ * have answered: so it never lists less than will start. A failed read keeps it
+ * disabled and says so. Turning on Automatic chooses How thorough in the same
+ * dialog, so quick checks never pass through full upkeep on the way.
  */
 export function useLinkedInAutomation(): LinkedInControl {
   const queryClient = useQueryClient()
@@ -131,22 +144,33 @@ export function useLinkedInAutomation(): LinkedInControl {
     if (target.position === state.position && target.depth === state.depth) return
     move.reset()
     if (doesMore(state, target)) {
-      setAsking(target)
+      setAsking({ position: target.position, depth: depth ?? null })
+      // The list is built from a fresh answer, never a stale one.
+      void queryClient.invalidateQueries({ queryKey: automationKeys.all })
       return
     }
     move.mutate({ position: target.position, depth, confirm: false })
   }
 
   const toAutomatic = asking !== null && state?.position !== 'automatic'
+  const depth = asking?.depth ?? state?.depth ?? 'full'
   const from = state === undefined ? '' : linkedinText(state.position, state.depth)
   const perDay = budget.data?.budgets.find((row) => row.action === 'profile_visits')?.day.limit
   const full = fullJobs(perDay)
   const jobs =
+    asking === null ? [] : toAutomatic ? [...QUICK_JOBS, ...(depth === 'full' ? full : [])] : full
+  const needsBudget = depth === 'full'
+  const failed =
     asking === null
-      ? []
-      : toAutomatic
-        ? [...QUICK_JOBS, ...(asking.depth === 'full' ? full : [])]
-        : full
+      ? null
+      : automation.isRefetchError
+        ? readFailure('the switch', automation.error)
+        : config.isError
+          ? readFailure('your settings', config.error)
+          : needsBudget && budget.isError
+            ? readFailure('the LinkedIn budget', budget.error)
+            : null
+  const waiting = automation.isFetching || config.isPending || (needsBudget && budget.isPending)
 
   const dialog = (
     <ConfirmDialog
@@ -160,26 +184,32 @@ export function useLinkedInAutomation(): LinkedInControl {
       confirmVariant="default"
       confirmLabel={toAutomatic ? 'Turn on Automatic' : 'Add the full sync'}
       pending={move.isPending}
-      // The profile-visit notes come with the budget, and the hours and auto-send with
-      // the settings: confirm once they could show.
-      confirmDisabled={(asking?.depth === 'full' && budget.isPending) || config.isPending}
-      error={asking !== null && move.isError ? message(move.error) : null}
+      confirmDisabled={waiting || failed !== null}
+      error={move.isError ? message(move.error) : failed}
       onConfirm={() =>
         asking === null
           ? Promise.resolve()
-          : move.mutateAsync({ position: asking.position, depth: asking.depth, confirm: true })
+          : move.mutateAsync({ position: asking.position, depth, confirm: true })
       }
     >
       {asking !== null && (
         <>
           <p className="text-foreground">
             You’re moving LinkedIn from <strong>{from}</strong> to{' '}
-            <strong>{linkedinText(asking.position, asking.depth)}</strong>. From now on, within
-            active hours{hoursText(config.data)}, netkeep {toAutomatic ? 'starts' : 'also starts'}{' '}
-            these without you watching:
+            <strong>{linkedinText(asking.position, depth)}</strong>. From now on, within active
+            hours{hoursText(config.data)}, netkeep {toAutomatic ? 'starts' : 'also starts'} these
+            without you watching:
           </p>
+          {toAutomatic && (
+            <DepthChoice
+              compact
+              value={depth}
+              onChoose={(next) => setAsking({ ...asking, depth: next })}
+              busy={move.isPending}
+            />
+          )}
           <JobList items={jobs} />
-          {asking.depth === 'full' && (
+          {depth === 'full' && (
             <>
               <RiskWarning text={budget.data?.risk_warning} />
               <ProfileViewNotice text={budget.data?.profile_view_notice} />
@@ -198,7 +228,7 @@ export function useLinkedInAutomation(): LinkedInControl {
 
   return {
     state,
-    loadError: automation.isError ? message(automation.error) : null,
+    loadError: automation.isError && state === undefined ? message(automation.error) : null,
     choose,
     pending: move.isPending,
     error: asking === null && move.isError ? message(move.error) : null,
@@ -244,11 +274,19 @@ export function useGmailAutomation(): GmailControl {
       ? null
       : (state.blocked_reason ?? 'Automatic isn’t available yet.')
 
+  const gmailFailed = !asking
+    ? null
+    : automation.isRefetchError
+      ? readFailure('the switch', automation.error)
+      : blockedReason
   const choose = (position: Position) => {
     if (state === undefined || move.isPending || position === state.position) return
     move.reset()
     if (doesMore(state, { position })) {
-      if (blockedReason === null) setAsking(true)
+      if (blockedReason !== null) return
+      setAsking(true)
+      // Confirm only on a fresh answer: the mailbox may have stopped being ready.
+      void queryClient.invalidateQueries({ queryKey: automationKeys.all })
       return
     }
     move.mutate({ position, confirm: false })
@@ -266,7 +304,8 @@ export function useGmailAutomation(): GmailControl {
       confirmVariant="default"
       confirmLabel="Turn on Automatic"
       pending={move.isPending}
-      error={asking && move.isError ? message(move.error) : null}
+      confirmDisabled={automation.isFetching || gmailFailed !== null}
+      error={move.isError ? message(move.error) : gmailFailed}
       onConfirm={() => move.mutateAsync({ position: 'automatic', confirm: true })}
     >
       <p className="text-foreground">
@@ -285,7 +324,7 @@ export function useGmailAutomation(): GmailControl {
 
   return {
     state,
-    loadError: automation.isError ? message(automation.error) : null,
+    loadError: automation.isError && state === undefined ? message(automation.error) : null,
     choose,
     pending: move.isPending,
     error: !asking && move.isError ? message(move.error) : null,

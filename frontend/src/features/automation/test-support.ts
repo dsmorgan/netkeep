@@ -4,7 +4,7 @@
  */
 import type { Automation } from './api'
 
-/** What a new install answers: LinkedIn Manual at full depth, Gmail Off with no mailbox. */
+/** Both switches on Manual, LinkedIn at full depth, and Gmail ready for Automatic. */
 export const AUTOMATION_MANUAL: Automation = {
   linkedin: { position: 'manual', depth: 'full', changed_at: null },
   gmail: {

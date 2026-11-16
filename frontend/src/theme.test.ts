@@ -386,6 +386,15 @@ describe.each(CONTRAST_MODES)('the theme with %s', (_, __, choice, os) => {
     expect(worst(colorOf(tokens, ink), surfaces)).toBeGreaterThanOrEqual(4.5)
   })
 
+  // The automation confirm dialog's list of what starts on its own (#829): foreground
+  // text on the ok tint, in a dialog (popover) and over a card.
+  it('keeps the automation dialog’s list readable on its ok tint', () => {
+    const surfaces = [colorOf(tokens, 'popover'), colorOf(tokens, 'card')].map((surface) =>
+      over(colorOf(tokens, 'ok-soft'), surface),
+    )
+    expect(worst(colorOf(tokens, 'foreground'), surfaces)).toBeGreaterThanOrEqual(4.5)
+  })
+
   // The top bar's status chips (#751): the tone's soft tint over an opaque card, so the
   // color field never shows through, and the word and the fact both in its full ink. On
   // the bare field the inks drop to about 3.5:1 under a blob. An off chip is muted text
