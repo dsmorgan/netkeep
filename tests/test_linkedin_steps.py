@@ -275,8 +275,16 @@ def test_the_li_prefills_budget_is_clamped_to_its_hard_max() -> None:
 # --- the claim ------------------------------------------------------------------------
 
 
-def test_linkedin_off_refuses_the_claim_with_the_reason_and_records_nothing(lane: Lane) -> None:
-    """#829: Off refuses a prefill a person asks for, ahead of every other check."""
+def test_linkedin_off_refuses_the_claim_with_the_reason_and_records_nothing(
+    lane: Lane, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#829: Off refuses a prefill a person asks for, ahead of the user's checks (active
+    hours closed here, so Off must be the reason given)."""
+
+    def closed(*_: object, **__: object) -> None:
+        raise runs.OutsideActiveHours("outside active hours")
+
+    monkeypatch.setattr(runs, "refuse_if_outside_active_hours", closed)
     from netkeep.services import automation
 
     def turn_off(session: Session, user: User) -> None:
