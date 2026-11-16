@@ -181,6 +181,12 @@ def test_a_check_that_waits_on_its_own_reads_working_and_one_serve_doesnt_run_of
         "off": "off",
         "not_running": "off",
         "not_wired": "off",
+        "manual": "ok",  # #829: Gmail on Manual, working as set up
+    }
+    # Every state has a tone and a text, so no chip fails on one.
+    assert set(service.CHECK_TONE) == set(poll_service.CheckState)
+    assert set(service.STATE_TEXT) == set(poll_service.CheckState) - {
+        poll_service.CheckState.SCHEDULED
     }
 
 
@@ -220,6 +226,16 @@ def test_gmail_says_drafts_only_and_warns_when_not_armed() -> None:
         "text": "Gmail · Not armed · checked {replies_last}",
         "href": "/settings#gmail",
     }
+
+
+def test_gmail_on_manual_says_replies_are_checked_on_check_now() -> None:
+    """#829: Gmail on Manual has no scheduled reply check; the chip still reads well."""
+    manual = check(state=State.MANUAL, next_at=None, reason=poll_service.MANUAL_REPLIES)
+    chip = gmail(mailboxes=[mailbox(arm=MailboxArm.DRAFT)], poll=poll(manual))
+    assert face(chip)["tone"] == "ok"
+    replies = find(chip, "replies")
+    assert (replies.tone, replies.word) == ("ok", "When you click Check now")
+    assert "when you click Check now" in replies.detail
 
 
 def test_gmail_stops_and_sends_you_to_settings_when_google_signed_it_out() -> None:
