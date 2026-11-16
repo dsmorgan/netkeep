@@ -1730,7 +1730,7 @@ def _scheduled_jobs(scheduler: SchedulerPosture) -> Protection:
         warnings=(
             f"these job kinds have no due time, so they never run ({meaning})."
             " `netkeep serve` gives a missing kind its first due time when it starts,"
-            " and `netkeep linkedin schedule arm` does it at once",
+            " and `netkeep automation linkedin automatic` does it at once",
         ),
         fix=(
             "Restart `netkeep serve`, which gives each missing job its first due time when it"
@@ -2109,7 +2109,8 @@ def _scheduled_runs_armed(session: Session, user: User, account_id: int) -> Prot
         else f"paused since {pause.paused_at:%Y-%m-%d %H:%M UTC}"
     )
     paused = (
-        f"; {since}: no new scheduled run starts until `netkeep linkedin schedule unpause`"
+        f"; {since}: no new scheduled run starts until LinkedIn moves to Automatic"
+        " (`netkeep automation linkedin automatic`)"
         if pause.paused
         else ""
     )
@@ -2131,7 +2132,7 @@ def _scheduled_runs_armed(session: Session, user: User, account_id: int) -> Prot
         status=Status.ON,
         value=(
             f"armed since {account.scheduled_runs_armed_at:%Y-%m-%d %H:%M UTC}: due jobs fire"
-            " within the budgets and active hours (`netkeep linkedin schedule disarm`)"
+            " within the budgets and active hours (`netkeep automation linkedin manual`)"
         ),
     )
 

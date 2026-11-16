@@ -584,8 +584,21 @@ def test_linkedin_disarmed(world: World) -> None:
     checks = world.read()
     for key in ("linkedin_enrich", "linkedin_incremental_sync", "linkedin_full_sync"):
         assert checks[key].state is S.OFF
-        assert checks[key].reason == "Scheduled LinkedIn runs are disarmed"
+        assert checks[key].reason == service.LINKEDIN_MANUAL
     _no_times(checks)
+
+
+def test_linkedin_off_says_so_and_how_to_change_it(world: World) -> None:
+    from netkeep.services import automation
+
+    for session, user in world.write():
+        automation.set_linkedin(session, user, automation.Position.OFF, confirm=False, now=NOW)
+    checks = world.read()
+    for key in ("linkedin_inbox", "linkedin_enrich", "linkedin_full_sync"):
+        reason = checks[key].reason
+        assert checks[key].state is S.OFF
+        assert reason is not None and reason.startswith(service.LINKEDIN_OFF)
+    assert "Settings, Automation" in service.LINKEDIN_OFF
 
 
 def test_linkedin_next_is_the_stored_due_time(world: World) -> None:

@@ -72,6 +72,7 @@ from netkeep.paths import data_dir
 from netkeep.scoping import get_scoped_contact, scoped_contacts
 from netkeep.services import (
     auto_send_outlook,
+    automation,
     budgets,
     enrich_plan,
     route_breaker,
@@ -92,11 +93,8 @@ from netkeep.services.events import EventBus
 from netkeep.services.heat import cooldown_multiplier
 from netkeep.services.linkedin_accounts import (
     account_id_for,
-    arm_scheduled_runs,
-    disarm_scheduled_runs,
     ensure_account,
     find_account,
-    pause_schedule,
     schedule_pause_state,
     schedule_paused,
     scheduled_runs_armed,
@@ -696,7 +694,8 @@ def arm_schedule(
             detail="arming lets netkeep visit LinkedIn on its own schedule; send confirm: true",
         )
     now = utcnow()
-    arm_scheduled_runs(session, user, now=now)
+    # Deprecated (#829): Automatic, keeping the depth; the same as PUT /automation/linkedin.
+    automation.set_linkedin(session, user, automation.Position.AUTOMATIC, confirm=True, now=now)
     seed_served_schedule(session, user, _settings(request, session, user), now=now)
     session.commit()  # the change stands before anything is read back for display
     return _schedule_out(request, session, user)
@@ -704,8 +703,9 @@ def arm_schedule(
 
 @router.post("/schedule/disarm", operation_id="disarm_linkedin_schedule")
 def disarm_schedule(request: Request, user: CurrentUser, session: SessionDep) -> ScheduleOut:
-    """Stop scheduled LinkedIn runs from firing. A run already going is not cancelled."""
-    disarm_scheduled_runs(session, user)
+    """Deprecated (#829): ``PUT /automation/linkedin`` with ``manual``. Stops scheduled
+    LinkedIn runs from firing; a run already going is not cancelled."""
+    automation.set_linkedin(session, user, automation.Position.MANUAL, confirm=False, now=utcnow())
     session.commit()  # the change stands before anything is read back for display
     return _schedule_out(request, session, user)
 
@@ -714,13 +714,10 @@ def disarm_schedule(request: Request, user: CurrentUser, session: SessionDep) ->
 def pause_linkedin_schedule(
     request: Request, user: CurrentUser, session: SessionDep
 ) -> ScheduleOut:
-    """Hold scheduled runs without disarming (#324): no new one starts until unpaused.
-
-    A run already going is not stopped (cancel does that). Due fires met while
-    paused are skipped and their cadence moves on, so unpausing starts nothing at
-    once. The pause survives a restart of ``netkeep serve``.
-    """
-    pause_schedule(session, user, now=utcnow())
+    """Deprecated (#829): pause is gone, and this moves LinkedIn to Manual, which does its
+    job: no scheduled run starts, and it survives a restart. A run already going is not
+    stopped (cancel does that)."""
+    automation.set_linkedin(session, user, automation.Position.MANUAL, confirm=False, now=utcnow())
     session.commit()  # the change stands before anything is read back for display
     return _schedule_out(request, session, user)
 
@@ -733,9 +730,9 @@ def pause_linkedin_schedule(
 def unpause_linkedin_schedule(
     body: ScheduleArmIn, request: Request, user: CurrentUser, session: SessionDep
 ) -> ScheduleOut:
-    """Let scheduled runs start again; each kind waits for its next due time. Needs
-    ``confirm: true``: on an armed account it moves LinkedIn from Manual to Automatic
-    (#829), which does more."""
+    """Deprecated (#829): clears a legacy pause, if one is left. Needs ``confirm: true``:
+    on an armed account that moves LinkedIn from Manual to Automatic, which does more.
+    ``PUT /automation/linkedin`` is the switch."""
     if not body.confirm:
         raise HTTPException(
             status_code=422,

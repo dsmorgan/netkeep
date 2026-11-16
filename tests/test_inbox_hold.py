@@ -342,7 +342,8 @@ def test_a_claim_is_held_on_an_old_complete_poll_and_goes_on_a_fresh_one(
     held = lane.claim(enrollment_id, polled=False)
     assert held.reasons == ("linkedin_inbox_stale",)
     assert held.detail is not None and "hours ago" in held.detail
-    assert "or wait for the next scheduled poll" in held.detail  # an older poll exists
+    # An older poll exists; this account is on Manual (#829), so none runs on its own.
+    assert "run `netkeep linkedin inbox`; on Manual no poll runs on its own" in held.detail
 
     lane.write(lambda s, u: record_poll(s, u, NOW - LIMIT))
     assert lane.claim(enrollment_id, polled=False).claimed
@@ -745,7 +746,7 @@ def test_poll_status_says_why_the_inbox_holds_steps(
     world = _linkedin_world(session_factory)
     check = _inbox_check(world, poll_status_service.Serving(scheduler=True, campaign_engine=True))
     assert check.reason is not None
-    assert check.reason.startswith("Scheduled LinkedIn runs are disarmed")  # still says so
+    assert check.reason.startswith(poll_status_service.LINKEDIN_MANUAL)  # still says so
     assert "steps for a contact you are watching on LinkedIn (a conversation the poll has seen" in (
         check.reason
     )
@@ -759,7 +760,7 @@ def test_poll_status_says_why_the_inbox_holds_steps(
 
     _poll(world, NOW - timedelta(hours=1))
     fresh = _inbox_check(world, poll_status_service.Serving(scheduler=True, campaign_engine=True))
-    assert fresh.reason == "Scheduled LinkedIn runs are disarmed"
+    assert fresh.reason == poll_status_service.LINKEDIN_MANUAL
     assert fresh.last_at is not None
 
 
@@ -822,3 +823,31 @@ def test_posture_hold_note_names_the_contact_id_case_when_the_self_contact_has_o
     assert "your own contact's LinkedIn ID does not match" in note
     assert "inbox-forget-owner" not in note
     assert row.actions == ()  # forgetting could not fix it (#583)
+
+
+@pytest.mark.parametrize(
+    ("position", "says"),
+    [
+        ("automatic", "or wait for the next scheduled poll"),
+        ("manual", "on Manual no poll runs on its own"),
+        ("off", "LinkedIn is Off, so no poll runs; move LinkedIn to Manual or Automatic"),
+    ],
+)
+@pytest.mark.parametrize("polled_before", [True, False])
+def test_why_stale_names_the_fix_the_switch_allows(
+    session_factory: sessionmaker[Session], position: str, says: str, polled_before: bool
+) -> None:
+    """#829: Off refuses the poll by hand, so it names the switch, never the command."""
+    from netkeep.db import session_scope
+    from netkeep.services import automation
+
+    with session_scope(session_factory, write=True) as session:
+        user = factories.make_user(session)
+        automation.set_linkedin(session, user, automation.Position(position), confirm=True, now=NOW)
+        if polled_before:
+            record_poll(session, user, NOW - LIMIT - timedelta(minutes=1))
+        text = inbox_hold.why_stale(session, user, now=NOW)
+    if polled_before or position == "off":
+        assert says in text
+    if position == "off":
+        assert "`netkeep linkedin inbox`" not in text

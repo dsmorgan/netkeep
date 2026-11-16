@@ -23,7 +23,7 @@ with the change that moves its value here.
 this account's scheduled runs, or ``NULL`` while they are disarmed. Disarmed is
 the default for every account, new or migrated: ``netkeep serve`` runs its
 scheduler either way, but no scheduled LinkedIn job fires until a person arms
-it, by hand, through ``netkeep linkedin schedule arm`` or the API. It is a
+it, by hand, through ``netkeep automation linkedin automatic`` or the API. It is a
 column rather than a ``settings_kv`` key on purpose: ``settings_kv`` values are
 seeded from ``config.toml``, and a value copied around in a config file must
 never be the thing that turns on scheduled LinkedIn traffic.

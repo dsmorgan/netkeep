@@ -199,7 +199,11 @@ def schedule_paused(session: Session, user: User, account_id: int) -> bool:
 
 
 def pause_schedule(session: Session, user: User, *, now: datetime) -> LinkedInAccount:
-    """Pause ``user``'s account's schedule. Pausing a paused one keeps the first time."""
+    """Pause ``user``'s account's schedule. Pausing a paused one keeps the first time.
+
+    Legacy (#829): nothing in netkeep calls this any more; ``linkedin schedule pause``
+    and ``POST /linkedin/schedule/pause`` move LinkedIn to Manual instead. Tests use it
+    to make a pause as an install from before migration 0049 had one."""
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("now must be timezone-aware")
     _require_writer(session, "pause_schedule")

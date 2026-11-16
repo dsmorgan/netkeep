@@ -2741,7 +2741,8 @@ export interface paths {
         put?: never;
         /**
          * Disarm Schedule
-         * @description Stop scheduled LinkedIn runs from firing. A run already going is not cancelled.
+         * @description Deprecated (#829): ``PUT /automation/linkedin`` with ``manual``. Stops scheduled
+         *     LinkedIn runs from firing; a run already going is not cancelled.
          */
         post: operations["disarm_linkedin_schedule"];
         delete?: never;
@@ -2761,11 +2762,9 @@ export interface paths {
         put?: never;
         /**
          * Pause Linkedin Schedule
-         * @description Hold scheduled runs without disarming (#324): no new one starts until unpaused.
-         *
-         *     A run already going is not stopped (cancel does that). Due fires met while
-         *     paused are skipped and their cadence moves on, so unpausing starts nothing at
-         *     once. The pause survives a restart of ``netkeep serve``.
+         * @description Deprecated (#829): pause is gone, and this moves LinkedIn to Manual, which does its
+         *     job: no scheduled run starts, and it survives a restart. A run already going is not
+         *     stopped (cancel does that).
          */
         post: operations["pause_linkedin_schedule"];
         delete?: never;
@@ -2812,9 +2811,9 @@ export interface paths {
         put?: never;
         /**
          * Unpause Linkedin Schedule
-         * @description Let scheduled runs start again; each kind waits for its next due time. Needs
-         *     ``confirm: true``: on an armed account it moves LinkedIn from Manual to Automatic
-         *     (#829), which does more.
+         * @description Deprecated (#829): clears a legacy pause, if one is left. Needs ``confirm: true``:
+         *     on an armed account that moves LinkedIn from Manual to Automatic, which does more.
+         *     ``PUT /automation/linkedin`` is the switch.
          */
         post: operations["unpause_linkedin_schedule"];
         delete?: never;
