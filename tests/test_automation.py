@@ -571,20 +571,29 @@ def test_stop_linkedin_from_off_changes_nothing(writer: Session, user: User) -> 
     assert (state.position, state.changed_at) == (Position.OFF, NOW)
 
 
-async def test_unpausing_a_legacy_pause_dates_the_switch(
-    running_app: FastAPI, client: httpx.AsyncClient
+@pytest.mark.parametrize("start", ["armed", "off"])
+async def test_unpausing_a_legacy_pause_never_does_more_and_dates_the_switch(
+    running_app: FastAPI, client: httpx.AsyncClient, start: str
 ) -> None:
-    """A pause left from before 0049 reads as Manual; deleting it is a move, so it is dated."""
+    """A pause left from before 0049 reads as Manual. Unpausing deletes it and stays
+    Manual (disarmed, not Automatic again); from Off it stays Off. Either way it's dated."""
     for session, user in _local(running_app):
-        arm_scheduled_runs(session, user, now=NOW)
+        if start == "off":
+            automation.set_linkedin(session, user, Position.OFF, confirm=False, now=NOW)
+        else:
+            arm_scheduled_runs(session, user, now=NOW)
         pause_schedule(session, user, now=NOW)
         _account(session, user).automation_changed_at = None
     response = await client.post("/api/v1/linkedin/schedule/unpause", headers=CSRF)
     assert response.status_code == 200, response.text
+    assert response.json()["armed"] is False
     for session, user in _local(running_app):
         account = _account(session, user)
         assert not schedule_paused(session, user, account.id)
+        assert account.scheduled_runs_armed_at is None
         assert account.automation_changed_at is not None
+        expected = Position.OFF if start == "off" else Position.MANUAL
+        assert automation.linkedin_state(session, user).position is expected
 
 
 async def test_the_old_arm_endpoint_keeps_the_depth(

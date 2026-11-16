@@ -727,11 +727,14 @@ def pause_linkedin_schedule(
 def unpause_linkedin_schedule(
     request: Request, user: CurrentUser, session: SessionDep
 ) -> ScheduleOut:
-    """Deprecated (#829): deletes a pause left from before migration 0049, if any; it sets
-    no arming (an account armed under that pause runs on its schedule again). Migration
-    0049 deleted every pause, nothing writes one since, and no page calls this after
-    #832; the switch is ``PUT /automation/linkedin``."""
-    unpause_schedule(session, user, now=utcnow())
+    """Deprecated (#829): deletes a pause left from before migration 0049, if any, and
+    never does more. A paused account reads as Manual, so it stays Manual (disarmed, not
+    Automatic again), and Off stays Off. Migration 0049 deleted every pause, nothing
+    writes one since, and no page calls this after #832; the switch is
+    ``PUT /automation/linkedin``."""
+    now = utcnow()
+    automation.stop_linkedin(session, user, now=now)  # armed and paused: to Manual
+    unpause_schedule(session, user, now=now)  # a key left on an Off account
     session.commit()  # the change stands before anything is read back for display
     return _schedule_out(request, session, user)
 

@@ -1161,7 +1161,7 @@ async def test_a_broken_outlook_never_stops_a_schedule_control(
     expected = {
         "disarm": (False, False),
         "pause": (False, False),  # #829: Manual, which is disarmed
-        "unpause": (True, False),  # clears the legacy pause; still armed
+        "unpause": (False, False),  # #829: clears the legacy pause and stays Manual
         "arm": (True, False),
     }[path.rsplit("/", 1)[1]]
     assert (armed, paused) == expected
