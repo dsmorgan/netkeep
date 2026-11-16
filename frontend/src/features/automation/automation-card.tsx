@@ -31,6 +31,16 @@ function sentence(text: string): string {
   return /[.!?]$/.test(text) ? text : `${text}.`
 }
 
+/** A failed refresh under a switch that still shows its last answer. */
+function StaleError({ text }: { text: string | null }) {
+  if (text === null) return null
+  return (
+    <p role="status" className="text-xs text-destructive">
+      {text}
+    </p>
+  )
+}
+
 /** A failure beside a switch: a move refused, or the switch that couldn't load. */
 export function SwitchError({ text }: { text: string | null }) {
   if (text === null) return null
@@ -93,6 +103,7 @@ function LinkedInSection({ control }: { control: LinkedInControl }) {
               busy={control.pending}
             />
           )}
+          <StaleError text={control.staleError} />
           <SwitchError text={control.error} />
         </>
       )}
@@ -127,6 +138,7 @@ function GmailSection({ control }: { control: GmailControl }) {
               {sentence(control.blockedReason)}
             </p>
           )}
+          <StaleError text={control.staleError} />
           <SwitchError text={control.error} />
         </>
       )}

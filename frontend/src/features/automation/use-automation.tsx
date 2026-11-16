@@ -99,6 +99,8 @@ export interface LinkedInControl {
   /** The server's switch, once it answered. */
   state: Automation['linkedin'] | undefined
   loadError: string | null
+  /** A later read failed: the switch shows its last answer, and this says so. */
+  staleError: string | null
   /** Move the switch; a move that does more opens the dialog first. */
   choose: (to: { position?: Position; depth?: Depth }) => void
   pending: boolean
@@ -236,6 +238,10 @@ export function useLinkedInAutomation(): LinkedInControl {
   return {
     state,
     loadError: automation.isError && state === undefined ? message(automation.error) : null,
+    staleError:
+      automation.isError && state !== undefined
+        ? `Couldn’t refresh this: ${message(automation.error)}. It shows the last answer.`
+        : null,
     choose,
     pending: move.isPending,
     error: asking === null && move.isError ? message(move.error) : null,
@@ -246,6 +252,8 @@ export function useLinkedInAutomation(): LinkedInControl {
 export interface GmailControl {
   state: Automation['gmail'] | undefined
   loadError: string | null
+  /** A later read failed: the switch shows its last answer, and this says so. */
+  staleError: string | null
   choose: (position: Position) => void
   pending: boolean
   error: string | null
@@ -331,6 +339,10 @@ export function useGmailAutomation(): GmailControl {
   return {
     state,
     loadError: automation.isError && state === undefined ? message(automation.error) : null,
+    staleError:
+      automation.isError && state !== undefined
+        ? `Couldn’t refresh this: ${message(automation.error)}. It shows the last answer.`
+        : null,
     choose,
     pending: move.isPending,
     error: !asking && move.isError ? message(move.error) : null,

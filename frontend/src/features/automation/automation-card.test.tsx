@@ -17,7 +17,7 @@ import { pollStatusKeys } from '@/features/poll-status/api'
 import { systemStatusKeys } from '@/features/system-status/api'
 import { jsonResponse, mockFetch } from '@/test/fetch'
 
-import type { Automation, GmailMove, LinkedInMove } from './api'
+import { automationKeys, type Automation, type GmailMove, type LinkedInMove } from './api'
 import { AutomationCard } from './automation-card'
 import { automation, BLOCKED_REASON, configWith } from './test-support'
 
@@ -540,6 +540,148 @@ describe('Settings › Automation (#829)', () => {
       'Couldn’t load the profile-visit limit and notes',
     )
     expect(within(dialog).getByRole('button', { name: 'Turn on Automatic' })).toBeDisabled()
+  })
+
+  it('waits for the budget when the dialog’s choice moves quick to full', async () => {
+    let release: (response: Response) => void = () => {}
+    renderCard(automation({ linkedin: { depth: 'quick' } }), {
+      'GET /api/v1/linkedin/budget': () =>
+        new Promise<Response>((resolve) => {
+          release = resolve
+        }),
+    })
+    fireEvent.click((await group('LinkedIn automation')).getByRole('radio', { name: 'Automatic' }))
+    const dialog = await screen.findByRole('alertdialog')
+    const confirm = within(dialog).getByRole('button', { name: 'Turn on Automatic' })
+    // Quick checks need no budget: Confirm is ready.
+    await waitFor(() => expect(confirm).toBeEnabled())
+
+    fireEvent.click(
+      within(dialog).getByRole('radio', { name: 'Quick checks and a weekly full sync' }),
+    )
+    expect(confirm).toBeDisabled()
+    expect(within(dialog).queryByRole('note', { name: 'Profile-visit risk' })).toBeNull()
+
+    act(() => release(jsonResponse({ ...BUDGET, risk_warning: RISK_WARNING })))
+    expect(
+      await within(dialog).findByRole('note', { name: 'Profile-visit risk' }),
+    ).toBeInTheDocument()
+    expect(within(dialog).getByRole('note', { name: 'Profile views' })).toBeInTheDocument()
+    await waitFor(() => expect(confirm).toBeEnabled())
+  })
+
+  it('holds LinkedIn’s Confirm while the fresh switch read is on its way', async () => {
+    let reads = 0
+    let release: (response: Response) => void = () => {}
+    renderCard(undefined, {
+      'GET /api/v1/automation': () => {
+        reads += 1
+        if (reads === 1) return jsonResponse(automation())
+        return new Promise<Response>((resolve) => {
+          release = resolve
+        })
+      },
+    })
+    fireEvent.click((await group('LinkedIn automation')).getByRole('radio', { name: 'Automatic' }))
+    const dialog = await screen.findByRole('alertdialog')
+    const confirm = within(dialog).getByRole('button', { name: 'Turn on Automatic' })
+    await within(dialog).findByText('profile refreshes, up to 60 a day')
+    await within(dialog).findByText(/within active hours \(08:30–21:30\)/)
+    await waitFor(() => expect(reads).toBe(2))
+    expect(confirm).toBeDisabled()
+
+    act(() => release(jsonResponse(automation())))
+    await waitFor(() => expect(confirm).toBeEnabled())
+  })
+
+  it.each([
+    ['LinkedIn automation', 'Let netkeep use LinkedIn on its own?'],
+    ['Gmail automation', 'Let netkeep send email on its own?'],
+  ] as const)(
+    'says so, and holds Confirm, when the %s switch can’t be read again',
+    async (name, title) => {
+      let reads = 0
+      const { calls } = renderCard(undefined, {
+        'GET /api/v1/automation': () => {
+          reads += 1
+          return reads === 1
+            ? jsonResponse(automation())
+            : jsonResponse({ detail: 'switch unreadable' }, 500)
+        },
+      })
+      fireEvent.click((await group(name)).getByRole('radio', { name: 'Automatic' }))
+      const dialog = await screen.findByRole('alertdialog', { name: title })
+      expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+        'Couldn’t load the switch: switch unreadable',
+      )
+      const confirm = within(dialog).getByRole('button', { name: 'Turn on Automatic' })
+      expect(confirm).toBeDisabled()
+      fireEvent.click(confirm)
+      expect(calls.some((call) => call.method === 'PUT')).toBe(false)
+    },
+  )
+
+  it('locks the dialog’s depth choice while the move is sending', async () => {
+    let release: (response: Response) => void = () => {}
+    const { puts } = renderCard(undefined, {
+      'PUT /api/v1/automation/linkedin': () =>
+        new Promise<Response>((resolve) => {
+          release = resolve
+        }),
+    })
+    fireEvent.click((await group('LinkedIn automation')).getByRole('radio', { name: 'Automatic' }))
+    const dialog = await screen.findByRole('alertdialog')
+    const confirm = within(dialog).getByRole('button', { name: 'Turn on Automatic' })
+    await waitFor(() => expect(confirm).toBeEnabled())
+    fireEvent.click(confirm)
+    await waitFor(() => expect(puts('linkedin')).toHaveLength(1))
+
+    const depth = within(within(dialog).getByRole('radiogroup', { name: 'How thorough' }))
+    fireEvent.click(depth.getByRole('radio', { name: 'Quick checks' }))
+
+    expect(
+      depth.getByRole('radio', { name: 'Quick checks and a weekly full sync' }),
+    ).toHaveAttribute('aria-checked', 'true')
+    expect(within(dialog).getAllByRole('listitem')).toHaveLength(4)
+    expect(puts('linkedin')[0]?.body).toEqual({
+      position: 'automatic',
+      depth: 'full',
+      confirm: true,
+    })
+    act(() => release(jsonResponse(automation({ linkedin: { position: 'automatic' } }))))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+  })
+
+  it('shows a refused LinkedIn confirm in the dialog, which stays open', async () => {
+    const detail = 'LinkedIn is Off, so netkeep starts no LinkedIn run'
+    renderCard(undefined, {
+      'PUT /api/v1/automation/linkedin': () => jsonResponse({ detail }, 409),
+    })
+    fireEvent.click((await group('LinkedIn automation')).getByRole('radio', { name: 'Automatic' }))
+    const dialog = await screen.findByRole('alertdialog')
+    const confirm = within(dialog).getByRole('button', { name: 'Turn on Automatic' })
+    await waitFor(() => expect(confirm).toBeEnabled())
+    fireEvent.click(confirm)
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(detail)
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument()
+  })
+
+  it('keeps the last answer on screen when a later read fails, and says so', async () => {
+    let fail = false
+    const { queryClient } = renderCard(undefined, {
+      'GET /api/v1/automation': () =>
+        fail ? jsonResponse({ detail: 'server went away' }, 500) : jsonResponse(automation()),
+    })
+    const linkedin = await group('LinkedIn automation')
+    fail = true
+    await act(() => queryClient.invalidateQueries({ queryKey: automationKeys.all }))
+
+    expect(
+      await screen.findAllByText(
+        'Couldn’t refresh this: server went away. It shows the last answer.',
+      ),
+    ).toHaveLength(2)
+    expect(checked(linkedin)).toContain('Manual')
   })
 
   it('reads the switch again when the dialog opens, and lists from that answer', async () => {
