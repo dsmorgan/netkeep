@@ -24695,7 +24695,7 @@
     },
     "/api/v1/linkedin/schedule/disarm": {
       "post": {
-        "description": "Stop scheduled LinkedIn runs from firing. A run already going is not cancelled.",
+        "description": "Deprecated (#829): ``PUT /automation/linkedin`` with ``manual``. Stops scheduled\nLinkedIn runs from firing; a run already going is not cancelled.",
         "operationId": "disarm_linkedin_schedule",
         "responses": {
           "200": {
@@ -24717,7 +24717,7 @@
     },
     "/api/v1/linkedin/schedule/pause": {
       "post": {
-        "description": "Hold scheduled runs without disarming (#324): no new one starts until unpaused.\n\nA run already going is not stopped (cancel does that). Due fires met while\npaused are skipped and their cadence moves on, so unpausing starts nothing at\nonce. The pause survives a restart of ``netkeep serve``.",
+        "description": "Deprecated (#829): pause is gone, and this moves LinkedIn to Manual, which does its\njob: no scheduled run starts, and it survives a restart. A run already going is not\nstopped (cancel does that).",
         "operationId": "pause_linkedin_schedule",
         "responses": {
           "200": {
@@ -24777,7 +24777,7 @@
     },
     "/api/v1/linkedin/schedule/unpause": {
       "post": {
-        "description": "Let scheduled runs start again; each kind waits for its next due time. Needs\n``confirm: true``: on an armed account it moves LinkedIn from Manual to Automatic\n(#829), which does more.",
+        "description": "Deprecated (#829): clears a legacy pause, if one is left. Needs ``confirm: true``:\non an armed account that moves LinkedIn from Manual to Automatic, which does more.\n``PUT /automation/linkedin`` is the switch.",
         "operationId": "unpause_linkedin_schedule",
         "requestBody": {
           "content": {

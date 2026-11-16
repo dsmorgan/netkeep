@@ -1987,7 +1987,7 @@ def test_a_missing_served_kind_is_off_and_says_what_that_means(writer: Session) 
     assert "enrich missing" in row.value and "inbox scheduled" in row.value
     [warning] = row.warnings
     assert "enrich: enrichment never runs on its own" in warning
-    assert "`netkeep linkedin schedule arm`" in warning
+    assert "`netkeep automation linkedin automatic`" in warning
 
 
 def test_every_served_kind_has_a_meaning_when_missing() -> None:

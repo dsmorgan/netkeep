@@ -662,7 +662,7 @@ def test_posture_says_the_schedule_is_paused(session_factory: sessionmaker[Sessi
         report = posture(session, user, account, now=NOW, settings=Settings())
         (row,) = [p for p in report.protections if p.name == "scheduled runs"]
         assert row.value.startswith("armed since 2026-09-23 15:00 UTC; paused since")
-        assert "schedule unpause" in row.value
+        assert "automation linkedin automatic" in row.value
 
         set_setting(session, user, f"linkedin.schedule.{account}.paused_at", "garbled")
         report = posture(session, user, account, now=NOW, settings=Settings())
@@ -759,11 +759,13 @@ async def test_the_api_pauses_a_run_shows_it_and_resumes_it(
     assert connector.attaches == 1  # only the resume, a person's own act, reached Chrome
 
 
-async def test_the_schedule_pause_survives_a_restart_and_unpause_lets_runs_start(
+async def test_the_schedule_pause_is_manual_and_survives_a_restart(
     bare_engine: Engine, no_frontend: None
 ) -> None:
-    """Paused through the API, ``serve`` restarts: still paused, the heartbeats across
-    the first day's due times attach nothing. Unpaused, the next ones do."""
+    """#829: ``POST /schedule/pause`` moves LinkedIn to Manual. ``serve`` restarts: still
+    Manual, the heartbeats across the first day's due times attach nothing. The
+    deprecated ``unpause`` arms nothing; Automatic again (``PUT /automation/linkedin``
+    with ``confirm``) lets the next ones run."""
     settings = Settings()
     provider, connector = fake_provider()
     clock = ServeClock(START)
@@ -771,30 +773,29 @@ async def test_the_schedule_pause_survives_a_restart_and_unpause_lets_runs_start
         await client.post("/api/v1/linkedin/schedule/arm", json={"confirm": True}, headers=HEADERS)
         paused = await client.post("/api/v1/linkedin/schedule/pause", headers=HEADERS)
     assert paused.status_code == 200
-    assert (paused.json()["armed"], paused.json()["paused"]) == (True, True)
-    assert paused.json()["paused_at"] is not None
+    assert (paused.json()["armed"], paused.json()["paused"]) == (False, False)
 
     async with served(bare_engine, settings, provider, clock) as app:
         async with client_for(app) as client:
-            schedule = (await client.get("/api/v1/linkedin/schedule")).json()
-            status = (await client.get("/api/v1/linkedin/status")).json()
-        assert schedule["paused"] is True and schedule["armed"] is True
-        assert status["schedule_paused"] is True
+            switch = (await client.get("/api/v1/automation")).json()["linkedin"]
+        assert switch["position"] == "manual"
         # Past 08:30 in New York, when the first day's due times land.
         await drive(app, clock, clock.at + timedelta(hours=8))
         assert connector.attaches == 0
         assert _rows(bare_engine) == []
 
         async with client_for(app) as client:
-            refused = await client.post(
-                "/api/v1/linkedin/schedule/unpause", json={"confirm": False}, headers=HEADERS
-            )
-            assert refused.status_code == 422  # #829: Manual to Automatic asks first
             unpaused = await client.post(
                 "/api/v1/linkedin/schedule/unpause", json={"confirm": True}, headers=HEADERS
             )
-        assert unpaused.json()["paused"] is False and unpaused.json()["paused_at"] is None
-        # The first-setup full sync, skipped while paused, is offered again within the hour.
+            assert unpaused.json()["armed"] is False  # it arms nothing
+            automatic = await client.put(
+                "/api/v1/automation/linkedin",
+                json={"position": "automatic", "confirm": True},
+                headers=HEADERS,
+            )
+        assert automatic.status_code == 200, automatic.text
+        # The first-setup full sync, skipped while Manual, is offered again within the hour.
         await drive(app, clock, clock.at + scheduler.FIRST_SETUP_RETRY + timedelta(hours=1))
     assert connector.attaches > 0
     assert {run.trigger for run in _rows(bare_engine)} == {SyncRunTrigger.SCHEDULED}

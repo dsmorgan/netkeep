@@ -68,6 +68,7 @@ from netkeep.models import (
 )
 from netkeep.scoping import scoped
 from netkeep.services.campaign_guards import LIVE_ENROLLMENT_STATUSES, RUNNING_CAMPAIGN_STATUSES
+from netkeep.services.linkedin_accounts import account_id_for, linkedin_off, scheduled_runs_armed
 from netkeep.services.scheduler import DEFAULT_SCHEDULES, RETRY_MAX_MINUTES, JobKind
 
 STALE_AFTER_POLLS: Final = 2
@@ -203,12 +204,23 @@ def why_stale(session: Session, user: User, *, now: datetime) -> str:
     """The sentence that says why the inbox is stale, for a refusal or a status line.
     Read-only."""
     last = last_complete_poll(session, user, now=now)
-    if last is None:
+    if linkedin_off(session, user):
+        # #829: Off refuses the poll by hand too, so the fix is the switch.
+        action = (
+            "LinkedIn is Off, so no poll runs; move LinkedIn to Manual or Automatic"
+            " (Settings, Automation, or `netkeep automation linkedin manual`)"
+        )
+        if last is None:
+            return f"{_REASON}: no poll has completed yet; {action}"
+    elif last is None:
         return (
             f"{_REASON}: no poll has completed yet; run `netkeep linkedin inbox` by hand;"
             " scheduled polls wait for a first one"
         )
-    action = "run `netkeep linkedin inbox`, or wait for the next scheduled poll"
+    elif scheduled_runs_armed(session, user, account_id_for(session, user)):
+        action = "run `netkeep linkedin inbox`, or wait for the next scheduled poll"
+    else:
+        action = "run `netkeep linkedin inbox`; on Manual no poll runs on its own"
     hours = max((now - last).total_seconds(), 0) / 3600
     return (
         f"{_REASON}: its last complete poll was {hours:.1f} hours ago, and a poll older than"

@@ -15,10 +15,12 @@ from typing import Any
 
 import pytest
 
-from netkeep.models import MailboxArm, MailboxStatus, SyncRunKind, SyncRunTrigger
+from netkeep.models import MailboxArm, MailboxStatus, ScheduleDepth, SyncRunKind, SyncRunTrigger
 from netkeep.services import attention as attention_service
+from netkeep.services import automation
 from netkeep.services import poll_status as poll_service
 from netkeep.services import system_status as service
+from netkeep.services.automation import Position
 from netkeep.services.system_status import (
     FAILED,
     Chip,
@@ -117,7 +119,7 @@ def reads(**overrides: Any) -> Reads:
         "poll": poll(),
         "attention": attention(),
         "linkedin": LinkedInRead(session_flag=None),
-        "schedule": ScheduleRead(armed=True, paused=False, scheduler_running=True),
+        "schedule": ScheduleRead(position=Position.AUTOMATIC, scheduler_running=True),
         "prefills": PrefillsRead(limit=15, remaining=12),
         "heat": HeatRead(tripped=False),
     }
@@ -202,12 +204,12 @@ def test_gmail_says_how_it_sends_and_when_replies_were_last_checked() -> None:
     chip = gmail()
     assert face(chip) == {
         "tone": "ok",
-        "text": "Gmail · Sending · checked {replies_last}",
+        "text": "Gmail · Automatic · checked {replies_last}",
         "href": "/gmail",
     }
     assert rows(chip) == [
         ("Mailbox", "ok", "sender@example.com · connected"),
-        ("Sending", "ok", "Armed to send"),
+        ("Automation", "ok", "Automatic: netkeep sends approved campaign email and checks replies"),
         ("Reply check", "ok", "Checked {replies_last} · next {replies_next}"),
     ]
     assert chip.page == "Gmail"
@@ -218,14 +220,15 @@ def test_gmail_says_how_it_sends_and_when_replies_were_last_checked() -> None:
     }
 
 
-def test_gmail_says_drafts_only_and_warns_when_not_armed() -> None:
+def test_gmail_says_its_position_drafts_only_or_off() -> None:
+    """#829: the pill's word is the switch's position; Off takes the off tone."""
     drafts = gmail(mailboxes=[mailbox(arm=MailboxArm.DRAFT)])
     assert face(drafts)["text"] == "Gmail · Drafts only · checked {replies_last}"
-    assert face(gmail(mailboxes=[mailbox()])) == {
-        "tone": "warn",
-        "text": "Gmail · Not armed · checked {replies_last}",
-        "href": "/settings#gmail",
-    }
+    off = gmail(mailboxes=[mailbox()], poll=poll(check(state=State.OFF, next_at=None)))
+    assert face(off) == {"tone": "off", "text": "Gmail · Off", "href": "/settings#gmail"}
+    assert find(off, "sending").detail == (
+        "Off: nothing is drafted, sent or checked; Gmail stays connected"
+    )
 
 
 def test_gmail_on_manual_says_replies_are_checked_on_check_now() -> None:
@@ -296,7 +299,7 @@ def test_gmail_says_why_the_reply_check_has_no_next_time() -> None:
     assert chip.parts[-1].detail == "Checked {replies_last} · paused. Sending hours are over"
     assert "replies_next" not in chip.times
     never = gmail(poll=poll(check(last_at=None)))
-    assert face(never)["text"] == "Gmail · Sending · not checked yet"
+    assert face(never)["text"] == "Gmail · Automatic · not checked yet"
     assert find(never, "replies").detail == "Next {replies_next}"
 
 
@@ -330,17 +333,17 @@ def test_gmail_shows_a_draft_held_for_a_contact_you_shouldnt_email() -> None:
 # --- LinkedIn ---------------------------------------------------------------------------
 
 
-def test_linkedin_says_scheduled_runs_are_armed_and_when_the_inbox_was_checked() -> None:
+def test_linkedin_says_its_position_and_how_thorough() -> None:
     chip = linkedin()
     assert face(chip) == {
         "tone": "ok",
-        "text": "LinkedIn · Armed · inbox {inbox_last}",
+        "text": "LinkedIn · Automatic · full upkeep",
         "href": "/linkedin#schedule",
     }
     # No flag is not a healthy session: nothing here checks the live one.
     assert rows(chip) == [
         ("Session", "ok", "No session flag: no run has found LinkedIn logged out"),
-        ("Scheduled runs", "ok", "Armed"),
+        ("Automation", "ok", "Automatic, full upkeep"),
         ("Inbox check", "ok", "Checked {inbox_last} · next {inbox_next}"),
         ("Prefills today", "ok", "12 of 15 left"),
         ("Heat", "ok", "Normal"),
@@ -352,15 +355,21 @@ def test_linkedin_says_scheduled_runs_are_armed_and_when_the_inbox_was_checked()
     never = linkedin(
         poll=poll(check(key=poll_service.LINKEDIN_INBOX, last_at=None, state=State.IDLE))
     )
-    assert face(never)["text"] == "LinkedIn · Armed · inbox not checked yet"
+    assert face(never)["text"] == "LinkedIn · Automatic · full upkeep"
+    quick = linkedin(
+        schedule=ScheduleRead(
+            position=Position.AUTOMATIC, scheduler_running=True, depth=ScheduleDepth.QUICK
+        )
+    )
+    assert face(quick)["text"] == "LinkedIn · Automatic · quick checks"
 
 
 def test_linkedin_names_the_next_scheduled_run() -> None:
     due = NOW + timedelta(minutes=20)
     chip = linkedin(
-        schedule=ScheduleRead(armed=True, paused=False, scheduler_running=True, next_due=due)
+        schedule=ScheduleRead(position=Position.AUTOMATIC, scheduler_running=True, next_due=due)
     )
-    assert chip.parts[1].detail == "Armed · next run {schedule_next}"
+    assert chip.parts[1].detail == "Automatic, full upkeep · next run {schedule_next}"
     assert chip.times["schedule_next"] == Time(due, TimeStyle.NEXT)
 
 
@@ -372,6 +381,8 @@ def test_the_soonest_stored_due_is_the_next_run(
     monkeypatch.setattr(service, "stored_due", lambda *_args: next(dues, None))
     monkeypatch.setattr(service, "find_account", lambda *_args: None)
     monkeypatch.setattr(service, "account_id_for", lambda *_args: 1)
+    manual = automation.LinkedInAutomation(Position.MANUAL, ScheduleDepth.FULL, None)
+    monkeypatch.setattr(automation, "linkedin_state", lambda *_args: manual)
     found = service.read_all(
         None,  # type: ignore[arg-type]  # nothing here reaches the session
         None,  # type: ignore[arg-type]
@@ -450,7 +461,7 @@ def test_only_the_progress_shapes_it_knows_count() -> None:
 def test_a_logged_out_session_or_a_checkpoint_stops_above_everything_else() -> None:
     out = linkedin(
         linkedin=LinkedInRead("logged_out", run()),
-        schedule=ScheduleRead(armed=True, paused=True, scheduler_running=True),
+        schedule=ScheduleRead(position=Position.OFF, scheduler_running=True),
     )
     assert face(out) == {
         "tone": "bad",
@@ -466,24 +477,29 @@ def test_a_logged_out_session_or_a_checkpoint_stops_above_everything_else() -> N
     ("schedule", "tone", "text"),
     [
         (
-            ScheduleRead(armed=True, paused=True, scheduler_running=True),
-            "warn",
-            "LinkedIn · Paused · inbox {inbox_last}",
-        ),
-        (ScheduleRead(armed=False, paused=False, scheduler_running=True), "off", "LinkedIn · Off"),
-        (
-            ScheduleRead(armed=False, paused=True, scheduler_running=True),
-            "warn",
-            "LinkedIn · Paused · inbox {inbox_last}",
+            ScheduleRead(position=Position.OFF, scheduler_running=True),
+            "off",
+            "LinkedIn · Off · runs don’t start",
         ),
         (
-            ScheduleRead(armed=True, paused=False, scheduler_running=False),
+            ScheduleRead(position=Position.MANUAL, scheduler_running=True),
+            "ok",
+            "LinkedIn · Manual · you start runs",
+        ),
+        (
+            # No scheduler matters only to Automatic: Manual and Off run nothing on one.
+            ScheduleRead(position=Position.MANUAL, scheduler_running=False),
+            "ok",
+            "LinkedIn · Manual · you start runs",
+        ),
+        (
+            ScheduleRead(position=Position.AUTOMATIC, scheduler_running=False),
             "bad",
             "LinkedIn · No scheduler · runs don’t start",
         ),
     ],
 )
-def test_linkedin_says_whether_scheduled_runs_are_paused_off_or_have_no_scheduler(
+def test_linkedin_says_off_manual_automatic_or_no_scheduler(
     schedule: ScheduleRead, tone: str, text: str
 ) -> None:
     chip = linkedin(schedule=schedule)
@@ -665,7 +681,7 @@ def test_the_paused_run_and_sending_fields() -> None:
     busy = service.system_status(
         reads(
             linkedin=LinkedInRead(None, auto),
-            schedule=ScheduleRead(armed=True, paused=True, scheduler_running=True),
+            schedule=ScheduleRead(position=Position.MANUAL, scheduler_running=True, paused=True),
             campaign_busy=True,
         )
     )

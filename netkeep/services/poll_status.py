@@ -83,6 +83,7 @@ from netkeep.services.campaign_sender import DRAFTS_POLL_EVERY
 from netkeep.services.linkedin_accounts import (
     find_account,
     full_upkeep,
+    linkedin_off,
     schedule_paused,
     scheduled_runs_armed,
 )
@@ -160,6 +161,11 @@ MANUAL_PARTIAL: Final = (
     "The last Check now read only part of the mailbox; on Manual nothing reads the rest"
     " until you click Check now again"
 )
+LINKEDIN_OFF: Final = (
+    "LinkedIn is Off, so no run starts, on a schedule or by hand; move LinkedIn to Manual"
+    " or Automatic (Settings, Automation)"
+)
+LINKEDIN_MANUAL: Final = "LinkedIn is on Manual, so a run starts only when you start it"
 QUICK_CHECKS: Final = (
     "LinkedIn runs quick checks only; this runs with Quick checks and a weekly full sync"
 )
@@ -623,8 +629,10 @@ def _linkedin_gate(
     hours follow, in :func:`_linkedin`."""
     if not serving.scheduler:
         return CheckState.NOT_RUNNING, NOT_SERVING
+    if linkedin_off(session, user):
+        return CheckState.OFF, LINKEDIN_OFF
     if account_id is None or not scheduled_runs_armed(session, user, account_id):
-        return CheckState.OFF, "Scheduled LinkedIn runs are disarmed"
+        return CheckState.OFF, LINKEDIN_MANUAL
     if schedule_paused(session, user, account_id):
         return CheckState.PAUSED, "The LinkedIn schedule is paused"
     if session_flag(session, user) is not None:

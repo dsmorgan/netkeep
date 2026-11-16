@@ -537,8 +537,8 @@ def create_run(
     account = ensure_account(session, user)
     if trigger is SyncRunTrigger.SCHEDULED and not scheduled_runs_armed(session, user, account.id):
         raise ScheduledRunsDisarmed(
-            "scheduled LinkedIn runs are disarmed for this account; arm them with"
-            " `netkeep linkedin schedule arm` once a supervised run has gone well"
+            "scheduled LinkedIn runs are disarmed for this account; move LinkedIn to Automatic"
+            " (`netkeep automation linkedin automatic`) once a supervised run has gone well"
         )
     if (
         trigger is SyncRunTrigger.SCHEDULED

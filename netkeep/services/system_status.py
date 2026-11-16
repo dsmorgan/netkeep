@@ -35,18 +35,20 @@ from typing import Any, Final, Literal
 from sqlalchemy.orm import Session
 
 from netkeep.config import Settings
-from netkeep.models import MailboxArm, MailboxStatus, SyncRunKind, SyncRunTrigger, User
+from netkeep.models import (
+    MailboxArm,
+    MailboxStatus,
+    ScheduleDepth,
+    SyncRunKind,
+    SyncRunTrigger,
+    User,
+)
 from netkeep.services import attention as attention_service
-from netkeep.services import budgets, runs
+from netkeep.services import automation, budgets, runs
 from netkeep.services import mailboxes as mailbox_service
 from netkeep.services import poll_status as poll_service
 from netkeep.services import posture as posture_service
-from netkeep.services.linkedin_accounts import (
-    account_id_for,
-    find_account,
-    schedule_pause_state,
-    scheduled_runs_armed,
-)
+from netkeep.services.linkedin_accounts import account_id_for, find_account, schedule_paused
 from netkeep.services.linkedin_session import session_flag
 from netkeep.services.scheduler import SERVED_SCHEDULES, stored_due
 
@@ -243,10 +245,15 @@ class LinkedInRead:
 
 @dataclass(frozen=True, slots=True)
 class ScheduleRead:
-    armed: bool
-    paused: bool
+    """The LinkedIn automation switch (#829) and whether a scheduler runs."""
+
+    position: automation.Position
     scheduler_running: bool
+    depth: ScheduleDepth = ScheduleDepth.FULL
     next_due: datetime | None = None
+    paused: bool = False
+    """A legacy schedule pause (#324). Nothing sets one since #829 (migration 0049 deleted
+    them); it reads as Manual, and stays read for the release the aliases last."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -349,15 +356,16 @@ def read_all(
         )
 
     def schedule() -> ScheduleRead:
+        state = automation.linkedin_state(session, user)
         account = find_account(session, user)
         account_id = account_id_for(session, user)
-        pause = None if account is None else schedule_pause_state(session, user, account.id)
         dues = [stored_due(session, user, account_id, kind) for kind in SERVED_SCHEDULES]
         return ScheduleRead(
-            armed=account is not None and scheduled_runs_armed(session, user, account.id),
-            paused=pause is not None and pause.paused,
+            position=state.position,
+            depth=state.depth,
             scheduler_running=process.scheduler_running,
             next_due=min((due for due in dues if due is not None), default=None),
+            paused=account is not None and schedule_paused(session, user, account.id),
         )
 
     def prefills() -> PrefillsRead:
@@ -597,18 +605,31 @@ def _mailbox_part(read: list[MailboxRead] | Failed) -> Part:
 
 
 def _sending_part(mailbox: MailboxRead) -> Part:
+    """The Gmail switch (#829): Automatic, Drafts only (Manual) or Off."""
     if mailbox.arm is MailboxArm.SEND:
-        return Part("sending", "Sending", "ok", "Sending", "Armed to send")
+        return Part(
+            "sending",
+            "Automation",
+            "ok",
+            "Automatic",
+            "Automatic: netkeep sends approved campaign email and checks replies",
+        )
     if mailbox.arm is MailboxArm.DRAFT:
         return Part(
-            "sending", "Sending", "ok", "Drafts only", "Armed for drafts only: nothing is sent"
+            "sending",
+            "Automation",
+            "ok",
+            "Drafts only",
+            "Manual: netkeep writes each campaign email as a draft and you send it;"
+            " replies are checked when you click Check now",
         )
     return Part(
         "sending",
-        "Sending",
-        "warn",
-        "Not armed",
-        "Not armed: nothing is drafted or sent",
+        "Automation",
+        "off",
+        "Off",
+        "Off: nothing is drafted, sent or checked; Gmail stays connected",
+        fact="",
         target=GMAIL_SETTINGS,
     )
 
@@ -645,9 +666,10 @@ BATCH: Final = Part(
 
 
 def gmail_chip(reads: Reads) -> Chip:
-    """Gmail: the mailbox (connected, needs re-authorizing or disconnected), whether it
-    is armed (drafts only, sending or not armed), the reply check, and a campaign send
-    batch while it runs. All well, it says how it sends and when replies were last checked."""
+    """Gmail: the mailbox (connected, needs re-authorizing or disconnected), the
+    automation switch (Off, Drafts only, Automatic; #829), the reply check, and a campaign
+    send batch while it runs. All well, it says the switch's position and when replies
+    were last checked."""
     parts = [_mailbox_part(reads.mailboxes)]
     mailbox = None if isinstance(reads.mailboxes, Failed) else pick_mailbox(reads.mailboxes)
     if mailbox is not None and mailbox.status is MailboxStatus.OK:
@@ -854,17 +876,21 @@ def _schedule_part(read: ScheduleRead | Failed) -> Part:
     target = _linkedin("schedule")
     if isinstance(read, Failed):
         return _failed("schedule", "Scheduled runs", target)
-    base = Part("schedule", "Scheduled runs", "ok", "", "", target=target)
-    if read.paused:
+    base = Part("schedule", "Automation", "ok", "", "", target=target)
+    if read.position is automation.Position.OFF:
         return replace(
             base,
-            tone="warn",
-            word="Paused",
-            detail="Paused: no scheduled run starts until you resume",
+            tone="off",
+            word="Off",
+            fact="runs don’t start",
+            detail="Off: netkeep leaves LinkedIn alone; no run starts, on a schedule or by hand",
         )
-    if not read.armed:
+    if read.position is automation.Position.MANUAL:
         return replace(
-            base, tone="off", word="Off", fact="", detail="Off: nothing runs on a schedule"
+            base,
+            word="Manual",
+            fact="you start runs",
+            detail="Manual: a run starts only when you start it",
         )
     if not read.scheduler_running:
         return replace(
@@ -872,10 +898,13 @@ def _schedule_part(read: ScheduleRead | Failed) -> Part:
             tone="bad",
             word="No scheduler",
             fact="runs don’t start",
-            detail="Armed, but no scheduler is running, so nothing starts on time",
+            detail="Automatic, but no scheduler is running, so nothing starts on time",
         )
-    detail = "Armed" if read.next_due is None else "Armed · next run {schedule_next}"
-    return replace(base, word="Armed", detail=detail)
+    depth = "quick checks" if read.depth is ScheduleDepth.QUICK else "full upkeep"
+    detail = f"Automatic, {depth}"
+    if read.next_due is not None:
+        detail += " · next run {schedule_next}"
+    return replace(base, word="Automatic", fact=depth, detail=detail)
 
 
 def _prefills_part(read: PrefillsRead | Failed | None) -> Part | None:
@@ -923,9 +952,9 @@ def _heat_part(read: HeatRead | Failed) -> Part:
 
 def linkedin_chip(reads: Reads) -> Chip:
     """LinkedIn: the session (signed in, logged out or a checkpoint), the running run
-    with its progress, scheduled runs (armed, paused, off or no scheduler), the inbox
-    check, prefills left today, heat, a tripped breaker and a held auto-send. All well,
-    it says scheduled runs are armed and when the inbox was last checked."""
+    with its progress, the automation switch (Off, Manual, Automatic, or no scheduler),
+    the inbox check, prefills left today, heat, a tripped breaker and a held auto-send.
+    All well, it says the switch's position and what that runs (#829)."""
     parts: list[Part | None] = [_session_part(reads.linkedin)]
     times: dict[str, Time] = {}
     running = None if isinstance(reads.linkedin, Failed) else reads.linkedin.running

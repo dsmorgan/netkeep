@@ -78,6 +78,7 @@ from netkeep.models import (
     MailboxStatus,
     ResponseOutcome,
     ResponseVia,
+    ScheduleDepth,
     StepMode,
     SyncRun,
     SyncRunKind,
@@ -119,6 +120,7 @@ from netkeep.services import (
     user_dictionary,
     uv_tool,
 )
+from netkeep.services import automation as automation_service
 from netkeep.services import campaigns as campaign_service
 from netkeep.services import config_adopt as config_adopt_service
 from netkeep.services import mailboxes as mailbox_service
@@ -144,13 +146,9 @@ from netkeep.services.chrome_launch import LaunchResult, PortProbe, UiFront
 from netkeep.services.events import EventBus
 from netkeep.services.linkedin_accounts import (
     account_id_for,
-    arm_scheduled_runs,
-    disarm_scheduled_runs,
     ensure_account,
     find_account,
-    pause_schedule,
     schedule_pause_state,
-    unpause_schedule,
 )
 from netkeep.services.linkedin_session import (
     FlagClearRefused,
@@ -278,6 +276,10 @@ login_item_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(login_item_app, name="login-item")
+automation_app = typer.Typer(
+    help="One switch per service: Off, Manual or Automatic (#829).", no_args_is_help=True
+)
+app.add_typer(automation_app, name="automation")
 dictionary_app = typer.Typer(
     help="Your dictionary: words the template spelling check accepts (#522).",
     no_args_is_help=True,
@@ -2888,7 +2890,8 @@ def linkedin_schedule_status(ctx: typer.Context) -> None:
             else f"paused since {pause.paused_at:%Y-%m-%d %H:%M UTC}"
         )
         typer.echo(
-            f"{since}: no new scheduled run starts until `netkeep linkedin schedule unpause`"
+            f"{since}: no new scheduled run starts until LinkedIn moves to Automatic"
+            " (`netkeep automation linkedin automatic`)"
         )
     typer.echo(describe_active_hours(settings))
     typer.echo(_streak_line("route-changed breaker", "route_changed", route))
@@ -2978,130 +2981,227 @@ def _streak_line(
     return f"{name}: {counted}"
 
 
+# --- the automation switch (#829) -------------------------------------------------------
+
+
+def _deprecated(old: str, new: str) -> None:
+    typer.echo(
+        f"deprecated: `netkeep {old}` goes in a later release; use `netkeep {new}`", err=True
+    )
+
+
+def _move_linkedin(
+    settings: Settings,
+    position: automation_service.Position,
+    depth: ScheduleDepth | None,
+    *,
+    yes: bool,
+) -> None:
+    """Move the LinkedIn switch from the terminal: read, ask when it does more, write."""
+    engine = make_engine(database_url())
+    try:
+        factory = make_session_factory(engine)
+        install_scope_guard(factory)
+        # Read, then ask, then write: the prompt waits on a person, and a writer session
+        # held across it would lock out `serve` for as long (#175 review, F4).
+        with session_scope(factory) as session:
+            before = automation_service.linkedin_state(session, _local_user_or_exit(session))
+        new_depth = before.depth if depth is None else depth
+        to_automatic = (
+            position is automation_service.Position.AUTOMATIC
+            and before.position is not automation_service.Position.AUTOMATIC
+        )
+        to_full = new_depth is ScheduleDepth.FULL and before.depth is ScheduleDepth.QUICK
+        if to_automatic or to_full:
+            if new_depth is ScheduleDepth.FULL:
+                risk = budgets.profile_visit_risk_warning(settings.linkedin.budget)
+                if risk is not None:
+                    typer.echo(f"warning: {risk}")
+                typer.echo(f"note: {budgets.PROFILE_VIEW_NOTICE}")
+            question = (
+                "move LinkedIn to Automatic? netkeep serve will then visit LinkedIn on its own"
+                f" schedule ({_depth_text(new_depth)}), without you starting each run"
+                if to_automatic
+                else "add the weekly full sync and profile refreshes to the schedule?"
+            )
+            if not yes and not typer.confirm(question):
+                typer.echo(f"cancelled: LinkedIn stays {before.position.value}")
+                raise typer.Exit(code=1)
+        with session_scope(factory, write=True) as session:
+            user = _local_user_or_exit(session)
+            now = datetime.now(UTC)
+            try:
+                # Confirmed only what was asked: a change since the read that makes this
+                # do more is refused, not carried through.
+                after = automation_service.set_linkedin(
+                    session, user, position, depth, confirm=to_automatic or to_full, now=now
+                )
+            except automation_service.AutomationRefused as exc:
+                typer.echo(f"error: {exc}; run it again", err=True)
+                raise typer.Exit(code=1) from exc
+            if after.position is automation_service.Position.AUTOMATIC:
+                seed_served_schedule(session, user, settings.linkedin, now=now)
+    finally:
+        engine.dispose()
+    typer.echo(f"LinkedIn: {_linkedin_text(after)}")
+
+
+def _depth_text(depth: ScheduleDepth) -> str:
+    return "quick checks" if depth is ScheduleDepth.QUICK else "quick checks and a weekly full sync"
+
+
+def _linkedin_text(state: automation_service.LinkedInAutomation) -> str:
+    if state.position is automation_service.Position.OFF:
+        return "off; no LinkedIn run starts, on a schedule or by hand"
+    if state.position is automation_service.Position.MANUAL:
+        return "manual; runs start only when you start them"
+    return f"automatic, {_depth_text(state.depth)}"
+
+
+def _gmail_text(state: automation_service.GmailAutomation) -> str:
+    if state.position is automation_service.Position.OFF:
+        return "off; nothing is drafted, sent or checked"
+    if state.position is automation_service.Position.MANUAL:
+        return "drafts only; replies are checked when you click Check now"
+    return "automatic; approved campaign email is sent, and replies are checked"
+
+
+@automation_app.command("status")
+def automation_status() -> None:
+    """Show where each switch stands."""
+    engine = make_engine(database_url())
+    try:
+        factory = make_session_factory(engine)
+        install_scope_guard(factory)
+        with session_scope(factory) as session:
+            user = _local_user_or_exit(session)
+            linkedin = automation_service.linkedin_state(session, user)
+            gmail = automation_service.gmail_state(session, user, now=datetime.now(UTC))
+    finally:
+        engine.dispose()
+    typer.echo(f"LinkedIn: {_linkedin_text(linkedin)}")
+    typer.echo(f"Gmail: {_gmail_text(gmail)}")
+    if gmail.blocked_reason is not None:
+        typer.echo(f"  Automatic waits: {gmail.blocked_reason}")
+
+
+@automation_app.command("linkedin")
+def automation_linkedin(
+    ctx: typer.Context,
+    position: Annotated[
+        automation_service.Position, typer.Argument(help="off, manual or automatic.")
+    ],
+    depth: Annotated[
+        ScheduleDepth | None,
+        typer.Option(
+            "--depth",
+            help="How thorough Automatic is: quick (the daily incremental sync and the"
+            " inbox check) or full (also the weekly full sync and the profile refresh)."
+            " Omitted: keep it.",
+        ),
+    ] = None,
+    yes: Annotated[bool, typer.Option("--yes", help="Skip the confirmation prompt.")] = False,
+) -> None:
+    """Move the LinkedIn switch. Automatic, or quick to full, asks first.
+
+    Off: netkeep leaves LinkedIn alone; no run starts, on a schedule or by hand. Manual:
+    a run starts only when you start it. Automatic: `netkeep serve` runs on its own
+    within your budgets and active hours. Moving left takes effect at once. A run
+    already going is not stopped (`netkeep linkedin cancel` does that).
+    """
+    settings = _load_settings_or_exit(ctx.ensure_object(CliState))
+    _move_linkedin(settings, position, depth, yes=yes)
+
+
+@automation_app.command("gmail")
+def automation_gmail(
+    position: Annotated[
+        automation_service.Position, typer.Argument(help="off, manual or automatic.")
+    ],
+    yes: Annotated[bool, typer.Option("--yes", help="Skip the confirmation prompt.")] = False,
+) -> None:
+    """Move the Gmail switch for every connected mailbox. Automatic asks first.
+
+    Off: nothing is drafted, sent or checked; Gmail stays connected. Manual (drafts
+    only): each campaign email is a Gmail draft you send; replies are checked when you
+    click Check now. Automatic: approved campaign email is sent within sending hours,
+    and replies are checked on their own. Automatic waits for each mailbox's Message-ID
+    check (`netkeep gmail status`).
+    """
+    engine = make_engine(database_url())
+    try:
+        factory = make_session_factory(engine)
+        install_scope_guard(factory)
+        with session_scope(factory) as session:
+            before = automation_service.gmail_state(
+                session, _local_user_or_exit(session), now=datetime.now(UTC)
+            )
+        if (
+            position is automation_service.Position.AUTOMATIC
+            and before.position is not automation_service.Position.AUTOMATIC
+        ):
+            if before.blocked_reason is not None:
+                typer.echo(f"error: {before.blocked_reason}", err=True)
+                raise typer.Exit(code=1)
+            if not yes and not typer.confirm(
+                "move Gmail to Automatic? netkeep serve will then send approved campaign"
+                " email with no one pressing Send"
+            ):
+                typer.echo(f"cancelled: Gmail stays {before.position.value}")
+                raise typer.Exit(code=1)
+        with session_scope(factory, write=True) as session:
+            user = _local_user_or_exit(session)
+            try:
+                after = automation_service.set_gmail(
+                    session, user, position, confirm=True, by=_cli_actor(), now=datetime.now(UTC)
+                )
+            except automation_service.AutomationRefused as exc:
+                typer.echo(f"error: {exc}", err=True)
+                raise typer.Exit(code=1) from exc
+    finally:
+        engine.dispose()
+    typer.echo(f"Gmail: {_gmail_text(after)}")
+
+
+# --- `linkedin schedule arm/disarm/pause/unpause`: aliases for one release (#829) ---------
+
+
 @schedule_app.command("arm")
 def linkedin_schedule_arm(
     ctx: typer.Context,
     yes: Annotated[bool, typer.Option("--yes", help="Skip the confirmation prompt.")] = False,
 ) -> None:
-    """Let `netkeep serve` run LinkedIn jobs on its own schedule.
-
-    Until this, serve's scheduler keeps due times and fires nothing. Once armed,
-    the weekly full sync (due soon after arming if it has never run), the daily
-    incremental sync, and enrichment run on their own, within your budgets and
-    active hours. Arm only after a supervised run by hand has gone well.
-
-    When the daily profile-visit limit is above 100, it says so first, --yes or
-    not (#318). The warning informs; it does not stop arming. It also notes that
-    enrichment can show up in the contact's Who viewed your profile (#325).
-    """
+    """Deprecated: `netkeep automation linkedin automatic`, keeping the depth."""
+    _deprecated("linkedin schedule arm", "automation linkedin automatic")
     settings = _load_settings_or_exit(ctx.ensure_object(CliState))
-    engine = make_engine(database_url())
-    try:
-        factory = make_session_factory(engine)
-        install_scope_guard(factory)
-        # Read, then ask, then write: the prompt waits on a person, and a writer
-        # session held across it would lock out `serve` for as long (#175 review, F4).
-        with session_scope(factory) as session:
-            user = _local_user_or_exit(session)
-            account = find_account(session, user)
-            already = account is not None and account.scheduled_runs_armed_at is not None
-        if already:
-            # A kind added since arming gets its first due time here too (#327).
-            with session_scope(factory, write=True) as session:
-                user = _local_user_or_exit(session)
-                seed_served_schedule(session, user, settings.linkedin, now=datetime.now(UTC))
-            typer.echo("scheduled LinkedIn runs are already armed")
-            return
-        risk = budgets.profile_visit_risk_warning(settings.linkedin.budget)
-        if risk is not None:
-            typer.echo(f"warning: {risk}")
-        typer.echo(f"note: {budgets.PROFILE_VIEW_NOTICE}")
-        if not yes and not typer.confirm(
-            "arm scheduled LinkedIn runs? netkeep serve will then visit LinkedIn on its"
-            " own schedule, without you starting each run"
-        ):
-            typer.echo("cancelled: scheduled runs stay disarmed")
-            raise typer.Exit(code=1)
-        with session_scope(factory, write=True) as session:
-            # Arming is idempotent, so a change between the read and here is harmless.
-            user = _local_user_or_exit(session)
-            now = datetime.now(UTC)
-            arm_scheduled_runs(session, user, now=now)
-            seed_served_schedule(session, user, settings.linkedin, now=now)
-    finally:
-        engine.dispose()
-    typer.echo("scheduled LinkedIn runs armed; `netkeep linkedin schedule disarm` undoes it")
+    _move_linkedin(settings, automation_service.Position.AUTOMATIC, None, yes=yes)
 
 
 @schedule_app.command("disarm")
-def linkedin_schedule_disarm() -> None:
-    """Stop scheduled LinkedIn runs from firing. A run already going is not stopped."""
-    engine = make_engine(database_url())
-    try:
-        factory = make_session_factory(engine)
-        install_scope_guard(factory)
-        with session_scope(factory, write=True) as session:
-            disarm_scheduled_runs(session, _local_user_or_exit(session))
-    finally:
-        engine.dispose()
-    typer.echo("scheduled LinkedIn runs disarmed")
+def linkedin_schedule_disarm(ctx: typer.Context) -> None:
+    """Deprecated: `netkeep automation linkedin manual`."""
+    _deprecated("linkedin schedule disarm", "automation linkedin manual")
+    settings = _load_settings_or_exit(ctx.ensure_object(CliState))
+    _move_linkedin(settings, automation_service.Position.MANUAL, None, yes=False)
 
 
 @schedule_app.command("pause")
-def linkedin_schedule_pause() -> None:
-    """Hold scheduled LinkedIn runs without disarming: no new one starts until unpaused.
-
-    A run already going is not stopped (`netkeep linkedin cancel` does that).
-    Due runs met while paused are skipped and their cadence moves on, so
-    unpausing starts nothing at once. The pause survives a restart of `serve`.
-    """
-    engine = make_engine(database_url())
-    try:
-        factory = make_session_factory(engine)
-        install_scope_guard(factory)
-        with session_scope(factory, write=True) as session:
-            pause_schedule(session, _local_user_or_exit(session), now=datetime.now(UTC))
-    finally:
-        engine.dispose()
-    typer.echo(
-        "scheduled LinkedIn runs paused; `netkeep linkedin schedule unpause` lets them start again"
-    )
+def linkedin_schedule_pause(ctx: typer.Context) -> None:
+    """Deprecated: `netkeep automation linkedin manual`. Pause is gone: Manual does its job."""
+    _deprecated("linkedin schedule pause", "automation linkedin manual")
+    settings = _load_settings_or_exit(ctx.ensure_object(CliState))
+    _move_linkedin(settings, automation_service.Position.MANUAL, None, yes=False)
 
 
 @schedule_app.command("unpause")
 def linkedin_schedule_unpause(
+    ctx: typer.Context,
     yes: Annotated[bool, typer.Option("--yes", help="Skip the confirmation prompt.")] = False,
 ) -> None:
-    """Let scheduled LinkedIn runs start again. Runs skipped while paused are not replayed:
-    each kind waits for its next due time. Asks first unless --yes: on an armed account
-    it moves LinkedIn from Manual to Automatic (#829)."""
-    engine = make_engine(database_url())
-    try:
-        factory = make_session_factory(engine)
-        install_scope_guard(factory)
-        # Read, then ask, then write: a writer held across the prompt would lock out serve.
-        with session_scope(factory) as session:
-            user = _local_user_or_exit(session)
-            account = find_account(session, user)
-            pause = None if account is None else schedule_pause_state(session, user, account.id)
-            armed = account is not None and account.scheduled_runs_armed_at is not None
-        if (
-            pause is not None
-            and pause.paused
-            and armed
-            and not yes
-            and not typer.confirm(
-                "unpause scheduled LinkedIn runs? netkeep serve will then visit LinkedIn on its"
-                " own schedule again"
-            )
-        ):
-            typer.echo("cancelled: the schedule stays paused")
-            raise typer.Exit(code=1)
-        with session_scope(factory, write=True) as session:
-            unpause_schedule(session, _local_user_or_exit(session), now=datetime.now(UTC))
-    finally:
-        engine.dispose()
-    typer.echo("scheduled LinkedIn runs unpaused; each kind runs at its next due time")
+    """Deprecated: `netkeep automation linkedin automatic`, keeping the depth."""
+    _deprecated("linkedin schedule unpause", "automation linkedin automatic")
+    settings = _load_settings_or_exit(ctx.ensure_object(CliState))
+    _move_linkedin(settings, automation_service.Position.AUTOMATIC, None, yes=yes)
 
 
 @schedule_app.command("reset-breaker")
