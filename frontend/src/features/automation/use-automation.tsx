@@ -178,7 +178,13 @@ export function useLinkedInAutomation(): LinkedInControl {
             needed: needsBudget,
           },
         ])
-  const waiting = automation.isFetching || config.isPending || (needsBudget && budget.isPending)
+  // Fetching as well as pending: a reopened dialog waits for fresh answers, never a
+  // cached one (Settings keeps the settings read cached).
+  const waiting =
+    automation.isFetching ||
+    config.isPending ||
+    config.isFetching ||
+    (needsBudget && (budget.isPending || budget.isFetching))
 
   const dialog = (
     <ConfirmDialog
