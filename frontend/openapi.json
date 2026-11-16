@@ -24695,7 +24695,7 @@
     },
     "/api/v1/linkedin/schedule/disarm": {
       "post": {
-        "description": "Deprecated (#829): ``PUT /automation/linkedin`` with ``manual``. Stops scheduled\nLinkedIn runs from firing; a run already going is not cancelled.",
+        "description": "Deprecated (#829): ``PUT /automation/linkedin`` with ``manual``. Stops scheduled\nLinkedIn runs from firing; a run already going is not cancelled. From Off it stays\nOff: a stop never does more.",
         "operationId": "disarm_linkedin_schedule",
         "responses": {
           "200": {
@@ -24717,7 +24717,7 @@
     },
     "/api/v1/linkedin/schedule/pause": {
       "post": {
-        "description": "Deprecated (#829): pause is gone, and this moves LinkedIn to Manual, which does its\njob: no scheduled run starts, and it survives a restart. A run already going is not\nstopped (cancel does that).",
+        "description": "Deprecated (#829): pause is gone, and this moves LinkedIn to Manual, which does its\njob: no scheduled run starts, and it survives a restart. A run already going is not\nstopped (cancel does that). From Off it stays Off.",
         "operationId": "pause_linkedin_schedule",
         "responses": {
           "200": {
@@ -24777,18 +24777,8 @@
     },
     "/api/v1/linkedin/schedule/unpause": {
       "post": {
-        "description": "Deprecated (#829): clears a legacy pause, if one is left. Needs ``confirm: true``:\non an armed account that moves LinkedIn from Manual to Automatic, which does more.\n``PUT /automation/linkedin`` is the switch.",
+        "description": "Deprecated (#829): deletes a pause left from before migration 0049, if any; it sets\nno arming (an account armed under that pause runs on its schedule again). Migration\n0049 deleted every pause, nothing writes one since, and no page calls this after\n#832; the switch is ``PUT /automation/linkedin``.",
         "operationId": "unpause_linkedin_schedule",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ScheduleArmIn"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
             "content": {
@@ -24799,9 +24789,6 @@
               }
             },
             "description": "Successful Response"
-          },
-          "422": {
-            "description": "confirm was not true"
           }
         },
         "summary": "Unpause Linkedin Schedule",

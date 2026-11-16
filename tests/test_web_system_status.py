@@ -216,3 +216,33 @@ async def test_another_users_events_never_show(app: FastAPI, client: httpx.Async
 
     assert _face(body["linkedin"]) == "LinkedIn · Full sync running · started {run_started}"
     assert "batch" not in {part["key"] for part in body["gmail"]["parts"]}
+
+
+async def test_linkedin_reads_its_switch_position_with_or_without_serve(
+    running_app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    """#829: on Manual the pill says Manual, not "Not running" or "Off", whether serve's
+    scheduler runs or not; on Off it says Off, and its inbox check says why."""
+    from netkeep.services import automation
+
+    factory: sessionmaker[Session] = running_app.state.session_factory
+    with session_scope(factory, write=True) as session:
+        ensure_account(session, _local(session))
+
+    for scheduler in (None, SimpleNamespace()):
+        running_app.state.scheduler = scheduler
+        body = (await client.get(PATH)).json()
+        assert _face(body["linkedin"]) == "LinkedIn · Manual · you start runs"
+        assert body["linkedin"]["tone"] == "ok"
+        inbox = next(p for p in body["linkedin"]["parts"] if p["key"] == "inbox")
+        assert (inbox["tone"], inbox["word"]) == ("ok", "When you start it")
+
+    with session_scope(factory, write=True) as session:
+        automation.set_linkedin(
+            session, _local(session), automation.Position.OFF, confirm=False, now=utcnow()
+        )
+    body = (await client.get(PATH)).json()
+    assert _face(body["linkedin"]) == "LinkedIn · Off · runs don’t start"
+    inbox = next(p for p in body["linkedin"]["parts"] if p["key"] == "inbox")
+    assert "LinkedIn is Off; move it to Manual or Automatic" in inbox["detail"]
+    running_app.state.scheduler = None

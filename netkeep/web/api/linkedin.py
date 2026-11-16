@@ -704,8 +704,9 @@ def arm_schedule(
 @router.post("/schedule/disarm", operation_id="disarm_linkedin_schedule")
 def disarm_schedule(request: Request, user: CurrentUser, session: SessionDep) -> ScheduleOut:
     """Deprecated (#829): ``PUT /automation/linkedin`` with ``manual``. Stops scheduled
-    LinkedIn runs from firing; a run already going is not cancelled."""
-    automation.set_linkedin(session, user, automation.Position.MANUAL, confirm=False, now=utcnow())
+    LinkedIn runs from firing; a run already going is not cancelled. From Off it stays
+    Off: a stop never does more."""
+    automation.stop_linkedin(session, user, now=utcnow())
     session.commit()  # the change stands before anything is read back for display
     return _schedule_out(request, session, user)
 
@@ -716,29 +717,20 @@ def pause_linkedin_schedule(
 ) -> ScheduleOut:
     """Deprecated (#829): pause is gone, and this moves LinkedIn to Manual, which does its
     job: no scheduled run starts, and it survives a restart. A run already going is not
-    stopped (cancel does that)."""
-    automation.set_linkedin(session, user, automation.Position.MANUAL, confirm=False, now=utcnow())
+    stopped (cancel does that). From Off it stays Off."""
+    automation.stop_linkedin(session, user, now=utcnow())
     session.commit()  # the change stands before anything is read back for display
     return _schedule_out(request, session, user)
 
 
-@router.post(
-    "/schedule/unpause",
-    operation_id="unpause_linkedin_schedule",
-    responses={422: {"description": "confirm was not true"}},
-)
+@router.post("/schedule/unpause", operation_id="unpause_linkedin_schedule")
 def unpause_linkedin_schedule(
-    body: ScheduleArmIn, request: Request, user: CurrentUser, session: SessionDep
+    request: Request, user: CurrentUser, session: SessionDep
 ) -> ScheduleOut:
-    """Deprecated (#829): clears a legacy pause, if one is left. Needs ``confirm: true``:
-    on an armed account that moves LinkedIn from Manual to Automatic, which does more.
-    ``PUT /automation/linkedin`` is the switch."""
-    if not body.confirm:
-        raise HTTPException(
-            status_code=422,
-            detail="unpausing lets netkeep visit LinkedIn on its own schedule again;"
-            " send confirm: true",
-        )
+    """Deprecated (#829): deletes a pause left from before migration 0049, if any; it sets
+    no arming (an account armed under that pause runs on its schedule again). Migration
+    0049 deleted every pause, nothing writes one since, and no page calls this after
+    #832; the switch is ``PUT /automation/linkedin``."""
     unpause_schedule(session, user, now=utcnow())
     session.commit()  # the change stands before anything is read back for display
     return _schedule_out(request, session, user)

@@ -456,6 +456,19 @@ STATE_TEXT: Final[Mapping[poll_service.CheckState, str]] = {
 """What a check that has no next time says instead. Never a time."""
 
 
+#: What a ``manual`` check says, per check (#829): each runs on a different person's act.
+MANUAL_TEXT: Final[Mapping[str, str]] = {
+    "replies": "when you click Check now",
+    "inbox": "when you start it",
+}
+
+
+def _state_text(prefix: str, state: poll_service.CheckState) -> str:
+    if state is poll_service.CheckState.MANUAL:
+        return MANUAL_TEXT.get(prefix, STATE_TEXT[state])
+    return STATE_TEXT[state]
+
+
 def _check_times(prefix: str, check: poll_service.Check) -> dict[str, Time]:
     times: dict[str, Time] = {}
     if check.last_at is not None:
@@ -475,7 +488,7 @@ def _check_summary(prefix: str, check: poll_service.Check) -> str:
         if check.next_at is not None:
             parts.append(f"next {{{prefix}_next}}")
     else:
-        parts.append(STATE_TEXT[check.state])
+        parts.append(_state_text(prefix, check.state))
     return " · ".join(parts)
 
 
@@ -497,7 +510,7 @@ def _check_part(
         key=key,
         label=label,
         tone=CHECK_TONE[check.state],
-        word="Checked" if scheduled else _capitalized(STATE_TEXT[check.state]),
+        word="Checked" if scheduled else _capitalized(_state_text(prefix, check.state)),
         fact=fact,
         detail=f"{summary}. {check.reason}" if check.reason else summary,
         target=target,

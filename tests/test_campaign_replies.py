@@ -367,6 +367,54 @@ def test_on_manual_a_held_follow_up_says_to_click_check_now_and_a_partial_check_
     assert sender.replies_partial(mail.user.id) == frozenset()
 
 
+def test_on_manual_a_check_now_reads_a_mailbox_its_last_one_failed_on(
+    session_factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#829 review: a failed read backs a mailbox off, but on Manual only a click reads it,
+    so the backoff would only ever refuse the person. The next Check now reads it."""
+    mail = make_mail(session_factory, modes=(StepMode.DRAFT,) * 2, same_thread=(False, True))
+    set_mailbox(mail, send_armed_at=None)
+    sender = poller(mail, every=timedelta(days=1))
+    box = mail.mailbox.id
+    skipped: list[frozenset[int]] = []
+    script = iter([replies.RepliesPolled(failed=frozenset({box})), replies.RepliesPolled()])
+
+    def poll(*args: object, skip: frozenset[int] = frozenset(), **kwargs: object) -> object:
+        skipped.append(frozenset(skip))
+        return next(script)
+
+    monkeypatch.setattr(replies, "poll_replies", poll)
+    sender._replies_polled[mail.user.id] = NOW  # the interval's own poll just ran
+    sender.request_replies_poll(mail.user.id)
+    sender._poll_replies(mail.factory, mail.user.id, NOW + timedelta(minutes=1))
+    assert sender.replies_retry_at(mail.user.id)  # backing off after the failure
+    sender.request_replies_poll(mail.user.id)
+    sender._poll_replies(mail.factory, mail.user.id, NOW + timedelta(minutes=2))
+    assert skipped == [frozenset(), frozenset()]  # never left out
+
+
+def test_on_automatic_a_check_now_still_waits_out_a_backoff(
+    session_factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mail = make_mail(session_factory)
+    sender = poller(mail, every=timedelta(days=1))
+    box = mail.mailbox.id
+    skipped: list[frozenset[int]] = []
+    script = iter([replies.RepliesPolled(failed=frozenset({box})), replies.RepliesPolled()])
+
+    def poll(*args: object, skip: frozenset[int] = frozenset(), **kwargs: object) -> object:
+        skipped.append(frozenset(skip))
+        return next(script)
+
+    monkeypatch.setattr(replies, "poll_replies", poll)
+    sender._replies_polled[mail.user.id] = NOW
+    sender.request_replies_poll(mail.user.id)
+    sender._poll_replies(mail.factory, mail.user.id, NOW + timedelta(minutes=1))
+    sender.request_replies_poll(mail.user.id)
+    sender._poll_replies(mail.factory, mail.user.id, NOW + timedelta(minutes=1, seconds=30))
+    assert skipped == [frozenset(), frozenset({box})]
+
+
 def test_an_automatic_mailbox_is_polled_on_the_interval(
     session_factory: sessionmaker[Session],
 ) -> None:

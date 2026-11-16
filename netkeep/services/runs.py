@@ -987,6 +987,7 @@ STOP_REASON_TEXT: Final[Mapping[str, str]] = {
     "session_flagged": "refused: the session is flagged",
     "heat_skip": "refused: heat is over its skip threshold",
     "disarmed": "refused: scheduled runs are disarmed",
+    "quick_checks": "refused: LinkedIn runs quick checks only",
     "route_changed_breaker": "refused: the route-changed breaker is tripped",
     "answer_lost_breaker": "refused: the answer-lost limit is tripped",
     "contact_info_breaker": "refused: the Contact info breaker is tripped",

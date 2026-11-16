@@ -208,13 +208,28 @@ async def test_resume_and_i_sent_it_answer_409_off_ahead_of_active_hours(
 @pytest.mark.parametrize(
     ("position", "cancelled"), [(Position.OFF, True), (Position.MANUAL, False)]
 )
+@pytest.mark.parametrize(
+    ("kind", "trigger", "gate"),
+    [
+        (SyncRunKind.ENRICH, SyncRunTrigger.MANUAL, None),
+        # An auto-send (ADR 0008): a scheduled message_send run, stopped the same way.
+        (SyncRunKind.MESSAGE_SEND, SyncRunTrigger.SCHEDULED, runs.AUTO_SEND_GATE),
+    ],
+    ids=["enrich", "auto-send"],
+)
 def test_off_cancels_a_running_run_and_manual_lets_it_finish(
-    writer: Session, position: Position, cancelled: bool
+    writer: Session,
+    position: Position,
+    cancelled: bool,
+    kind: SyncRunKind,
+    trigger: SyncRunTrigger,
+    gate: object,
 ) -> None:
     """The maintainer's decision (#829): Off cancels through the same path as Cancel."""
     user = factories.make_user(writer)
     automation.set_linkedin(writer, user, Position.AUTOMATIC, confirm=True, now=NOW)
-    run = runs.create_run(writer, user, SyncRunKind.ENRICH, trigger=SyncRunTrigger.MANUAL, now=NOW)
+    extra: dict[str, Any] = {} if gate is None else {"gate": gate}
+    run = runs.create_run(writer, user, kind, trigger=trigger, now=NOW, **extra)
 
     automation.set_linkedin(writer, user, position, confirm=False, now=NOW)
 

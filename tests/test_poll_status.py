@@ -580,10 +580,14 @@ def test_drafts_on_a_disarmed_mailbox_are_not_polled(world: World) -> None:
 # --- LinkedIn ---------------------------------------------------------------------------
 
 
-def test_linkedin_disarmed(world: World) -> None:
-    checks = world.read()
+@pytest.mark.parametrize("serving", [SERVING, STOPPED], ids=["serve", "no-serve"])
+def test_linkedin_on_manual_is_manual_with_or_without_serve(
+    world: World, serving: service.Serving
+) -> None:
+    """#829: disarmed is Manual, a chosen position, whether serve runs or not."""
+    checks = world.read(serving=serving)
     for key in ("linkedin_enrich", "linkedin_incremental_sync", "linkedin_full_sync"):
-        assert checks[key].state is S.OFF
+        assert checks[key].state is S.MANUAL
         assert checks[key].reason == service.LINKEDIN_MANUAL
     _no_times(checks)
 
@@ -822,8 +826,9 @@ async def test_endpoint_answers_without_serve(client: httpx.AsyncClient) -> None
     assert by_key["gmail_replies"]["state"] == "not_running"
     assert by_key["gmail_replies"]["interval_minutes"] == 10
     assert by_key["gmail_drafts"]["interval_minutes"] == 10
-    assert by_key["linkedin_inbox"]["state"] == "not_running"
-    assert by_key["linkedin_enrich"]["state"] == "not_running"
+    # A fresh install is LinkedIn on Manual (#829): that answers before serve does.
+    assert by_key["linkedin_inbox"]["state"] == "manual"
+    assert by_key["linkedin_enrich"]["state"] == "manual"
     assert by_key["linkedin_enrich"]["interval_minutes"] == 180
     assert by_key["linkedin_incremental_sync"]["interval_minutes"] == 1440
     assert by_key["linkedin_full_sync"]["interval_minutes"] == 10080

@@ -785,9 +785,7 @@ async def test_the_schedule_pause_is_manual_and_survives_a_restart(
         assert _rows(bare_engine) == []
 
         async with client_for(app) as client:
-            unpaused = await client.post(
-                "/api/v1/linkedin/schedule/unpause", json={"confirm": True}, headers=HEADERS
-            )
+            unpaused = await client.post("/api/v1/linkedin/schedule/unpause", headers=HEADERS)
             assert unpaused.json()["armed"] is False  # it arms nothing
             automatic = await client.put(
                 "/api/v1/automation/linkedin",
