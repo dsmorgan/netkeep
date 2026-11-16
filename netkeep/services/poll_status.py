@@ -121,7 +121,8 @@ class CheckState(enum.StrEnum):
     """Turned off: disarmed, no armed mailbox, Gmail not connected, or a LinkedIn kind
     the schedule leaves out at quick checks (#829)."""
     MANUAL = "manual"
-    """It runs only when a person asks (Check now): Gmail on Manual (#829)."""
+    """It runs only when a person asks (#829): Gmail replies on Manual (Check now), and a
+    LinkedIn kind on Manual (a run a person starts)."""
     NOT_RUNNING = "not_running"
     """This process runs no background checks: it was not started by ``netkeep serve``."""
     NOT_WIRED = "not_wired"
@@ -161,11 +162,8 @@ MANUAL_PARTIAL: Final = (
     "The last Check now read only part of the mailbox; on Manual nothing reads the rest"
     " until you click Check now again"
 )
-LINKEDIN_OFF: Final = (
-    "LinkedIn is Off, so no run starts, on a schedule or by hand; move LinkedIn to Manual"
-    " or Automatic (Settings, Automation)"
-)
-LINKEDIN_MANUAL: Final = "LinkedIn is on Manual, so a run starts only when you start it"
+LINKEDIN_OFF: Final = "LinkedIn is Off; move it to Manual or Automatic (Settings, Automation)"
+LINKEDIN_MANUAL: Final = "LinkedIn is on Manual: you start LinkedIn runs"
 QUICK_CHECKS: Final = (
     "LinkedIn runs quick checks only; this runs with Quick checks and a weekly full sync"
 )
@@ -627,12 +625,13 @@ def _linkedin_gate(
     """What stops every scheduled LinkedIn kind, in the scheduler's order; None when nothing.
     The connections breakers and enrichment's Contact info breaker (per kind) and active
     hours follow, in :func:`_linkedin`."""
-    if not serving.scheduler:
-        return CheckState.NOT_RUNNING, NOT_SERVING
+    # The switch first (#829): Off and Manual run nothing on a schedule, serve or not.
     if linkedin_off(session, user):
         return CheckState.OFF, LINKEDIN_OFF
     if account_id is None or not scheduled_runs_armed(session, user, account_id):
-        return CheckState.OFF, LINKEDIN_MANUAL
+        return CheckState.MANUAL, LINKEDIN_MANUAL
+    if not serving.scheduler:
+        return CheckState.NOT_RUNNING, NOT_SERVING
     if schedule_paused(session, user, account_id):
         return CheckState.PAUSED, "The LinkedIn schedule is paused"
     if session_flag(session, user) is not None:

@@ -343,7 +343,9 @@ def test_a_claim_is_held_on_an_old_complete_poll_and_goes_on_a_fresh_one(
     assert held.reasons == ("linkedin_inbox_stale",)
     assert held.detail is not None and "hours ago" in held.detail
     # An older poll exists; this account is on Manual (#829), so none runs on its own.
-    assert "run `netkeep linkedin inbox`; on Manual no poll runs on its own" in held.detail
+    assert "run the inbox check yourself" in held.detail
+    assert "on Manual no poll runs on its own" in held.detail
+    assert "next scheduled poll" not in held.detail
 
     lane.write(lambda s, u: record_poll(s, u, NOW - LIMIT))
     assert lane.claim(enrollment_id, polled=False).claimed
@@ -830,7 +832,7 @@ def test_posture_hold_note_names_the_contact_id_case_when_the_self_contact_has_o
     [
         ("automatic", "or wait for the next scheduled poll"),
         ("manual", "on Manual no poll runs on its own"),
-        ("off", "LinkedIn is Off, so no poll runs; move LinkedIn to Manual or Automatic"),
+        ("off", "LinkedIn is Off; move it to Manual or Automatic (Settings, Automation)"),
     ],
 )
 @pytest.mark.parametrize("polled_before", [True, False])

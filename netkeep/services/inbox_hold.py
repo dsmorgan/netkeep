@@ -206,10 +206,7 @@ def why_stale(session: Session, user: User, *, now: datetime) -> str:
     last = last_complete_poll(session, user, now=now)
     if linkedin_off(session, user):
         # #829: Off refuses the poll by hand too, so the fix is the switch.
-        action = (
-            "LinkedIn is Off, so no poll runs; move LinkedIn to Manual or Automatic"
-            " (Settings, Automation, or `netkeep automation linkedin manual`)"
-        )
+        action = "LinkedIn is Off; move it to Manual or Automatic (Settings, Automation)"
         if last is None:
             return f"{_REASON}: no poll has completed yet; {action}"
     elif last is None:
@@ -220,7 +217,10 @@ def why_stale(session: Session, user: User, *, now: datetime) -> str:
     elif scheduled_runs_armed(session, user, account_id_for(session, user)):
         action = "run `netkeep linkedin inbox`, or wait for the next scheduled poll"
     else:
-        action = "run `netkeep linkedin inbox`; on Manual no poll runs on its own"
+        action = (
+            "run the inbox check yourself (Check inbox now on the LinkedIn page, or"
+            " `netkeep linkedin inbox`); on Manual no poll runs on its own"
+        )
     hours = max((now - last).total_seconds(), 0) / 3600
     return (
         f"{_REASON}: its last complete poll was {hours:.1f} hours ago, and a poll older than"

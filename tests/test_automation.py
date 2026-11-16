@@ -543,3 +543,45 @@ async def test_put_gmail_automatic_is_409_with_the_reason_until_ready(
     }
     off = await client.put("/api/v1/automation/gmail", json={"position": "off"}, headers=CSRF)
     assert off.status_code == 200 and off.json()["gmail"]["position"] == "off"
+
+
+@pytest.mark.parametrize("path", ["disarm", "pause"])
+@pytest.mark.parametrize(
+    ("start", "end"), [("automatic", "manual"), ("manual", "manual"), ("off", "off")]
+)
+async def test_the_old_stop_endpoints_never_do_more(
+    running_app: FastAPI, client: httpx.AsyncClient, path: str, start: str, end: str
+) -> None:
+    """#829 review: a stop is the left of the current position and Manual."""
+    moved = await client.put(
+        "/api/v1/automation/linkedin", json={"position": start, "confirm": True}, headers=CSRF
+    )
+    assert moved.status_code == 200, moved.text
+    stopped = await client.post(f"/api/v1/linkedin/schedule/{path}", headers=CSRF)
+    assert stopped.status_code == 200, stopped.text
+    assert stopped.json()["armed"] is False
+    switch = (await client.get("/api/v1/automation")).json()["linkedin"]
+    assert switch["position"] == end
+
+
+def test_stop_linkedin_from_off_changes_nothing(writer: Session, user: User) -> None:
+    automation.set_linkedin(writer, user, Position.OFF, confirm=False, now=NOW)
+    later = NOW + timedelta(hours=1)
+    state = automation.stop_linkedin(writer, user, now=later)
+    assert (state.position, state.changed_at) == (Position.OFF, NOW)
+
+
+async def test_unpausing_a_legacy_pause_dates_the_switch(
+    running_app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    """A pause left from before 0049 reads as Manual; deleting it is a move, so it is dated."""
+    for session, user in _local(running_app):
+        arm_scheduled_runs(session, user, now=NOW)
+        pause_schedule(session, user, now=NOW)
+        _account(session, user).automation_changed_at = None
+    response = await client.post("/api/v1/linkedin/schedule/unpause", headers=CSRF)
+    assert response.status_code == 200, response.text
+    for session, user in _local(running_app):
+        account = _account(session, user)
+        assert not schedule_paused(session, user, account.id)
+        assert account.automation_changed_at is not None

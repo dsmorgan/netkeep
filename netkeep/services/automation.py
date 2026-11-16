@@ -183,6 +183,16 @@ def _cancel_running(session: Session, user: User, account_id: int, *, now: datet
     log.warning("LinkedIn turned Off: cancel requested for run %d", running.id)
 
 
+def stop_linkedin(session: Session, user: User, *, now: datetime) -> LinkedInAutomation:
+    """What the old stop controls do (``schedule disarm`` and ``pause``, #829): the left
+    of the current position and Manual. From Automatic to Manual; Off stays Off, since a
+    stop never does more. Needs a writer session."""
+    before = linkedin_state(session, user)
+    if before.position is Position.OFF:
+        return before
+    return set_linkedin(session, user, Position.MANUAL, confirm=False, now=now)
+
+
 # --- Gmail -----------------------------------------------------------------------
 
 

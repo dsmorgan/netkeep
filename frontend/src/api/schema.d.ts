@@ -2742,7 +2742,8 @@ export interface paths {
         /**
          * Disarm Schedule
          * @description Deprecated (#829): ``PUT /automation/linkedin`` with ``manual``. Stops scheduled
-         *     LinkedIn runs from firing; a run already going is not cancelled.
+         *     LinkedIn runs from firing; a run already going is not cancelled. From Off it stays
+         *     Off: a stop never does more.
          */
         post: operations["disarm_linkedin_schedule"];
         delete?: never;
@@ -2764,7 +2765,7 @@ export interface paths {
          * Pause Linkedin Schedule
          * @description Deprecated (#829): pause is gone, and this moves LinkedIn to Manual, which does its
          *     job: no scheduled run starts, and it survives a restart. A run already going is not
-         *     stopped (cancel does that).
+         *     stopped (cancel does that). From Off it stays Off.
          */
         post: operations["pause_linkedin_schedule"];
         delete?: never;
@@ -2811,9 +2812,10 @@ export interface paths {
         put?: never;
         /**
          * Unpause Linkedin Schedule
-         * @description Deprecated (#829): clears a legacy pause, if one is left. Needs ``confirm: true``:
-         *     on an armed account that moves LinkedIn from Manual to Automatic, which does more.
-         *     ``PUT /automation/linkedin`` is the switch.
+         * @description Deprecated (#829): deletes a pause left from before migration 0049, if any; it sets
+         *     no arming (an account armed under that pause runs on its schedule again). Migration
+         *     0049 deleted every pause, nothing writes one since, and no page calls this after
+         *     #832; the switch is ``PUT /automation/linkedin``.
          */
         post: operations["unpause_linkedin_schedule"];
         delete?: never;
@@ -16214,11 +16216,7 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ScheduleArmIn"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -16228,13 +16226,6 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ScheduleOut"];
                 };
-            };
-            /** @description confirm was not true */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
         };
     };

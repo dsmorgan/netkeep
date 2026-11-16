@@ -2526,7 +2526,9 @@ def test_gmail_off_stops_a_batch_at_its_next_send(mail: Mail) -> None:
     assert outcome.outcome is SendOutcome.NOT_SENT
     assert outcome.error is not None and "disarmed" in outcome.error
     assert mail.gmail.calls == []
-    assert mail.messages(enrollment_id) == []
+    assert mail.messages(enrollment_id) == []  # the claim is given back
+    enrollment = mail.enrollment(enrollment_id)
+    assert enrollment.next_action_at is not None and enrollment.next_action_at > NOW
 
 
 def test_a_disarm_after_the_claim_lets_a_draft_already_claimed_through_as_a_draft(

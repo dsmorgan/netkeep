@@ -899,7 +899,10 @@ class GmailSender:
         if last is None or now - last >= every:
             self._replies_polled[user_id] = now
         elif requested:
-            skip = frozenset(m for m in due if self._retry_at(user_id, m) > now)
+            # A mailbox on Manual (#829) is read only on a click, so its backoff would only
+            # ever refuse the person: a Check now reads it whatever the backoff says.
+            manual = self._manual_mailboxes(factory, user_id)
+            skip = frozenset(m for m in due if self._retry_at(user_id, m) > now and m not in manual)
             self._replies_polled[user_id] = now
         else:
             only = frozenset(m for m in due if self._retry_at(user_id, m) <= now)
@@ -923,6 +926,19 @@ class GmailSender:
         if not scheduled:
             partial |= polled.behind | polled.failed
         self._settle(user_id, polled, only=only, skip=skip, now=now, every=every)
+
+    @staticmethod
+    def _manual_mailboxes(factory: sessionmaker[Session], user_id: int) -> frozenset[int]:
+        """The user's mailboxes armed for drafts only: Gmail on Manual (#829)."""
+        with session_scope(factory) as session:
+            user = session.get(User, user_id)
+            if user is None:
+                return frozenset()
+            return frozenset(
+                m.id
+                for m in replies.armed_mailboxes(session, user).values()
+                if m.arm is MailboxArm.DRAFT
+            )
 
     def _retry_at(self, user_id: int, mailbox_id: int) -> datetime:
         backoff = self._replies_backoff.get((user_id, mailbox_id))

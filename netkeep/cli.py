@@ -3136,10 +3136,11 @@ def automation_gmail(
             before = automation_service.gmail_state(
                 session, _local_user_or_exit(session), now=datetime.now(UTC)
             )
-        if (
+        asked = (
             position is automation_service.Position.AUTOMATIC
             and before.position is not automation_service.Position.AUTOMATIC
-        ):
+        )
+        if asked:
             if before.blocked_reason is not None:
                 typer.echo(f"error: {before.blocked_reason}", err=True)
                 raise typer.Exit(code=1)
@@ -3152,8 +3153,10 @@ def automation_gmail(
         with session_scope(factory, write=True) as session:
             user = _local_user_or_exit(session)
             try:
+                # Confirmed only what was asked: a change since the read that makes this
+                # do more is refused, not carried through.
                 after = automation_service.set_gmail(
-                    session, user, position, confirm=True, by=_cli_actor(), now=datetime.now(UTC)
+                    session, user, position, confirm=asked, by=_cli_actor(), now=datetime.now(UTC)
                 )
             except automation_service.AutomationRefused as exc:
                 typer.echo(f"error: {exc}", err=True)
@@ -3177,20 +3180,33 @@ def linkedin_schedule_arm(
     _move_linkedin(settings, automation_service.Position.AUTOMATIC, None, yes=yes)
 
 
+def _stop_linkedin() -> None:
+    """The old stop commands (#829): Automatic to Manual, and Off stays Off."""
+    engine = make_engine(database_url())
+    try:
+        factory = make_session_factory(engine)
+        install_scope_guard(factory)
+        with session_scope(factory, write=True) as session:
+            user = _local_user_or_exit(session)
+            after = automation_service.stop_linkedin(session, user, now=datetime.now(UTC))
+    finally:
+        engine.dispose()
+    typer.echo(f"LinkedIn: {_linkedin_text(after)}")
+
+
 @schedule_app.command("disarm")
-def linkedin_schedule_disarm(ctx: typer.Context) -> None:
-    """Deprecated: `netkeep automation linkedin manual`."""
+def linkedin_schedule_disarm() -> None:
+    """Deprecated: `netkeep automation linkedin manual`. From Off it stays Off."""
     _deprecated("linkedin schedule disarm", "automation linkedin manual")
-    settings = _load_settings_or_exit(ctx.ensure_object(CliState))
-    _move_linkedin(settings, automation_service.Position.MANUAL, None, yes=False)
+    _stop_linkedin()
 
 
 @schedule_app.command("pause")
-def linkedin_schedule_pause(ctx: typer.Context) -> None:
-    """Deprecated: `netkeep automation linkedin manual`. Pause is gone: Manual does its job."""
+def linkedin_schedule_pause() -> None:
+    """Deprecated: `netkeep automation linkedin manual`. Pause is gone: Manual does its job.
+    From Off it stays Off."""
     _deprecated("linkedin schedule pause", "automation linkedin manual")
-    settings = _load_settings_or_exit(ctx.ensure_object(CliState))
-    _move_linkedin(settings, automation_service.Position.MANUAL, None, yes=False)
+    _stop_linkedin()
 
 
 @schedule_app.command("unpause")

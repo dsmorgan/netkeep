@@ -242,6 +242,7 @@ def test_every_reason_a_run_is_given_has_plain_words() -> None:
         "session_flagged",
         "heat_skip",
         "disarmed",
+        "quick_checks",  # #829: the worker's third depth check
         "route_changed_breaker",
         "answer_lost_breaker",
         "contact_info_breaker",
