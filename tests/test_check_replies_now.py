@@ -49,6 +49,7 @@ def _mailbox(
     user: User,
     *,
     armed: bool = True,
+    send: bool = True,
     status: MailboxStatus = MailboxStatus.OK,
     email: str = "me@example.test",
 ) -> Mailbox:
@@ -59,6 +60,8 @@ def _mailbox(
         daily_cap=50,
         status=status,
         armed_at=datetime.now(UTC) - timedelta(days=1) if armed else None,
+        # Armed to send is Gmail on Automatic (#829): only it has a scheduled reply poll.
+        send_armed_at=datetime.now(UTC) - timedelta(days=1) if armed and send else None,
     )
     session.add(mailbox)
     session.flush()

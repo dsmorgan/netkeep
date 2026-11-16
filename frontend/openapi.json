@@ -1130,6 +1130,22 @@
         "title": "AutoSendResumed",
         "type": "object"
       },
+      "AutomationOut": {
+        "properties": {
+          "gmail": {
+            "$ref": "#/components/schemas/GmailAutomationOut"
+          },
+          "linkedin": {
+            "$ref": "#/components/schemas/LinkedInAutomationOut"
+          }
+        },
+        "required": [
+          "linkedin",
+          "gmail"
+        ],
+        "title": "AutomationOut",
+        "type": "object"
+      },
       "AutotagRuleCreate": {
         "properties": {
           "enabled": {
@@ -2578,6 +2594,7 @@
           "outside_hours",
           "blocked",
           "off",
+          "manual",
           "not_running",
           "not_wired"
         ],
@@ -6611,6 +6628,66 @@
         "title": "GmailActivityOut",
         "type": "object"
       },
+      "GmailAutomationIn": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm": {
+            "default": false,
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "position": {
+            "$ref": "#/components/schemas/Position"
+          }
+        },
+        "required": [
+          "position"
+        ],
+        "title": "GmailAutomationIn",
+        "type": "object"
+      },
+      "GmailAutomationOut": {
+        "properties": {
+          "automatic_ready": {
+            "title": "Automatic Ready",
+            "type": "boolean"
+          },
+          "blocked_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked Reason"
+          },
+          "changed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Changed At"
+          },
+          "position": {
+            "$ref": "#/components/schemas/Position"
+          }
+        },
+        "required": [
+          "position",
+          "automatic_ready",
+          "blocked_reason",
+          "changed_at"
+        ],
+        "title": "GmailAutomationOut",
+        "type": "object"
+      },
       "GmailLeftoverDraftOut": {
         "properties": {
           "at": {
@@ -9335,6 +9412,63 @@
         ],
         "title": "LinkKind",
         "type": "string"
+      },
+      "LinkedInAutomationIn": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm": {
+            "default": false,
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "depth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScheduleDepth"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "position": {
+            "$ref": "#/components/schemas/Position"
+          }
+        },
+        "required": [
+          "position"
+        ],
+        "title": "LinkedInAutomationIn",
+        "type": "object"
+      },
+      "LinkedInAutomationOut": {
+        "properties": {
+          "changed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Changed At"
+          },
+          "depth": {
+            "$ref": "#/components/schemas/ScheduleDepth"
+          },
+          "position": {
+            "$ref": "#/components/schemas/Position"
+          }
+        },
+        "required": [
+          "position",
+          "depth",
+          "changed_at"
+        ],
+        "title": "LinkedInAutomationOut",
+        "type": "object"
       },
       "LinkedInStatusOut": {
         "description": "The LinkedIn page's banner: the session flag, heat, arming, and any running run.",
@@ -12098,6 +12232,16 @@
         "title": "PollStatusOut",
         "type": "object"
       },
+      "Position": {
+        "description": "Where a service's switch stands, left to right.",
+        "enum": [
+          "off",
+          "manual",
+          "automatic"
+        ],
+        "title": "Position",
+        "type": "string"
+      },
       "PossibleDuplicateOut": {
         "description": "Another contact that may be the same person (#363). A hint; nothing merges on its own.\n\nThe names always agree (``name``: the same last name and first or preferred\nname). ``matched_by`` adds, strongest first, ``email`` (a personal address on\nboth; role addresses such as ``info@`` never count) and ``phone`` (a number\non both). ``linkedin_ids_differ``: both carry a LinkedIn slug and they\ndiffer, which counts against a match, so such a match ranks last.",
         "properties": {
@@ -13793,6 +13937,15 @@
         ],
         "title": "ScheduleArmIn",
         "type": "object"
+      },
+      "ScheduleDepth": {
+        "description": "How much an armed LinkedIn schedule runs (#829, \"How thorough\").",
+        "enum": [
+          "quick",
+          "full"
+        ],
+        "title": "ScheduleDepth",
+        "type": "string"
       },
       "ScheduleOut": {
         "description": "Whether scheduled runs may fire, and when each kind is next due.\n\n``armed`` is false on every install until a person arms it; while false the\nscheduler still keeps due times, and no scheduled LinkedIn job fires.\n``scheduler_running`` is whether this process runs a scheduler at all.\n``paused`` is whether a person paused the schedule (#324): armed or not, no\nnew scheduled run starts until it is unpaused, and nothing missed is replayed.\n``paused_at`` is null when not paused, and for a pause whose stored value\ncould not be read (still ``paused``: it fails closed).",
@@ -17609,6 +17762,103 @@
         "summary": "Get Attention",
         "tags": [
           "attention"
+        ]
+      }
+    },
+    "/api/v1/automation": {
+      "get": {
+        "operationId": "get_automation",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Automation",
+        "tags": [
+          "automation"
+        ]
+      }
+    },
+    "/api/v1/automation/gmail": {
+      "put": {
+        "description": "Move the Gmail switch for every connected mailbox. Applies from the campaign\nengine's next claim; what is already in the sender's hands is not recalled.",
+        "operationId": "set_gmail_automation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GmailAutomationIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "Not allowed now; the detail says why"
+          },
+          "422": {
+            "description": "The move does more and confirm was not true"
+          }
+        },
+        "summary": "Set Gmail Automation",
+        "tags": [
+          "automation"
+        ]
+      }
+    },
+    "/api/v1/automation/linkedin": {
+      "put": {
+        "description": "Move the LinkedIn switch. Automatic arms the schedule; Manual and Off disarm it.\nA run already going is not cancelled.",
+        "operationId": "set_linkedin_automation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkedInAutomationIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "Not allowed now; the detail says why"
+          },
+          "422": {
+            "description": "The move does more and confirm was not true"
+          }
+        },
+        "summary": "Set Linkedin Automation",
+        "tags": [
+          "automation"
         ]
       }
     },

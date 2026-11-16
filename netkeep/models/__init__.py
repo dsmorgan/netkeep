@@ -71,7 +71,12 @@ from netkeep.models.imports import (
     RowChanges,
     RowDecision,
 )
-from netkeep.models.linkedin import DEFAULT_ACCOUNT_LABEL, LiConversation, LinkedInAccount
+from netkeep.models.linkedin import (
+    DEFAULT_ACCOUNT_LABEL,
+    LiConversation,
+    LinkedInAccount,
+    ScheduleDepth,
+)
 from netkeep.models.lists import (
     LIST_NAME_MAX_LENGTH,
     VIEW_NAME_MAX_LENGTH,
@@ -186,6 +191,7 @@ __all__ = [
     "RowDecision",
     "RuleField",
     "SavedView",
+    "ScheduleDepth",
     "SettingKV",
     "StepApproval",
     "StepCondition",

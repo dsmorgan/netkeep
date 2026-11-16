@@ -81,7 +81,8 @@ Each tick, before anything is chosen, :meth:`GmailSender.reconcile` looks up wha
   person's "Check now" (#409, :meth:`GmailSender.request_replies_poll`): the
   request sets a flag, and the next tick polls every armed mailbox, as a full poll
   each interval does.
-  Every armed mailbox is polled once an interval; one that stopped at the read
+  Every mailbox armed to send is polled once an interval; one armed for drafts only
+  (Gmail on Manual, #829) only when a person asks. One that stopped at the read
   budget, was not ready (it needs signing in again, or the Keychain is locked), or
   holds a follow-up because its replies are stale is polled again alone at the next
   tick, never the others with it (#413). One whose poll failed is polled again alone
@@ -864,6 +865,10 @@ class GmailSender:
         # A mailbox that is not ready goes back in the due set, not into the request.
         with self._requests_lock:
             requested = self._replies_requested.pop(user_id, None) is not None
+        # Gmail on Manual (#829) reads replies only when a person asks: a poll nobody
+        # asked for reads only the mailboxes armed to send, so neither the interval nor
+        # a held follow-up reads a mailbox on Manual.
+        scheduled = not requested
         if last is None or now - last >= every:
             self._replies_polled[user_id] = now
         elif requested:
@@ -881,6 +886,7 @@ class GmailSender:
             label=self._label_reply,
             only=only,
             skip=skip,
+            scheduled=scheduled,
         )
         # A due mailbox still in its backoff was not polled: it stays due.
         waiting = set(skip) if only is None else due - only

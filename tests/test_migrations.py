@@ -3836,3 +3836,79 @@ def test_the_browser_lock_takes_account_one_before_any_table_exists(
         Path(migration_engine.url.database or "").touch()  # a file, with no tables yet
     monkeypatch.setenv("NETKEEP_DATABASE_URL", url)
     assert cli_module._browser_lock_key() == SINGLE_ACCOUNT_KEY
+
+
+# --- one automation switch per service (0049, #829) ---------------------------------------
+
+
+def _insert_account(connection: Connection, *, id: int, user_id: int, armed: bool) -> None:
+    connection.execute(
+        text(
+            "INSERT INTO linkedin_accounts"
+            " (id, user_id, label, scheduled_runs_armed_at, created_at, updated_at)"
+            " VALUES (:id, :user_id, 'default', :armed, :t, :t)"
+        ),
+        {"id": id, "user_id": user_id, "armed": STAMP if armed else None, "t": STAMP},
+    )
+
+
+def test_0049_maps_each_account_onto_the_switch(migration_engine: Engine) -> None:
+    """Armed: Automatic at full depth. Armed and paused: Manual. Disarmed (paused or not):
+    Manual. Every pause key goes; another user's keys stay."""
+    migrations.upgrade(migration_engine, "0048")
+    with migration_engine.begin() as connection:
+        _seed_users(connection, 1, 2, 3, 4)
+        _insert_account(connection, id=1, user_id=1, armed=True)
+        _insert_account(connection, id=2, user_id=2, armed=True)
+        _insert_account(connection, id=3, user_id=3, armed=False)
+        _insert_account(connection, id=4, user_id=4, armed=False)
+        paused = json.dumps("2026-09-20T12:00:00+00:00")
+        _put_setting(connection, 2, "linkedin.schedule.2.paused_at", paused)
+        _put_setting(connection, 3, "linkedin.schedule.3.paused_at", paused)
+        _put_setting(connection, 1, "linkedin.heat.1", "1")
+    migrations.upgrade(migration_engine, "0049")
+    with migration_engine.begin() as connection:
+        rows = connection.execute(
+            text(
+                "SELECT id, scheduled_runs_armed_at IS NOT NULL, automation_off_at,"
+                " scheduled_depth, automation_changed_at FROM linkedin_accounts ORDER BY id"
+            )
+        ).all()
+        assert [(r[0], bool(r[1]), r[2], r[3], r[4]) for r in rows] == [
+            (1, True, None, "full", None),
+            (2, False, None, "full", None),
+            (3, False, None, "full", None),
+            (4, False, None, "full", None),
+        ]
+        assert _keys(connection, 1) == {"linkedin.heat.1"}
+        assert _keys(connection, 2) == set()
+        assert _keys(connection, 3) == set()
+
+
+def test_0049_checks_the_depth_in_the_database(migration_engine: Engine) -> None:
+    migrations.upgrade(migration_engine, "0049")
+    with migration_engine.begin() as connection:
+        _seed_users(connection, 1)
+        _insert_account(connection, id=1, user_id=1, armed=False)
+    with pytest.raises(IntegrityError), migration_engine.begin() as connection:
+        connection.execute(text("UPDATE linkedin_accounts SET scheduled_depth = 'deep'"))
+
+
+def test_0049_downgrades_to_accounts_without_the_switch(migration_engine: Engine) -> None:
+    migrations.upgrade(migration_engine, "0049")
+    with migration_engine.begin() as connection:
+        _seed_users(connection, 1)
+        _insert_account(connection, id=1, user_id=1, armed=False)
+        connection.execute(
+            text(
+                "UPDATE linkedin_accounts SET automation_off_at = :t, scheduled_depth = 'quick',"
+                " automation_changed_at = :t"
+            ),
+            {"t": STAMP},
+        )
+    migrations.downgrade(migration_engine, "0048")
+    columns = {c["name"] for c in inspect(migration_engine).get_columns("linkedin_accounts")}
+    assert not {"automation_off_at", "scheduled_depth", "automation_changed_at"} & columns
+    with migration_engine.begin() as connection:
+        assert _count(connection, "linkedin_accounts") == 1
+    migrations.upgrade(migration_engine, "0049")

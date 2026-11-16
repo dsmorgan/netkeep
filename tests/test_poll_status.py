@@ -27,6 +27,7 @@ from netkeep.models import (
     Mailbox,
     MailboxStatus,
     MessageStatus,
+    ScheduleDepth,
     SettingKV,
     SyncRunKind,
     SyncRunStatus,
@@ -117,6 +118,7 @@ def _mailbox(
     user: User,
     *,
     armed: bool = True,
+    send: bool = True,
     polled: datetime | None = None,
     status: MailboxStatus = MailboxStatus.OK,
     email: str = "me@example.test",
@@ -128,6 +130,8 @@ def _mailbox(
         daily_cap=50,
         status=status,
         armed_at=NOW - timedelta(days=1) if armed else None,
+        # Armed to send is Gmail on Automatic (#829): only it has a scheduled reply poll.
+        send_armed_at=NOW - timedelta(days=1) if armed and send else None,
         replies_polled_at=polled,
     )
     session.add(mailbox)
@@ -264,6 +268,36 @@ def test_replies_last_and_next_come_from_the_senders_gate(world: World) -> None:
     assert replies.reason is None
     assert status.mailboxes[0].next_at == polled + timedelta(minutes=10)
     assert status.mailboxes[0].replies_polled_at == NOW - timedelta(hours=5)
+
+
+def test_replies_on_manual_run_only_on_check_now(world: World) -> None:
+    """#829: a mailbox armed for drafts only has no scheduled reply poll. It says so,
+    with no time, until a person asks; then it is due at the next tick."""
+    polled = NOW - timedelta(minutes=3)
+    for session, user in world.write():
+        _mailbox(session, user, send=False, polled=NOW - timedelta(hours=5))
+
+    status = world.status(serving=_serving(replies=polled))
+    replies = status.checks[0]
+    assert (replies.state, replies.next_at) == (S.MANUAL, None)
+    assert replies.reason == service.MANUAL_REPLIES
+    assert replies.last_at == NOW - timedelta(hours=5)  # the mailbox's own last read
+    assert (status.mailboxes[0].state, status.mailboxes[0].next_at) == (S.MANUAL, None)
+
+    asked = replace(_serving(replies=polled), replies_requested_at=NOW)
+    status = world.status(serving=asked)
+    assert status.checks[0].state is S.DUE
+    assert status.checks[0].requested_at == NOW
+    assert status.mailboxes[0].state is S.DUE
+
+
+def test_check_now_is_allowed_on_manual_and_refused_on_off(world: World) -> None:
+    for session, user in world.write():
+        mailbox = _mailbox(session, user, send=False)
+        assert service.replies_check_refused(session, user, serving=SERVING) is None
+        mailbox.armed_at = None
+        refused = service.replies_check_refused(session, user, serving=SERVING)
+        assert refused is not None and "armed" in refused
 
 
 def test_replies_follow_the_senders_interval(world: World) -> None:
@@ -546,6 +580,23 @@ def test_linkedin_overdue_is_due(world: World) -> None:
 
     later = NOW + timedelta(days=1, hours=1)  # past the stored due, inside active hours
     assert world.read(now=later)["linkedin_enrich"].state is S.DUE
+
+
+def test_linkedin_quick_checks_leave_out_the_full_upkeep_kinds(world: World) -> None:
+    """#829: at quick checks, the full sync and enrichment are off with the reason; the
+    incremental sync keeps its time."""
+    kinds = (JobKind.ENRICH, JobKind.CONNECTIONS_FULL, JobKind.CONNECTIONS_INCREMENTAL)
+    for session, user in world.write():
+        _arm_linkedin(session, user, kinds=kinds)
+        ensure_account(session, user).scheduled_depth = ScheduleDepth.QUICK
+
+    checks = world.read()
+
+    for key in ("linkedin_enrich", "linkedin_full_sync"):
+        assert checks[key].state is S.OFF
+        assert checks[key].reason == service.QUICK_CHECKS
+    assert checks["linkedin_incremental_sync"].state is S.SCHEDULED
+    _no_times(checks)
 
 
 def test_linkedin_paused_says_so(world: World) -> None:

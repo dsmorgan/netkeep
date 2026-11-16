@@ -306,16 +306,56 @@ def test_a_reply_to_a_scheduled_draft_once_delivered_ends_the_enrollment(
     assert mail.gmail.drafts() == {}
 
 
-def test_a_draft_armed_mailbox_is_polled_for_replies(
+def test_a_held_follow_up_on_manual_reads_no_reply(
     session_factory: sessionmaker[Session],
 ) -> None:
-    """#327: the reply poll needs an armed mailbox, not a send-armed one. A mailbox armed
-    for drafts only is polled like one armed to send, records ``replies_polled_at``, and a
-    reply to a draft the person sent ends the enrollment."""
+    """#829: a follow-up held for stale replies asks for a poll of its mailbox; on
+    Manual that poll reads nothing, since only a person's Check now reads replies."""
+    mail = make_mail(session_factory, modes=(StepMode.DRAFT,) * 2, same_thread=(False, True))
+    set_mailbox(mail, send_armed_at=None)
+    sender = poller(mail, every=timedelta(days=30))
+    mail.sender = sender
+    mail.enroll(ADA)
+    mail.tick(NOW)  # the interval's first poll reads nothing on Manual
+    [draft_id] = mail.gmail.drafts()
+    mail.gmail.send_draft(draft_id, at=NOW + timedelta(minutes=5))
+    mail.tick(NOW + timedelta(minutes=10))  # the drafts poll sees it sent: one watch
+    sender._poll_soon(mail.user.id, mail.mailbox.id)  # what a held follow-up does
+    mail.gmail.calls.clear()
+    mail.tick(NOW + timedelta(minutes=11))
+    assert not [call for call in mail.gmail.calls if "reply poll" in call[1]]
+    assert history_id(mail) is None
+    # A person's Check now reads it.
+    sender.request_replies_poll(mail.user.id)
+    mail.tick(NOW + timedelta(minutes=12))
+    assert [call for call in mail.gmail.calls if "reply poll" in call[1]]
+
+
+def test_an_automatic_mailbox_is_polled_on_the_interval(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """#829: armed to send is Gmail on Automatic, the one position polled on its own."""
+    mail = make_mail(session_factory)
+    assert mail.read(lambda s: mailbox_of(mail, s).arm) is MailboxArm.SEND
+    mail.sender = poller(mail)
+    mail.enroll(ADA)
+    mail.tick(NOW)
+    mail.tick(NOW + timedelta(minutes=1))
+    assert history_id(mail) is not None
+
+
+def test_a_draft_armed_mailbox_is_polled_for_replies_only_on_check_now(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """#829: Gmail on Manual (armed for drafts only) gets no scheduled reply poll; a
+    person's Check now polls it like one armed to send, records ``replies_polled_at``,
+    and a reply to a draft the person sent ends the enrollment. (Before #829, #327 polled
+    it on the interval too.)"""
     mail = make_mail(session_factory, modes=(StepMode.DRAFT,) * 2, same_thread=(False, True))
     set_mailbox(mail, send_armed_at=None)
     assert mail.read(lambda s: mailbox_of(mail, s).arm) is MailboxArm.DRAFT
-    mail.sender = poller(mail)
+    sender = poller(mail)
+    mail.sender = sender
     enrollment_id = mail.enroll(ADA)
     mail.tick(NOW)
     [draft_id] = mail.gmail.drafts()
@@ -323,10 +363,17 @@ def test_a_draft_armed_mailbox_is_polled_for_replies(
     delivered_at = NOW + timedelta(days=1)
     mail.gmail.send_scheduled(scheduled, at=delivered_at)
     mail.tick(delivered_at + timedelta(minutes=1))  # the drafts poll sees it sent
-    mail.tick(delivered_at + timedelta(minutes=2))  # the reply poll sets its baseline
+    mail.tick(delivered_at + timedelta(minutes=2))
+    mail.tick(delivered_at + timedelta(minutes=30))  # every tick is a whole interval here
+    assert history_id(mail) is None  # no scheduled reply poll read it
+    assert sender.request_replies_poll(mail.user.id)
+    mail.tick(delivered_at + timedelta(minutes=31))  # Check now sets the baseline
     assert history_id(mail) is not None
     mail.gmail.reply(scheduled, sender=f"Ada <{ADA}>", at=delivered_at + timedelta(hours=1))
-    polled_at = delivered_at + timedelta(hours=2)
+    mail.tick(delivered_at + timedelta(hours=2))
+    assert mail.enrollment(enrollment_id).status is not EnrollmentStatus.REPLIED
+    polled_at = delivered_at + timedelta(hours=2, minutes=1)
+    assert sender.request_replies_poll(mail.user.id)
     mail.tick(polled_at)
 
     enrollment = mail.enrollment(enrollment_id)

@@ -107,7 +107,7 @@ from netkeep.models import (
 )
 from netkeep.scoping import get_scoped, scoped, scoped_count, scoped_update
 from netkeep.services import heat as heat_service
-from netkeep.services.linkedin_accounts import ensure_account, scheduled_runs_armed
+from netkeep.services.linkedin_accounts import ensure_account, full_upkeep, scheduled_runs_armed
 from netkeep.services.linkedin_session import session_flag
 from netkeep.services.settings_kv import delete_setting, get_setting, set_setting
 
@@ -315,7 +315,13 @@ class RunAlreadyRunning(RunError):
 
 
 class ScheduledRunsDisarmed(RunError):
-    """A scheduled run was asked for while the account's scheduled runs are disarmed."""
+    """A scheduled run was asked for while the account's scheduled runs are disarmed, or
+    (#829) for a full-upkeep kind while the schedule runs quick checks only."""
+
+
+#: The run kinds a schedule records only at full upkeep depth (#829); the scheduler's
+#: gate skips them first (``scheduler.FULL_UPKEEP_KINDS``), and this is the second check.
+FULL_UPKEEP_RUN_KINDS: Final = frozenset({SyncRunKind.CONNECTIONS_FULL, SyncRunKind.ENRICH})
 
 
 class RunFinished(RunError):
@@ -501,6 +507,15 @@ def create_run(
         raise ScheduledRunsDisarmed(
             "scheduled LinkedIn runs are disarmed for this account; arm them with"
             " `netkeep linkedin schedule arm` once a supervised run has gone well"
+        )
+    if (
+        trigger is SyncRunTrigger.SCHEDULED
+        and kind in FULL_UPKEEP_RUN_KINDS
+        and not full_upkeep(session, user, account.id)
+    ):
+        raise ScheduledRunsDisarmed(
+            f"scheduled LinkedIn runs are quick checks only, so no scheduled {kind.value} run"
+            " starts"
         )
     busy = running_run(session, user, account.id)
     if busy is not None and _stale(busy, now=now, held=browser_held or browser_held_for(session)):

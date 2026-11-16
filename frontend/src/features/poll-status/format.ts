@@ -46,6 +46,7 @@ export const STATE_TEXT: Record<Exclude<CheckState, 'scheduled'>, string> = {
   outside_hours: 'outside active hours',
   blocked: 'needs attention',
   off: 'off',
+  manual: 'when you click Check now',
   not_running: 'not running',
   not_wired: 'not running yet',
 }
@@ -65,9 +66,12 @@ export function checkSummary(check: PollCheck, now: number): string {
   return parts.join(' · ')
 }
 
-/** Whether a check runs at all, so "Check now" (#409) can ask for it sooner. */
+/**
+ * Whether a check runs at all, so "Check now" (#409) can ask for it sooner. On Manual
+ * (#829) Check now is the only way it runs.
+ */
 export function canCheckNow(check: { state: CheckState }): boolean {
-  return check.state === 'scheduled' || check.state === 'due'
+  return check.state === 'scheduled' || check.state === 'due' || check.state === 'manual'
 }
 
 /**

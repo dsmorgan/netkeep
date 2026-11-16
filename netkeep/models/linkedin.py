@@ -27,22 +27,40 @@ it, by hand, through ``netkeep linkedin schedule arm`` or the API. It is a
 column rather than a ``settings_kv`` key on purpose: ``settings_kv`` values are
 seeded from ``config.toml``, and a value copied around in a config file must
 never be the thing that turns on scheduled LinkedIn traffic.
+
+The automation switch (#829, migration 0049) reads three more. Automatic is armed
+(the column above); Manual is disarmed; Off is disarmed with ``automation_off_at``
+set, the time a person turned LinkedIn off, which refuses runs a person starts too.
+``scheduled_depth`` says which kinds an armed schedule fires: ``quick`` (the
+incremental sync and the inbox poll) or ``full`` (also the full sync and
+enrichment). ``automation_changed_at`` is when the switch last moved. They are
+columns for the reason arming is: ``full`` makes the schedule do more.
 """
 
 from __future__ import annotations
 
+import enum
 from datetime import datetime
 from typing import Final
 
 from sqlalchemy import ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from netkeep.models.base import Base, TimestampMixin, UserOwned, UTCDateTime
+from netkeep.models.base import Base, TimestampMixin, UserOwned, UTCDateTime, string_enum
 
 DEFAULT_ACCOUNT_LABEL: Final = "default"
 
 #: The longest LinkedIn conversation or message URN stored (migration 0035).
 LI_URN_MAX_LENGTH: Final = 300
+
+
+class ScheduleDepth(enum.StrEnum):
+    """How much an armed LinkedIn schedule runs (#829, "How thorough")."""
+
+    QUICK = "quick"
+    """The daily incremental sync and the inbox poll."""
+    FULL = "full"
+    """Also the weekly full sync and enrichment: what an armed schedule ran before #829."""
 
 
 class LinkedInAccount(UserOwned, TimestampMixin, Base):
@@ -52,6 +70,14 @@ class LinkedInAccount(UserOwned, TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True, sort_order=-100)
     label: Mapped[str] = mapped_column(String(100), nullable=False, default=DEFAULT_ACCOUNT_LABEL)
     scheduled_runs_armed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    automation_off_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    scheduled_depth: Mapped[ScheduleDepth] = mapped_column(
+        string_enum(ScheduleDepth, "scheduled_depth"),
+        nullable=False,
+        default=ScheduleDepth.FULL,
+        server_default=ScheduleDepth.FULL.value,
+    )
+    automation_changed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
 
 class LiConversation(UserOwned, TimestampMixin, Base):

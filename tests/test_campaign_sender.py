@@ -2415,11 +2415,18 @@ def test_disarmed_leftovers_and_drafts_wait_with_no_gmail_call(drafts: Mail) -> 
 def test_armed_for_drafts_a_send_step_is_a_draft_and_messages_send_is_never_called(
     mail: Mail,
 ) -> None:
-    """Every step of a three-step send campaign, through the person sending each draft."""
+    """Every step of a three-step send campaign, through the person sending each draft.
+    On Manual (#829) nothing reads replies on a schedule, so the first follow-up waits
+    until the person clicks Check now (this sender's replies never go stale after)."""
     set_arm(mail, MailboxArm.DRAFT)
     enrollment_id = mail.enroll()
     at = NOW
     for step in range(3):
+        if step == 1:
+            mail.tick(at)
+            assert len(mail.messages(enrollment_id)) == 1  # held: replies never read
+            assert mail.sender.request_replies_poll(mail.user.id)
+            at += timedelta(minutes=1)
         mail.tick(at)
         message = mail.messages(enrollment_id)[step]
         assert message.status is MessageStatus.DRAFTED

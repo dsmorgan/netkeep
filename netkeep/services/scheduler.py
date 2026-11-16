@@ -125,6 +125,12 @@ its own stored due time, at most one interval away (a first-setup kind within
 restart; a restart while paused still goes through the cold path's one catch-up,
 which the gate then skips like any other fire.
 
+**Depth (#829).** Armed, the schedule runs at the account's depth
+(``linkedin_accounts.scheduled_depth``): at ``quick`` a due fire of a
+:data:`FULL_UPKEEP_KINDS` kind (the full sync, enrichment) is skipped as
+``"quick_checks"``, the same way as ``"disarmed"``; the incremental sync, the inbox poll
+and auto-send are untouched. :data:`ARMING_NOT_REQUIRED` turns this off too.
+
 **The interleave gap.** Spec 9.5's last bullet: "never run enrichment and a
 message send in the same minute; the scheduler interleaves job kinds with a
 gap." Two mechanisms, one constant (:data:`MIN_JOB_KIND_GAP`).
@@ -167,7 +173,7 @@ from netkeep.models import JsonValue, SyncRunKind, User
 from netkeep.models.base import utcnow
 from netkeep.services import heat as heat_service
 from netkeep.services import route_breaker, runs
-from netkeep.services.linkedin_accounts import schedule_paused, scheduled_runs_armed
+from netkeep.services.linkedin_accounts import full_upkeep, schedule_paused, scheduled_runs_armed
 from netkeep.services.linkedin_session import session_flag
 from netkeep.services.settings_kv import get_setting, set_setting
 
@@ -440,6 +446,16 @@ ArmGate = ArmCheck | Arming
 #: armed the account's scheduled runs (``linkedin_accounts.scheduled_runs_armed_at``).
 #: Every account starts disarmed, so a scheduler that nobody armed fires nothing.
 DEFAULT_ARM_GATE: Final[ArmCheck] = scheduled_runs_armed
+
+
+# --- the depth gate: quick checks or full upkeep (#829) -----------------------
+
+#: The kinds an armed schedule fires only at full upkeep depth
+#: (``linkedin_accounts.scheduled_depth`` ``full``). At ``quick`` a due fire of one is
+#: skipped as ``"quick_checks"``, like a disarmed one: the incremental sync and the
+#: inbox poll still fire. Auto-send is not here: ``[campaigns] linkedin_auto_send``
+#: alone governs it.
+FULL_UPKEEP_KINDS: Final = frozenset({JobKind.CONNECTIONS_FULL, JobKind.ENRICH})
 
 
 # --- the route-changed breaker gate: connections kinds only (#189 item 1) ----
@@ -1205,6 +1221,14 @@ def gate_skip_reason(
     reads it too."""
     if not isinstance(armed, Arming) and not armed(session, user, account_id):
         return "disarmed"
+    if (
+        not isinstance(armed, Arming)
+        and kind in FULL_UPKEEP_KINDS
+        and not full_upkeep(session, user, account_id)
+    ):
+        # Quick checks only (#829): skipped like a disarmed fire, so the cadence moves
+        # on and a move to full upkeep owes no backlog of runs.
+        return "quick_checks"
     if schedule_paused(session, user, account_id):
         # A person paused the schedule (#324): skipped like a disarmed fire,
         # so the cadence moves on and unpausing owes no backlog of runs.
@@ -1509,8 +1533,9 @@ async def poll_and_fire(
                 active_start=active_start,
                 active_end=active_end,
             )
-    elif skipped_reason in ("disarmed", "paused") or quiet:
-        # Every poll of a disarmed or paused account lands here; it is the expected state.
+    elif skipped_reason in ("disarmed", "paused", "quick_checks") or quiet:
+        # Every poll of a disarmed or paused account, or of a full-upkeep kind at quick
+        # checks, lands here; it is the expected state.
         log.debug(
             "scheduler: %s for account %d not fired: %s", kind.value, account_id, skipped_reason
         )

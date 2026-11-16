@@ -5,21 +5,21 @@ is the background checks ``netkeep serve`` runs, read from what they already
 store, never by running one:
 
 - **Gmail replies** (spec 11.7): every ``[campaigns] reply_poll_minutes``, in the
-  campaign tick, for every armed mailbox. Last and next come from one source, the
-  running sender's own gate (:meth:`GmailSender.replies_polled_at`): the next poll
-  is that plus the sender's interval, and with none (a fresh start) the next tick
-  polls, so the check is ``due``. A ready mailbox the sender polls again sooner,
-  alone (:meth:`GmailSender.replies_due`: its poll stopped part way, or it holds a
-  follow-up), is ``due`` too, and so is the check; the others keep their time
-  (#413). An ``ok`` mailbox the sender could not open (a locked Keychain) is
-  ``blocked`` with that reason, and the check names it, rather than ``due`` at every
-  tick. Without ``serve``
-  there is no next poll, and the last one is read from the armed mailboxes'
-  ``replies_polled_at``: the oldest, or none while one was never polled. An armed
-  mailbox that needs signing in again is named in the check's reason; it blocks
-  the check only when every armed mailbox does. A person can ask for it sooner
-  ("Check now", #409): the check is then ``due`` and ``requested`` until the next
-  tick starts the poll, and :func:`replies_check_refused` says when they cannot.
+  campaign tick, for every mailbox armed to send (Gmail on Automatic, #829). On Manual
+  (armed for drafts only) the check is ``manual``: it runs only on Check now. Last and
+  next come from one source, the running sender's own gate
+  (:meth:`GmailSender.replies_polled_at`): the next poll is that plus the sender's
+  interval, and with none (a fresh start) the next tick polls, so the check is ``due``.
+  A ready mailbox the sender polls again sooner, alone (:meth:`GmailSender.replies_due`:
+  its poll stopped part way, or it holds a follow-up), is ``due`` too, and so is the
+  check; the others keep their time (#413). An ``ok`` mailbox the sender could not open
+  (a locked Keychain) is ``blocked`` with that reason, and the check names it, rather
+  than ``due`` at every tick. Without ``serve`` there is no next poll, and the last one
+  is read from the armed mailboxes' ``replies_polled_at``: the oldest, or none while one
+  was never polled. An armed mailbox that needs signing in again is named in the check's
+  reason; it blocks the check only when every armed mailbox does. A person can ask for
+  it sooner ("Check now", #409): the check is then ``due`` and ``requested`` until the
+  next tick starts the poll, and :func:`replies_check_refused` says when they cannot.
 - **Gmail drafts** (spec 11.5): every :data:`~netkeep.services.campaign_sender.DRAFTS_POLL_EVERY`,
   only while a campaign draft waits in an armed mailbox, or the Message-ID check
   still has a draft to search for (a test draft, or a draft seen sent, #510). Its
@@ -65,6 +65,7 @@ from netkeep.models import (
     Campaign,
     Enrollment,
     Mailbox,
+    MailboxArm,
     MailboxStatus,
     Message,
     MessageStatus,
@@ -81,6 +82,7 @@ from netkeep.services import inbox_hold, message_id_check, route_breaker, runs
 from netkeep.services.campaign_sender import DRAFTS_POLL_EVERY
 from netkeep.services.linkedin_accounts import (
     find_account,
+    full_upkeep,
     schedule_paused,
     scheduled_runs_armed,
 )
@@ -89,6 +91,7 @@ from netkeep.services.mailboxes import REASON_KEYCHAIN_UNAVAILABLE
 from netkeep.services.scheduled_runs import INBOX_RUN_KIND, RUN_KIND
 from netkeep.services.scheduler import (
     DEFAULT_SCHEDULES,
+    FULL_UPKEEP_KINDS,
     SERVED_SCHEDULES,
     JobKind,
     stored_due,
@@ -114,7 +117,10 @@ class CheckState(enum.StrEnum):
     """Something stops it until a person acts: the session flag, heat, a breaker, a
     mailbox that needs reconnecting."""
     OFF = "off"
-    """Turned off: disarmed, no armed mailbox, Gmail not connected."""
+    """Turned off: disarmed, no armed mailbox, Gmail not connected, or a LinkedIn kind
+    the schedule leaves out at quick checks (#829)."""
+    MANUAL = "manual"
+    """It runs only when a person asks (Check now): Gmail on Manual (#829)."""
     NOT_RUNNING = "not_running"
     """This process runs no background checks: it was not started by ``netkeep serve``."""
     NOT_WIRED = "not_wired"
@@ -147,6 +153,12 @@ LABELS: Final[dict[str, str]] = {
 
 NOT_SERVING: Final = "netkeep serve isn't running in this process, so no background check runs"
 NOT_WIRED: Final = "This check isn't running yet: netkeep serve doesn't schedule it"
+MANUAL_REPLIES: Final = (
+    "Gmail is on Manual, so netkeep checks replies only when you click Check now"
+)
+QUICK_CHECKS: Final = (
+    "LinkedIn runs quick checks only; this runs with Quick checks and a weekly full sync"
+)
 _CONNECTIONS_KINDS: Final = frozenset({JobKind.CONNECTIONS_FULL, JobKind.CONNECTIONS_INCREMENTAL})
 _SYNC_RUN_KIND: Final[dict[JobKind, SyncRunKind]] = {**RUN_KIND, **INBOX_RUN_KIND}
 
@@ -271,6 +283,12 @@ def _mailbox_poll(
         state, reason = CheckState.BLOCKED, _needs_sign_in([mailbox])
     elif (code := serving.replies_not_ready.get(mailbox.id)) is not None:
         state, reason = CheckState.BLOCKED, _cannot_open(mailbox, code)
+    elif mailbox.arm is not MailboxArm.SEND:
+        # Manual (#829): no scheduled poll; a person's Check now runs at the next tick.
+        if serving.replies_requested_at is not None:
+            state = CheckState.DUE
+        else:
+            state, reason = CheckState.MANUAL, MANUAL_REPLIES
     elif mailbox.id in serving.replies_due:
         state, next_at = _backing_off(serving, mailbox.id, every, now)
     else:
@@ -358,6 +376,14 @@ def _gmail_replies(
     gate = _gmail_gate(mailboxes, serving)
     if gate is not None:
         return replace(base, state=gate[0], reason=gate[1], last_at=_stored_last(polls))
+    requested_at = serving.replies_requested_at
+    if not any(m.arm is MailboxArm.SEND for m in mailboxes):
+        # Manual (#829): replies are read only on Check now.
+        if requested_at is None:
+            return replace(
+                base, state=CheckState.MANUAL, reason=MANUAL_REPLIES, last_at=_stored_last(polls)
+            )
+        return replace(base, last_at=_stored_last(polls), requested_at=requested_at)
     stuck = [m for m in mailboxes if m.arm is not None and m.status is not MailboxStatus.OK]
     reasons = [_needs_sign_in(stuck)] if stuck else []
     reasons += [
@@ -366,7 +392,6 @@ def _gmail_replies(
         if p.state is CheckState.BLOCKED and p.mailbox_id in serving.replies_not_ready and p.reason
     ]
     reason = "; ".join(reasons) or None
-    requested_at = serving.replies_requested_at
     state, next_at = _next(
         serving.replies_polled_at, every, now, requested=requested_at is not None
     )
@@ -493,6 +518,13 @@ def _linkedin(
             checks.append(replace(base, state=CheckState.NOT_WIRED, reason=NOT_WIRED))
             continue
         blocked = gate
+        if (
+            blocked is None
+            and account is not None
+            and kind in FULL_UPKEEP_KINDS
+            and not full_upkeep(session, user, account.id)
+        ):
+            blocked = (CheckState.OFF, QUICK_CHECKS)
         if blocked is None and account is not None and kind in _CONNECTIONS_KINDS:
             blocked = _breaker(session, user, account.id)
         if blocked is None and account is not None and kind is JobKind.ENRICH:
