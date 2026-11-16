@@ -8,6 +8,7 @@ import { ProfileViewNotice } from '@/features/linkedin/profile-view-notice'
 import { RiskWarning } from '@/features/linkedin/risk-warning'
 import { mailboxKeys } from '@/features/mailboxes/api'
 import { pollStatusKeys, pollStatusQuery } from '@/features/poll-status/api'
+import { configSettingsQuery, type ConfigSettings } from '@/features/settings/api'
 import { systemStatusKeys } from '@/features/system-status/api'
 
 import {
@@ -54,7 +55,36 @@ function linkedinText(position: Position, depth: Depth): string {
 
 /** What the scheduler starts on its own at each depth (spec 9.4, #829). */
 const QUICK_JOBS = ['checks for new connections', 'LinkedIn inbox checks']
-const FULL_JOBS = ['a weekly full sync', 'profile refreshes']
+
+/** The full sync and enrichment, with enrichment's daily budget when it is known. */
+function fullJobs(perDay: number | undefined): string[] {
+  return [
+    'a weekly full sync',
+    perDay === undefined ? 'profile refreshes' : `profile refreshes, up to ${perDay} a day`,
+  ]
+}
+
+function configValue(config: ConfigSettings | undefined, key: string): unknown {
+  return config?.fields.find((field) => field.key === key)?.value
+}
+
+/** " (08:30–21:30)", the active hours in force; empty while unknown. */
+function hoursText(config: ConfigSettings | undefined): string {
+  const window = configValue(config, 'linkedin.active_hours')
+  return Array.isArray(window) && window.length === 2 ? ` (${window.join('–')})` : ''
+}
+
+/** What the dialog says about LinkedIn auto-send, which no position changes (ADR 0008). */
+function autoSendText(config: ConfigSettings | undefined): string {
+  const on = configValue(config, 'campaigns.linkedin_auto_send')
+  if (on === false) {
+    return 'It never sends a LinkedIn message on its own: that’s auto-send, a separate setting that stays off.'
+  }
+  if (on === true) {
+    return 'LinkedIn messages are auto-send’s: a separate setting, on now, that this switch doesn’t change.'
+  }
+  return 'Sending LinkedIn messages is auto-send’s: a separate setting this switch doesn’t change.'
+}
 
 interface Target {
   position: Position
@@ -85,6 +115,7 @@ export function useLinkedInAutomation(): LinkedInControl {
   const automation = useQuery(automationQuery)
   const [asking, setAsking] = useState<Target | null>(null)
   const budget = useQuery({ ...budgetQuery, enabled: asking !== null })
+  const config = useQuery({ ...configSettingsQuery, enabled: asking !== null })
   const move = useMutation({
     mutationFn: setLinkedInAutomation,
     onSuccess: (data) => {
@@ -108,12 +139,14 @@ export function useLinkedInAutomation(): LinkedInControl {
 
   const toAutomatic = asking !== null && state?.position !== 'automatic'
   const from = state === undefined ? '' : linkedinText(state.position, state.depth)
+  const perDay = budget.data?.budgets.find((row) => row.action === 'profile_visits')?.day.limit
+  const full = fullJobs(perDay)
   const jobs =
     asking === null
       ? []
       : toAutomatic
-        ? [...QUICK_JOBS, ...(asking.depth === 'full' ? FULL_JOBS : [])]
-        : FULL_JOBS
+        ? [...QUICK_JOBS, ...(asking.depth === 'full' ? full : [])]
+        : full
 
   const dialog = (
     <ConfirmDialog
@@ -127,8 +160,9 @@ export function useLinkedInAutomation(): LinkedInControl {
       confirmVariant="default"
       confirmLabel={toAutomatic ? 'Turn on Automatic' : 'Add the full sync'}
       pending={move.isPending}
-      // The profile-visit notes come with the budget: confirm once they could show.
-      confirmDisabled={asking?.depth === 'full' && budget.isPending}
+      // The profile-visit notes come with the budget, and the hours and auto-send with
+      // the settings: confirm once they could show.
+      confirmDisabled={(asking?.depth === 'full' && budget.isPending) || config.isPending}
       error={asking !== null && move.isError ? message(move.error) : null}
       onConfirm={() =>
         asking === null
@@ -141,8 +175,8 @@ export function useLinkedInAutomation(): LinkedInControl {
           <p className="text-foreground">
             You’re moving LinkedIn from <strong>{from}</strong> to{' '}
             <strong>{linkedinText(asking.position, asking.depth)}</strong>. From now on, within
-            active hours, netkeep {toAutomatic ? 'starts' : 'also starts'} these without you
-            watching:
+            active hours{hoursText(config.data)}, netkeep {toAutomatic ? 'starts' : 'also starts'}{' '}
+            these without you watching:
           </p>
           <JobList items={jobs} />
           {asking.depth === 'full' && (
@@ -152,8 +186,10 @@ export function useLinkedInAutomation(): LinkedInControl {
             </>
           )}
           <p>
-            It never sends a LinkedIn message on its own: that’s auto-send, a separate setting this
-            switch doesn’t change. Moving back takes one click, any time.
+            {autoSendText(config.data)}{' '}
+            {toAutomatic
+              ? 'Moving back to Manual or Off takes one click, any time.'
+              : 'Going back to quick checks takes one click, any time.'}
           </p>
         </>
       )}
