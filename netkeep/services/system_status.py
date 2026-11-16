@@ -434,13 +434,16 @@ CHECK_TONE: Final[Mapping[poll_service.CheckState, Tone]] = {
     poll_service.CheckState.PAUSED: "warn",
     poll_service.CheckState.BLOCKED: "warn",
     poll_service.CheckState.OFF: "off",
-    poll_service.CheckState.NOT_RUNNING: "off",
+    # #829: the netkeep chip says serve isn't running; a service chip keeps saying its
+    # switch's position (LinkedIn Automatic's No scheduler is its schedule part's).
+    poll_service.CheckState.NOT_RUNNING: "ok",
     poll_service.CheckState.NOT_WIRED: "off",
     poll_service.CheckState.MANUAL: "ok",
 }
 """A background check's tone. A check that waits on its own (outside active hours,
-nothing to look at) is working as set up. One that ``netkeep serve`` doesn't run is off
-here; the netkeep chip is the one that says serve isn't running."""
+nothing to look at, on Manual) is working as set up. One that ``netkeep serve`` doesn't
+run is not a problem of its service's chip either: the netkeep chip says serve isn't
+running, so the Gmail and LinkedIn chips keep saying their switch's position (#829)."""
 
 STATE_TEXT: Final[Mapping[poll_service.CheckState, str]] = {
     poll_service.CheckState.DUE: "due soon",

@@ -585,3 +585,16 @@ async def test_unpausing_a_legacy_pause_dates_the_switch(
         account = _account(session, user)
         assert not schedule_paused(session, user, account.id)
         assert account.automation_changed_at is not None
+
+
+async def test_the_old_arm_endpoint_keeps_the_depth(
+    running_app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    quick = await client.put(
+        "/api/v1/automation/linkedin", json={"position": "manual", "depth": "quick"}, headers=CSRF
+    )
+    assert quick.status_code == 200, quick.text
+    armed = await client.post("/api/v1/linkedin/schedule/arm", json={"confirm": True}, headers=CSRF)
+    assert armed.status_code == 200, armed.text
+    switch = (await client.get("/api/v1/automation")).json()["linkedin"]
+    assert (switch["position"], switch["depth"]) == ("automatic", "quick")

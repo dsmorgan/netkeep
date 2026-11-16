@@ -181,7 +181,7 @@ def test_a_check_that_waits_on_its_own_reads_working_and_one_serve_doesnt_run_of
         "paused": "warn",
         "blocked": "warn",
         "off": "off",
-        "not_running": "off",
+        "not_running": "ok",  # #829: the netkeep chip says it; the position leads
         "not_wired": "off",
         "manual": "ok",  # #829: Gmail on Manual, working as set up
     }
