@@ -607,3 +607,18 @@ async def test_the_old_arm_endpoint_keeps_the_depth(
     assert armed.status_code == 200, armed.text
     switch = (await client.get("/api/v1/automation")).json()["linkedin"]
     assert (switch["position"], switch["depth"]) == ("automatic", "quick")
+
+
+async def test_unpause_without_a_pause_leaves_automatic_alone(
+    running_app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    moved = await client.put(
+        "/api/v1/automation/linkedin",
+        json={"position": "automatic", "confirm": True},
+        headers=CSRF,
+    )
+    assert moved.status_code == 200, moved.text
+    response = await client.post("/api/v1/linkedin/schedule/unpause", headers=CSRF)
+    assert response.status_code == 200 and response.json()["armed"] is True
+    switch = (await client.get("/api/v1/automation")).json()["linkedin"]
+    assert switch["position"] == "automatic"

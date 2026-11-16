@@ -620,8 +620,20 @@ def _mailbox_part(read: list[MailboxRead] | Failed) -> Part:
     )
 
 
-def _sending_part(mailbox: MailboxRead) -> Part:
-    """The Gmail switch (#829): Automatic, Drafts only (Manual) or Off."""
+def _sending_part(mailbox: MailboxRead, *, no_sender: bool = False) -> Part:
+    """The Gmail switch (#829): Automatic, Drafts only (Manual) or Off. Automatic with no
+    campaign engine (``serve`` isn't running) takes over the chip, like LinkedIn's No
+    scheduler: it is set to send, and nothing does."""
+    if mailbox.arm is MailboxArm.SEND and no_sender:
+        return Part(
+            "sending",
+            "Automation",
+            "warn",
+            "Not running",
+            "Automatic, but netkeep serve isn't running, so nothing sends and no replies"
+            " are checked",
+            fact="nothing sends",
+        )
     if mailbox.arm is MailboxArm.SEND:
         return Part(
             "sending",
@@ -688,8 +700,13 @@ def gmail_chip(reads: Reads) -> Chip:
     were last checked."""
     parts = [_mailbox_part(reads.mailboxes)]
     mailbox = None if isinstance(reads.mailboxes, Failed) else pick_mailbox(reads.mailboxes)
+    replies = _find_check(reads.poll, poll_service.GMAIL_REPLIES)
+    no_sender = (
+        isinstance(replies, poll_service.Check)
+        and replies.state is poll_service.CheckState.NOT_RUNNING
+    )
     if mailbox is not None and mailbox.status is MailboxStatus.OK:
-        parts.append(_sending_part(mailbox))
+        parts.append(_sending_part(mailbox, no_sender=no_sender))
     if reads.sending:
         parts.append(BATCH)
     if isinstance(reads.attention, Failed):
@@ -701,7 +718,6 @@ def gmail_chip(reads: Reads) -> Chip:
             parts.append(flag)
     fact = ""
     times: dict[str, Time] = {}
-    replies = _find_check(reads.poll, poll_service.GMAIL_REPLIES)
     if isinstance(replies, Failed):
         parts.append(_failed("replies", "Reply check"))
     elif replies is not None:

@@ -310,5 +310,10 @@ async def test_each_pill_says_its_position_with_or_without_serve(
     if position == "automatic" and not serving:
         expected_linkedin = "No scheduler"  # a real problem, so it still leads
     assert body["linkedin"]["word"] == expected_linkedin
-    assert body["gmail"]["word"] == gmail_word
-    assert body["gmail"]["tone"] == ("off" if position == "off" else "ok")
+    if position == "automatic" and not serving:
+        # Set to send, and nothing does: it takes over, like No scheduler.
+        assert _face(body["gmail"]) == "Gmail · Not running · nothing sends"
+        assert body["gmail"]["tone"] == "warn"
+    else:
+        assert body["gmail"]["word"] == gmail_word
+        assert body["gmail"]["tone"] == ("off" if position == "off" else "ok")

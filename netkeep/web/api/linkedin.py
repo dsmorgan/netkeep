@@ -733,8 +733,10 @@ def unpause_linkedin_schedule(
     writes one since, and no page calls this after #832; the switch is
     ``PUT /automation/linkedin``."""
     now = utcnow()
-    automation.stop_linkedin(session, user, now=now)  # armed and paused: to Manual
-    unpause_schedule(session, user, now=now)  # a key left on an Off account
+    account = find_account(session, user)
+    if account is not None and schedule_paused(session, user, account.id):
+        automation.stop_linkedin(session, user, now=now)  # armed and paused: to Manual
+        unpause_schedule(session, user, now=now)  # a key left on an Off account
     session.commit()  # the change stands before anything is read back for display
     return _schedule_out(request, session, user)
 

@@ -231,6 +231,17 @@ def test_gmail_says_its_position_drafts_only_or_off() -> None:
     )
 
 
+def test_gmail_automatic_without_serve_says_nothing_sends_and_drafts_only_keeps_its_word() -> None:
+    """#829 review: armed to send with no campaign engine takes over, like No scheduler."""
+    stopped = check(state=State.NOT_RUNNING, next_at=None)
+    automatic = gmail(mailboxes=[mailbox(arm=MailboxArm.SEND)], poll=poll(stopped))
+    assert face(automatic)["text"] == "Gmail · Not running · nothing sends"
+    assert face(automatic)["tone"] == "warn"
+    drafts = gmail(mailboxes=[mailbox(arm=MailboxArm.DRAFT)], poll=poll(stopped))
+    assert face(drafts)["tone"] == "ok"
+    assert face(drafts)["text"].startswith("Gmail · Drafts only")
+
+
 def test_gmail_on_manual_says_replies_are_checked_on_check_now() -> None:
     """#829: Gmail on Manual has no scheduled reply check; the chip still reads well."""
     manual = check(state=State.MANUAL, next_at=None, reason=poll_service.MANUAL_REPLIES)
