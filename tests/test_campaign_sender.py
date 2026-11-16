@@ -2496,6 +2496,39 @@ def test_a_send_claimed_before_the_arming_changed_sends_nothing(
     assert enrollment.next_action_at is not None and enrollment.next_action_at > NOW
 
 
+@dataclass
+class TurnsGmailOffFirst:
+    """Between the claim and the send, a person moves the Gmail switch to Off (#829)."""
+
+    mail: Mail
+
+    def send(self, firing: Firing) -> SendResult:
+        from netkeep.services import automation
+
+        def turn_off(session: Session) -> None:
+            user = session.get(User, self.mail.user.id)
+            assert user is not None
+            automation.set_gmail(
+                session, user, automation.Position.OFF, confirm=False, by="test", now=NOW
+            )
+
+        self.mail.write(turn_off)
+        return self.mail.sender.send(firing)
+
+
+def test_gmail_off_stops_a_batch_at_its_next_send(mail: Mail) -> None:
+    """#829: the sender reads the arming again before each Gmail call, so Off stops a
+    batch already claimed: nothing goes to Gmail, and the claim is given back."""
+    set_arm(mail, MailboxArm.SEND)
+    enrollment_id = mail.enroll()
+    result = mail.tick(sender=TurnsGmailOffFirst(mail))
+    [(_, outcome)] = result.fired
+    assert outcome.outcome is SendOutcome.NOT_SENT
+    assert outcome.error is not None and "disarmed" in outcome.error
+    assert mail.gmail.calls == []
+    assert mail.messages(enrollment_id) == []
+
+
 def test_a_disarm_after_the_claim_lets_a_draft_already_claimed_through_as_a_draft(
     drafts: Mail,
 ) -> None:

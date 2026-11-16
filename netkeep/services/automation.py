@@ -10,7 +10,8 @@ position and moves it, and adds nothing that decides a run or a send.
   or ``full`` (also the full sync and enrichment; the scheduler's gate reads it).
 - Manual: disarmed. Runs start only when a person starts them. A legacy pause (#324)
   reads as Manual too: it fires nothing on a schedule.
-- Off: disarmed, with ``automation_off_at`` set.
+- Off: disarmed, with ``automation_off_at`` set. Moving to Off also cancels a run
+  already going, as a person's Cancel does; moving to Manual lets it finish.
 
 **Gmail** (the mailboxes' arming, #277): Automatic is armed to send, Manual is armed
 for drafts, Off is not armed. One switch moves every mailbox that isn't disconnected
@@ -35,7 +36,7 @@ from sqlalchemy.orm import Session
 from netkeep.models import Mailbox, MailboxArm, MailboxStatus, ScheduleDepth, User
 from netkeep.scoping import scoped
 from netkeep.services import mailboxes as mailbox_service
-from netkeep.services import message_id_check
+from netkeep.services import message_id_check, runs
 from netkeep.services.linkedin_accounts import (
     arm_scheduled_runs,
     disarm_scheduled_runs,
@@ -154,6 +155,8 @@ def set_linkedin(
         if (account.automation_off_at is None) != (off_at is None):
             account.automation_off_at = off_at
             changed = True
+        if position is Position.OFF:
+            _cancel_running(session, user, account.id, now=now)
     if changed:
         account.automation_changed_at = now
         log.warning(
@@ -165,6 +168,19 @@ def set_linkedin(
         )
     session.flush()
     return linkedin_state(session, user)
+
+
+def _cancel_running(session: Session, user: User, account_id: int, *, now: datetime) -> None:
+    """Off leaves LinkedIn alone, so a run already going is cancelled the way a person's
+    Cancel does it (maintainer, #829): it stops at its next check. Manual lets it finish."""
+    running = runs.running_run(session, user, account_id)
+    if running is None:
+        return
+    try:
+        runs.request_cancel(session, user, running.id, now=now)
+    except runs.RunFinished:
+        return  # it ended meanwhile
+    log.warning("LinkedIn turned Off: cancel requested for run %d", running.id)
 
 
 # --- Gmail -----------------------------------------------------------------------

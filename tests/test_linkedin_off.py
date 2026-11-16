@@ -42,6 +42,17 @@ def no_frontend(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("NETKEEP_FRONTEND_DIST", str(tmp_path / "no-dist"))
 
 
+def _closed(*_: Any, **__: Any) -> None:
+    raise runs.OutsideActiveHours("outside active hours")
+
+
+@pytest.fixture
+def hours_closed(inside_active_hours: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Outside active hours, so a test pins that Off is the reason given first. After
+    ``inside_active_hours`` (this module's mark), which it overrides."""
+    monkeypatch.setattr(runs, "refuse_if_outside_active_hours", _closed)
+
+
 def _turn_off(session: Session, user: User) -> None:
     automation.set_linkedin(session, user, Position.OFF, confirm=False, now=NOW)
 
@@ -105,6 +116,7 @@ def test_a_scheduled_run_on_off_is_refused_as_disarmed(writer: Session, off_user
 # --- prefills, "I sent it", and the message check -----------------------------------------
 
 
+@pytest.mark.usefixtures("hours_closed")
 def test_check_sent_is_refused(writer: Session, off_user: User, monkeypatch: Any) -> None:
     monkeypatch.setattr(linkedin_steps, "_waiting_message", lambda *_: None)
     with pytest.raises(runs.LinkedInOff):
@@ -112,6 +124,7 @@ def test_check_sent_is_refused(writer: Session, off_user: User, monkeypatch: Any
     assert runs.list_runs(writer, off_user)[1] == 0
 
 
+@pytest.mark.usefixtures("hours_closed")
 def test_a_message_check_is_refused(writer: Session, off_user: User) -> None:
     contact = factories.make_contact(
         writer, off_user, li_urn="urn:li:fsd_profile:ACoAAATEST01", li_public_id="first-last"
@@ -157,6 +170,58 @@ async def test_start_resume_and_check_connection_answer_409_and_attach_nothing(
     assert connector.attaches == 0 and _rows(bare_engine) == []
 
 
+async def test_resume_and_i_sent_it_answer_409_off_ahead_of_active_hours(
+    bare_engine: Engine, no_frontend: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from netkeep.models import SyncRunStatus
+    from netkeep.services import enrich_plan
+
+    provider, connector = fake_provider()
+    async with served(bare_engine, Settings(), provider, Clock(START)) as app:
+        with session_scope(app.state.session_factory, write=True) as session:
+            user = _local(session)
+            ids = [factories.make_contact(session, user).id for _ in range(2)]
+            old = runs.create_run(
+                session, user, SyncRunKind.ENRICH, trigger=SyncRunTrigger.MANUAL, now=START
+            )
+            enrich_plan.store_plan(session, user, old.id, ids)
+            runs.finish_run(session, user, old.id, status=SyncRunStatus.ABORTED, now=START)
+            old_id = old.id
+            _turn_off(session, user)
+        monkeypatch.setattr(runs, "refuse_if_outside_active_hours", _closed)
+        monkeypatch.setattr(linkedin_steps, "_waiting_message", lambda *_: None)
+        async with client_for(app) as client:
+            resume = await client.post(
+                f"/api/v1/linkedin/runs/{old_id}/resume", json={}, headers=HEADERS
+            )
+            sent = await client.post("/api/v1/campaigns/linkedin/messages/1/check", headers=HEADERS)
+    for response in (resume, sent):
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"] == runs.LINKEDIN_OFF_REFUSAL
+    assert connector.attaches == 0
+    assert [run.id for run in _rows(bare_engine)] == [old_id]
+
+
+# --- Off cancels a run already going; Manual lets it finish ----------------------------
+
+
+@pytest.mark.parametrize(
+    ("position", "cancelled"), [(Position.OFF, True), (Position.MANUAL, False)]
+)
+def test_off_cancels_a_running_run_and_manual_lets_it_finish(
+    writer: Session, position: Position, cancelled: bool
+) -> None:
+    """The maintainer's decision (#829): Off cancels through the same path as Cancel."""
+    user = factories.make_user(writer)
+    automation.set_linkedin(writer, user, Position.AUTOMATIC, confirm=True, now=NOW)
+    run = runs.create_run(writer, user, SyncRunKind.ENRICH, trigger=SyncRunTrigger.MANUAL, now=NOW)
+
+    automation.set_linkedin(writer, user, position, confirm=False, now=NOW)
+
+    stored = runs.get_run(writer, user, run.id)
+    assert (stored.cancel_requested_at is not None) is cancelled
+
+
 # --- the CLI --------------------------------------------------------------------------------
 
 
@@ -174,12 +239,13 @@ def cli_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[sessionm
     engine.dispose()
 
 
-@pytest.mark.usefixtures("no_browser_for_cli_runs")
+@pytest.mark.usefixtures("no_browser_for_cli_runs", "hours_closed")
 @pytest.mark.parametrize(
     "command", [["linkedin", "sync"], ["linkedin", "enrich"], ["linkedin", "inbox"]]
 )
 def test_the_cli_refuses_runs_while_off(cli_db: sessionmaker[Session], command: list[str]) -> None:
     result = CliRunner().invoke(cli, command)
+    assert "outside active hours" not in result.output  # Off is the reason given
     assert result.exit_code == 1
     assert "LinkedIn is Off" in result.output
     with session_scope(cli_db) as session:
