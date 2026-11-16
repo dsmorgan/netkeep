@@ -198,3 +198,14 @@ def test_gmail_refuses_a_move_that_became_more_since_it_read(
     result = CliRunner().invoke(cli, ["automation", "gmail", "automatic"])
     assert result.exit_code == 1 and "confirm" in result.output
     assert _arm(cli_db) is MailboxArm.DRAFT
+
+
+def test_unpause_at_quick_checks_stays_quick(cli_db: sessionmaker[Session]) -> None:
+    runner = CliRunner()
+    assert (
+        runner.invoke(cli, ["automation", "linkedin", "manual", "--depth", "quick"]).exit_code == 0
+    )
+    result = runner.invoke(cli, ["linkedin", "schedule", "unpause", "--yes"])
+    assert result.exit_code == 0, result.output
+    state = _linkedin(cli_db)
+    assert (state.position, state.depth) == (Position.AUTOMATIC, ScheduleDepth.QUICK)

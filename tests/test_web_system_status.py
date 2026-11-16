@@ -12,6 +12,7 @@ from typing import Any
 
 import factories
 import httpx
+import pytest
 from fastapi import FastAPI
 from sqlalchemy import event, select
 from sqlalchemy.engine import Engine
@@ -246,3 +247,68 @@ async def test_linkedin_reads_its_switch_position_with_or_without_serve(
     inbox = next(p for p in body["linkedin"]["parts"] if p["key"] == "inbox")
     assert "LinkedIn is Off; move it to Manual or Automatic" in inbox["detail"]
     running_app.state.scheduler = None
+
+
+class _Engine:
+    """Stands in for serve's campaign engine: the status reads its sender and busy flag."""
+
+    def __init__(self, sender: object) -> None:
+        self.sender = sender
+        self.busy = False
+
+
+def _no_gmail(user_id: int, mailbox_id: int) -> Any:
+    raise AssertionError("a status read opened Gmail")
+
+
+@pytest.mark.parametrize("serving", [False, True], ids=["no-serve", "serve"])
+@pytest.mark.parametrize(
+    ("position", "linkedin_word", "gmail_word"),
+    [
+        ("off", "Off", "Off"),
+        ("manual", "Manual", "Drafts only"),
+        ("automatic", "Automatic", "Automatic"),
+    ],
+)
+async def test_each_pill_says_its_position_with_or_without_serve(
+    running_app: FastAPI,
+    client: httpx.AsyncClient,
+    serving: bool,
+    position: str,
+    linkedin_word: str,
+    gmail_word: str,
+) -> None:
+    """#829 review: the position leads, not "Not running" or "Off", with a realistic
+    inbox poll behind it; only LinkedIn Automatic without a scheduler says so."""
+    from campaign_fakes import make_mailbox
+
+    from netkeep.models import SyncRunStatus
+    from netkeep.services import automation
+    from netkeep.services.campaign_sender import GmailSender
+
+    factory: sessionmaker[Session] = running_app.state.session_factory
+    with session_scope(factory, write=True) as session:
+        user = _local(session)
+        make_mailbox(session, user, message_id_verified_at=utcnow())
+        inbox = runs.create_run(
+            session, user, SyncRunKind.INBOX, trigger=SyncRunTrigger.MANUAL, now=utcnow()
+        )
+        runs.finish_run(session, user, inbox.id, status=SyncRunStatus.COMPLETED, now=utcnow())
+        to = automation.Position(position)
+        automation.set_linkedin(session, user, to, confirm=True, now=utcnow())
+        automation.set_gmail(session, user, to, confirm=True, by="test", now=utcnow())
+    if serving:
+        running_app.state.scheduler = SimpleNamespace()
+        running_app.state.campaign_engine = _Engine(GmailSender(factory, opener=_no_gmail))
+    try:
+        body = (await client.get(PATH)).json()
+    finally:
+        running_app.state.scheduler = None
+        running_app.state.campaign_engine = None
+
+    expected_linkedin = linkedin_word
+    if position == "automatic" and not serving:
+        expected_linkedin = "No scheduler"  # a real problem, so it still leads
+    assert body["linkedin"]["word"] == expected_linkedin
+    assert body["gmail"]["word"] == gmail_word
+    assert body["gmail"]["tone"] == ("off" if position == "off" else "ok")
