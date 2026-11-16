@@ -2121,6 +2121,7 @@ def _run_by_hand(
             user = _local_user_or_exit(session)
             user_id = user.id
             try:
+                runs.refuse_if_linkedin_off(session, user)  # #829: Off says so first
                 runs.refuse_if_outside_active_hours(settings.linkedin, now=datetime.now(UTC))
                 account_id = ensure_account(session, user).id
                 runs.refuse_if_flagged_or_hot(

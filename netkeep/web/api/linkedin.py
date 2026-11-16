@@ -263,6 +263,7 @@ async def start_run(
     executor = _executor(request)
     tasks.check_open()  # #730: before anything is written
     try:
+        runs.refuse_if_linkedin_off(session, user)  # #829: Off says so first
         runs.refuse_if_outside_active_hours(_settings(request, session, user), now=utcnow())
         # After the hours check, so a refused request writes no row at all (#294).
         account = ensure_account(session, user)
@@ -282,6 +283,7 @@ async def start_run(
         runs.HeatSkipped,
         runs.SessionFlagged,
         runs.OutsideActiveHours,
+        runs.LinkedInOff,
     ) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except runs.RunError as exc:
@@ -416,6 +418,7 @@ async def resume_run(
     account = ensure_account(session, user)
     try:
         enrich_plan.load_plan(session, user, run_id)  # 404 before any 409: is there a plan?
+        runs.refuse_if_linkedin_off(session, user)  # #829: Off says so first
         runs.refuse_if_outside_active_hours(_settings(request, session, user), now=utcnow())
         runs.refuse_if_flagged_or_hot(
             session, user, account.id, now=utcnow(), settings=_settings(request, session, user)

@@ -171,7 +171,7 @@ from netkeep.services.campaign_guards import (
     check_channel,
     check_step,
 )
-from netkeep.services.linkedin_accounts import account_id_for, ensure_account
+from netkeep.services.linkedin_accounts import account_id_for, ensure_account, linkedin_off
 from netkeep.services.linkedin_session import last_session_evidence, session_flag
 from netkeep.services.settings_kv import delete_setting, set_setting
 
@@ -1097,6 +1097,10 @@ class _Claimer:
         if not verdict.eligible:
             return self._excluded(enrollment, verdict.reasons, slots, hours)
 
+        if not self.auto and linkedin_off(session, user):
+            # LinkedIn Off (#829): no prefill starts, and Off is the reason given. An
+            # auto-send never gets here while Off, which is always disarmed.
+            return self.refuse(enrollment, Refusal.RUN_REFUSED, detail=runs.LINKEDIN_OFF_REFUSAL)
         # The user and the browser: one open prefill, active hours, the channel, the inbox.
         refused = user_refusal(session, user, now=now, settings=self.settings, auto=self.auto)
         if refused is not None:
@@ -1856,6 +1860,7 @@ def check_sent(
     session."""
     engine._require_writer(session, "check_sent")
     _waiting_message(session, user, message_id)
+    runs.refuse_if_linkedin_off(session, user)  # #829: Off says so first
     runs.refuse_if_outside_active_hours(settings.linkedin, now=now)
     account = ensure_account(session, user)
     runs.refuse_if_flagged_or_hot(session, user, account.id, now=now, settings=settings.linkedin)

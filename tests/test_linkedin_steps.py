@@ -275,6 +275,22 @@ def test_the_li_prefills_budget_is_clamped_to_its_hard_max() -> None:
 # --- the claim ------------------------------------------------------------------------
 
 
+def test_linkedin_off_refuses_the_claim_with_the_reason_and_records_nothing(lane: Lane) -> None:
+    """#829: Off refuses a prefill a person asks for, ahead of every other check."""
+    from netkeep.services import automation
+
+    def turn_off(session: Session, user: User) -> None:
+        automation.set_linkedin(session, user, automation.Position.OFF, confirm=False, now=NOW)
+
+    lane.write(turn_off)
+    enrollment_id = lane.enroll()
+    claim = lane.claim(enrollment_id)
+
+    assert claim.reasons == (Refusal.RUN_REFUSED,)
+    assert claim.detail == runs.LINKEDIN_OFF_REFUSAL
+    assert lane.messages(enrollment_id) == [] and lane.runs() == []
+
+
 def test_a_due_linkedin_step_is_claimed_with_its_run(lane: Lane) -> None:
     enrollment_id = lane.enroll()
     claim = lane.claim(enrollment_id)

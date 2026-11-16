@@ -2387,6 +2387,35 @@ def test_a_disarmed_mailbox_claims_nothing_and_never_calls_gmail(mail: Mail) -> 
     assert (mail.messages(), opened, mail.gmail.calls) == ([], [], [])
 
 
+@pytest.mark.parametrize("before", [MailboxArm.DRAFT, MailboxArm.SEND])
+def test_gmail_off_drafts_nothing_sends_nothing_and_never_calls_gmail(
+    mail: Mail, before: MailboxArm
+) -> None:
+    """#829: the Gmail switch at Off disarms every connected mailbox, from Manual or
+    Automatic, and nothing more is claimed on it: no draft, no send, no Gmail call."""
+    from netkeep.services import automation
+
+    set_arm(mail, before)
+
+    def turn_off(session: Session) -> None:
+        user = session.get(User, mail.user.id)
+        assert user is not None
+        automation.set_gmail(
+            session, user, automation.Position.OFF, confirm=False, by="test", now=NOW
+        )
+
+    mail.write(turn_off)
+    opened, opener = counting_opener(mail)
+    mail.sender = GmailSender(mail.factory, opener=opener, clock=mail.clock)
+    enrollment_id = mail.enroll()
+    result = mail.tick()
+    assert result.decisions == [
+        engine_module.Decision(enrollment_id, False, (engine_module.Skip.MAILBOX_DISARMED,))
+    ]
+    mail.tick(NOW + timedelta(hours=3))
+    assert (mail.messages(), opened, mail.gmail.calls) == ([], [], [])
+
+
 def test_disarmed_leftovers_and_drafts_wait_with_no_gmail_call(drafts: Mail) -> None:
     """Reconcile, the drafts poll and the Message-ID check skip a disarmed mailbox."""
     set_arm(drafts, MailboxArm.SEND)

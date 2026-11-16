@@ -185,7 +185,10 @@ async def test_check_now_refuses_a_campaign_engine_without_gmail(
     [
         ({"none": True}, "Gmail isn't connected"),
         ({"status": MailboxStatus.DISABLED, "armed": False}, "Gmail isn't connected"),
-        ({"armed": False}, "No mailbox is armed, so netkeep doesn't read Gmail"),
+        (
+            {"armed": False},
+            "Gmail is Off, so netkeep doesn't read it; move Gmail to Manual or Automatic first",
+        ),
         (
             {"status": MailboxStatus.REAUTH_REQUIRED},
             "me@example.test needs you to sign in to Gmail again (Settings, Gmail)",
@@ -203,6 +206,31 @@ async def test_check_now_refuses_with_the_reason(
 
     assert response.status_code == 409
     assert response.json()["detail"] == reason
+    assert not sender.replies_poll_requested(user_id)
+
+
+async def test_check_now_is_refused_once_the_gmail_switch_is_off(
+    running_app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    """#829: Off refuses Check now too; Manual allows it."""
+    from netkeep.services import automation
+
+    user_id = _local_user(running_app, send=False)
+    sender = _serve(running_app)
+    manual = await client.post(URL, headers=CSRF)
+    assert manual.status_code == 202
+    with session_scope(running_app.state.session_factory, write=True) as session:
+        user = session.get(User, user_id)
+        assert user is not None
+        automation.set_gmail(
+            session, user, automation.Position.OFF, confirm=False, by="test", now=datetime.now(UTC)
+        )
+    sender._replies_requested.clear()
+
+    response = await client.post(URL, headers=CSRF)
+
+    assert response.status_code == 409
+    assert response.json()["detail"].startswith("Gmail is Off")
     assert not sender.replies_poll_requested(user_id)
 
 

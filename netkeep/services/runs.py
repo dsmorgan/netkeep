@@ -107,7 +107,12 @@ from netkeep.models import (
 )
 from netkeep.scoping import get_scoped, scoped, scoped_count, scoped_update
 from netkeep.services import heat as heat_service
-from netkeep.services.linkedin_accounts import ensure_account, full_upkeep, scheduled_runs_armed
+from netkeep.services.linkedin_accounts import (
+    ensure_account,
+    full_upkeep,
+    linkedin_off,
+    scheduled_runs_armed,
+)
 from netkeep.services.linkedin_session import session_flag
 from netkeep.services.settings_kv import delete_setting, get_setting, set_setting
 
@@ -328,6 +333,25 @@ class QuickChecksOnly(RunError):
 FULL_UPKEEP_RUN_KINDS: Final = frozenset({SyncRunKind.CONNECTIONS_FULL, SyncRunKind.ENRICH})
 
 
+class LinkedInOff(RunError):
+    """A person asked for a LinkedIn run while LinkedIn's automation switch is Off (#829)."""
+
+
+#: What a run a person starts answers while LinkedIn is Off.
+LINKEDIN_OFF_REFUSAL: Final = (
+    "LinkedIn is Off, so netkeep starts no LinkedIn run; move LinkedIn to Manual or"
+    " Automatic first (Settings, Automation)"
+)
+
+
+def refuse_if_linkedin_off(session: Session, user: User) -> None:
+    """Raise :class:`LinkedInOff` while a person has turned LinkedIn Off (#829). Every
+    run a person starts asks it, through :func:`create_run`; an entry point asks first
+    too, so Off is the reason given rather than active hours or heat. Read-only."""
+    if linkedin_off(session, user):
+        raise LinkedInOff(LINKEDIN_OFF_REFUSAL)
+
+
 class RunFinished(RunError):
     """The run already ended; there is nothing to cancel."""
 
@@ -477,6 +501,10 @@ def create_run(
     """
     _require_writer(session)
     _require_aware(now)
+    if trigger is SyncRunTrigger.MANUAL:
+        # LinkedIn Off (#829) refuses every run a person starts: a sync, enrichment, an
+        # inbox poll, a prefill, a message check, and Check connection.
+        refuse_if_linkedin_off(session, user)
     if (
         kind is SyncRunKind.MESSAGE_SEND
         and trigger is not SyncRunTrigger.MANUAL

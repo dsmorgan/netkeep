@@ -360,7 +360,10 @@ def _gmail_gate(mailboxes: Sequence[Mailbox], serving: Serving) -> tuple[CheckSt
     if not armed:
         if all(m.status is MailboxStatus.DISABLED for m in mailboxes):
             return CheckState.OFF, "Gmail isn't connected"
-        return CheckState.OFF, "No mailbox is armed, so netkeep doesn't read Gmail"
+        return (
+            CheckState.OFF,
+            "Gmail is Off, so netkeep doesn't read it; move Gmail to Manual or Automatic first",
+        )
     if all(m.status is not MailboxStatus.OK for m in armed):
         return CheckState.BLOCKED, _needs_sign_in(armed)
     return None
