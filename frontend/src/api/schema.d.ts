@@ -2812,10 +2812,11 @@ export interface paths {
         put?: never;
         /**
          * Unpause Linkedin Schedule
-         * @description Deprecated (#829): deletes a pause left from before migration 0049, if any; it sets
-         *     no arming (an account armed under that pause runs on its schedule again). Migration
-         *     0049 deleted every pause, nothing writes one since, and no page calls this after
-         *     #832; the switch is ``PUT /automation/linkedin``.
+         * @description Deprecated (#829): deletes a pause left from before migration 0049, if any, and
+         *     never does more. A paused account reads as Manual, so it stays Manual (disarmed, not
+         *     Automatic again), and Off stays Off. Migration 0049 deleted every pause, nothing
+         *     writes one since, and no page calls this after #832; the switch is
+         *     ``PUT /automation/linkedin``.
          */
         post: operations["unpause_linkedin_schedule"];
         delete?: never;
