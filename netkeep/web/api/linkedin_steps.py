@@ -532,6 +532,7 @@ async def check_sent(
         runs.HeatSkipped,
         runs.SessionFlagged,
         runs.OutsideActiveHours,
+        runs.LinkedInOff,
     ) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except runs.RunError as exc:

@@ -242,7 +242,10 @@ def test_a_connected_mailbox_nobody_armed_is_off(world: World) -> None:
     status = world.status()
 
     assert status.checks[0].state is S.OFF
-    assert status.checks[0].reason == "No mailbox is armed, so netkeep doesn't read Gmail"
+    assert (
+        status.checks[0].reason
+        == "Gmail is Off, so netkeep doesn't read it; move Gmail to Manual or Automatic first"
+    )
     assert status.mailboxes[0].state is S.OFF
     assert not status.mailboxes[0].armed
 
@@ -324,7 +327,7 @@ def test_check_now_is_allowed_on_manual_and_refused_on_off(world: World) -> None
         assert service.replies_check_refused(session, user, serving=SERVING) is None
         mailbox.armed_at = None
         refused = service.replies_check_refused(session, user, serving=SERVING)
-        assert refused is not None and "armed" in refused
+        assert refused is not None and refused.startswith("Gmail is Off")
 
 
 def test_replies_follow_the_senders_interval(world: World) -> None:

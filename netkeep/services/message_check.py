@@ -107,6 +107,7 @@ def start(
         or _BAD_ID_CHARACTERS & set(profile_id)
     ):
         raise CheckRefused(f"contact {contact_id} has no usable LinkedIn profile URN")
+    runs.refuse_if_linkedin_off(session, user)  # #829: Off says so first
     runs.refuse_if_outside_active_hours(settings.linkedin, now=now)
     account_id = ensure_account(session, user).id
     runs.refuse_if_flagged_or_hot(session, user, account_id, now=now, settings=settings.linkedin)
