@@ -3895,20 +3895,32 @@ def test_0049_checks_the_depth_in_the_database(migration_engine: Engine) -> None
 
 
 def test_0049_downgrades_to_accounts_without_the_switch(migration_engine: Engine) -> None:
+    """An armed account at quick is disarmed first: 0048 would run it at full upkeep. One
+    armed at full stays armed, and an Off one stays disarmed."""
     migrations.upgrade(migration_engine, "0049")
     with migration_engine.begin() as connection:
-        _seed_users(connection, 1)
+        _seed_users(connection, 1, 2, 3)
         _insert_account(connection, id=1, user_id=1, armed=False)
+        _insert_account(connection, id=2, user_id=2, armed=True)
+        _insert_account(connection, id=3, user_id=3, armed=True)
         connection.execute(
             text(
                 "UPDATE linkedin_accounts SET automation_off_at = :t, scheduled_depth = 'quick',"
-                " automation_changed_at = :t"
+                " automation_changed_at = :t WHERE id = 1"
             ),
             {"t": STAMP},
+        )
+        connection.execute(
+            text("UPDATE linkedin_accounts SET scheduled_depth = 'quick' WHERE id = 2")
         )
     migrations.downgrade(migration_engine, "0048")
     columns = {c["name"] for c in inspect(migration_engine).get_columns("linkedin_accounts")}
     assert not {"automation_off_at", "scheduled_depth", "automation_changed_at"} & columns
     with migration_engine.begin() as connection:
-        assert _count(connection, "linkedin_accounts") == 1
+        armed = connection.execute(
+            text(
+                "SELECT id, scheduled_runs_armed_at IS NOT NULL FROM linkedin_accounts ORDER BY id"
+            )
+        ).all()
+        assert [(r[0], bool(r[1])) for r in armed] == [(1, False), (2, False), (3, True)]
     migrations.upgrade(migration_engine, "0049")

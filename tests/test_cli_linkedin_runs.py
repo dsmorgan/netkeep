@@ -875,7 +875,9 @@ def test_schedule_pause_and_unpause_show_in_status(cli_db: sessionmaker[Session]
     assert "paused since" in status.output and "schedule unpause" in status.output
     assert _armed(cli_db)  # pausing does not disarm
 
-    unpaused = runner.invoke(cli, ["linkedin", "schedule", "unpause"])
+    declined = runner.invoke(cli, ["linkedin", "schedule", "unpause"], input="n\n")
+    assert declined.exit_code == 1 and "stays paused" in declined.output
+    unpaused = runner.invoke(cli, ["linkedin", "schedule", "unpause"], input="y\n")
     after = runner.invoke(cli, ["linkedin", "schedule", "status"])
     assert unpaused.exit_code == 0 and "next due time" in unpaused.output
     assert "paused since" not in after.output

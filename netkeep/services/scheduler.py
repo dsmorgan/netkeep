@@ -228,6 +228,10 @@ class JobOutcome(enum.Enum):
     DISARMED_AFTER_GATE = "disarmed_after_gate"
     """The same, for an account found disarmed after the gate let the fire through."""
 
+    QUICK_CHECKS_AFTER_GATE = "quick_checks_after_gate"
+    """The same, for a full-upkeep kind whose account moved to quick checks after the gate
+    let the fire through (#829)."""
+
     OUTSIDE_HOURS_AFTER_GATE = "outside_hours_after_gate"
     """The worker refused the run outside active hours (#696): the window closed, or was
     narrowed on the Settings page, after the scheduler claimed the fire. The fire counts
@@ -258,6 +262,7 @@ SKIPPED_AFTER_GATE: Final = frozenset(
     {
         JobOutcome.PAUSED_AFTER_GATE,
         JobOutcome.DISARMED_AFTER_GATE,
+        JobOutcome.QUICK_CHECKS_AFTER_GATE,
         JobOutcome.NOTHING_TO_WATCH,
         JobOutcome.FIRST_POLL_BY_HAND,
         JobOutcome.OWNER_BY_HAND,

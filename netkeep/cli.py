@@ -3068,15 +3068,36 @@ def linkedin_schedule_pause() -> None:
 
 
 @schedule_app.command("unpause")
-def linkedin_schedule_unpause() -> None:
+def linkedin_schedule_unpause(
+    yes: Annotated[bool, typer.Option("--yes", help="Skip the confirmation prompt.")] = False,
+) -> None:
     """Let scheduled LinkedIn runs start again. Runs skipped while paused are not replayed:
-    each kind waits for its next due time."""
+    each kind waits for its next due time. Asks first unless --yes: on an armed account
+    it moves LinkedIn from Manual to Automatic (#829)."""
     engine = make_engine(database_url())
     try:
         factory = make_session_factory(engine)
         install_scope_guard(factory)
+        # Read, then ask, then write: a writer held across the prompt would lock out serve.
+        with session_scope(factory) as session:
+            user = _local_user_or_exit(session)
+            account = find_account(session, user)
+            pause = None if account is None else schedule_pause_state(session, user, account.id)
+            armed = account is not None and account.scheduled_runs_armed_at is not None
+        if (
+            pause is not None
+            and pause.paused
+            and armed
+            and not yes
+            and not typer.confirm(
+                "unpause scheduled LinkedIn runs? netkeep serve will then visit LinkedIn on its"
+                " own schedule again"
+            )
+        ):
+            typer.echo("cancelled: the schedule stays paused")
+            raise typer.Exit(code=1)
         with session_scope(factory, write=True) as session:
-            unpause_schedule(session, _local_user_or_exit(session))
+            unpause_schedule(session, _local_user_or_exit(session), now=datetime.now(UTC))
     finally:
         engine.dispose()
     typer.echo("scheduled LinkedIn runs unpaused; each kind runs at its next due time")

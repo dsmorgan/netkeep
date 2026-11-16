@@ -1,6 +1,8 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { pollStatusKeys } from '@/features/poll-status/api'
 
 import { linkedinKeys, pauseSchedule, unpauseSchedule } from './api'
@@ -15,9 +17,10 @@ function message(error: unknown): string {
  * Pause and unpause the schedule (#324), for the dashboard and the LinkedIn page.
  *
  * Pausing holds new scheduled runs without disarming: a run already going keeps
- * going (Cancel stops it), and the pause survives a restart. Neither button reaches
- * LinkedIn, so neither asks first. Unpausing replays nothing that was skipped:
- * each kind waits for its next due time, and the line under the button says so.
+ * going (Cancel stops it), and the pause survives a restart, so it doesn't ask first.
+ * Unpausing lets scheduled runs reach LinkedIn on their own again, so it asks first
+ * (#829). It replays nothing that was skipped: each kind waits for its next due time,
+ * and the line under the button says so.
  */
 export function SchedulePause({ schedule }: { schedule: Schedule }) {
   const queryClient = useQueryClient()
@@ -28,7 +31,8 @@ export function SchedulePause({ schedule }: { schedule: Schedule }) {
   }
   const pause = useMutation({ mutationFn: pauseSchedule, onSuccess })
   const unpause = useMutation({ mutationFn: unpauseSchedule, onSuccess })
-  const failed = pause.error ?? unpause.error
+  const [asking, setAsking] = useState(false)
+  const failed = pause.error ?? (asking ? null : unpause.error)
 
   return (
     <div className="flex flex-col gap-2">
@@ -46,12 +50,27 @@ export function SchedulePause({ schedule }: { schedule: Schedule }) {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => unpause.mutate()}
+              onClick={() => setAsking(true)}
               disabled={unpause.isPending}
             >
               {unpause.isPending ? 'Unpausing…' : 'Unpause schedule'}
             </Button>
           </div>
+          <ConfirmDialog
+            open={asking}
+            onOpenChange={setAsking}
+            title="Unpause scheduled runs?"
+            confirmVariant="default"
+            confirmLabel="Unpause schedule"
+            pending={unpause.isPending}
+            error={unpause.isError ? message(unpause.error) : null}
+            onConfirm={() => unpause.mutateAsync().then(() => setAsking(false))}
+          >
+            <p>
+              Scheduled syncs and enrichment will start contacting LinkedIn on their own again,
+              within active hours, without you starting or watching each one.
+            </p>
+          </ConfirmDialog>
         </>
       ) : (
         <div>

@@ -24777,8 +24777,18 @@
     },
     "/api/v1/linkedin/schedule/unpause": {
       "post": {
-        "description": "Let scheduled runs start again; each kind waits for its next due time.",
+        "description": "Let scheduled runs start again; each kind waits for its next due time. Needs\n``confirm: true``: on an armed account it moves LinkedIn from Manual to Automatic\n(#829), which does more.",
         "operationId": "unpause_linkedin_schedule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleArmIn"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
@@ -24789,6 +24799,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "description": "confirm was not true"
           }
         },
         "summary": "Unpause Linkedin Schedule",
