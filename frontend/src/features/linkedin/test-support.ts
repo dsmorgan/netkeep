@@ -5,6 +5,7 @@
  * `.example` addresses and no real LinkedIn URNs, in keeping with the rest of
  * the fixtures in this repository.
  */
+import { AUTOMATION_MANUAL } from '@/features/automation/test-support'
 import { jsonResponse } from '@/test/fetch'
 
 import type {
@@ -283,6 +284,7 @@ export function defaultHandlers(overrides: Record<string, Handler> = {}): Record
     'GET /api/v1/linkedin/heat': () => jsonResponse(HEAT),
     'GET /api/v1/linkedin/pins': () => jsonResponse(PINS),
     'GET /api/v1/linkedin/runs': () => jsonResponse(runPage([run()])),
+    'GET /api/v1/automation': () => jsonResponse(AUTOMATION_MANUAL),
     ...overrides,
   }
 }

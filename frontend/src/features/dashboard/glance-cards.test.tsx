@@ -7,10 +7,11 @@ import {
   createRoute,
   createRouter,
 } from '@tanstack/react-router'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { automation } from '@/features/automation/test-support'
 import { formatWhen } from '@/features/linkedin/fields'
 import { autoSendOutlook } from '@/features/linkedin/test-support'
 import { jsonResponse, mockFetch } from '@/test/fetch'
@@ -116,6 +117,7 @@ function scheduleWith(overrides: Record<string, unknown> = {}) {
 // --- coming up: campaign sends ----------------------------------------------------------
 
 const FIRES = '/api/v1/dashboard/next-fires'
+const AUTOMATION = '/api/v1/automation'
 
 /** Scheduled runs off, so a send test reads only its sends. */
 const UNARMED = json(scheduleWith({ armed: false }))
@@ -126,7 +128,12 @@ const NO_SENDS = json({ items: [], total: 0 })
  * so a test names only the one it is about.
  */
 function renderComingUp(routes: Record<string, Route>) {
-  return renderCard(ComingUpCard, { [FIRES]: NO_SENDS, [SCHEDULE]: UNARMED, ...routes })
+  return renderCard(ComingUpCard, {
+    [FIRES]: NO_SENDS,
+    [SCHEDULE]: UNARMED,
+    [AUTOMATION]: json(automation({ linkedin: { position: 'automatic' } })),
+    ...routes,
+  })
 }
 
 describe('ComingUpCard: campaign sends', () => {
@@ -284,7 +291,7 @@ describe('ComingUpCard: scheduled LinkedIn runs', () => {
   it('says scheduled runs are off rather than showing a time that will not fire', async () => {
     renderComingUp({ [SCHEDULE]: json(schedule({ armed: false })) })
     const body = await card('Coming up')
-    expect(await body.findByText(/Scheduled runs are off/)).toBeInTheDocument()
+    expect(await body.findByText(/isn’t on Automatic/)).toBeInTheDocument()
     expect(body.queryByText(/2099/)).not.toBeInTheDocument()
     expect(body.getByRole('link', { name: 'Open LinkedIn' })).toHaveAttribute(
       'href',
@@ -329,55 +336,16 @@ describe('ComingUpCard: scheduled LinkedIn runs', () => {
     expect(await body.findByRole('alert')).toHaveTextContent('No scheduler is running')
   })
 
-  it('says the schedule is paused instead of showing times that will not fire (#324)', async () => {
-    let paused = true
-    const { seen } = renderComingUp({
-      [SCHEDULE]: () =>
-        jsonResponse(
-          schedule(paused ? { paused: true, paused_at: '2026-09-21T08:00:00Z' } : { paused }),
-        ),
-      [`${SCHEDULE}/unpause`]: () => {
-        paused = false
-        return jsonResponse(schedule({ paused: false, paused_at: null }))
-      },
-    })
-    const body = await card('Coming up')
-    expect(await body.findByText(/no new scheduled run starts/)).toBeInTheDocument()
-    expect(body.getByText(/nothing skipped is replayed/)).toBeInTheDocument()
-    expect(body.queryByText(/2099/)).not.toBeInTheDocument()
-
-    fireEvent.click(body.getByRole('button', { name: 'Unpause schedule' }))
-    const dialog = await screen.findByRole('alertdialog')
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Unpause schedule' }))
-    expect(await body.findByRole('button', { name: 'Pause schedule' })).toBeInTheDocument()
-    expect(seen).toContain(`${SCHEDULE}/unpause`)
-    expect((await body.findAllByRole('listitem')).length).toBe(2)
-  })
-
-  it('says both when the schedule is disarmed and paused (#324)', async () => {
+  it('leaves out the full sync and enrichment at quick checks (#829)', async () => {
     renderComingUp({
-      [SCHEDULE]: json(schedule({ armed: false, paused: true, paused_at: '2026-09-21T08:00:00Z' })),
+      [SCHEDULE]: json(schedule()),
+      [AUTOMATION]: json(automation({ linkedin: { position: 'automatic', depth: 'quick' } })),
     })
     const body = await card('Coming up')
-    expect(await body.findByText(/Scheduled runs are off/)).toBeInTheDocument()
-    expect(body.getByRole('link', { name: 'Open LinkedIn' })).toHaveAttribute(
-      'href',
-      '/linkedin#schedule',
-    )
-    expect(body.getByText(/no new scheduled run starts/)).toBeInTheDocument()
-    expect(body.getByRole('button', { name: 'Unpause schedule' })).toBeInTheDocument()
-    expect(body.queryByText(/2099/)).not.toBeInTheDocument()
-  })
-
-  it('offers to pause an armed schedule (#324)', async () => {
-    const { seen } = renderComingUp({
-      [SCHEDULE]: json(schedule({ paused: false, paused_at: null })),
-      [`${SCHEDULE}/pause`]: json(schedule({ paused: true, paused_at: '2026-09-21T08:00:00Z' })),
-    })
-    const body = await card('Coming up')
-    fireEvent.click(await body.findByRole('button', { name: 'Pause schedule' }))
-    expect(await body.findByText(/no new scheduled run starts/)).toBeInTheDocument()
-    expect(seen).toContain(`${SCHEDULE}/pause`)
+    const items = await body.findAllByRole('listitem')
+    expect(items.map((item) => item.textContent)).toEqual([
+      expect.stringContaining('Incremental connections sync'),
+    ])
   })
 
   it('lists the auto-send check with its time and what it would do', async () => {
@@ -485,7 +453,6 @@ describe('ComingUpCard: one timeline', () => {
     const items = await body.findAllByRole('listitem')
     expect(items).toHaveLength(1)
     expect(items[0]).toHaveTextContent('Ada Example')
-    expect(body.getByRole('button', { name: 'Unpause schedule' })).toBeInTheDocument()
   })
 
   it('keeps the runs when the sends fail, and says which read failed', async () => {

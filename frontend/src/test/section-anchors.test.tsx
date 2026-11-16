@@ -83,6 +83,7 @@ describe('section anchors (#739)', () => {
     serve()
     await renderApp('/settings')
     for (const id of [
+      'automation',
       'gmail',
       'sending-hours',
       'about-you',

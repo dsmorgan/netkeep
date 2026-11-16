@@ -36,6 +36,10 @@ The sidebar footer has an Auto, Light and Dark switch (#666). It's in the sideba
 
 Tone only what needs the person: the live run (accent, amber while paused), the send tray, replies (ok), a stopped session or mailbox (bad).
 
+## Automation switch
+
+The Off, Manual and Automatic switch (#829) is a radio group in two forms, both in `features/automation/automation-switch.tsx`. Settings › Automation uses the three-stop track, with a line under each stop; the status pill popovers and the LinkedIn page use the compact segments. Off is muted (`--muted-foreground`), Manual the accent (`--primary`), Automatic green (`--ok`), and the track fills in the chosen position's color up to its stop. LinkedIn's How thorough choice sits in a flat green tint (`nk-tint nk-tone-ok nk-flat`). The switch adds no tokens of its own.
+
 ## Fallbacks and accessibility
 
 - Panes are solid first. Glass is applied only inside `@supports (backdrop-filter: blur(1px))`, and `prefers-reduced-transparency: reduce` (macOS's Reduce transparency) makes the panes solid again. The field stays on: it's the page background, and page text is held to AA on it. A solid tint is the state color at 0.6 of the tint mix over `--card`.

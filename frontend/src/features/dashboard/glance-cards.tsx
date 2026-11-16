@@ -5,6 +5,7 @@ import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import type { Tone } from '@/components/ui/tone'
+import { automationQuery, FULL_UPKEEP_KINDS } from '@/features/automation/api'
 import { CampaignStatusBadge } from '@/features/campaigns/badges'
 import { campaignsQuery } from '@/features/campaigns/api'
 import { countsText } from '@/features/campaigns/format'
@@ -15,7 +16,6 @@ import {
   autoSendWaitText,
   type AutoSendOutlook,
 } from '@/features/linkedin-steps/format'
-import { SchedulePause } from '@/features/linkedin/schedule-pause'
 import { formatWhen } from '@/features/linkedin/fields'
 import { RUN_KIND_LABELS, type RunKind } from '@/features/linkedin/types'
 
@@ -139,6 +139,7 @@ export function ComingUpCard() {
   // `scheduleQuery` refetches each minute on its own (#761), so the auto-send check's
   // time and reason never go stale on an open page; one poll, not a second (#752).
   const schedule = useQuery(scheduleQuery)
+  const automation = useQuery(automationQuery)
   const outlook = schedule.data?.auto_send ?? null
   const autoSendOn = outlook?.on === true
   const fetchedAt = new Date(fires.dataUpdatedAt)
@@ -154,11 +155,15 @@ export function ComingUpCard() {
   const plan = schedule.data
   // Jobs fire only while the schedule is armed and not paused.
   const firing = plan !== undefined && plan.armed && !plan.paused
+  // At quick checks the full sync and enrichment are skipped when due (#829).
+  const quick = automation.data?.linkedin.depth === 'quick'
   const check = firing && autoSendOn ? outlook : null
   const rows: Upcoming[] = [
     ...(fires.data?.items ?? []).map((fire): Upcoming => ({ kind: 'send', at: fire.due, fire })),
     ...(firing ? plan.jobs : []).flatMap((job): Upcoming[] =>
-      job.next_due === null ? [] : [{ kind: 'job', at: job.next_due, job: job.kind }],
+      job.next_due === null || (quick && FULL_UPKEEP_KINDS.has(job.kind))
+        ? []
+        : [{ kind: 'job', at: job.next_due, job: job.kind }],
     ),
   ]
   // An overdue check runs once in the scheduler's catch-up window, not at its old time.
@@ -172,9 +177,7 @@ export function ComingUpCard() {
       {schedule.isError && <Failed what="The LinkedIn schedule" />}
       {plan !== undefined && !plan.armed && (
         <>
-          <Muted>
-            Scheduled runs are off. Nothing visits LinkedIn on its own until you arm them.
-          </Muted>
+          <Muted>LinkedIn isn’t on Automatic, so nothing visits LinkedIn on its own.</Muted>
           <div>
             <Button size="sm" variant="outline" render={<Link to="/linkedin" hash="schedule" />}>
               Open LinkedIn
@@ -208,8 +211,6 @@ export function ComingUpCard() {
           Auto-send check: <span className="text-muted-foreground">{autoSendCheckText(check)}</span>
         </p>
       )}
-      {/* Disarmed and paused are separate switches: both say so, and either can be undone. */}
-      {plan !== undefined && (plan.armed || plan.paused) && <SchedulePause schedule={plan} />}
     </GlanceCard>
   )
 }

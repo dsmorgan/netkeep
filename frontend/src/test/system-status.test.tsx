@@ -2,6 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ATTENTION_EVERY_MS } from '@/features/attention/api'
+import { automation, BLOCKED_REASON } from '@/features/automation/test-support'
 import { BATCH_EVERY_MS, PROGRESS_EVERY_MS } from '@/features/system-status/api'
 import {
   gmailChip,
@@ -18,6 +19,7 @@ import { renderApp } from './render'
 
 const CHECK_NOW = '/api/v1/poll-status/gmail-replies/check-now'
 const STATUS = '/api/v1/system-status'
+const AUTOMATION = '/api/v1/automation'
 
 /** The LinkedIn chip stopped by a session flag, as the server rolls it up. */
 function stopped(word: 'Logged out' | 'Checkpoint') {
@@ -168,6 +170,88 @@ describe('the top bar’s status chips (#751)', () => {
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Check now' }))
     await waitFor(() => expect(posts).toBe(1))
+  })
+
+  it('moves LinkedIn left from its popover at once, then reads the pill again (#829)', async () => {
+    let reads = 0
+    const calls = serve({
+      [STATUS]: () => {
+        reads += 1
+        return jsonResponse(serverStatus())
+      },
+      [`PUT ${AUTOMATION}/linkedin`]: () =>
+        jsonResponse(automation({ linkedin: { position: 'manual' } })),
+    })
+    await renderApp('/contacts')
+    fireEvent.click(await chip('linkedin', 'ok'))
+    const dialog = await screen.findByRole('dialog')
+    const radios = within(
+      await within(dialog).findByRole('radiogroup', { name: 'LinkedIn automation' }),
+    )
+    expect(radios.getByRole('radio', { name: 'Automatic' })).toHaveAttribute('aria-checked', 'true')
+    expect(
+      within(dialog).getByRole('checkbox', {
+        name: 'Also run the weekly full sync and profile refreshes',
+      }),
+    ).toHaveAttribute('aria-checked', 'true')
+    const before = reads
+
+    fireEvent.click(radios.getByRole('radio', { name: 'Manual' }))
+
+    await waitFor(() =>
+      expect(radios.getByRole('radio', { name: 'Manual' })).toHaveAttribute('aria-checked', 'true'),
+    )
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(
+      calls.filter((call) => call.method === 'PUT').map((call) => JSON.parse(call.body)),
+    ).toEqual([{ position: 'manual', confirm: false }])
+    // The pill's word is the server's: the roll-up is read again, not rewritten here.
+    await waitFor(() => expect(reads).toBeGreaterThan(before))
+  })
+
+  it('asks before turning Gmail to Automatic from its popover', async () => {
+    const calls = serve({
+      [AUTOMATION]: automation({ linkedin: { position: 'automatic' } }),
+      [`PUT ${AUTOMATION}/gmail`]: () =>
+        jsonResponse(
+          automation({ linkedin: { position: 'automatic' }, gmail: { position: 'automatic' } }),
+        ),
+    })
+    await renderApp('/contacts')
+    fireEvent.click(await chip('gmail', 'ok'))
+    const popover = await screen.findByRole('dialog')
+    const radios = within(
+      await within(popover).findByRole('radiogroup', { name: 'Gmail automation' }),
+    )
+
+    fireEvent.click(radios.getByRole('radio', { name: 'Automatic' }))
+    const confirm = await screen.findByRole('alertdialog', {
+      name: 'Let netkeep send email on its own?',
+    })
+    expect(calls.some((call) => call.method === 'PUT')).toBe(false)
+
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Turn on Automatic' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(
+      calls.filter((call) => call.method === 'PUT').map((call) => JSON.parse(call.body)),
+    ).toEqual([{ position: 'automatic', confirm: true }])
+  })
+
+  it('disables Gmail Automatic in its popover while it isn’t ready, and says why', async () => {
+    serve({
+      [AUTOMATION]: automation({
+        gmail: { automatic_ready: false, blocked_reason: BLOCKED_REASON },
+      }),
+    })
+    await renderApp('/contacts')
+    fireEvent.click(await chip('gmail', 'ok'))
+    const popover = await screen.findByRole('dialog')
+    const radios = within(
+      await within(popover).findByRole('radiogroup', { name: 'Gmail automation' }),
+    )
+    const stop = radios.getByRole('radio', { name: 'Automatic' })
+    expect(stop).toHaveAttribute('aria-disabled', 'true')
+    expect(stop).toHaveAccessibleDescription(BLOCKED_REASON)
   })
 
   it('reads Unreachable in red, and Unknown in grey, while the server is down', async () => {
