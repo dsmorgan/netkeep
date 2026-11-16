@@ -4,6 +4,12 @@ import { Component, useCallback, useEffect, useRef, useState, type ReactNode } f
 import { healthQuery } from '@/api/queries'
 import { announcement, type ActivityState } from '@/features/attention/activity'
 import { attentionQuery } from '@/features/attention/api'
+import {
+  AutomationHeading,
+  GmailSwitchCompact,
+  LinkedInSwitchCompact,
+} from '@/features/automation/automation-compact'
+import { useGmailAutomation, useLinkedInAutomation } from '@/features/automation/use-automation'
 import { lastRunQuery } from '@/features/dashboard/api'
 import { useEventStreamStatus } from '@/features/events/event-stream-context'
 import { useServerEvent } from '@/features/events/use-server-event'
@@ -15,6 +21,16 @@ import { useNow } from '@/features/poll-status/use-now'
 import { useSystemStatus } from './api'
 import { gmailStatus, linkedinStatus, netkeepStatus, read, updatedText } from './roll-up'
 import { StatusChip } from './status-chip'
+
+/** The popover's switch (#829, mockup D), under its status rows. */
+function AutomationBlock({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-2 border-t border-border pt-2.5">
+      <AutomationHeading />
+      {children}
+    </div>
+  )
+}
 
 /** When the newest of `queries` last answered, in ms; 0 before any has. */
 function updatedAt(...queries: UseQueryResult<unknown>[]): number {
@@ -128,6 +144,9 @@ function Chips() {
   const app = netkeepStatus({ health: read(health), stream, status: read(status) }, now)
   const replies = poll.data?.items.find((check) => check.key === 'gmail_replies')
   const updated = updatedText(updatedAt(status), now)
+  // The switches' dialogs render beside the chips, so a dialog outlives its popover.
+  const gmailSwitch = useGmailAutomation()
+  const linkedinSwitch = useLinkedInAutomation()
 
   return (
     <div
@@ -142,8 +161,21 @@ function Chips() {
             <CheckRepliesNow check={replies} />
           </div>
         )}
+        {!serverDown && (
+          <AutomationBlock>
+            <GmailSwitchCompact control={gmailSwitch} />
+          </AutomationBlock>
+        )}
       </StatusChip>
-      <StatusChip status={linkedin} updated={updated} />
+      {gmailSwitch.dialog}
+      <StatusChip status={linkedin} updated={updated}>
+        {!serverDown && (
+          <AutomationBlock>
+            <LinkedInSwitchCompact control={linkedinSwitch} />
+          </AutomationBlock>
+        )}
+      </StatusChip>
+      {linkedinSwitch.dialog}
       <LinkedInAnnouncer />
       <StatusChip status={app} updated={updatedText(updatedAt(health, status), now)} />
     </div>

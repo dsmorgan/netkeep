@@ -58,9 +58,10 @@ describe('session banner', () => {
 })
 
 describe('scheduled runs, shown plainly', () => {
-  it('shows disarmed by default', async () => {
+  it('shows the automation switch on Manual by default (#829)', async () => {
     renderLinkedInPage()
-    expect(await screen.findByText('Disarmed — nothing runs on its own')).toBeInTheDocument()
+    const group = within(await screen.findByRole('radiogroup', { name: 'LinkedIn automation' }))
+    expect(group.getByRole('radio', { name: 'Manual' })).toHaveAttribute('aria-checked', 'true')
   })
 })
 

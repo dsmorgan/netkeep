@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { automationKeys } from '@/features/automation/api'
 import { pollStatusKeys } from '@/features/poll-status/api'
 import {
   ARM_LABEL,
@@ -64,6 +65,8 @@ export function GmailSection({ outcome }: { outcome: GmailOutcome }) {
     Promise.all([
       queryClient.invalidateQueries({ queryKey: mailboxKeys.all }),
       queryClient.invalidateQueries({ queryKey: pollStatusKeys.all }),
+      // Arming is the Gmail automation switch's position (#829).
+      queryClient.invalidateQueries({ queryKey: automationKeys.all }),
     ])
 
   const connect = useMutation({

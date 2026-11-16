@@ -1,128 +1,67 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 
-import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { ActivityIndicator } from '@/features/attention/activity-indicator'
-import { pollStatusKeys } from '@/features/poll-status/api'
-import { cn } from '@/lib/utils'
+import { FULL_UPKEEP_KINDS } from '@/features/automation/api'
+import { LinkedInSwitchCompact } from '@/features/automation/automation-compact'
+import { useLinkedInAutomation } from '@/features/automation/use-automation'
 
-import { armSchedule, budgetQuery, disarmSchedule, linkedinKeys, scheduleQuery } from './api'
+import { scheduleQuery } from './api'
 import { formatWhen } from './fields'
-import { ProfileViewNotice } from './profile-view-notice'
-import { RiskWarning } from './risk-warning'
-import { SchedulePause } from './schedule-pause'
+import { RUN_KIND_LABELS, type RunKind } from './types'
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+const NOT_AUTOMATIC = {
+  off: 'Off: netkeep leaves LinkedIn alone.',
+  manual: 'Manual: nothing runs on its own. Runs start when you click Start.',
+} as const
+
 /**
- * Whether scheduled runs may fire, always shown plainly (spec 9.4): every
- * install starts disarmed, and arming is the one thing on this page that
- * lets netkeep contact LinkedIn without a person watching. Arming from the
- * UI goes through a confirmation dialog that says exactly that and sends
- * `confirm: true` (the API refuses arming without it); disarming is one
- * click, because backing out of "runs happen on their own" should never be
- * harder than turning it on. When the daily profile-visit limit is above
- * 100, the dialog shows the budget's risk warning too (#318); it informs and
- * does not block arming. Armed, the schedule can also be paused (#324): no new
- * scheduled run starts until it is unpaused, without disarming.
+ * What runs on its own (spec 9.4), always shown plainly: the LinkedIn automation
+ * switch (#829), the same one Settings › Automation and the LinkedIn pill have, and,
+ * on Automatic, each kind's next due time. Moving to Automatic, or adding the weekly
+ * full sync, asks first and sends `confirm: true`; moving back is one click.
  */
 export function ScheduleCard() {
   const schedule = useQuery(scheduleQuery)
-  const budget = useQuery(budgetQuery)
-  const queryClient = useQueryClient()
-  const [asking, setAsking] = useState(false)
-
-  const arm = useMutation({
-    mutationFn: armSchedule,
-    onSuccess: (data) => {
-      queryClient.setQueryData(linkedinKeys.schedule(), data)
-      void queryClient.invalidateQueries({ queryKey: linkedinKeys.status() })
-      void queryClient.invalidateQueries({ queryKey: pollStatusKeys.all })
-      setAsking(false)
-    },
-  })
-  const disarm = useMutation({
-    mutationFn: disarmSchedule,
-    onSuccess: (data) => {
-      queryClient.setQueryData(linkedinKeys.schedule(), data)
-      void queryClient.invalidateQueries({ queryKey: linkedinKeys.status() })
-      void queryClient.invalidateQueries({ queryKey: pollStatusKeys.all })
-    },
-  })
-
-  const armed = schedule.data?.armed ?? false
+  const control = useLinkedInAutomation()
+  const state = control.state
 
   return (
     <Card size="sm">
       <CardHeader>
         <CardTitle level={2}>Scheduled runs</CardTitle>
-        <CardDescription>Syncs and enrichment that run on their own, when armed.</CardDescription>
+        <CardDescription>Syncs and enrichment that run on their own, on Automatic.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         <ActivityIndicator />
-        {schedule.isPending && <p role="status">Loading…</p>}
-        {schedule.isError && <p role="alert">{message(schedule.error)}</p>}
-        {schedule.isSuccess && (
-          <>
-            <p className="flex items-center gap-2">
-              <span
-                aria-hidden="true"
-                className={cn('size-2 rounded-full', armed ? 'bg-warn' : 'bg-muted-foreground/50')}
-              />
-              <span role="status" className="font-medium">
-                {armed
-                  ? `Armed${schedule.data.armed_at === null ? '' : ` since ${formatWhen(schedule.data.armed_at)}`}`
-                  : 'Disarmed — nothing runs on its own'}
-              </span>
-            </p>
-            {schedule.data.jobs.length > 0 && (
-              <ul className="space-y-1 text-muted-foreground">
-                {schedule.data.jobs.map((job) => (
-                  <li key={job.kind}>
-                    {job.kind}: every {job.interval_hours}h, next due{' '}
-                    {job.next_due === null ? 'not scheduled' : formatWhen(job.next_due)}
-                  </li>
-                ))}
-              </ul>
-            )}
-            {(armed || schedule.data.paused) && <SchedulePause schedule={schedule.data} />}
-            {armed ? (
-              <Button variant="outline" onClick={() => disarm.mutate()} disabled={disarm.isPending}>
-                {disarm.isPending ? 'Disarming…' : 'Disarm'}
-              </Button>
-            ) : (
-              <Button onClick={() => setAsking(true)}>Arm scheduled runs</Button>
-            )}
-            {disarm.isError && <p role="alert">{message(disarm.error)}</p>}
-          </>
+        {state === undefined && control.loadError === null && <p role="status">Loading…</p>}
+        <LinkedInSwitchCompact control={control} />
+        {state !== undefined && state.position !== 'automatic' && (
+          <p className="text-muted-foreground">{NOT_AUTOMATIC[state.position]}</p>
+        )}
+        {state?.position === 'automatic' && schedule.isError && (
+          <p role="alert">{message(schedule.error)}</p>
+        )}
+        {state?.position === 'automatic' && schedule.isSuccess && schedule.data.jobs.length > 0 && (
+          <ul aria-label="Next runs" className="space-y-1 text-muted-foreground">
+            {schedule.data.jobs.map((job) => (
+              <li key={job.kind}>
+                {RUN_KIND_LABELS[job.kind as RunKind] ?? job.kind}:{' '}
+                {state.depth === 'quick' && FULL_UPKEEP_KINDS.has(job.kind)
+                  ? 'not on quick checks'
+                  : `every ${job.interval_hours}h, next due ${
+                      job.next_due === null ? 'not scheduled' : formatWhen(job.next_due)
+                    }`}
+              </li>
+            ))}
+          </ul>
         )}
       </CardContent>
-
-      <ConfirmDialog
-        open={asking}
-        onOpenChange={setAsking}
-        title="Arm scheduled runs?"
-        confirmVariant="default"
-        confirmLabel="Arm scheduled runs"
-        pending={arm.isPending}
-        error={arm.isError ? message(arm.error) : null}
-        onConfirm={() => arm.mutateAsync()}
-      >
-        <p>
-          Scheduled syncs and enrichment will start contacting LinkedIn on their own, within active
-          hours, from now on — without you starting or watching each one.
-        </p>
-        <RiskWarning text={budget.data?.risk_warning} />
-        <ProfileViewNotice text={budget.data?.profile_view_notice} />
-        <p>
-          You can disarm again with one click, any time, and a run already going is not cancelled by
-          disarming.
-        </p>
-      </ConfirmDialog>
+      {control.dialog}
     </Card>
   )
 }

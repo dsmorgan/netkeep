@@ -311,46 +311,6 @@ export async function unpinContact(contactId: number): Promise<Pin[]> {
   return data
 }
 
-// --- scheduled runs: armed or not ----------------------------------------------------
-
-/** Arm scheduled runs. Needs `confirm: true` — a person's own act, never automatic. */
-export async function armSchedule(): Promise<Schedule> {
-  const { data, error, response } = await api.POST('/api/v1/linkedin/schedule/arm', {
-    body: { confirm: true },
-  })
-  if (data === undefined) throw apiError(error, response, 'POST /api/v1/linkedin/schedule/arm')
-  return data
-}
-
-export async function disarmSchedule(): Promise<Schedule> {
-  const { data, error, response } = await api.POST('/api/v1/linkedin/schedule/disarm')
-  if (data === undefined) {
-    throw apiError(error, response, 'POST /api/v1/linkedin/schedule/disarm')
-  }
-  return data
-}
-
-/**
- * Hold scheduled runs without disarming (#324): no new one starts until unpaused, a
- * run already going is not stopped, and nothing skipped while paused is replayed.
- */
-export async function pauseSchedule(): Promise<Schedule> {
-  const { data, error, response } = await api.POST('/api/v1/linkedin/schedule/pause')
-  if (data === undefined) throw apiError(error, response, 'POST /api/v1/linkedin/schedule/pause')
-  return data
-}
-
-/** Unpause the schedule. Needs `confirm: true` (#829): runs start on their own again. */
-export async function unpauseSchedule(): Promise<Schedule> {
-  const { data, error, response } = await api.POST('/api/v1/linkedin/schedule/unpause', {
-    body: { confirm: true },
-  })
-  if (data === undefined) {
-    throw apiError(error, response, 'POST /api/v1/linkedin/schedule/unpause')
-  }
-  return data
-}
-
 // --- the session flag and heat: confirmed manual clears (#181) ---------------------------
 
 /**

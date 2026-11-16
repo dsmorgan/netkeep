@@ -2,6 +2,7 @@
  * A quiet, healthy install for app-level tests of the dashboard and the top bar's
  * status chips: every read they make, answered (invented data only).
  */
+import { automation } from '@/features/automation/test-support'
 import { GRAPH } from '@/features/dashboard/steps-fixtures'
 import { mailbox } from '@/features/mailboxes/test-support'
 import { pollStatus, serverStatus } from '@/features/system-status/test-support'
@@ -38,6 +39,7 @@ export function quiet(): Record<string, unknown> {
     '/api/v1/health': { status: 'ok', version: '0.0.1-test' },
     '/api/v1/poll-status': pollStatus(),
     '/api/v1/system-status': serverStatus(),
+    '/api/v1/automation': automation({ linkedin: { position: 'automatic' } }),
     '/api/v1/setup': {
       complete: false,
       steps: GRAPH.map((step) => ({ ...step, title: `Step ${step.key}`, reason: 'Waits.' })),

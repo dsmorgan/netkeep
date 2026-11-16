@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { meQuery } from '@/api/queries'
 import { SectionAnchor } from '@/components/layout/section-anchor'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { AutomationCard } from '@/features/automation/automation-card'
 
 import { AboutYouSection } from './about-you-section'
 import { BackupsSection } from './backups-section'
@@ -27,9 +28,9 @@ export function SettingsPage({ gmail = {} }: { gmail?: GmailOutcome }) {
         <CardHeader>
           <CardTitle level={2}>Settings</CardTitle>
           <CardDescription>
-            Gmail auth, sending hours, about you, LinkedIn budgets, hours and runs, campaign
-            defaults, backups, and a support bundle to send when something goes wrong. You change
-            them here; config.toml is optional, and a value it sets wins.
+            Automation, Gmail auth, sending hours, about you, LinkedIn budgets, hours and runs,
+            campaign defaults, backups, and a support bundle to send when something goes wrong. You
+            change them here; config.toml is optional, and a value it sets wins.
           </CardDescription>
           <p className="text-sm text-muted-foreground">
             netkeep’s UI requires Google Chrome. Other browsers may work, but they are not tested or
@@ -37,6 +38,10 @@ export function SettingsPage({ gmail = {} }: { gmail?: GmailOutcome }) {
           </p>
         </CardHeader>
       </Card>
+
+      <SectionAnchor id="automation">
+        <AutomationCard />
+      </SectionAnchor>
 
       <SectionAnchor id="gmail">
         <GmailSection outcome={gmail} />
