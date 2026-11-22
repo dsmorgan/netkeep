@@ -413,6 +413,31 @@ describe('the activity indicator (#347)', () => {
     )
   })
 
+  it('speaks the new position when one render changes both the activity and the switch (#834)', async () => {
+    serve(
+      () => activity('running', 'A LinkedIn enrichment run is running.'),
+      204,
+      () => automation(),
+    )
+    const { queryClient } = await renderApp('/exports')
+    const live = await screen.findByTestId('activity-live')
+    await waitFor(() => expect(queryClient.getQueryData(attentionQuery.queryKey)).toBeDefined())
+    await waitFor(() => expect(queryClient.getQueryData(automationKeys.all)).toBeDefined())
+
+    // Both answers land together: the run ended, and the switch moved to Off meanwhile.
+    act(() => {
+      queryClient.setQueryData(automationKeys.all, automation({ linkedin: { position: 'off' } }))
+      queryClient.setQueryData(
+        attentionQuery.queryKey,
+        activity('idle', 'Scheduled LinkedIn runs are off.'),
+      )
+    })
+
+    await waitFor(() =>
+      expect(live).toHaveTextContent('LinkedIn: Off. Scheduled LinkedIn runs are off.'),
+    )
+  })
+
   it('announces armed as Automatic, whatever the switch read says', () => {
     expect(announcement(activity('armed', '').activity, 'manual')).toBe('LinkedIn: Automatic')
   })
