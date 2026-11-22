@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { act } from 'react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { automation } from '@/features/automation/test-support'
 import { mailbox } from '@/features/mailboxes/test-support'
@@ -220,6 +221,52 @@ describe('app shell', () => {
     expect(within(header).getByRole('group', { name: 'System status' })).toBeInTheDocument()
     // Above the page's cards and banners, below the drawer (z-40) and dialogs (z-50).
     expect(header.parentElement).toBe(screen.getByTestId('shell-content'))
+  })
+
+  describe('the top bar’s height (#835)', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals()
+      vi.restoreAllMocks()
+    })
+
+    it('sets --top-bar-height for scroll-padding-top, and removes it on unmount', async () => {
+      type Entry = {
+        callback: ResizeObserverCallback
+        targets: Element[]
+        disconnected: boolean
+      }
+      const observers: Entry[] = []
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          entry: Entry
+          constructor(callback: ResizeObserverCallback) {
+            this.entry = { callback, targets: [], disconnected: false }
+            observers.push(this.entry)
+          }
+          observe(target: Element) {
+            this.entry.targets.push(target)
+          }
+          unobserve() {}
+          disconnect() {
+            this.entry.disconnected = true
+          }
+        },
+      )
+      vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(52)
+      const root = document.documentElement
+      const { unmount } = await renderApp('/contacts')
+
+      const header = screen.getByTestId('top-bar')
+      const watching = observers.find((entry) => entry.targets.includes(header))
+      expect(watching).toBeDefined()
+      act(() => watching?.callback([], {} as ResizeObserver))
+      expect(root.style.getPropertyValue('--top-bar-height')).toBe('52px')
+
+      unmount()
+      expect(watching?.disconnected).toBe(true)
+      expect(root.style.getPropertyValue('--top-bar-height')).toBe('')
+    })
   })
 
   describe('the automation bar (#835)', () => {
