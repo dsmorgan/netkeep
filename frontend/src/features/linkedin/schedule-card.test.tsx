@@ -44,7 +44,7 @@ describe('ScheduleCard (#829, #835)', () => {
   it('says nothing is scheduled on Manual, with no run times and no “LinkedIn: off”', async () => {
     renderCard()
     expect(
-      await screen.findByText('Nothing runs on its own while LinkedIn is on Manual.'),
+      await screen.findByText('Nothing runs on its own while LinkedIn automation is Manual.'),
     ).toBeInTheDocument()
     expect(screen.queryByRole('list', { name: 'Next runs' })).toBeNull()
     expect(screen.queryByText(/LinkedIn: off/)).toBeNull()
@@ -57,7 +57,7 @@ describe('ScheduleCard (#829, #835)', () => {
       'GET /api/v1/automation': () => jsonResponse(automation({ linkedin: { position: 'off' } })),
     })
     expect(
-      await screen.findByText('Nothing runs on its own while LinkedIn is Off.'),
+      await screen.findByText('Nothing runs on its own while LinkedIn automation is Off.'),
     ).toBeInTheDocument()
   })
 

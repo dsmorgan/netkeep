@@ -61,7 +61,7 @@ describe('scheduled runs, shown plainly', () => {
   it('says nothing runs on its own on Manual, with no switch of its own (#835)', async () => {
     renderLinkedInPage()
     expect(
-      await screen.findByText('Nothing runs on its own while LinkedIn is on Manual.'),
+      await screen.findByText('Nothing runs on its own while LinkedIn automation is Manual.'),
     ).toBeInTheDocument()
     // The switch is the shell's automation bar now (app-shell.test.tsx), not this page's.
     expect(screen.queryByRole('radiogroup', { name: 'LinkedIn automation' })).toBeNull()

@@ -1,17 +1,21 @@
 import { useQuery } from '@tanstack/react-query'
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { automationQuery, FULL_UPKEEP_KINDS } from '@/features/automation/api'
+import {
+  automationQuery,
+  FULL_UPKEEP_KINDS,
+  POSITION_LABEL,
+  type Position,
+} from '@/features/automation/api'
 
 import { scheduleQuery } from './api'
 import { formatWhen } from './fields'
 import { RUN_KIND_LABELS, type RunKind } from './types'
 
-/** The card's line off Automatic, in the switch's own words. */
-const NOTHING_SCHEDULED = {
-  off: 'Nothing runs on its own while LinkedIn is Off.',
-  manual: 'Nothing runs on its own while LinkedIn is on Manual.',
-} as const
+/** The card's line off Automatic: one sentence, naming the bar's switch and its position. */
+function nothingScheduled(position: Exclude<Position, 'automatic'>): string {
+  return `Nothing runs on its own while LinkedIn automation is ${POSITION_LABEL[position]}.`
+}
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -39,7 +43,7 @@ export function ScheduleCard() {
           <p role="alert">{message(automation.error)}</p>
         )}
         {state !== undefined && state.position !== 'automatic' && (
-          <p className="text-muted-foreground">{NOTHING_SCHEDULED[state.position]}</p>
+          <p className="text-muted-foreground">{nothingScheduled(state.position)}</p>
         )}
         {state?.position === 'automatic' && schedule.isError && (
           <p role="alert">{message(schedule.error)}</p>
