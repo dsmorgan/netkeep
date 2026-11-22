@@ -600,7 +600,7 @@ def test_send_is_refused_until_armed_for_drafts_and_a_draft_was_found(
 ) -> None:
     user = _user(session_factory)
     mailbox = _connect(session_factory, user, "rt")
-    with pytest.raises(service.ArmRefused, match="not armed"):
+    with pytest.raises(service.ArmRefused, match="is Off; move Gmail to Manual first"):
         _arm(session_factory, user, mailbox.id, MailboxArm.SEND)
     _arm(session_factory, user, mailbox.id, MailboxArm.DRAFT)
     with pytest.raises(service.ArmRefused, match="Message-ID"):
@@ -620,7 +620,7 @@ def test_even_verified_send_needs_the_draft_step_first(
     user = _user(session_factory)
     mailbox = _connect(session_factory, user, "rt")
     _verify(session_factory, user, mailbox.id)
-    with pytest.raises(service.ArmRefused, match="not armed"):
+    with pytest.raises(service.ArmRefused, match="is Off; move Gmail to Manual first"):
         _arm(session_factory, user, mailbox.id, MailboxArm.SEND)
 
 

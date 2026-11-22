@@ -215,12 +215,7 @@ def _position_of(mailbox: Mailbox) -> Position:
 
 
 #: What the Message-ID check waits for, in the switch's words where arming's differ.
-_WAIT_TEXT: Final = {
-    **message_id_check.WAITING_TEXT,
-    message_id_check.MessageIdWait.NOT_ARMED: (
-        "move Gmail to Manual first; netkeep checks for its drafts only then"
-    ),
-}
+_WAIT_TEXT: Final = message_id_check.WAITING_TEXT
 
 
 def _blocked_reason(

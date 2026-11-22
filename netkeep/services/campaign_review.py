@@ -1180,8 +1180,8 @@ def prepare_test_send(
         raise ReviewConflict(f"campaign {campaign_id} has no mailbox")
     if mailbox.arm is None:
         raise ReviewConflict(
-            f"{mailbox.email} is not armed; arm it for drafts (`gmail arm`) to make the test"
-            " a draft in your Drafts, or to send (`gmail arm --send`) to send it to you"
+            f"{mailbox.email} is Off; move Gmail to Manual (`netkeep automation gmail manual`)"
+            " to make the test a draft in your Drafts, or to Automatic to send it to you"
         )
     if mailbox.status is not MailboxStatus.OK:
         raise ReviewConflict(f"{mailbox.email} is {mailbox.status}")

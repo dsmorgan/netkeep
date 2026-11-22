@@ -381,7 +381,8 @@ def arm(
     else:
         if mailbox.armed_at is None:
             raise ArmRefused(
-                f"{mailbox.email} is not armed; arm it for drafts first and let a draft be made"
+                f"{mailbox.email} is Off; move Gmail to Manual first"
+                " (`netkeep automation gmail manual`) and let a draft be made"
             )
         if mailbox.message_id_verified_at is None:
             recent = recent_test_drafts(session, user, mailbox)
@@ -392,8 +393,8 @@ def arm(
                     " campaign's review"
                 )
             raise ArmRefused(
-                f"no draft on {mailbox.email} has been found by its Message-ID yet; while it"
-                " is armed for drafts, `serve` checks for its drafts, a campaign's test draft"
+                f"no draft on {mailbox.email} has been found by its Message-ID yet; while"
+                " Gmail is on Manual, `serve` checks for its drafts, a campaign's test draft"
                 " and drafts you already sent included (`netkeep gmail status` says why it"
                 " waits)"
             )

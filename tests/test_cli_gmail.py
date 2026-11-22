@@ -294,7 +294,7 @@ def test_arm_for_send_is_refused_until_a_draft_was_found_by_its_message_id(
     mailbox_id = _connected(cli_db)
     before = runner.invoke(cli, ["gmail", "arm", FAKE_EMAIL, "--send", "--yes"])
     assert before.exit_code == 1
-    assert "not armed" in before.output
+    assert "is Off; move Gmail to Manual first" in before.output
     runner.invoke(cli, ["gmail", "arm", FAKE_EMAIL, "--yes"])
     refused = runner.invoke(cli, ["gmail", "arm", FAKE_EMAIL, "--send", "--yes"])
     assert refused.exit_code == 1
@@ -332,7 +332,7 @@ def test_status_shows_each_step_to_arming_to_send(
     assert f"keychain service: {keychain.service_name()}" in first.output  # #580
     assert f"{FAKE_EMAIL}: arming to send" in first.output
     assert "1. armed for drafts: not yet" in first.output
-    assert "2. netkeep found its own draft: arm it for drafts first" in first.output
+    assert "2. netkeep found its own draft: move Gmail to Manual first" in first.output
     assert "3. arm to send: not yet" in first.output
 
     runner.invoke(cli, ["gmail", "arm", FAKE_EMAIL, "--yes"])
