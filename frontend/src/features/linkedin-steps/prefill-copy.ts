@@ -314,8 +314,9 @@ const BEFORE_CLICK: readonly Rule[] = [
     bubble: 'closed',
   },
   {
+    // Recorded before #834 removed the schedule pause; an old run's notes can still say it.
     match: 'the schedule is paused',
-    text: 'The LinkedIn schedule is paused, so netkeep sent nothing.',
+    text: 'The LinkedIn schedule was paused, so netkeep sent nothing.',
     bubble: 'closed',
   },
   {

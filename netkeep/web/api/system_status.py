@@ -88,8 +88,6 @@ class SystemStatusOut(BaseModel):
     netkeep: StatusChipOut
     """The server's parts only: background checks, and the Keychain when it refused.
     Each client rolls it up again with whether it reaches the server."""
-    linkedin_paused: bool
-    """LinkedIn scheduled runs are paused."""
     linkedin_run: RunInProgressOut | None
     """The LinkedIn run in progress, if any."""
     campaign_sending: bool
@@ -163,7 +161,6 @@ def get_system_status(request: Request, user: CurrentUser, session: SessionDep) 
         gmail=_chip(status.gmail),
         linkedin=_chip(status.linkedin),
         netkeep=_chip(status.netkeep),
-        linkedin_paused=status.linkedin_paused,
         linkedin_run=None
         if run is None
         else RunInProgressOut(id=run.id, kind=run.kind, label=run.label, started_at=run.started_at),

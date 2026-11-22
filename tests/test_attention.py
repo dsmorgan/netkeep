@@ -51,7 +51,6 @@ from netkeep.services import inbox, linkedin_steps, posture, route_breaker, runs
 from netkeep.services.linkedin_accounts import (
     arm_scheduled_runs,
     ensure_account,
-    pause_schedule,
 )
 from netkeep.services.linkedin_session import clear_session_flag, flag_session
 
@@ -510,9 +509,9 @@ def test_the_activity_state_takes_the_first_match(world: World) -> None:
         arm_scheduled_runs(session, user, now=NOW - timedelta(days=1))
     assert world.read().activity == service.Activity(A.ARMED, service.ARMED, None, None)
 
-    with world.write() as (session, user):
-        pause_schedule(session, user, now=NOW)
-    assert world.read().activity.state is A.PAUSED
+    with world.write() as (session, user):  # #834: a legacy pause key is not read
+        factories.write_legacy_pause(session, user, account)
+    assert world.read().activity == service.Activity(A.ARMED, service.ARMED, None, None)
 
     with world.write() as (session, user):
         run = runs.create_run(
@@ -530,7 +529,7 @@ def test_the_activity_state_takes_the_first_match(world: World) -> None:
 
     with world.write() as (session, user):
         clear_session_flag(session, user)
-    assert world.read().activity.state is A.PAUSED, "stopped outranks paused"
+    assert world.read().activity.state is A.ARMED, "stopped outranks armed"
     assert account
 
 
@@ -554,7 +553,6 @@ def test_flag_labels_are_plain_sentences() -> None:
         service.SESSION_FLAGGED,
         service.HEAT_TRIPPED,
         service.BREAKER_TRIPPED,
-        service.PAUSED,
         service.ARMED,
         service.IDLE,
     )

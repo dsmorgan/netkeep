@@ -30,6 +30,7 @@ from netkeep.models import (
     Message,
     MessageDirection,
     MessageStatus,
+    SettingKV,
     StepMode,
     Template,
     TemplateChannel,
@@ -240,3 +241,18 @@ def make_self_naming_list(session: Session, user: User) -> ContactList:
     row.filter_json = {"where": {"op": "list_member", "list_id": row.id}, "include_archived": False}
     session.flush()
     return row
+
+
+def legacy_pause_key(account_id: int) -> str:
+    """The ``settings_kv`` key of the LinkedIn schedule pause (#324). Migration 0049 deletes
+    every one, and nothing in netkeep writes or reads it since #834."""
+    return f"linkedin.schedule.{account_id}.paused_at"
+
+
+def write_legacy_pause(
+    session: Session, user: User, account_id: int, value: str = "2026-11-01T12:00:00+00:00"
+) -> None:
+    """A schedule pause from before #829, written by hand, as an old database could hold
+    one. ``value`` may be anything, a garbled one included: nothing reads it."""
+    session.add(SettingKV(user_id=user.id, key=legacy_pause_key(account_id), value=value))
+    session.flush()

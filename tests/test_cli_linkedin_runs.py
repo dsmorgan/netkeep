@@ -16,6 +16,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import factories
 import pytest
 import typer
 from run_fakes import ConnectionsContext, fake_provider, fast_profiles, no_sleep
@@ -34,7 +35,6 @@ from netkeep.services import budgets, enrich_plan, route_breaker, runs
 from netkeep.services.linkedin_accounts import (
     account_id_for,
     ensure_account,
-    schedule_paused,
     scheduled_runs_armed,
 )
 from netkeep.services.linkedin_session import flag_session
@@ -96,21 +96,21 @@ def fake_chrome(monkeypatch: pytest.MonkeyPatch) -> ConnectionsContext:
 
 def test_arming_asks_first_and_no_leaves_it_disarmed(cli_db: sessionmaker[Session]) -> None:
     runner = CliRunner()
-    declined = runner.invoke(cli, ["linkedin", "schedule", "arm"], input="n\n")
+    declined = runner.invoke(cli, ["automation", "linkedin", "automatic"], input="n\n")
     assert declined.exit_code == 1 and "LinkedIn stays manual" in declined.output
     assert not _armed(cli_db)
 
     status = runner.invoke(cli, ["linkedin", "schedule", "status"])
     assert status.exit_code == 0 and status.output.startswith("disarmed")
 
-    armed = runner.invoke(cli, ["linkedin", "schedule", "arm"], input="y\n")
+    armed = runner.invoke(cli, ["automation", "linkedin", "automatic"], input="y\n")
     assert armed.exit_code == 0, armed.output
     assert _armed(cli_db)
     assert "armed since" in runner.invoke(cli, ["linkedin", "schedule", "status"]).output
 
     runner.invoke(cli, ["linkedin", "schedule", "disarm"])
     assert not _armed(cli_db)
-    assert runner.invoke(cli, ["linkedin", "schedule", "arm", "--yes"]).exit_code == 0
+    assert runner.invoke(cli, ["automation", "linkedin", "automatic", "--yes"]).exit_code == 0
     assert _armed(cli_db)
 
 
@@ -119,14 +119,14 @@ def test_arming_shows_the_profile_view_notice_with_or_without_yes_and_still_arms
 ) -> None:
     """#325: informational. It comes before the question and gates nothing."""
     runner = CliRunner()
-    declined = runner.invoke(cli, ["linkedin", "schedule", "arm"], input="n\n")
+    declined = runner.invoke(cli, ["automation", "linkedin", "automatic"], input="n\n")
     assert budgets.PROFILE_VIEW_NOTICE in declined.output
     assert declined.output.index("Who viewed your profile") < declined.output.index(
         "move LinkedIn to Automatic?"
     )
     assert not _armed(cli_db)
 
-    armed = runner.invoke(cli, ["linkedin", "schedule", "arm", "--yes"])
+    armed = runner.invoke(cli, ["automation", "linkedin", "automatic", "--yes"])
     assert armed.exit_code == 0, armed.output
     assert budgets.PROFILE_VIEW_NOTICE in armed.output
     assert _armed(cli_db)
@@ -144,7 +144,7 @@ def test_arming_seeds_each_served_kind_with_no_due_time(cli_db: sessionmaker[Ses
             return {kind: stored_due(session, user, account, kind) for kind in JobKind}
 
     runner = CliRunner()
-    assert runner.invoke(cli, ["linkedin", "schedule", "arm", "--yes"]).exit_code == 0
+    assert runner.invoke(cli, ["automation", "linkedin", "automatic", "--yes"]).exit_code == 0
     assert set(dues().values()) == {None}  # serve never ran: its first start seeds
 
     with session_scope(cli_db, write=True) as session:  # what serve's start does
@@ -166,7 +166,7 @@ def test_arming_seeds_each_served_kind_with_no_due_time(cli_db: sessionmaker[Ses
         user = _user(session)
         account = account_id_for(session, user)
         assert delete_setting(session, user, f"scheduler.job.{account}.enrich")
-    rearmed = runner.invoke(cli, ["linkedin", "schedule", "arm", "--yes"])
+    rearmed = runner.invoke(cli, ["automation", "linkedin", "automatic", "--yes"])
     assert rearmed.exit_code == 0 and "LinkedIn: automatic" in rearmed.output
     second = dues()
     assert second[JobKind.ENRICH] is not None
@@ -184,7 +184,7 @@ def test_arming_shows_the_profile_visit_risk_warning_above_100_a_day_and_still_a
     runner = CliRunner()
 
     declined = runner.invoke(
-        cli, ["--config", str(config), "linkedin", "schedule", "arm"], input="n\n"
+        cli, ["--config", str(config), "automation", "linkedin", "automatic"], input="n\n"
     )
     assert declined.exit_code == 1
     warning = "warning: Profile visits are set to 180 a day, above the 100 a day"
@@ -192,7 +192,9 @@ def test_arming_shows_the_profile_visit_risk_warning_above_100_a_day_and_still_a
     assert declined.output.index(warning) < declined.output.index("move LinkedIn to Automatic?")
     assert not _armed(cli_db)
 
-    armed = runner.invoke(cli, ["--config", str(config), "linkedin", "schedule", "arm", "--yes"])
+    armed = runner.invoke(
+        cli, ["--config", str(config), "automation", "linkedin", "automatic", "--yes"]
+    )
     assert armed.exit_code == 0, armed.output
     assert warning in armed.output
     assert _armed(cli_db)
@@ -204,7 +206,7 @@ def test_arming_at_100_a_day_shows_no_risk_warning(
     config = tmp_path / "calm.toml"
     config.write_text("[linkedin.budget]\nprofile_visits_per_day = 100\n")
     result = CliRunner().invoke(
-        cli, ["--config", str(config), "linkedin", "schedule", "arm", "--yes"]
+        cli, ["--config", str(config), "automation", "linkedin", "automatic", "--yes"]
     )
     assert result.exit_code == 0, result.output
     assert "warning:" not in result.output
@@ -615,7 +617,7 @@ def test_arming_asks_before_it_takes_the_write_lock(
     monkeypatch.setattr("typer.confirm", confirm_while_serve_writes)
     monkeypatch.setattr("netkeep.db.SQLITE_BUSY_TIMEOUT_MS", 100)
 
-    result = CliRunner().invoke(cli, ["linkedin", "schedule", "arm"])
+    result = CliRunner().invoke(cli, ["automation", "linkedin", "automatic"])
 
     assert result.exit_code == 0, result.output
     assert wrote == [True] and _armed(cli_db)
@@ -863,47 +865,46 @@ def test_a_sync_cannot_be_paused(
     assert result.exit_code == 1 and "cancel a sync instead" in result.output
 
 
-def test_schedule_pause_and_unpause_are_aliases_for_manual_and_automatic(
-    cli_db: sessionmaker[Session],
-) -> None:
-    """#829: pause is gone. ``pause`` moves to Manual (disarmed), and ``unpause`` to
-    Automatic, which asks first like ``arm``. Each says it is deprecated."""
+def test_schedule_pause_is_an_alias_for_manual(cli_db: sessionmaker[Session]) -> None:
+    """#829: pause is gone, and ``pause`` moves to Manual (disarmed), saying it is
+    deprecated. ``unpause`` is gone (#834): it moves nothing."""
     runner = CliRunner()
-    assert runner.invoke(cli, ["linkedin", "schedule", "arm", "--yes"]).exit_code == 0
+    assert runner.invoke(cli, ["automation", "linkedin", "automatic", "--yes"]).exit_code == 0
 
     paused = runner.invoke(cli, ["linkedin", "schedule", "pause"])
     assert paused.exit_code == 0, paused.output
     assert "deprecated: `netkeep linkedin schedule pause`" in paused.output
     assert "LinkedIn: manual" in paused.output
     assert not _armed(cli_db)  # Manual is disarmed
-    with session_scope(cli_db) as session:
-        user = _user(session)
-        assert not schedule_paused(session, user, account_id_for(session, user))
-    assert "paused since" not in runner.invoke(cli, ["linkedin", "schedule", "status"]).output
+    assert "paused" not in runner.invoke(cli, ["linkedin", "schedule", "status"]).output
 
-    declined = runner.invoke(cli, ["linkedin", "schedule", "unpause"], input="n\n")
-    assert declined.exit_code == 1 and not _armed(cli_db)
-    unpaused = runner.invoke(cli, ["linkedin", "schedule", "unpause"], input="y\n")
-    assert unpaused.exit_code == 0, unpaused.output
-    assert "deprecated: `netkeep linkedin schedule unpause`" in unpaused.output
-    assert _armed(cli_db)
+    unpaused = runner.invoke(cli, ["linkedin", "schedule", "unpause", "--yes"])
+    assert unpaused.exit_code == 2 and not _armed(cli_db)
+
+
+def test_schedule_status_says_nothing_of_a_legacy_pause_key(cli_db: sessionmaker[Session]) -> None:
+    """#834: a pause key left in the database is not read, so status doesn't mention it."""
+    runner = CliRunner()
+    assert runner.invoke(cli, ["automation", "linkedin", "automatic", "--yes"]).exit_code == 0
+    with session_scope(cli_db, write=True) as session:
+        user = _user(session)
+        factories.write_legacy_pause(session, user, account_id_for(session, user), "garbled")
+    status = runner.invoke(cli, ["linkedin", "schedule", "status"])
+    assert status.exit_code == 0, status.output
+    assert status.output.startswith("armed since") and "paused" not in status.output
 
 
 @pytest.mark.parametrize(
     ("alias", "replacement"),
     [
-        ("arm", "automation linkedin automatic"),
         ("disarm", "automation linkedin manual"),
         ("pause", "automation linkedin manual"),
-        ("unpause", "automation linkedin automatic"),
     ],
 )
 def test_each_schedule_alias_names_its_replacement(
     cli_db: sessionmaker[Session], alias: str, replacement: str
 ) -> None:
-    result = CliRunner().invoke(
-        cli, ["linkedin", "schedule", alias, *(["--yes"] * (alias in ("arm", "unpause")))]
-    )
+    result = CliRunner().invoke(cli, ["linkedin", "schedule", alias])
     assert result.exit_code == 0, result.output
     assert f"use `netkeep {replacement}`" in result.output
 

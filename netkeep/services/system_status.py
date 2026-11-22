@@ -48,7 +48,7 @@ from netkeep.services import automation, budgets, runs
 from netkeep.services import mailboxes as mailbox_service
 from netkeep.services import poll_status as poll_service
 from netkeep.services import posture as posture_service
-from netkeep.services.linkedin_accounts import account_id_for, find_account, schedule_paused
+from netkeep.services.linkedin_accounts import account_id_for, find_account
 from netkeep.services.linkedin_session import session_flag
 from netkeep.services.scheduler import SERVED_SCHEDULES, stored_due
 
@@ -133,8 +133,6 @@ class SystemStatus:
     gmail: Chip
     linkedin: Chip
     netkeep: Chip
-    linkedin_paused: bool
-    """LinkedIn scheduled runs are paused: the menu bar offers Resume, not Pause."""
     linkedin_run: RunInProgress | None
     """The LinkedIn run in progress, which the Update and Quit confirmations name."""
     campaign_sending: bool
@@ -251,9 +249,6 @@ class ScheduleRead:
     scheduler_running: bool
     depth: ScheduleDepth = ScheduleDepth.FULL
     next_due: datetime | None = None
-    paused: bool = False
-    """A legacy schedule pause (#324). Nothing sets one since #829 (migration 0049 deleted
-    them); it reads as Manual, and stays read for the release the aliases last."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -357,7 +352,6 @@ def read_all(
 
     def schedule() -> ScheduleRead:
         state = automation.linkedin_state(session, user)
-        account = find_account(session, user)
         account_id = account_id_for(session, user)
         dues = [stored_due(session, user, account_id, kind) for kind in SERVED_SCHEDULES]
         return ScheduleRead(
@@ -365,7 +359,6 @@ def read_all(
             depth=state.depth,
             scheduler_running=process.scheduler_running,
             next_due=min((due for due in dues if due is not None), default=None),
-            paused=account is not None and schedule_paused(session, user, account.id),
         )
 
     def prefills() -> PrefillsRead:
@@ -431,7 +424,6 @@ CHECK_TONE: Final[Mapping[poll_service.CheckState, Tone]] = {
     poll_service.CheckState.DUE: "ok",
     poll_service.CheckState.IDLE: "ok",
     poll_service.CheckState.OUTSIDE_HOURS: "ok",
-    poll_service.CheckState.PAUSED: "warn",
     poll_service.CheckState.BLOCKED: "warn",
     poll_service.CheckState.OFF: "off",
     # #829: the netkeep chip says serve isn't running; a service chip keeps saying its
@@ -448,7 +440,6 @@ running, so the Gmail and LinkedIn chips keep saying their switch's position (#8
 STATE_TEXT: Final[Mapping[poll_service.CheckState, str]] = {
     poll_service.CheckState.DUE: "due soon",
     poll_service.CheckState.IDLE: "nothing to check",
-    poll_service.CheckState.PAUSED: "paused",
     poll_service.CheckState.OUTSIDE_HOURS: "outside active hours",
     poll_service.CheckState.BLOCKED: "needs attention",
     poll_service.CheckState.OFF: "off",
@@ -482,7 +473,7 @@ def _check_times(prefix: str, check: poll_service.Check) -> dict[str, Time]:
 
 
 def _check_summary(prefix: str, check: poll_service.Check) -> str:
-    """ "checked {last} · next {next}", "next {next}", "checked {last} · paused". Only a
+    """ "checked {last} · next {next}", "next {next}", "checked {last} · off". Only a
     ``scheduled`` check shows a next time."""
     parts: list[str] = []
     if check.last_at is not None:
@@ -1114,7 +1105,6 @@ def system_status(reads: Reads) -> SystemStatus:
         gmail=gmail_chip(reads),
         linkedin=linkedin_chip(reads),
         netkeep=netkeep_chip(reads),
-        linkedin_paused=not isinstance(reads.schedule, Failed) and reads.schedule.paused,
         linkedin_run=None
         if running is None
         else RunInProgress(

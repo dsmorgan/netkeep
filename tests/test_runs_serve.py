@@ -61,6 +61,8 @@ pytestmark = pytest.mark.usefixtures("inside_active_hours")
 START = datetime(2026, 9, 23, 6, 0, tzinfo=UTC)
 STEP = timedelta(hours=1)
 HEADERS = {CLIENT_HEADER: CLIENT_HEADER_VALUE}
+#: The body that moves LinkedIn to Automatic, with the confirmation a person gives.
+AUTOMATIC = {"position": "automatic", "confirm": True}
 
 
 @pytest.fixture
@@ -141,10 +143,11 @@ async def _a_week_of_serve(
     async with served(engine, settings, provider, clock) as app:
         if arm:
             async with client_for(app) as client:
-                armed = await client.post(
-                    "/api/v1/linkedin/schedule/arm", json={"confirm": True}, headers=HEADERS
+                armed = await client.put(
+                    "/api/v1/automation/linkedin", json=AUTOMATIC, headers=HEADERS
                 )
-                assert armed.status_code == 200 and armed.json()["armed"] is True
+                assert armed.status_code == 200
+                assert armed.json()["linkedin"]["position"] == "automatic"
         for _ in range(4):
             await drive(app, clock, clock.at + timedelta(days=1))
             await _every_get(app)
@@ -293,9 +296,7 @@ async def test_first_setup_waits_for_arming_then_runs_within_the_hour(
         await drive(app, clock, clock.at + timedelta(hours=3))
         assert connector.attaches == 0
         async with client_for(app) as client:
-            await client.post(
-                "/api/v1/linkedin/schedule/arm", json={"confirm": True}, headers=HEADERS
-            )
+            await client.put("/api/v1/automation/linkedin", json=AUTOMATIC, headers=HEADERS)
         await drive(app, clock, clock.at + scheduler.FIRST_SETUP_RETRY + STEP)
     assert connector.attaches >= 1
     kinds = [run.kind for run in _rows(bare_engine)]
@@ -398,9 +399,9 @@ async def test_arming_takes_confirm_and_the_client_header(
         served(bare_engine, settings, provider, Clock(START)) as app,
         client_for(app) as client,
     ):
-        no_header = await client.post("/api/v1/linkedin/schedule/arm", json={"confirm": True})
-        unconfirmed = await client.post(
-            "/api/v1/linkedin/schedule/arm", json={"confirm": False}, headers=HEADERS
+        no_header = await client.put("/api/v1/automation/linkedin", json=AUTOMATIC)
+        unconfirmed = await client.put(
+            "/api/v1/automation/linkedin", json={"position": "automatic"}, headers=HEADERS
         )
         state = (await client.get("/api/v1/linkedin/schedule")).json()
         assert (no_header.status_code, unconfirmed.status_code) == (403, 422)
@@ -419,12 +420,14 @@ async def test_arming_takes_confirm_and_the_client_header(
             "enrich": True,
             "inbox": False,
         }
-        armed = await client.post(
-            "/api/v1/linkedin/schedule/arm", json={"confirm": True}, headers=HEADERS
+        armed = await client.put("/api/v1/automation/linkedin", json=AUTOMATIC, headers=HEADERS)
+        assert armed.status_code == 200, armed.text
+        assert (await client.get("/api/v1/linkedin/schedule")).json()["armed"] is True
+        manual = await client.put(
+            "/api/v1/automation/linkedin", json={"position": "manual"}, headers=HEADERS
         )
-        assert armed.json()["armed"] is True
-        disarmed = await client.post("/api/v1/linkedin/schedule/disarm", headers=HEADERS)
-        assert disarmed.json()["armed"] is False
+        assert manual.status_code == 200, manual.text
+        assert (await client.get("/api/v1/linkedin/schedule")).json()["armed"] is False
 
 
 async def test_arming_through_the_api_seeds_a_served_kind_with_no_due_time(
@@ -443,11 +446,11 @@ async def test_arming_through_the_api_seeds_a_served_kind_with_no_due_time(
             account = ensure_account(session, user).id
             assert delete_setting(session, user, f"scheduler.job.{account}.enrich")
         before = (await client.get("/api/v1/linkedin/schedule")).json()
-        armed = await client.post(
-            "/api/v1/linkedin/schedule/arm", json={"confirm": True}, headers=HEADERS
-        )
+        armed = await client.put("/api/v1/automation/linkedin", json=AUTOMATIC, headers=HEADERS)
+        assert armed.status_code == 200, armed.text
+        after_schedule = (await client.get("/api/v1/linkedin/schedule")).json()
     due = {job["kind"]: job["next_due"] for job in before["jobs"]}
-    after = {job["kind"]: job["next_due"] for job in armed.json()["jobs"]}
+    after = {job["kind"]: job["next_due"] for job in after_schedule["jobs"]}
     assert due["enrich"] is None and after["enrich"] is not None
     assert {k: v for k, v in after.items() if k != "enrich"} == {
         k: v for k, v in due.items() if k != "enrich"

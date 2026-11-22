@@ -49,7 +49,7 @@ export const attentionQuery = queryOptions({
 
 const COUNT_KEYS = ['inbox', 'dashboard', 'waiting', 'try_again', 'triage', 'imports'] as const
 const FLAG_KEYS = ['dashboard', 'gmail', 'linkedin', 'settings'] as const
-const STATES = new Set<string>(['running', 'stopped', 'paused', 'armed', 'idle'])
+const STATES = new Set<string>(['running', 'stopped', 'armed', 'idle'])
 
 function count(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0

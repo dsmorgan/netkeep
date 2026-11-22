@@ -97,7 +97,7 @@ from netkeep.services import campaign_engine as engine
 from netkeep.services import heat as heat_service
 from netkeep.services.budgets import ActionClass, BudgetExceeded
 from netkeep.services.campaign_guards import check_step
-from netkeep.services.linkedin_accounts import schedule_paused, scheduled_runs_armed
+from netkeep.services.linkedin_accounts import scheduled_runs_armed
 from netkeep.services.linkedin_session import flag_session
 from netkeep.services.linkedin_steps import (
     AUTO_SEND_HOLD_BUBBLE,
@@ -652,12 +652,10 @@ async def run_prefill(
             refusal = auto_send_refusal(on, StepMode.AUTO_SEND)
             if refusal is not None:
                 return refusal
-            # Live reads, asked again before the click: disarming or pausing scheduled
-            # runs, or a hold, stops an auto-send mid-run (#458 review).
+            # Live reads, asked again before the click: disarming scheduled runs, or a
+            # hold, stops an auto-send mid-run (#458 review).
             if not scheduled_runs_armed(session, user, prepared.account_id):
                 return "scheduled runs are disarmed"
-            if schedule_paused(session, user, prepared.account_id):
-                return "the schedule is paused"
             if auto_send_hold(session, user, prepared.account_id) is not None:
                 return "auto-send is held until the open message bubbles are closed"
             changed = still_wanted(session, user, run_id, now=now)

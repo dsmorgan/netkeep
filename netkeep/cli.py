@@ -148,7 +148,6 @@ from netkeep.services.linkedin_accounts import (
     account_id_for,
     ensure_account,
     find_account,
-    schedule_pause_state,
 )
 from netkeep.services.linkedin_session import (
     FlagClearRefused,
@@ -2879,7 +2878,6 @@ def linkedin_schedule_status(ctx: typer.Context) -> None:
             account = find_account(session, user)
             armed_at = None if account is None else account.scheduled_runs_armed_at
             account_id = account_id_for(session, user)
-            pause = None if account is None else schedule_pause_state(session, user, account.id)
             route = route_breaker.state(session, user, account_id)
             lost = route_breaker.answer_lost_states(session, user, account_id)
             info = route_breaker.contact_info_state(session, user, account_id)
@@ -2896,16 +2894,6 @@ def linkedin_schedule_status(ctx: typer.Context) -> None:
         )
     else:
         typer.echo(f"armed since {armed_at:%Y-%m-%d %H:%M UTC}: scheduled runs fire when due")
-    if pause is not None and pause.paused:
-        since = (
-            "paused (unreadable value)"
-            if pause.paused_at is None
-            else f"paused since {pause.paused_at:%Y-%m-%d %H:%M UTC}"
-        )
-        typer.echo(
-            f"{since}: no new scheduled run starts until LinkedIn moves to Automatic"
-            " (`netkeep automation linkedin automatic`)"
-        )
     typer.echo(describe_active_hours(settings))
     typer.echo(_streak_line("route-changed breaker", "route_changed", route))
     for kind, streak in lost.items():
@@ -3179,18 +3167,28 @@ def automation_gmail(
     typer.echo(f"Gmail: {_gmail_text(after)}")
 
 
-# --- `linkedin schedule arm/disarm/pause/unpause`: aliases for one release (#829) ---------
+# --- `linkedin schedule disarm/pause`: aliases for one release (#829) ---------------------
+# `arm` and `unpause` are gone (#834): `netkeep automation linkedin automatic` is the one
+# way to turn on Automatic. They stay as hidden commands that only say so.
+
+#: What `linkedin schedule arm` and `unpause` say, and do nothing else.
+AUTOMATIC_GONE: Final = (
+    "error: `netkeep linkedin schedule {old}` is gone; use `netkeep automation linkedin automatic`"
+)
+
+#: Take any arguments the old command took (``--yes``), so the message is what you see.
+_GONE_CONTEXT: Final = {"ignore_unknown_options": True, "allow_extra_args": True}
 
 
-@schedule_app.command("arm")
-def linkedin_schedule_arm(
-    ctx: typer.Context,
-    yes: Annotated[bool, typer.Option("--yes", help="Skip the confirmation prompt.")] = False,
-) -> None:
-    """Deprecated: `netkeep automation linkedin automatic`, keeping the depth."""
-    _deprecated("linkedin schedule arm", "automation linkedin automatic")
-    settings = _load_settings_or_exit(ctx.ensure_object(CliState))
-    _move_linkedin(settings, automation_service.Position.AUTOMATIC, None, yes=yes)
+def _automatic_gone(old: str) -> NoReturn:
+    typer.echo(AUTOMATIC_GONE.format(old=old), err=True)
+    raise typer.Exit(code=2)
+
+
+@schedule_app.command("arm", hidden=True, context_settings=_GONE_CONTEXT)
+def linkedin_schedule_arm() -> None:
+    """Gone: `netkeep automation linkedin automatic`."""
+    _automatic_gone("arm")
 
 
 def _stop_linkedin() -> None:
@@ -3222,15 +3220,10 @@ def linkedin_schedule_pause() -> None:
     _stop_linkedin()
 
 
-@schedule_app.command("unpause")
-def linkedin_schedule_unpause(
-    ctx: typer.Context,
-    yes: Annotated[bool, typer.Option("--yes", help="Skip the confirmation prompt.")] = False,
-) -> None:
-    """Deprecated: `netkeep automation linkedin automatic`, keeping the depth."""
-    _deprecated("linkedin schedule unpause", "automation linkedin automatic")
-    settings = _load_settings_or_exit(ctx.ensure_object(CliState))
-    _move_linkedin(settings, automation_service.Position.AUTOMATIC, None, yes=yes)
+@schedule_app.command("unpause", hidden=True, context_settings=_GONE_CONTEXT)
+def linkedin_schedule_unpause() -> None:
+    """Gone: `netkeep automation linkedin automatic`."""
+    _automatic_gone("unpause")
 
 
 @schedule_app.command("reset-breaker")

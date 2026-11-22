@@ -3885,6 +3885,28 @@ def test_0049_maps_each_account_onto_the_switch(migration_engine: Engine) -> Non
         assert _keys(connection, 3) == set()
 
 
+def test_0049_deletes_a_pause_written_after_a_downgrade(migration_engine: Engine) -> None:
+    """#834: downgraded to 0048, the code of then could pause the schedule again. The next
+    upgrade runs 0049 again, which maps that armed, paused account to Manual and deletes
+    the key, so no pause key outlives an upgrade past 0049."""
+    migrations.upgrade(migration_engine, "0049")
+    with migration_engine.begin() as connection:
+        _seed_users(connection, 1)
+        _insert_account(connection, id=1, user_id=1, armed=True)
+    migrations.downgrade(migration_engine, "0048")
+    with migration_engine.begin() as connection:
+        _put_setting(
+            connection, 1, "linkedin.schedule.1.paused_at", json.dumps("2026-11-20T12:00:00+00:00")
+        )
+    migrations.upgrade(migration_engine, "0049")
+    with migration_engine.begin() as connection:
+        assert _keys(connection, 1) == set()
+        armed = connection.execute(
+            text("SELECT scheduled_runs_armed_at FROM linkedin_accounts WHERE id = 1")
+        ).scalar_one()
+        assert armed is None
+
+
 def test_0049_checks_the_depth_in_the_database(migration_engine: Engine) -> None:
     migrations.upgrade(migration_engine, "0049")
     with migration_engine.begin() as connection:

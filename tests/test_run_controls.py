@@ -1,10 +1,10 @@
-"""The dashboard's run controls (#324): pause and resume a run, pause the schedule,
-and the last few contacts a run touched.
+"""The dashboard's run controls (#324): pause and resume a run, and the last few
+contacts a run touched. The schedule pause is gone (#829, #834): a legacy pause key
+left in the database changes nothing.
 
 Every control here goes through the run, worker, and scheduler paths that were
-already there: a pause is the cancel flag plus a marker, a resume is
-``enrich_plan.start_resume``, and a paused schedule is one more reason the
-scheduler's gate skips a due fire. Nothing here attaches to a real browser: the
+already there: a pause is the cancel flag plus a marker, and a resume is
+``enrich_plan.start_resume``. Nothing here attaches to a real browser: the
 runners read a fake tab (``profile_fakes``, ``voyager_pages``) and the served app
 a fake Chrome (``run_fakes``).
 """
@@ -14,6 +14,7 @@ from __future__ import annotations
 import random
 from collections.abc import Callable
 from datetime import UTC, datetime, time, timedelta
+from typing import Final
 
 import factories
 import httpx
@@ -27,11 +28,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from test_enrichment import Sleeps, _enrich, _people, _plan, _setup
 from test_runs_serve import (
     HEADERS,
-    START,
     _local,
-    _rows,
     client_for,
-    drive,
     served,
 )
 from voyager_pages import FakeConnectionsSource
@@ -48,10 +46,6 @@ from netkeep.services.linkedin_accounts import (
     arm_scheduled_runs,
     disarm_scheduled_runs,
     ensure_account,
-    pause_schedule,
-    schedule_pause_state,
-    schedule_paused,
-    unpause_schedule,
 )
 from netkeep.services.settings_kv import set_setting
 
@@ -316,7 +310,7 @@ def test_a_pages_touched_contacts_keep_the_pages_order_not_their_ids(
     assert ordered == [(late.id, "confirmed"), (early.id, "added"), (stray.id, "added")]
 
 
-# --- pause the schedule: the scheduler's gate -------------------------------------------------
+# --- a legacy schedule pause: the scheduler's gate ignores it (#834) ----------------------
 
 SCHEDULE = scheduler.JobSchedule(scheduler.JobKind.ENRICH, timedelta(hours=3))
 
@@ -370,115 +364,155 @@ async def _poll(
     )
 
 
-async def test_a_paused_schedule_starts_nothing_and_unpausing_replays_nothing(
+#: Something that stops a due fire at the gate, for an armed account.
+Stop = Callable[[Session, User, int], None]
+
+
+def _every_n(n: int, record: Callable[[Session, User, int], object]) -> Stop:
+    def stop(session: Session, user: User, account: int) -> None:
+        for _ in range(n):
+            record(session, user, account)
+
+    return stop
+
+
+def _disarm(session: Session, user: User, account: int) -> None:
+    disarm_scheduled_runs(session, user)
+
+
+def _quick(session: Session, user: User, account: int) -> None:
+    from netkeep.models import ScheduleDepth
+
+    ensure_account(session, user).scheduled_depth = ScheduleDepth.QUICK
+
+
+def _flag(session: Session, user: User, account: int) -> None:
+    from netkeep.linkedin.classify import Outcome
+    from netkeep.services.linkedin_session import flag_session
+
+    flag_session(session, user, Outcome.CHECKPOINT, url="/checkpoint/challenge")
+
+
+def _hot(session: Session, user: User, account: int) -> None:
+    from netkeep.services import heat
+
+    for _ in range(10):
+        heat.raise_heat(session, user, account, now=NOW, settings=Settings().linkedin.heat)
+
+
+def _breaker(name: str) -> Stop:
+    from netkeep.services import route_breaker as rb
+
+    records: dict[str, Callable[[Session, User, int], object]] = {
+        "route_changed_breaker": lambda s, u, a: rb.record(
+            s, u, a, route_changed=True, succeeded=False, now=NOW
+        ),
+        "answer_lost_breaker": lambda s, u, a: rb.record_answer_lost(
+            s,
+            u,
+            a,
+            kind=SyncRunKind.CONNECTIONS_FULL,
+            answer_lost=True,
+            clean_end=False,
+            now=NOW,
+        ),
+        "contact_info_breaker": lambda s, u, a: rb.record_contact_info(
+            s, u, a, answer_lost=True, clean_end=False, now=NOW
+        ),
+        "inbox_route_changed_breaker": lambda s, u, a: rb.record_inbox(
+            s, u, a, route_changed=True, completed=False, now=NOW
+        ),
+        "inbox_owner_breaker": lambda s, u, a: rb.record_inbox_owner(
+            s, u, a, owner_mismatch=True, completed=False, now=NOW
+        ),
+    }
+    return _every_n(5, records[name])
+
+
+GATE_STOPS: Final[list[tuple[str, scheduler.JobKind, Stop]]] = [
+    ("disarmed", scheduler.JobKind.ENRICH, _disarm),
+    ("quick_checks", scheduler.JobKind.ENRICH, _quick),
+    ("quick_checks", scheduler.JobKind.CONNECTIONS_FULL, _quick),
+    ("session_flagged", scheduler.JobKind.ENRICH, _flag),
+    ("heat", scheduler.JobKind.ENRICH, _hot),
+    (
+        "route_changed_breaker",
+        scheduler.JobKind.CONNECTIONS_FULL,
+        _breaker("route_changed_breaker"),
+    ),
+    ("answer_lost_breaker", scheduler.JobKind.CONNECTIONS_FULL, _breaker("answer_lost_breaker")),
+    ("contact_info_breaker", scheduler.JobKind.ENRICH, _breaker("contact_info_breaker")),
+    (
+        "inbox_route_changed_breaker",
+        scheduler.JobKind.INBOX,
+        _breaker("inbox_route_changed_breaker"),
+    ),
+    ("inbox_owner_breaker", scheduler.JobKind.INBOX, _breaker("inbox_owner_breaker")),
+]
+
+
+@pytest.mark.parametrize("legacy_key", [False, True], ids=["no-key", "legacy-key"])
+@pytest.mark.parametrize(("reason", "kind", "stop"), GATE_STOPS, ids=[g[0] for g in GATE_STOPS])
+def test_the_gate_still_refuses_everything_but_the_pause(
     session_factory: sessionmaker[Session],
+    reason: str,
+    kind: scheduler.JobKind,
+    stop: Stop,
+    legacy_key: bool,
 ) -> None:
-    """Armed and paused: every due fire is skipped as paused and the cadence moves on.
-    Unpaused, nothing fires until the next due time, and then exactly once."""
+    """#834: removing the pause took one check out of the gate and no other. Each stop
+    still skips its fire with its own reason, and a legacy pause key changes none."""
     owner, account = _armed_account(session_factory)
-    due = _establish(session_factory, owner, account, NOW)
     with session_scope(session_factory, write=True) as session:
-        pause_schedule(session, owner, now=NOW)
-    calls: list[scheduler.JobContext] = []
-
-    skipped = []
-    for i in range(3):  # three due times pass while paused
-        result = await _poll(session_factory, owner, account, due + i * SCHEDULE.interval, calls)
-        assert result is not None
-        skipped.append((result.fired, result.skipped_reason))
-    assert calls == []
-    assert skipped == [(False, "paused")] * 3
-
-    with session_scope(session_factory, write=True) as session:
-        unpause_schedule(session, owner)
-    unpaused_at = due + 2 * SCHEDULE.interval + timedelta(minutes=30)
-    next_due = due + 3 * SCHEDULE.interval
-    # Every heartbeat between unpausing and the next due time fires nothing.
-    at = unpaused_at
-    while at < next_due:
-        assert await _poll(session_factory, owner, account, at, calls) is None
-        at += timedelta(minutes=1)
-    assert calls == []
-    fired = await _poll(session_factory, owner, account, next_due, calls)
-    assert fired is not None and fired.fired and len(calls) == 1
+        heat = Settings().linkedin.heat
+        assert (
+            scheduler.gate_skip_reason(session, owner, account, kind, now=NOW, heat_settings=heat)
+            is None
+        )
+        if legacy_key:
+            factories.write_legacy_pause(session, owner, account)
+        stop(session, owner, account)
+        assert (
+            scheduler.gate_skip_reason(session, owner, account, kind, now=NOW, heat_settings=heat)
+            == reason
+        )
 
 
-async def test_a_long_pause_across_downtime_still_owes_nothing(
-    session_factory: sessionmaker[Session],
+@pytest.mark.parametrize("value", ["2026-09-23T15:00:00+00:00", "garbled"])
+async def test_a_legacy_pause_key_holds_nothing(
+    session_factory: sessionmaker[Session], value: str
 ) -> None:
-    """Paused, then the process was down for days: the restart's single catch-up is
-    skipped as paused like any other fire, and unpausing waits for the next due time."""
+    """#834: a pause key left in the database, readable or not, no longer holds the
+    schedule. Armed, the due fire runs as it would with no key."""
     owner, account = _armed_account(session_factory)
     due = _establish(session_factory, owner, account, NOW)
     with session_scope(session_factory, write=True) as session:
-        pause_schedule(session, owner, now=NOW)
-    restart = due + timedelta(days=3)
-    catch_up = _establish(session_factory, owner, account, restart)
-    assert restart < catch_up <= restart + timedelta(minutes=20)
-    calls: list[scheduler.JobContext] = []
-    result = await _poll(session_factory, owner, account, catch_up, calls)
-    assert result is not None and result.skipped_reason == "paused"
-    with session_scope(session_factory, write=True) as session:
-        unpause_schedule(session, owner)
-    assert (
-        await _poll(session_factory, owner, account, catch_up + timedelta(hours=1), calls) is None
-    )
-    assert calls == []
-
-
-async def test_unpaused_the_same_poll_fires(session_factory: sessionmaker[Session]) -> None:
-    """Anti-coincidence for the skip above: armed and never paused, it fires."""
-    owner, account = _armed_account(session_factory)
-    due = _establish(session_factory, owner, account, NOW)
+        factories.write_legacy_pause(session, owner, account, value)
     calls: list[scheduler.JobContext] = []
     result = await _poll(session_factory, owner, account, due, calls)
     assert result is not None and result.fired and len(calls) == 1
 
 
-def test_pause_is_idempotent_and_an_unreadable_one_counts_as_paused(
+async def test_the_served_handler_records_a_run_under_a_legacy_pause_key(
     session_factory: sessionmaker[Session],
 ) -> None:
-    with session_scope(session_factory, write=True) as session:
-        owner = factories.make_user(session)
-        account = ensure_account(session, owner).id
-        assert not schedule_pause_state(session, owner, account).paused
-        pause_schedule(session, owner, now=NOW)
-        pause_schedule(session, owner, now=NOW + timedelta(hours=1))
-        assert schedule_pause_state(session, owner, account).paused_at == NOW  # the first time
-        unpause_schedule(session, owner)
-        assert not schedule_paused(session, owner, account)
-        set_setting(session, owner, f"linkedin.schedule.{account}.paused_at", "not a time")
-        assert schedule_paused(session, owner, account)  # fail closed: nothing starts
-        state = schedule_pause_state(session, owner, account)
-        assert (state.paused, state.paused_at, state.unreadable) == (True, None, True)
-
-
-def test_another_users_pause_pauses_nothing_here(session_factory: sessionmaker[Session]) -> None:
-    with session_scope(session_factory, write=True) as session:
-        mine = factories.make_user(session)
-        theirs = factories.make_user(session)
-        account = ensure_account(session, mine).id
-        pause_schedule(session, theirs, now=NOW)
-        assert not schedule_paused(session, mine, account)
-
-
-async def test_the_served_handler_records_nothing_while_paused(
-    session_factory: sessionmaker[Session],
-) -> None:
-    """The gap between the scheduler's gate and the handler: paused there, no run."""
+    """#834: the handler no longer reads the pause key between the gate and the record."""
     from netkeep.services.events import EventBus
     from netkeep.services.scheduled_runs import serve_registry
     from netkeep.services.tasks import TaskRunner
 
     owner, account = _armed_account(session_factory)
     with session_scope(session_factory, write=True) as session:
-        pause_schedule(session, owner, now=NOW)
+        factories.write_legacy_pause(session, owner, account)
 
-    class Never:
+    executed: list[int] = []
+
+    class Done:
         async def execute(self, run_id: int, user_id: int) -> runs.RunOutcome:
-            raise AssertionError("a paused schedule reached the worker")
+            executed.append(run_id)
+            return runs.RunOutcome.DONE
 
-    registry = serve_registry(session_factory, Never(), TaskRunner(EventBus()), clock=lambda: NOW)
+    registry = serve_registry(session_factory, Done(), TaskRunner(EventBus()), clock=lambda: NOW)
     ctx = scheduler.JobContext(
         user_id=owner.id,
         account_id=account,
@@ -486,11 +520,12 @@ async def test_the_served_handler_records_nothing_while_paused(
         due=NOW,
         catch_up=False,
     )
-    assert await registry[scheduler.JobKind.ENRICH](ctx) is scheduler.JobOutcome.PAUSED_AFTER_GATE
+    assert await registry[scheduler.JobKind.ENRICH](ctx) is None
+    assert len(executed) == 1
     with session_scope(session_factory) as session:
         user = session.get(User, owner.id)
         assert user is not None
-        assert runs.list_runs(session, user)[1] == 0
+        assert runs.list_runs(session, user)[1] == 1
 
 
 FIRST = scheduler.JobSchedule(
@@ -500,7 +535,8 @@ FIRST = scheduler.JobSchedule(
 
 class _Race:
     """An armed account's weekly full sync, and ``serve``'s real handler for it, for
-    a pause (or a disarm) that lands between the scheduler's gate and the handler."""
+    a disarm (or a move to quick checks) that lands between the scheduler's gate and the
+    handler."""
 
     def __init__(self, factory: sessionmaker[Session]) -> None:
         from netkeep.services.events import EventBus
@@ -528,11 +564,6 @@ class _Race:
             ).due
         self.served = serve_registry(factory, Never(), TaskRunner(EventBus()), clock=lambda: NOW)
         self.calls: list[scheduler.JobContext] = []
-
-    async def pause_then_handle(self, ctx: scheduler.JobContext) -> scheduler.JobOutcome | None:
-        with session_scope(self.factory, write=True) as session:
-            pause_schedule(session, self.owner, now=NOW)
-        return await self.served[FIRST.kind](ctx)
 
     async def quick_then_handle(self, ctx: scheduler.JobContext) -> scheduler.JobOutcome | None:
         from netkeep.models import ScheduleDepth
@@ -578,34 +609,10 @@ class _Race:
             return runs.list_runs(session, user)[1]
 
 
-async def test_a_pause_that_lands_after_the_gate_keeps_first_setup_standing(
+async def test_a_disarm_after_the_gate_on_a_later_fire_keeps_the_weekly_cadence(
     session_factory: sessionmaker[Session],
 ) -> None:
-    """The narrow race: the gate let the never-run full sync through, then a person
-    paused before the handler recorded a run. The handler starts nothing and says
-    so; the fire counts as skipped, so the full sync is offered again within the
-    hour after the late poll, not a week later, and runs then."""
-    race = _Race(session_factory)
-    late = race.due + timedelta(minutes=30)
-
-    raced = await race.poll(late, race.pause_then_handle)
-
-    assert raced is not None and not raced.fired
-    assert raced.skipped_reason == "paused_after_gate"
-    assert raced.next_due == late + scheduler.FIRST_SETUP_RETRY  # from now, not from due
-    assert race.fired_once() is False
-    assert race.recorded_runs() == 0
-
-    with session_scope(session_factory, write=True) as session:
-        unpause_schedule(session, race.owner)
-    again = await race.poll(raced.next_due, race.record)
-    assert again is not None and again.fired and len(race.calls) == 1
-
-
-async def test_a_pause_after_the_gate_on_a_later_fire_keeps_the_weekly_cadence(
-    session_factory: sessionmaker[Session],
-) -> None:
-    """The full sync already ran once. A pause that races its next fire is skipped,
+    """The full sync already ran once. A disarm that races its next fire is skipped,
     but there is no first-setup standing to give back: the claim's week-out due time
     stands, and the kind still counts as having fired."""
     race = _Race(session_factory)
@@ -614,10 +621,10 @@ async def test_a_pause_after_the_gate_on_a_later_fire_keeps_the_weekly_cadence(
     week_on = race.due + FIRST.interval
     assert first.next_due == week_on
 
-    raced = await race.poll(week_on, race.pause_then_handle)
+    raced = await race.poll(week_on, race.disarm_then_handle)
 
     assert raced is not None and not raced.fired
-    assert raced.skipped_reason == "paused_after_gate"
+    assert raced.skipped_reason == "disarmed_after_gate"
     assert raced.next_due == week_on + FIRST.interval
     assert race.fired_once() is True
     assert len(race.calls) == 1 and race.recorded_runs() == 0
@@ -649,25 +656,6 @@ async def test_quick_checks_after_the_gate_are_skipped_with_their_own_reason(
     assert raced.skipped_reason == "quick_checks_after_gate"
     assert raced.next_due == race.due + scheduler.FIRST_SETUP_RETRY
     assert race.fired_once() is False and race.recorded_runs() == 0
-
-
-def test_posture_says_the_schedule_is_paused(session_factory: sessionmaker[Session]) -> None:
-    from netkeep.services.posture import posture
-
-    with session_scope(session_factory, write=True) as session:
-        user = factories.make_user(session, timezone="UTC")
-        account = ensure_account(session, user).id
-        arm_scheduled_runs(session, user, now=NOW)
-        pause_schedule(session, user, now=NOW)
-        report = posture(session, user, account, now=NOW, settings=Settings())
-        (row,) = [p for p in report.protections if p.name == "scheduled runs"]
-        assert row.value.startswith("armed since 2026-09-23 15:00 UTC; paused since")
-        assert "automation linkedin automatic" in row.value
-
-        set_setting(session, user, f"linkedin.schedule.{account}.paused_at", "garbled")
-        report = posture(session, user, account, now=NOW, settings=Settings())
-        (row,) = [p for p in report.protections if p.name == "scheduled runs"]
-        assert "paused (unreadable value)" in row.value
 
 
 # --- the API ------------------------------------------------------------------------------
@@ -759,46 +747,6 @@ async def test_the_api_pauses_a_run_shows_it_and_resumes_it(
     assert connector.attaches == 1  # only the resume, a person's own act, reached Chrome
 
 
-async def test_the_schedule_pause_is_manual_and_survives_a_restart(
-    bare_engine: Engine, no_frontend: None
-) -> None:
-    """#829: ``POST /schedule/pause`` moves LinkedIn to Manual. ``serve`` restarts: still
-    Manual, the heartbeats across the first day's due times attach nothing. The
-    deprecated ``unpause`` arms nothing; Automatic again (``PUT /automation/linkedin``
-    with ``confirm``) lets the next ones run."""
-    settings = Settings()
-    provider, connector = fake_provider()
-    clock = ServeClock(START)
-    async with served(bare_engine, settings, provider, clock) as app, client_for(app) as client:
-        await client.post("/api/v1/linkedin/schedule/arm", json={"confirm": True}, headers=HEADERS)
-        paused = await client.post("/api/v1/linkedin/schedule/pause", headers=HEADERS)
-    assert paused.status_code == 200
-    assert (paused.json()["armed"], paused.json()["paused"]) == (False, False)
-
-    async with served(bare_engine, settings, provider, clock) as app:
-        async with client_for(app) as client:
-            switch = (await client.get("/api/v1/automation")).json()["linkedin"]
-        assert switch["position"] == "manual"
-        # Past 08:30 in New York, when the first day's due times land.
-        await drive(app, clock, clock.at + timedelta(hours=8))
-        assert connector.attaches == 0
-        assert _rows(bare_engine) == []
-
-        async with client_for(app) as client:
-            unpaused = await client.post("/api/v1/linkedin/schedule/unpause", headers=HEADERS)
-            assert unpaused.json()["armed"] is False  # it arms nothing
-            automatic = await client.put(
-                "/api/v1/automation/linkedin",
-                json={"position": "automatic", "confirm": True},
-                headers=HEADERS,
-            )
-        assert automatic.status_code == 200, automatic.text
-        # The first-setup full sync, skipped while Manual, is offered again within the hour.
-        await drive(app, clock, clock.at + scheduler.FIRST_SETUP_RETRY + timedelta(hours=1))
-    assert connector.attaches > 0
-    assert {run.trigger for run in _rows(bare_engine)} == {SyncRunTrigger.SCHEDULED}
-
-
 @pytest.fixture
 def no_frontend(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NETKEEP_FRONTEND_DIST", "/nonexistent-dist")
@@ -828,16 +776,22 @@ async def test_pausing_a_running_sync_is_refused_and_sets_no_flag(
         assert not runs.pause_requested(session, user, sync)
 
 
-async def test_an_unreadable_pause_reads_paused_with_no_time(
+async def test_a_legacy_pause_key_is_not_in_the_schedule_or_the_status(
     client: httpx.AsyncClient, running_app: FastAPI
 ) -> None:
+    """#834: ``GET /linkedin/schedule`` and ``/linkedin/status`` no longer answer a pause,
+    and a key left in the database changes neither."""
+    before_schedule = (await client.get("/api/v1/linkedin/schedule")).json()
+    before_status = (await client.get("/api/v1/linkedin/status")).json()
     with session_scope(running_app.state.session_factory, write=True) as session:
         user = _local(session)
         account = ensure_account(session, user).id
-        set_setting(session, user, f"linkedin.schedule.{account}.paused_at", "garbled")
+        factories.write_legacy_pause(session, user, account, "garbled")
 
     schedule = (await client.get("/api/v1/linkedin/schedule")).json()
     status = (await client.get("/api/v1/linkedin/status")).json()
 
-    assert (schedule["paused"], schedule["paused_at"]) == (True, None)
-    assert status["schedule_paused"] is True
+    assert "paused" not in schedule and "paused_at" not in schedule
+    assert "schedule_paused" not in status
+    assert schedule["armed"] == before_schedule["armed"]
+    assert status == before_status

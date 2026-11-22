@@ -25,7 +25,7 @@ from netkeep.models.base import utcnow
 from netkeep.services import mailboxes as mailbox_service
 from netkeep.services import runs
 from netkeep.services.events import Event
-from netkeep.services.linkedin_accounts import ensure_account, pause_schedule
+from netkeep.services.linkedin_accounts import ensure_account
 from netkeep.services.linkedin_session import flag_session
 
 PATH = "/api/v1/system-status"
@@ -77,7 +77,6 @@ async def test_all_well_reads_three_chips_and_writes_nothing(
         "gmail",
         "linkedin",
         "netkeep",
-        "linkedin_paused",
         "linkedin_run",
         "campaign_sending",
         "update_available",
@@ -90,7 +89,6 @@ async def test_all_well_reads_three_chips_and_writes_nothing(
     assert _face(body["gmail"]) == "Gmail · Not set up"
     assert body["gmail"]["target"] == {"to": "/settings", "hash": "gmail"}
     assert body["linkedin"]["parts"][0]["key"] == "session"
-    assert body["linkedin_paused"] is False
     assert body["linkedin_run"] is None
     assert body["campaign_sending"] is False
     assert body["update_available"] is None
@@ -158,18 +156,17 @@ async def test_live_progress_and_a_send_batch_come_from_this_processs_events(
     assert _face(body["gmail"]) == "Gmail · Sending now · campaign batch"
 
 
-async def test_paused_sending_and_the_keychain(app: FastAPI, client: httpx.AsyncClient) -> None:
+async def test_sending_and_the_keychain(app: FastAPI, client: httpx.AsyncClient) -> None:
     factory: sessionmaker[Session] = app.state.session_factory
     with session_scope(factory, write=True) as session:
         user = _local(session)
         ensure_account(session, user)
-        pause_schedule(session, user, now=utcnow())
     app.state.campaign_engine = SimpleNamespace(busy=True, sender=None)
     app.state.local_api_key.persisted = False
 
     body = (await client.get(PATH)).json()
 
-    assert body["linkedin_paused"] is True
+    assert "linkedin_paused" not in body  # gone with the pause (#834)
     assert body["campaign_sending"] is True
     assert _face(body["netkeep"]) == "netkeep · Keychain refused · key in memory"
 
@@ -182,7 +179,6 @@ async def test_another_users_state_never_shows(app: FastAPI, client: httpx.Async
         other = factories.make_user(session, UserKind.HOSTED)
         ensure_account(session, other)
         flag_session(session, other, Outcome.CHECKPOINT, url="/checkpoint/challenge")
-        pause_schedule(session, other, now=utcnow())
         runs.create_run(
             session, other, SyncRunKind.ENRICH, trigger=SyncRunTrigger.MANUAL, now=utcnow()
         )
@@ -193,7 +189,6 @@ async def test_another_users_state_never_shows(app: FastAPI, client: httpx.Async
     assert _face(body["gmail"]) == "Gmail · Not set up"
     session_part = body["linkedin"]["parts"][0]
     assert (session_part["key"], session_part["tone"]) == ("session", "ok")
-    assert body["linkedin_paused"] is False
     assert body["linkedin_run"] is None
 
 

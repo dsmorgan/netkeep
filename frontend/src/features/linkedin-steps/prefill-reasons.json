@@ -88,7 +88,6 @@
   "the prefill failed ({})",
   "the profile opened somewhere else",
   "the run was refused",
-  "the schedule is paused",
   "the send gates could not be checked",
   "the step is not an auto-send step",
   "the step no longer passes its guards",

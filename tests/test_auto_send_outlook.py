@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, cast
 
+import factories
 import pytest
 from campaign_fakes import NOW
 from inbox_fakes import record_poll
@@ -56,10 +57,10 @@ from netkeep.services import heat as heat_service
 from netkeep.services.auto_send_outlook import Wait
 from netkeep.services.budgets import ActionClass
 from netkeep.services.linkedin_accounts import (
+    account_id_for,
     arm_scheduled_runs,
     disarm_scheduled_runs,
     ensure_account,
-    pause_schedule,
 )
 from netkeep.services.scheduled_runs import auto_send_off
 from netkeep.services.settings_kv import get_setting, set_setting
@@ -292,21 +293,19 @@ async def test_pinned_disarmed(lane: Lane, caplog: pytest.LogCaptureFixture) -> 
     assert fired == Fired(scheduler.JobOutcome.DISARMED_AFTER_GATE, None, [], 0, None)
 
 
-async def test_pinned_paused(lane: Lane, caplog: pytest.LogCaptureFixture) -> None:
-    lane.enroll(contact=dict(CONTACT))
-    lane.write(lambda s, u: pause_schedule(s, u, now=NOW))
-    fired = await fire(lane, caplog)
-    assert fired == Fired(scheduler.JobOutcome.PAUSED_AFTER_GATE, None, [], 0, None)
+def _legacy_pause(session: Session, user: User) -> None:
+    factories.write_legacy_pause(session, user, account_id_for(session, user))
 
 
-async def test_pinned_paused_and_disarmed_says_paused(
+async def test_pinned_legacy_pause_key_and_disarmed_says_disarmed(
     lane: Lane, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """#834: a pause key left in the database is not a stop of its own any more."""
     lane.enroll(contact=dict(CONTACT))
-    lane.write(lambda s, u: pause_schedule(s, u, now=NOW))
+    lane.write(_legacy_pause)
     lane.write(lambda s, u: disarm_scheduled_runs(s, u))
     fired = await fire(lane, caplog)
-    assert fired.outcome is scheduler.JobOutcome.PAUSED_AFTER_GATE
+    assert fired == Fired(scheduler.JobOutcome.DISARMED_AFTER_GATE, None, [], 0, None)
 
 
 async def test_pinned_held(lane: Lane, caplog: pytest.LogCaptureFixture) -> None:
@@ -449,15 +448,20 @@ def test_the_outlook_says_when_the_job_has_no_due_time(lane: Lane) -> None:
     assert seen.wait is Wait.NOT_SCHEDULED and seen.next_fire is None
 
 
-@pytest.mark.parametrize("state", ["disarmed", "paused"])
-def test_the_outlook_reads_the_gate(lane: Lane, state: str) -> None:
+def test_the_outlook_reads_the_gate(lane: Lane) -> None:
     lane.enroll(contact=dict(CONTACT))
     _scheduled(lane)
-    if state == "disarmed":
-        lane.write(lambda s, u: disarm_scheduled_runs(s, u))
-    else:
-        lane.write(lambda s, u: pause_schedule(s, u, now=NOW))
-    assert look(lane).wait is Wait(state)
+    lane.write(lambda s, u: disarm_scheduled_runs(s, u))
+    assert look(lane).wait is Wait.DISARMED
+
+
+def test_the_outlook_ignores_a_legacy_pause_key(lane: Lane) -> None:
+    """#834: the outlook no longer reads the pause, so a key left over changes nothing."""
+    lane.enroll(contact=dict(CONTACT))
+    _scheduled(lane)
+    before = look(lane)
+    lane.write(_legacy_pause)
+    assert look(lane) == before
 
 
 def test_the_outlook_reads_the_session_flag(lane: Lane) -> None:
@@ -944,6 +948,11 @@ def test_the_words_carry_the_times() -> None:
     assert last(scheduler.LastFire(at=NOW, reason="linkedin_inbox_stale"), _utc) == (
         "14:00: sent nothing, linkedin inbox stale"
     )
+    # A last fire stored before #829 can still name the pause (#834).
+    for legacy in ("paused", "paused_after_gate"):
+        assert last(scheduler.LastFire(at=NOW, reason=legacy), _utc) == (
+            "14:00: sent nothing, the schedule was paused"
+        )
 
 
 # --- the sending hours: the outlook's copy of the claim's call, held to it ---------------
@@ -1110,61 +1119,6 @@ def test_each_step_names_the_budget_it_spends() -> None:
 
 
 # --- the schedule's controls never wait on the display -------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("path", "body"),
-    [
-        ("/api/v1/linkedin/schedule/disarm", None),
-        ("/api/v1/linkedin/schedule/pause", None),
-        ("/api/v1/linkedin/schedule/unpause", None),
-        ("/api/v1/linkedin/schedule/arm", {"confirm": True}),
-    ],
-)
-async def test_a_broken_outlook_never_stops_a_schedule_control(
-    client: Any,
-    running_app: Any,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    path: str,
-    body: Any,
-) -> None:
-    from netkeep.services.linkedin_accounts import schedule_paused, scheduled_runs_armed
-    from netkeep.web.security import CLIENT_HEADER, CLIENT_HEADER_VALUE
-
-    factory = running_app.state.session_factory
-    with session_scope(factory, write=True) as session:
-        user = session.scalars(select(User).where(User.kind == UserKind.LOCAL)).one()
-        arm_scheduled_runs(session, user, now=NOW)
-        if path.endswith("unpause"):
-            pause_schedule(session, user, now=NOW)
-
-    def broken(*args: Any, **kwargs: Any) -> Any:
-        raise RuntimeError("a contact named Somebody broke it")
-
-    monkeypatch.setattr(auto_send_outlook, "outlook", broken)
-    if path.endswith("/arm"):
-        with session_scope(factory, write=True) as session:
-            user = session.scalars(select(User).where(User.kind == UserKind.LOCAL)).one()
-            disarm_scheduled_runs(session, user)
-    with caplog.at_level(logging.WARNING):
-        response = await client.post(path, json=body, headers={CLIENT_HEADER: CLIENT_HEADER_VALUE})
-    assert response.status_code == 200, response.text
-    assert response.json()["auto_send"] is None
-    # Only the exception's type is logged, never its words.
-    assert "RuntimeError" in caplog.text and "Somebody" not in caplog.text
-    with session_scope(factory) as session:
-        user = session.scalars(select(User).where(User.kind == UserKind.LOCAL)).one()
-        account = ensure_account(session, user).id
-        armed = scheduled_runs_armed(session, user, account)
-        paused = schedule_paused(session, user, account)
-    expected = {
-        "disarm": (False, False),
-        "pause": (False, False),  # #829: Manual, which is disarmed
-        "unpause": (False, False),  # #829: clears the legacy pause and stays Manual
-        "arm": (True, False),
-    }[path.rsplit("/", 1)[1]]
-    assert (armed, paused) == expected
 
 
 async def test_a_broken_outlook_leaves_the_schedule_readable(

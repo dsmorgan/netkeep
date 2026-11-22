@@ -27,10 +27,10 @@ built on:
   the person saw): spec 9.7's manual clear (#181).
 * ``GET``/``POST /linkedin/pins``, ``DELETE /linkedin/pins/{contact_id}``: up
   to five contacts at the front of the next enrichment (spec 9.6).
-* ``GET /linkedin/schedule``, ``POST /linkedin/schedule/arm`` (with
-  ``confirm: true``), ``POST /linkedin/schedule/disarm``: whether scheduled
-  runs may fire. Every install starts disarmed. ``POST /linkedin/schedule/pause``
-  and ``/unpause`` hold new scheduled runs without disarming (#324).
+* ``GET /linkedin/schedule``: whether scheduled runs may fire, and when each kind is
+  due. Every install starts disarmed. The switch that arms them is
+  ``PUT /automation/linkedin`` (#829); ``/schedule/arm``, ``/disarm``, ``/pause`` and
+  ``/unpause`` are gone (#834).
 * ``GET /linkedin/status``: the page's banner in one read.
 * ``POST /linkedin/session-flag/clear`` (with ``confirm: true`` and the flag the
   person saw): ``netkeep linkedin clear-flag``, with its refusals (#181).
@@ -72,7 +72,6 @@ from netkeep.paths import data_dir
 from netkeep.scoping import get_scoped_contact, scoped_contacts
 from netkeep.services import (
     auto_send_outlook,
-    automation,
     budgets,
     enrich_plan,
     route_breaker,
@@ -95,10 +94,7 @@ from netkeep.services.linkedin_accounts import (
     account_id_for,
     ensure_account,
     find_account,
-    schedule_pause_state,
-    schedule_paused,
     scheduled_runs_armed,
-    unpause_schedule,
 )
 from netkeep.services.linkedin_session import (
     FlagClearRefused,
@@ -106,7 +102,7 @@ from netkeep.services.linkedin_session import (
     last_session_evidence,
     session_flag,
 )
-from netkeep.services.scheduled_runs import seed_served_schedule, submit_run
+from netkeep.services.scheduled_runs import submit_run
 from netkeep.services.scheduler import FULL_UPKEEP_KINDS, SERVED_SCHEDULES, stored_due
 from netkeep.services.visit_budget import todays_visits
 from netkeep.web.deps import (
@@ -147,7 +143,6 @@ from netkeep.web.schemas import (
     RunResumeIn,
     RunStartIn,
     RunVisitReasonOut,
-    ScheduleArmIn,
     ScheduledJobOut,
     ScheduleOut,
     SessionFlagClearIn,
@@ -644,12 +639,9 @@ def _auto_send_out(request: Request, session: Session, user: User) -> AutoSendOu
 def _schedule_out(request: Request, session: SessionDep, user: User) -> ScheduleOut:
     account = find_account(session, user)
     account_id = account_id_for(session, user)
-    pause = None if account is None else schedule_pause_state(session, user, account.id)
     return ScheduleOut(
         armed=account is not None and scheduled_runs_armed(session, user, account.id),
         armed_at=None if account is None else account.scheduled_runs_armed_at,
-        paused=pause is not None and pause.paused,
-        paused_at=None if pause is None else pause.paused_at,
         scheduler_running=request.app.state.scheduler is not None,
         jobs=[
             ScheduledJobOut(
@@ -666,8 +658,7 @@ def _schedule_out(request: Request, session: SessionDep, user: User) -> Schedule
 
 def _auto_send_or_none(request: Request, session: Session, user: User) -> AutoSendOutlookOut | None:
     """The outlook, or ``None`` when it cannot be read. It is a display: a fault in it must
-    never fail the schedule's arm, disarm, pause or unpause, which return this too. Only
-    the exception's type is logged."""
+    never fail the schedule's read. Only the exception's type is logged."""
     try:
         return _auto_send_out(request, session, user)
     except Exception as exc:
@@ -677,68 +668,6 @@ def _auto_send_or_none(request: Request, session: Session, user: User) -> AutoSe
 
 @router.get("/schedule", operation_id="get_linkedin_schedule")
 def get_schedule(request: Request, user: CurrentUser, session: SessionDep) -> ScheduleOut:
-    return _schedule_out(request, session, user)
-
-
-@router.post(
-    "/schedule/arm",
-    operation_id="arm_linkedin_schedule",
-    responses={422: {"description": "confirm was not true"}},
-)
-def arm_schedule(
-    body: ScheduleArmIn, request: Request, user: CurrentUser, session: SessionDep
-) -> ScheduleOut:
-    """Let scheduled LinkedIn runs fire. Needs ``confirm: true``; a person's act only."""
-    if not body.confirm:
-        raise HTTPException(
-            status_code=422,
-            detail="arming lets netkeep visit LinkedIn on its own schedule; send confirm: true",
-        )
-    now = utcnow()
-    # Deprecated (#829): Automatic, keeping the depth; the same as PUT /automation/linkedin.
-    automation.set_linkedin(session, user, automation.Position.AUTOMATIC, confirm=True, now=now)
-    seed_served_schedule(session, user, _settings(request, session, user), now=now)
-    session.commit()  # the change stands before anything is read back for display
-    return _schedule_out(request, session, user)
-
-
-@router.post("/schedule/disarm", operation_id="disarm_linkedin_schedule")
-def disarm_schedule(request: Request, user: CurrentUser, session: SessionDep) -> ScheduleOut:
-    """Deprecated (#829): ``PUT /automation/linkedin`` with ``manual``. Stops scheduled
-    LinkedIn runs from firing; a run already going is not cancelled. From Off it stays
-    Off: a stop never does more."""
-    automation.stop_linkedin(session, user, now=utcnow())
-    session.commit()  # the change stands before anything is read back for display
-    return _schedule_out(request, session, user)
-
-
-@router.post("/schedule/pause", operation_id="pause_linkedin_schedule")
-def pause_linkedin_schedule(
-    request: Request, user: CurrentUser, session: SessionDep
-) -> ScheduleOut:
-    """Deprecated (#829): pause is gone, and this moves LinkedIn to Manual, which does its
-    job: no scheduled run starts, and it survives a restart. A run already going is not
-    stopped (cancel does that). From Off it stays Off."""
-    automation.stop_linkedin(session, user, now=utcnow())
-    session.commit()  # the change stands before anything is read back for display
-    return _schedule_out(request, session, user)
-
-
-@router.post("/schedule/unpause", operation_id="unpause_linkedin_schedule")
-def unpause_linkedin_schedule(
-    request: Request, user: CurrentUser, session: SessionDep
-) -> ScheduleOut:
-    """Deprecated (#829): deletes a pause left from before migration 0049, if any, and
-    never does more. A paused account reads as Manual, so it stays Manual (disarmed, not
-    Automatic again), and Off stays Off. Migration 0049 deleted every pause, nothing
-    writes one since, and no page calls this after #832; the switch is
-    ``PUT /automation/linkedin``."""
-    now = utcnow()
-    account = find_account(session, user)
-    if account is not None and schedule_paused(session, user, account.id):
-        automation.stop_linkedin(session, user, now=now)  # armed and paused: to Manual
-        unpause_schedule(session, user, now=now)  # a key left on an Off account
-    session.commit()  # the change stands before anything is read back for display
     return _schedule_out(request, session, user)
 
 
@@ -881,7 +810,6 @@ def _status_out(request: Request, session: SessionDep, user: User) -> LinkedInSt
         session_flagged_at=None if flag is None else flag.flagged_at,
         heat_tripped=heat.tripped,
         armed=account is not None and scheduled_runs_armed(session, user, account.id),
-        schedule_paused=account is not None and schedule_paused(session, user, account.id),
         running_run_id=None if running is None else running.id,
         can_start_runs=request.app.state.executor is not None,
     )

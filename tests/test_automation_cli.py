@@ -155,14 +155,25 @@ def test_a_stop_alias_leaves_off_off(cli_db: sessionmaker[Session], alias: str) 
     assert _linkedin(cli_db).position is Position.OFF
 
 
-def test_arm_yes_at_quick_checks_stays_quick(cli_db: sessionmaker[Session]) -> None:
-    runner = CliRunner()
-    args = ["automation", "linkedin", "manual", "--depth", "quick"]
-    assert runner.invoke(cli, args).exit_code == 0
-    result = runner.invoke(cli, ["linkedin", "schedule", "arm", "--yes"])
-    assert result.exit_code == 0, result.output
-    state = _linkedin(cli_db)
-    assert (state.position, state.depth) == (Position.AUTOMATIC, ScheduleDepth.QUICK)
+@pytest.mark.parametrize("alias", ["arm", "unpause"])
+@pytest.mark.parametrize("extra", [[], ["--yes"]])
+def test_arm_and_unpause_are_gone_and_say_what_replaces_them(
+    cli_db: sessionmaker[Session], alias: str, extra: list[str]
+) -> None:
+    """#834: one way to turn on Automatic. The old commands only say which, and move
+    nothing, with or without the ``--yes`` they used to take."""
+    result = CliRunner().invoke(cli, ["linkedin", "schedule", alias, *extra])
+    assert result.exit_code == 2, result.output
+    assert f"`netkeep linkedin schedule {alias}` is gone" in result.output
+    assert "use `netkeep automation linkedin automatic`" in result.output
+    assert _linkedin(cli_db).position is Position.MANUAL
+
+
+def test_arm_and_unpause_are_not_listed(cli_db: sessionmaker[Session]) -> None:
+    listed = CliRunner().invoke(cli, ["linkedin", "schedule", "--help"])
+    assert listed.exit_code == 0
+    assert "disarm" in listed.output and "pause" in listed.output
+    assert " arm " not in listed.output and "unpause" not in listed.output
 
 
 # --- a change between the read and the write that does more is refused --------------------
@@ -198,14 +209,3 @@ def test_gmail_refuses_a_move_that_became_more_since_it_read(
     result = CliRunner().invoke(cli, ["automation", "gmail", "automatic"])
     assert result.exit_code == 1 and "confirm" in result.output
     assert _arm(cli_db) is MailboxArm.DRAFT
-
-
-def test_unpause_at_quick_checks_stays_quick(cli_db: sessionmaker[Session]) -> None:
-    runner = CliRunner()
-    assert (
-        runner.invoke(cli, ["automation", "linkedin", "manual", "--depth", "quick"]).exit_code == 0
-    )
-    result = runner.invoke(cli, ["linkedin", "schedule", "unpause", "--yes"])
-    assert result.exit_code == 0, result.output
-    state = _linkedin(cli_db)
-    assert (state.position, state.depth) == (Position.AUTOMATIC, ScheduleDepth.QUICK)

@@ -495,10 +495,10 @@ describe('ComingUpCard: one timeline', () => {
     ])
   })
 
-  it('still lists the sends while the schedule is paused, and none of its runs', async () => {
+  it('still lists the sends while the schedule is disarmed, and none of its runs', async () => {
     renderComingUp({
       [FIRES]: json({ items: [fire({ contact_name: 'Ada Example' })], total: 1 }),
-      [SCHEDULE]: json(scheduleWith({ jobs, paused: true, paused_at: '2026-09-21T08:00:00Z' })),
+      [SCHEDULE]: json(scheduleWith({ jobs, armed: false })),
     })
     const body = await card('Coming up')
     const items = await body.findAllByRole('listitem')

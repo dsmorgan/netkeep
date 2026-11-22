@@ -83,11 +83,11 @@ function pollStatus(overrides: Partial<PollStatus> = {}): PollStatus {
         key: 'linkedin_enrich',
         group: 'linkedin',
         label: 'LinkedIn enrichment',
-        state: 'paused',
+        state: 'blocked',
         interval_minutes: 180,
         last_at: minutes(-120),
         next_at: null,
-        reason: 'The LinkedIn schedule is paused',
+        reason: 'LinkedIn heat is high, so scheduled runs wait until it cools',
       }),
     ],
     mailboxes: [mailboxPoll()],
@@ -192,7 +192,7 @@ describe('format', () => {
       expect(summary).toBe(`checked 3 min ago · ${STATE_TEXT[state]}`)
       expect(summary).not.toContain('next')
     }
-    expect(checkSummary(check({ state: 'paused', last_at: null }), NOW)).toBe('paused')
+    expect(checkSummary(check({ state: 'off', last_at: null }), NOW)).toBe('off')
     expect(checkSummary(check({ state: 'outside_hours' }), NOW)).toContain('outside active hours')
   })
 

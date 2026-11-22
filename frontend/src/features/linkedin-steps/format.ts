@@ -176,7 +176,6 @@ export const AUTO_SEND_WAIT_TEXT: Readonly<Record<string, string>> = {
   not_scheduled:
     "The auto-send check isn't scheduled yet. netkeep serve schedules it when it starts.",
   disarmed: 'Scheduled runs are off, so the auto-send check sends nothing.',
-  paused: 'Scheduled runs are paused, so the auto-send check sends nothing.',
   session_flagged:
     "The LinkedIn session is flagged (a checkpoint or a login wall). Nothing runs until it's cleared.",
   heat: 'Heat is at or over its threshold',

@@ -28,7 +28,7 @@ store, never by running one:
   ``requested`` too, until the next tick runs it.
 - **LinkedIn**: each kind the scheduler serves, from its stored due time
   (:func:`~netkeep.services.scheduler.stored_due`), and its last completed run.
-  The gates are the scheduler's own, in its order: disarmed, paused, the session
+  The gates are the scheduler's own, in its order: disarmed, the session
   flag, heat, the connections breakers. Then active hours, last: the scheduler snaps
   every due time into the window, and a fire it finds outside the window anyway (a
   window narrowed since) moves to the next start rather than running (#696). The
@@ -43,9 +43,8 @@ The campaign engine's one-minute tick is left out on purpose: it is not a check.
 
 A check that cannot run says why instead of giving a time: ``next_at`` is set only
 for a ``scheduled`` check. Gmail and LinkedIn check their gates in one order:
-``serve`` not running, then turned off (disarmed, not connected), then paused
-(LinkedIn only), then blocked. No function here writes, calls Gmail, or attaches
-to a browser.
+``serve`` not running, then turned off (disarmed, not connected), then blocked. No
+function here writes, calls Gmail, or attaches to a browser.
 """
 
 from __future__ import annotations
@@ -84,7 +83,6 @@ from netkeep.services.linkedin_accounts import (
     find_account,
     full_upkeep,
     linkedin_off,
-    schedule_paused,
     scheduled_runs_armed,
 )
 from netkeep.services.linkedin_session import session_flag
@@ -110,8 +108,6 @@ class CheckState(enum.StrEnum):
     machine slept), as a catch-up 5 to 20 minutes after the scheduler notices."""
     IDLE = "idle"
     """It would run, but has nothing to look at (no draft waiting, nothing scheduled)."""
-    PAUSED = "paused"
-    """A person paused the LinkedIn schedule."""
     OUTSIDE_HOURS = "outside_hours"
     """Outside LinkedIn active hours: nothing starts until the window opens."""
     BLOCKED = "blocked"
@@ -600,7 +596,7 @@ def _linkedin(
 def _inbox_hold(session: Session, user: User, *, now: datetime) -> str | None:
     """What is held while the inbox poll is stale (#417), or None when nothing is: the
     inbox is fresh, or no LinkedIn step or watched contact makes a stale one matter. It
-    says so whatever state the check is in (not wired, disarmed, paused, blocked): a poll
+    says so whatever state the check is in (not wired, disarmed, blocked): a poll
     that is not running is the usual reason it is stale."""
     if not inbox_hold.linkedin_in_use(session, user):
         return None
@@ -632,8 +628,6 @@ def _linkedin_gate(
         return CheckState.MANUAL, LINKEDIN_MANUAL
     if not serving.scheduler:
         return CheckState.NOT_RUNNING, NOT_SERVING
-    if schedule_paused(session, user, account_id):
-        return CheckState.PAUSED, "The LinkedIn schedule is paused"
     if session_flag(session, user) is not None:
         return (
             CheckState.BLOCKED,

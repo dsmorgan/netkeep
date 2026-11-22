@@ -9,15 +9,13 @@ made since, on the first run that needs it.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
 from netkeep.db import is_writer
 from netkeep.models import DEFAULT_ACCOUNT_LABEL, LinkedInAccount, ScheduleDepth, User
 from netkeep.scoping import scoped
-from netkeep.services.settings_kv import delete_setting, get_setting, set_setting
 from netkeep.services.users import local_owner
 
 log = logging.getLogger(__name__)
@@ -144,95 +142,6 @@ def linkedin_off(session: Session, user: User) -> bool:
     Read-only. ``False`` before the account has a row: nobody can have turned it off."""
     account = find_account(session, user)
     return account is not None and account.automation_off_at is not None
-
-
-# --- the schedule paused: armed, but no new scheduled run starts (#324) ---------
-
-
-def _pause_key(account_id: int) -> str:
-    return f"linkedin.schedule.{account_id}.paused_at"
-
-
-@dataclass(frozen=True, slots=True)
-class SchedulePause:
-    """Whether an account's schedule is paused, and since when (#324).
-
-    ``paused_at`` is ``None`` while not paused, and also for a pause whose stored
-    value could not be read: that one is ``paused`` (fail closed) with no time.
-    """
-
-    paused: bool
-    paused_at: datetime | None = None
-
-    @property
-    def unreadable(self) -> bool:
-        return self.paused and self.paused_at is None
-
-
-def schedule_pause_state(session: Session, user: User, account_id: int) -> SchedulePause:
-    """Whether a person paused ``account_id``'s schedule, and when. Read-only.
-
-    A pause holds the scheduler without disarming it: no new scheduled run starts
-    until :func:`unpause_schedule`, and a run already going is not stopped. It is
-    a ``settings_kv`` key, so it survives a restart of ``serve``. Unlike arming,
-    it only ever stops traffic, so a key is safe here. A stored value this cannot
-    read counts as paused (logged), the side that starts nothing.
-    """
-    raw = get_setting(session, user, _pause_key(account_id))
-    if raw is None:
-        return SchedulePause(paused=False)
-    try:
-        when = datetime.fromisoformat(str(raw))
-    except ValueError:
-        log.warning(
-            "the schedule pause for account %d is unreadable; treating it as paused", account_id
-        )
-        return SchedulePause(paused=True)
-    return SchedulePause(
-        paused=True, paused_at=when if when.tzinfo is not None else when.replace(tzinfo=UTC)
-    )
-
-
-def schedule_paused(session: Session, user: User, account_id: int) -> bool:
-    """Whether ``account_id``'s schedule is paused (:func:`schedule_pause_state`). Read-only."""
-    return schedule_pause_state(session, user, account_id).paused
-
-
-def pause_schedule(session: Session, user: User, *, now: datetime) -> LinkedInAccount:
-    """Pause ``user``'s account's schedule. Pausing a paused one keeps the first time.
-
-    Legacy (#829): nothing in netkeep calls this any more; ``linkedin schedule pause``
-    and ``POST /linkedin/schedule/pause`` move LinkedIn to Manual instead. Tests use it
-    to make a pause as an install from before migration 0049 had one."""
-    if now.tzinfo is None or now.utcoffset() is None:
-        raise ValueError("now must be timezone-aware")
-    _require_writer(session, "pause_schedule")
-    account = ensure_account(session, user)
-    if not schedule_paused(session, user, account.id):
-        set_setting(session, user, _pause_key(account.id), now.isoformat())
-        account.automation_changed_at = now
-        log.warning("scheduled LinkedIn runs paused for account %d (user %d)", account.id, user.id)
-    return account
-
-
-def unpause_schedule(
-    session: Session, user: User, *, now: datetime | None = None
-) -> LinkedInAccount:
-    """Let ``user``'s account's scheduled runs start again. Nothing missed is replayed.
-
-    Every due fire the scheduler met while paused was skipped and its cadence
-    moved on (``services.scheduler.poll_and_fire``), so each kind next fires at
-    its own stored due time, never all at once.
-    """
-    _require_writer(session, "unpause_schedule")
-    account = ensure_account(session, user)
-    if delete_setting(session, user, _pause_key(account.id)):
-        if now is not None:
-            account.automation_changed_at = now
-        log.warning(
-            "scheduled LinkedIn runs unpaused for account %d (user %d)", account.id, user.id
-        )
-    return account
 
 
 def _require_writer(session: Session, where: str) -> None:

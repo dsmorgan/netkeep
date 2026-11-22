@@ -161,6 +161,45 @@ def test_a_backup_from_an_older_netkeep_is_upgraded_to_head(data: Path) -> None:
         engine.dispose()
 
 
+def test_a_backup_from_before_the_switch_loses_its_schedule_pause(data: Path) -> None:
+    """#834: a backup from before 0049 can hold the schedule pause (#324). The restore runs
+    the migrations, so 0049 maps the armed, paused account to Manual and deletes the key:
+    nothing past 0049 reads one, and nothing restores one."""
+    engine = make_engine(database_url(data))
+    try:
+        migrations.downgrade(engine, "0048")
+    finally:
+        engine.dispose()
+    key = "linkedin.schedule.1.paused_at"
+    with closing(sqlite3.connect(data / DATABASE_FILENAME)) as connection:
+        (user_id,) = connection.execute("SELECT user_id FROM settings_kv LIMIT 1").fetchone()
+        connection.execute(
+            "INSERT INTO linkedin_accounts"
+            " (id, user_id, label, scheduled_runs_armed_at, created_at, updated_at)"
+            " VALUES (1, ?, 'default', '2026-09-20 12:00:00', '2026-09-20', '2026-09-20')",
+            (user_id,),
+        )
+        connection.execute(
+            "INSERT INTO settings_kv (user_id, key, value, created_at, updated_at)"
+            " VALUES (?, ?, '\"2026-09-20T12:00:00+00:00\"', '2026-09-20', '2026-09-20')",
+            (user_id, key),
+        )
+        connection.commit()
+    saved = _backup_now(data, datetime(2026, 10, 1, tzinfo=UTC))
+    _mark(data, "at head again")
+
+    result = restore_backup(saved, database_url(data), data / "backups")
+
+    assert result.source_revision == "0048"
+    with closing(sqlite3.connect(data / DATABASE_FILENAME)) as connection:
+        keys = {row[0] for row in connection.execute("SELECT key FROM settings_kv")}
+        (armed,) = connection.execute(
+            "SELECT scheduled_runs_armed_at FROM linkedin_accounts WHERE id = 1"
+        ).fetchone()
+    assert key not in keys
+    assert armed is None  # Manual
+
+
 def test_restore_backs_up_the_database_in_place_first(data: Path) -> None:
     saved = _backup_now(data, datetime(2026, 10, 1, tzinfo=UTC))
     _mark(data, "work since the backup")

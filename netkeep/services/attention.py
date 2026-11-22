@@ -19,7 +19,7 @@ breakers only, not the full posture check).
 The activity state covers LinkedIn runs only (``sync_runs``). A campaign send batch shows
 as running beside it, from the ``campaign.tick`` event in the browser (#547), never here;
 the Gmail reply poll does not show (it takes seconds and would only blink).
-The first match wins: Running, Stopped, Paused, Armed, Idle.
+The first match wins: Running, Stopped, Armed, Idle.
 
 ``title_total`` adds up the number badges for the browser tab, without Triage: after an
 import its backlog can run to thousands, and the tab would never read clean.
@@ -45,7 +45,6 @@ from netkeep.services import heat, inbox, leftover_drafts, linkedin_steps, route
 from netkeep.services.linkedin_accounts import (
     LEGACY_ACCOUNT_ID,
     find_account,
-    schedule_paused,
     scheduled_runs_armed,
 )
 from netkeep.services.linkedin_session import session_flag
@@ -56,7 +55,6 @@ class ActivityState(enum.StrEnum):
 
     RUNNING = "running"
     STOPPED = "stopped"
-    PAUSED = "paused"
     ARMED = "armed"
     IDLE = "idle"
 
@@ -88,7 +86,6 @@ BREAKER_TRIPPED: Final = (
     "A breaker is tripped, so some scheduled runs can't start; reset it on the Settings page."
 )
 
-PAUSED: Final = "The LinkedIn schedule is paused."
 #: The switch on Automatic (#829). The UI's live region reads it after "LinkedIn:
 #: Automatic", so it never says "armed" or repeats "LinkedIn" (#834).
 ARMED: Final = "Runs on its own, within active hours."
@@ -229,8 +226,6 @@ def attention(session: Session, user: User, *, now: datetime, settings: Settings
         )
     elif stopped is not None:
         activity = Activity(ActivityState.STOPPED, stopped, None, None)
-    elif account is not None and schedule_paused(session, user, account.id):
-        activity = Activity(ActivityState.PAUSED, PAUSED, None, None)
     elif account is not None and scheduled_runs_armed(session, user, account.id):
         activity = Activity(ActivityState.ARMED, ARMED, None, None)
     else:

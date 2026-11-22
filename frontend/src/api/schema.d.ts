@@ -2710,70 +2710,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/linkedin/schedule/arm": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Arm Schedule
-         * @description Let scheduled LinkedIn runs fire. Needs ``confirm: true``; a person's act only.
-         */
-        post: operations["arm_linkedin_schedule"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/linkedin/schedule/disarm": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Disarm Schedule
-         * @description Deprecated (#829): ``PUT /automation/linkedin`` with ``manual``. Stops scheduled
-         *     LinkedIn runs from firing; a run already going is not cancelled. From Off it stays
-         *     Off: a stop never does more.
-         */
-        post: operations["disarm_linkedin_schedule"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/linkedin/schedule/pause": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Pause Linkedin Schedule
-         * @description Deprecated (#829): pause is gone, and this moves LinkedIn to Manual, which does its
-         *     job: no scheduled run starts, and it survives a restart. A run already going is not
-         *     stopped (cancel does that). From Off it stays Off.
-         */
-        post: operations["pause_linkedin_schedule"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/linkedin/schedule/reset-breaker": {
         parameters: {
             query?: never;
@@ -2795,30 +2731,6 @@ export interface paths {
          *     reason to reset here; the command still clears one.
          */
         post: operations["reset_linkedin_breaker"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/linkedin/schedule/unpause": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Unpause Linkedin Schedule
-         * @description Deprecated (#829): deletes a pause left from before migration 0049, if any, and
-         *     never does more. A paused account reads as Manual, so it stays Manual (disarmed, not
-         *     Automatic again), and Off stays Off. Migration 0049 deleted every pause, nothing
-         *     writes one since, and no page calls this after #832; the switch is
-         *     ``PUT /automation/linkedin``.
-         */
-        post: operations["unpause_linkedin_schedule"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4203,7 +4115,7 @@ export interface components {
          * @description What LinkedIn is doing, in precedence order: the first that applies wins.
          * @enum {string}
          */
-        ActivityState: "running" | "stopped" | "paused" | "armed" | "idle";
+        ActivityState: "running" | "stopped" | "armed" | "idle";
         /** AdoptIn */
         AdoptIn: {
             /**
@@ -5221,7 +5133,7 @@ export interface components {
          * @description Where a check stands. Only ``scheduled`` carries a next time.
          * @enum {string}
          */
-        CheckState: "scheduled" | "due" | "idle" | "paused" | "outside_hours" | "blocked" | "off" | "manual" | "not_running" | "not_wired";
+        CheckState: "scheduled" | "due" | "idle" | "outside_hours" | "blocked" | "off" | "manual" | "not_running" | "not_wired";
         /** ConfigFieldOut */
         ConfigFieldOut: {
             /**
@@ -7416,8 +7328,6 @@ export interface components {
             heat_tripped: boolean;
             /** Running Run Id */
             running_run_id: number | null;
-            /** Schedule Paused */
-            schedule_paused: boolean;
             /** Session Flag */
             session_flag: string | null;
             /** Session Flagged At */
@@ -9151,14 +9061,6 @@ export interface components {
             sort?: components["schemas"]["SortKey"][] | null;
         };
         /**
-         * ScheduleArmIn
-         * @description Arming needs ``confirm: true``: it lets netkeep visit LinkedIn on its own.
-         */
-        ScheduleArmIn: {
-            /** Confirm */
-            confirm: boolean;
-        };
-        /**
          * ScheduleDepth
          * @description How much an armed LinkedIn schedule runs (#829, "How thorough").
          * @enum {string}
@@ -9171,10 +9073,6 @@ export interface components {
          *     ``armed`` is false on every install until a person arms it; while false the
          *     scheduler still keeps due times, and no scheduled LinkedIn job fires.
          *     ``scheduler_running`` is whether this process runs a scheduler at all.
-         *     ``paused`` is whether a person paused the schedule (#324): armed or not, no
-         *     new scheduled run starts until it is unpaused, and nothing missed is replayed.
-         *     ``paused_at`` is null when not paused, and for a pause whose stored value
-         *     could not be read (still ``paused``: it fails closed).
          */
         ScheduleOut: {
             /** Armed */
@@ -9184,10 +9082,6 @@ export interface components {
             auto_send: components["schemas"]["AutoSendOutlookOut"] | null;
             /** Jobs */
             jobs: components["schemas"]["ScheduledJobOut"][];
-            /** Paused */
-            paused: boolean;
-            /** Paused At */
-            paused_at: string | null;
             /** Scheduler Running */
             scheduler_running: boolean;
         };
@@ -9798,8 +9692,6 @@ export interface components {
             checked_at: string;
             gmail: components["schemas"]["StatusChipOut"];
             linkedin: components["schemas"]["StatusChipOut"];
-            /** Linkedin Paused */
-            linkedin_paused: boolean;
             linkedin_run: components["schemas"]["RunInProgressOut"] | null;
             netkeep: components["schemas"]["StatusChipOut"];
             /** Update Available */
@@ -16103,77 +15995,6 @@ export interface operations {
             };
         };
     };
-    arm_linkedin_schedule: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ScheduleArmIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ScheduleOut"];
-                };
-            };
-            /** @description confirm was not true */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    disarm_linkedin_schedule: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ScheduleOut"];
-                };
-            };
-        };
-    };
-    pause_linkedin_schedule: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ScheduleOut"];
-                };
-            };
-        };
-    };
     reset_linkedin_breaker: {
         parameters: {
             query?: never;
@@ -16209,26 +16030,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-        };
-    };
-    unpause_linkedin_schedule: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ScheduleOut"];
-                };
             };
         };
     };
