@@ -89,8 +89,12 @@ BREAKER_TRIPPED: Final = (
 )
 
 PAUSED: Final = "The LinkedIn schedule is paused."
-ARMED: Final = "Scheduled LinkedIn runs are armed."
-IDLE: Final = "Scheduled LinkedIn runs are off."
+#: The switch on Automatic (#829). The UI's live region reads it after "LinkedIn:
+#: Automatic", so it never says "armed" (#834).
+ARMED: Final = "LinkedIn runs on its own, within active hours."
+#: The switch on Manual or Off. The live region reads it after "LinkedIn: Manual" or
+#: "LinkedIn: Off", so it says nothing that reads against either (#834).
+IDLE: Final = "Nothing runs on its own."
 
 _RUN_NAMES: Final = {
     SyncRunKind.CONNECTIONS_FULL: "full connections sync",

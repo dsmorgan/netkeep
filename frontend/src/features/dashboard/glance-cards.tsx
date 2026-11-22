@@ -5,7 +5,7 @@ import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import type { Tone } from '@/components/ui/tone'
-import { automationQuery, FULL_UPKEEP_KINDS } from '@/features/automation/api'
+import { automationQuery } from '@/features/automation/api'
 import { CampaignStatusBadge } from '@/features/campaigns/badges'
 import { campaignsQuery } from '@/features/campaigns/api'
 import { countsText } from '@/features/campaigns/format'
@@ -155,13 +155,14 @@ export function ComingUpCard() {
   const plan = schedule.data
   // Jobs fire only while the schedule is armed and not paused.
   const firing = plan !== undefined && plan.armed && !plan.paused
-  // At quick checks the full sync and enrichment are skipped when due (#829).
+  // At quick checks the kinds the schedule marks skipped (the full sync, enrichment)
+  // don't fire when due (#829, #834).
   const quick = automation.data?.linkedin.depth === 'quick'
   const check = firing && autoSendOn ? outlook : null
   const rows: Upcoming[] = [
     ...(fires.data?.items ?? []).map((fire): Upcoming => ({ kind: 'send', at: fire.due, fire })),
     ...(firing ? plan.jobs : []).flatMap((job): Upcoming[] =>
-      job.next_due === null || (quick && FULL_UPKEEP_KINDS.has(job.kind))
+      job.next_due === null || (quick && job.skipped_on_quick)
         ? []
         : [{ kind: 'job', at: job.next_due, job: job.kind }],
     ),

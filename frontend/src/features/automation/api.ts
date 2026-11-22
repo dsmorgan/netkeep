@@ -23,12 +23,6 @@ export type Service = keyof Automation
 /** Left to right: a stop further right does more. */
 export const POSITIONS: readonly Position[] = ['off', 'manual', 'automatic']
 
-/**
- * The job kinds the schedule fires only with the weekly full sync (the scheduler's
- * `FULL_UPKEEP_KINDS`): at quick checks it skips them, so their due times never fire.
- */
-export const FULL_UPKEEP_KINDS: ReadonlySet<string> = new Set(['connections_full', 'enrich'])
-
 export const POSITION_LABEL: Record<Position, string> = {
   off: 'Off',
   manual: 'Manual',

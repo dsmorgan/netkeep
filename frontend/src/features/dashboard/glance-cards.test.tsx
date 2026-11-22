@@ -275,9 +275,19 @@ describe('ComingUpCard: scheduled LinkedIn runs', () => {
       armed_at: '2026-09-20T12:00:00Z',
       scheduler_running: true,
       jobs: [
-        { kind: 'connections_full', interval_hours: 168, next_due: '2099-03-01T09:00:00Z' },
-        { kind: 'connections_incremental', interval_hours: 24, next_due: '2099-01-01T09:00:00Z' },
-        { kind: 'enrich', interval_hours: 24, next_due: null },
+        {
+          kind: 'connections_full',
+          interval_hours: 168,
+          next_due: '2099-03-01T09:00:00Z',
+          skipped_on_quick: true,
+        },
+        {
+          kind: 'connections_incremental',
+          interval_hours: 24,
+          next_due: '2099-01-01T09:00:00Z',
+          skipped_on_quick: false,
+        },
+        { kind: 'enrich', interval_hours: 24, next_due: null, skipped_on_quick: true },
       ],
       ...overrides,
     }
@@ -302,7 +312,9 @@ describe('ComingUpCard: scheduled LinkedIn runs', () => {
   it('says so when armed but nothing is scheduled yet', async () => {
     renderComingUp({
       [SCHEDULE]: json(
-        schedule({ jobs: [{ kind: 'enrich', interval_hours: 24, next_due: null }] }),
+        schedule({
+          jobs: [{ kind: 'enrich', interval_hours: 24, next_due: null, skipped_on_quick: true }],
+        }),
       ),
     })
     const body = await card('Coming up')
@@ -345,6 +357,35 @@ describe('ComingUpCard: scheduled LinkedIn runs', () => {
     const items = await body.findAllByRole('listitem')
     expect(items.map((item) => item.textContent)).toEqual([
       expect.stringContaining('Incremental connections sync'),
+    ])
+  })
+
+  it('follows the schedule’s skipped_on_quick flag at quick checks (#834)', async () => {
+    renderComingUp({
+      [SCHEDULE]: json(
+        schedule({
+          jobs: [
+            {
+              kind: 'connections_full',
+              interval_hours: 168,
+              next_due: '2099-03-01T09:00:00Z',
+              skipped_on_quick: false,
+            },
+            {
+              kind: 'connections_incremental',
+              interval_hours: 24,
+              next_due: '2099-01-01T09:00:00Z',
+              skipped_on_quick: true,
+            },
+          ],
+        }),
+      ),
+      [AUTOMATION]: json(automation({ linkedin: { position: 'automatic', depth: 'quick' } })),
+    })
+    const body = await card('Coming up')
+    const items = await body.findAllByRole('listitem')
+    expect(items.map((item) => item.textContent)).toEqual([
+      expect.stringContaining('Full connections sync'),
     ])
   })
 
@@ -419,8 +460,18 @@ describe('ComingUpCard: scheduled LinkedIn runs', () => {
 
 describe('ComingUpCard: one timeline', () => {
   const jobs = [
-    { kind: 'connections_incremental', interval_hours: 24, next_due: '2099-01-01T09:00:00Z' },
-    { kind: 'enrich', interval_hours: 24, next_due: '2099-01-03T09:00:00Z' },
+    {
+      kind: 'connections_incremental',
+      interval_hours: 24,
+      next_due: '2099-01-01T09:00:00Z',
+      skipped_on_quick: false,
+    },
+    {
+      kind: 'enrich',
+      interval_hours: 24,
+      next_due: '2099-01-03T09:00:00Z',
+      skipped_on_quick: true,
+    },
   ]
 
   it('puts the sends and the LinkedIn runs in one list, soonest first (#739)', async () => {

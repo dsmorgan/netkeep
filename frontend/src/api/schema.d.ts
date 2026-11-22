@@ -9199,6 +9199,8 @@ export interface components {
             kind: string;
             /** Next Due */
             next_due: string | null;
+            /** Skipped On Quick */
+            skipped_on_quick: boolean;
         };
         /** SelfContactIn */
         SelfContactIn: {

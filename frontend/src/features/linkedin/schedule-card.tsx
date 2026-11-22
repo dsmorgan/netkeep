@@ -1,12 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-  automationQuery,
-  FULL_UPKEEP_KINDS,
-  POSITION_LABEL,
-  type Position,
-} from '@/features/automation/api'
+import { automationQuery, POSITION_LABEL, type Position } from '@/features/automation/api'
 
 import { scheduleQuery } from './api'
 import { formatWhen } from './fields'
@@ -53,7 +48,7 @@ export function ScheduleCard() {
             {schedule.data.jobs.map((job) => (
               <li key={job.kind}>
                 {RUN_KIND_LABELS[job.kind as RunKind] ?? job.kind}:{' '}
-                {state.depth === 'quick' && FULL_UPKEEP_KINDS.has(job.kind)
+                {state.depth === 'quick' && job.skipped_on_quick
                   ? 'not on quick checks'
                   : `every ${job.interval_hours}h, next due ${
                       job.next_due === null ? 'not scheduled' : formatWhen(job.next_due)

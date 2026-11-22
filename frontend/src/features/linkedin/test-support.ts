@@ -118,8 +118,13 @@ export const SCHEDULE_DISARMED: Schedule = {
   paused_at: null,
   scheduler_running: true,
   jobs: [
-    { kind: 'connections_incremental', interval_hours: 24, next_due: '2026-09-24T08:00:00Z' },
-    { kind: 'enrich', interval_hours: 6, next_due: '2026-09-23T14:00:00Z' },
+    {
+      kind: 'connections_incremental',
+      interval_hours: 24,
+      next_due: '2026-09-24T08:00:00Z',
+      skipped_on_quick: false,
+    },
+    { kind: 'enrich', interval_hours: 6, next_due: '2026-09-23T14:00:00Z', skipped_on_quick: true },
   ],
   auto_send: AUTO_SEND_OFF_OUTLOOK,
 }
