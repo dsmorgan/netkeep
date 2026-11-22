@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api/client'
 import { navStateText } from '@/components/layout/nav'
+import { automationKeys } from '@/features/automation/api'
+import { automation } from '@/features/automation/test-support'
 import { FakeEventSource, resetFakeEventSource } from '@/test/fake-event-source'
 import { jsonResponse, mockFetch } from '@/test/fetch'
 import { renderApp } from '@/test/render'
@@ -48,14 +50,20 @@ const BUSY = attention({
   title_total: 124,
 })
 
-/** Serves `current()` at `/attention`, counts those fetches, and answers `change` to any change. */
-function serve(current: () => unknown, change = 204) {
+/**
+ * Serves `current()` at `/attention`, counts those fetches, and answers `change` to any
+ * change. `switchAt` answers `/automation` when given; otherwise it is a 404.
+ */
+function serve(current: () => unknown, change = 204, switchAt?: () => unknown) {
   let fetches = 0
   mockFetch((request) => {
     const { pathname } = new URL(request.url)
     if (pathname === '/api/v1/attention') {
       fetches += 1
       return jsonResponse(current())
+    }
+    if (pathname === '/api/v1/automation' && switchAt !== undefined) {
+      return jsonResponse(switchAt())
     }
     if (request.method !== 'GET') return new Response(null, { status: change })
     return jsonResponse({ detail: `unexpected ${pathname}` }, 404)
@@ -340,12 +348,54 @@ describe('the activity indicator (#347)', () => {
       running: 'LinkedIn: running',
       stopped: 'LinkedIn: blocked',
       paused: 'LinkedIn: paused',
-      armed: 'LinkedIn: armed',
-      idle: 'LinkedIn: off',
+      armed: 'LinkedIn: Automatic',
+      idle: 'LinkedIn: not on Automatic',
     })
     expect(announcement(activity('paused', 'The LinkedIn schedule is paused.').activity)).toBe(
       'LinkedIn: paused. The LinkedIn schedule is paused.',
     )
+  })
+
+  it.each([
+    ['manual', 'LinkedIn: Manual. Scheduled LinkedIn runs are off.'],
+    ['off', 'LinkedIn: Off. Scheduled LinkedIn runs are off.'],
+    // A switch read older than the activity: the neutral text, never a wrong position.
+    ['automatic', 'LinkedIn: not on Automatic. Scheduled LinkedIn runs are off.'],
+    [undefined, 'LinkedIn: not on Automatic. Scheduled LinkedIn runs are off.'],
+  ] as const)(
+    'announces idle as the switch reads (%s), never “LinkedIn: off” (#835)',
+    (position, text) => {
+      expect(
+        announcement(activity('idle', 'Scheduled LinkedIn runs are off.').activity, position),
+      ).toBe(text)
+    },
+  )
+
+  it('announces armed as Automatic, whatever the switch read says', () => {
+    expect(announcement(activity('armed', '').activity, 'manual')).toBe('LinkedIn: Automatic')
+  })
+
+  it('announces the switch’s Manual when a run ends, once, in the live region (#835)', async () => {
+    let current = activity('running', 'A LinkedIn enrichment run is running.')
+    serve(
+      () => current,
+      204,
+      () => automation(),
+    )
+    const { queryClient } = await renderApp('/exports')
+    const live = await screen.findByTestId('activity-live')
+    await waitFor(() => expect(queryClient.getQueryData(attentionQuery.queryKey)).toBeDefined())
+    await waitFor(() => expect(queryClient.getQueryData(automationKeys.all)).toBeDefined())
+    expect(live).toHaveTextContent('')
+
+    current = activity('idle', 'Scheduled LinkedIn runs are off.')
+    act(() => FakeEventSource.instances.at(-1)?.emit('run.finished', {}))
+
+    await waitFor(() =>
+      expect(live).toHaveTextContent('LinkedIn: Manual. Scheduled LinkedIn runs are off.'),
+    )
+    expect(live).not.toHaveTextContent(/LinkedIn: off/)
+    expect(screen.getAllByTestId('activity-live')).toHaveLength(1)
   })
 
   it.each([

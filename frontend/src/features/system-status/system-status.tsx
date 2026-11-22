@@ -9,6 +9,7 @@ import {
   GmailSwitchCompact,
   LinkedInSwitchCompact,
 } from '@/features/automation/automation-compact'
+import { automationQuery } from '@/features/automation/api'
 import { useGmailAutomation, useLinkedInAutomation } from '@/features/automation/use-automation'
 import { lastRunQuery } from '@/features/dashboard/api'
 import { useEventStreamStatus } from '@/features/events/event-stream-context'
@@ -63,6 +64,8 @@ function useStatusRefresh(): void {
  */
 function LinkedInAnnouncer() {
   const attention = useQuery(attentionQuery)
+  // The switch's position, so idle is announced as Manual or Off, as the switch reads.
+  const position = useQuery(automationQuery).data?.linkedin.position
   const activity = attention.data?.activity
   const [spoken, setSpoken] = useState('')
   const previous = useRef<ActivityState | null>(null)
@@ -70,9 +73,11 @@ function LinkedInAnnouncer() {
   useEffect(() => {
     if (activity === undefined) return
     if (previous.current !== null && previous.current !== activity.state) {
-      setSpoken(announcement(activity))
+      setSpoken(announcement(activity, position))
     }
     previous.current = activity.state
+    // Only a change of activity speaks; the position is read, not watched.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activity])
 
   return (
