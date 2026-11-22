@@ -24,6 +24,7 @@ import {
 } from './api'
 import { DepthChoice } from './depth-choice'
 import { JobList } from './job-list'
+import { automaticUnavailable } from './lines'
 import { FailureList } from './read-failure'
 import { failures } from './read-failures'
 
@@ -263,7 +264,10 @@ export interface GmailControl {
   choose: (position: Position) => void
   pending: boolean
   error: string | null
-  /** Why Automatic can't be chosen now; null when it can, or already is. */
+  /**
+   * Why Automatic can't be chosen now, as the one sentence every place shows
+   * (`automaticUnavailable`); null when it can, or already is.
+   */
   blockedReason: string | null
   /** "every 10 min", from the reply check's interval. */
   replyEvery: string
@@ -293,7 +297,7 @@ export function useGmailAutomation(): GmailControl {
   const blockedReason =
     state === undefined || state.position === 'automatic' || state.automatic_ready
       ? null
-      : (state.blocked_reason ?? 'Automatic isn’t available yet.')
+      : automaticUnavailable(state.blocked_reason)
 
   const gmailFailed = !asking
     ? []

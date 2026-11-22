@@ -20,3 +20,15 @@ export function gmailLines(replyEvery: string): Record<Position, string> {
 export function sentence(text: string): string {
   return /[.!?]$/.test(text) ? text : `${text}.`
 }
+
+/**
+ * Why Gmail Automatic can't be chosen now, worded one way wherever it shows (the bar,
+ * the pill's popover, Settings and the dialog): the server's reason as a sentence after
+ * one prefix, or a plain sentence when the server gave none.
+ */
+export function automaticUnavailable(reason: string | null): string {
+  const text = reason?.trim() ?? ''
+  return text === ''
+    ? 'Automatic isn’t available yet.'
+    : `Automatic isn’t available: ${sentence(text)}`
+}

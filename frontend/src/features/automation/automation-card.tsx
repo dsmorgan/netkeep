@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 
 import { AutomationLadder } from './automation-switch'
 import { DepthChoice } from './depth-choice'
-import { gmailLines, LINKEDIN_LINES, sentence } from './lines'
+import { gmailLines, LINKEDIN_LINES } from './lines'
 import {
   useGmailAutomation,
   useLinkedInAutomation,
@@ -116,7 +116,7 @@ function GmailSection({ control }: { control: GmailControl }) {
           />
           {control.blockedReason !== null && (
             <p id={reasonId} className="text-sm text-muted-foreground">
-              {sentence(control.blockedReason)}
+              {control.blockedReason}
             </p>
           )}
           <StaleError text={control.staleError} />
