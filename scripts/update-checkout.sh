@@ -62,6 +62,8 @@ stopped_after_pull() {
   say "      uv sync --all-extras --frozen"
   say "      make build-ui"
   say "    then start netkeep serve: .venv/bin/netkeep login-item on, or make serve."
+  say "    login-item on drops a --host or --port the login item ran serve with: pass"
+  say "    them again if it had them."
   exit 1
 }
 
@@ -161,6 +163,8 @@ main() {
     say "      make build-ui"
     say "      .venv/bin/netkeep restore <the backup step 2 named>"
     say "      .venv/bin/netkeep login-item on"
+    say "    login-item off, then on, drops a --host or --port the login item ran serve"
+    say "    with: pass them to login-item on again if it had them."
     exit 1
   fi
   say "Done: the checkout is at $(short "$new")."
