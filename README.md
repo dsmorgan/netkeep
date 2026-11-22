@@ -64,7 +64,7 @@ In a checkout, run netkeep as `.venv/bin/netkeep`. The wheel and sdist that CI b
 
 `make setup` runs `make install` and `make build-ui`. `make install` also installs the developer tools (tests, linters). You don't need them to use netkeep; `uv sync` installs netkeep alone.
 
-To update a checkout, run `make update`. It updates `main` to `origin/main` and puts the new code in service: it stops the login item, backs up the database, pulls, runs `uv sync` and builds the UI, then starts the login item again and checks that `serve` answers. See [Updating a checkout](docs/guide/setup.md#updating-a-checkout).
+To update a checkout, run `make update`. It updates `main` to `origin/main` and puts the new code in service: it stops the login item, backs up the database, pulls, runs `uv sync` and builds the UI, then starts the login item again and checks that a fresh `serve` answers. See [Updating a checkout](docs/guide/setup.md#updating-a-checkout).
 
 ## What it does
 

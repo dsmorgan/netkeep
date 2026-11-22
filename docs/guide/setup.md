@@ -110,7 +110,7 @@ It prints each step and stops at the first one that fails:
 3. It fast-forwards `main` to what it fetched.
 4. It runs `uv sync --all-extras --frozen`.
 5. It builds the UI into `frontend/dist`, as `make build-ui` does.
-6. If the login item is on, it starts it and checks that `serve` answers with the checkout's version. `serve` runs the new migrations when it starts. If the login item is off, start netkeep with `make serve`.
+6. If the login item is on, it starts it and checks that a fresh `serve` answers. The version number stays the same between releases, so the check shows that a new `serve` started, not which commit it runs. `serve` runs the new migrations when it starts. If the login item started during the update (from the launcher app, for example), it only checks it. If the login item is off, start netkeep with `make serve`.
 
 With nothing to pull, `make update` still reinstalls, rebuilds and restarts, so `.venv` and the UI always match the checkout.
 
