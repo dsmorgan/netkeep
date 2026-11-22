@@ -227,6 +227,16 @@ describe('the Gmail automation bar (#835)', () => {
     expect(puts()).toEqual([])
   })
 
+  it('says “Automatic isn’t available yet.” once when the server gives no reason', async () => {
+    renderBar('gmail', automation({ gmail: { automatic_ready: false, blocked_reason: null } }))
+    const stop = (await group('Gmail automation')).getByRole('radio', { name: 'Automatic' })
+    expect(stop).toHaveAttribute('data-disabled')
+    expect(stop).toHaveAccessibleDescription('Automatic isn’t available yet.')
+    expect(screen.getByRole('region', { name: 'Gmail automation' })).not.toHaveTextContent(
+      /isn’t available: Automatic/,
+    )
+  })
+
   it('moves left without confirm', async () => {
     const { puts } = renderBar('gmail')
     const radios = await group('Gmail automation')

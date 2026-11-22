@@ -302,7 +302,7 @@ describe('Settings › Automation (#829)', () => {
     const stop = gmail.getByRole('radio', { name: 'Automatic' })
     expect(stop).toHaveAttribute('aria-disabled', 'true')
     expect(stop).toHaveAccessibleDescription(expect.stringContaining(BLOCKED_REASON))
-    expect(screen.getByText(`${BLOCKED_REASON}.`)).toBeInTheDocument()
+    expect(screen.getByText(`Automatic isn’t available: ${BLOCKED_REASON}.`)).toBeInTheDocument()
 
     fireEvent.click(stop)
 

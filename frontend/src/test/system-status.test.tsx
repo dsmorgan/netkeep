@@ -267,7 +267,7 @@ describe('the top bar’s status chips (#751)', () => {
     )
     const stop = radios.getByRole('radio', { name: 'Automatic' })
     expect(stop).toHaveAttribute('aria-disabled', 'true')
-    expect(stop).toHaveAccessibleDescription(BLOCKED_REASON)
+    expect(stop).toHaveAccessibleDescription(`Automatic isn’t available: ${BLOCKED_REASON}.`)
   })
 
   it('reads Unreachable in red, and Unknown in grey, while the server is down', async () => {

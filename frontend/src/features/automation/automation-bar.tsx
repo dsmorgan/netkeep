@@ -123,7 +123,7 @@ export function GmailAutomationBar() {
           <>
             {control.blockedReason !== null && (
               <p id={reasonId} className="text-sm text-muted-foreground">
-                Automatic isn’t available: {sentence(control.blockedReason)}
+                {control.blockedReason}
               </p>
             )}
             <StaleError text={control.staleError} />
