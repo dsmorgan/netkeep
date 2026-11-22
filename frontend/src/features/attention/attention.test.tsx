@@ -358,8 +358,9 @@ describe('the activity indicator (#347)', () => {
     'leaves %s off the LinkedIn page, where the switch bar says the position (#835)',
     async (state, label) => {
       serve(() => activity(state, label))
-      await renderApp('/linkedin')
+      const { queryClient } = await renderApp('/linkedin')
       await screen.findByTestId('activity-live')
+      await waitFor(() => expect(queryClient.getQueryData(attentionQuery.queryKey)).toBeDefined())
 
       // "LinkedIn: off" over a switch on Manual read as a contradiction; the top
       // bar's LinkedIn chip, fixed above the page, says what LinkedIn is doing.
