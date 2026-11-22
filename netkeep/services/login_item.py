@@ -459,6 +459,13 @@ class LoginItem:
                 port = int(value)
         return host, port
 
+    def _kept_settings(self) -> dict[str, str]:
+        """The Keychain service and config file this label's plist names, if any: what a
+        rewrite that keeps the agent as it was keeps when this process names none."""
+        env = self.plist_environment() or {}
+        names = (keychain.SERVICE_ENV, paths.CONFIG_ENV)
+        return {name: env[name].strip() for name in names if env.get(name, "").strip()}
+
     def _is_loaded(self) -> bool:
         return self._runner(["print", self._service]).returncode == 0
 
@@ -480,6 +487,7 @@ class LoginItem:
         host: str | None = None,
         port: int | None = None,
         carried: Mapping[str, str] | None = None,
+        kept: Mapping[str, str] | None = None,
     ) -> bytes:
         if self._executable is None:
             raise LoginItemError(
@@ -497,9 +505,15 @@ class LoginItem:
         }
         # Settings that name where secrets and config live must follow the agent, or it
         # would read another Keychain service or config file than the serve you set up.
-        # ``carried`` (the settings of the agent being replaced) wins over this process's.
+        # ``carried`` (the settings of the old agent being adopted) wins over this
+        # process's; ``kept`` (this label's own plist's, on a rewrite that keeps it as it
+        # was) fills in only where this process sets none.
         for name in (keychain.SERVICE_ENV, paths.CONFIG_ENV):
-            value = (carried or {}).get(name) or (paths.getenv(name, self._environ) or "").strip()
+            value = (
+                (carried or {}).get(name)
+                or (paths.getenv(name, self._environ) or "").strip()
+                or (kept or {}).get(name)
+            )
             if value:
                 env[name] = value
         document = {
@@ -552,7 +566,9 @@ class LoginItem:
         ``serving_here`` says the caller is a ``serve`` itself (the Settings switch is):
         the lock is then held by definition. A held lock means the agent is registered
         and enabled but not started, so there is never a second ``serve``.
-        ``keep_arguments`` keeps the ``--host`` and ``--port`` of the plist it replaces.
+        ``keep_arguments`` keeps the ``--host`` and ``--port`` of the plist it replaces, and
+        its ``NETKEEP_KEYCHAIN_SERVICE`` and ``NETKEEP_CONFIG`` where this process sets
+        none (``netkeep update`` and ``make update`` run from a shell that may not, #839).
 
         An old plist serving this data directory (the old script's, which always used
         the plain old label, or one from before the rename, #661) is booted out and
@@ -565,7 +581,8 @@ class LoginItem:
         if keep_arguments and host is None and port is None:
             host, port = self._kept_arguments(adopting)
         carried = self._carried(adopting) if adopting is not None else None
-        content = self.render_plist(host=host, port=port, carried=carried)
+        kept = self._kept_settings() if keep_arguments else None
+        content = self.render_plist(host=host, port=port, carried=carried, kept=kept)
         previous = self.plist_path.read_bytes() if self.plist_path.is_file() else None
         self._write_plist(content)
         try:
