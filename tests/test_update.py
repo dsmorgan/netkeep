@@ -637,7 +637,7 @@ def test_a_checkout_is_refused(world: World) -> None:
     world.tool_install = False
     world.install_login_item()
     assert world.run_update() == 1
-    assert "git pull, then make install" in world.text
+    assert "Update a checkout with: make update" in world.text
     assert world.fetched == [] and world.uv_calls == []
 
 
@@ -1091,7 +1091,7 @@ def test_the_cli_refuses_a_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(update, "https_get", no_download)
     result = CliRunner().invoke(cli.app, ["update"])
     assert result.exit_code == 1
-    assert "git pull, then make install" in result.output
+    assert "Update a checkout with: make update" in result.output
 
 
 def test_the_cli_check(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1852,3 +1852,167 @@ def test_finish_passes_when_the_agents_serve_runs_through_the_cli(
     assert served and served[-1][0] == "serve"
     assert world.running == NEW
     assert world.state() is None
+
+
+# -- a checkout: make update's two steps (#839) ------------------------------------------
+
+
+@pytest.fixture
+def checkout(world: World) -> World:
+    """The world as a checkout's ``.venv`` sees it: ``make update`` runs these steps."""
+    world.tool_install = False
+    return world
+
+
+def test_checkout_stop_stops_the_login_item_and_backs_up(checkout: World) -> None:
+    checkout.install_login_item()
+    assert update.checkout_stop(checkout.item(), checkout.seams(), checkout.say) == 0
+    assert checkout.running is None, "the login item's serve still runs"
+    assert checkout.lock.holder is None, "the step kept the serve lock"
+    assert checkout.lock.claims == 1
+    assert checkout.item().plist_path.exists(), "the plist went, so start can't know it was on"
+    assert len(checkout.backups) == 1
+    assert f"   backup: {checkout.backups[0]}" in checkout.output
+    # It is not netkeep update: nothing is downloaded or installed, and no state is kept.
+    assert checkout.fetched == [] and checkout.uv_calls == [] and checkout.execs == []
+    assert checkout.state() is None
+
+
+def test_checkout_stop_with_no_database_says_so(checkout: World) -> None:
+    checkout.has_database = False
+    checkout.install_login_item()
+    assert update.checkout_stop(checkout.item(), checkout.seams(), checkout.say) == 0
+    assert "   backup: none, there is no database yet" in checkout.output
+
+
+def test_checkout_stop_refuses_a_manual_serve(checkout: World) -> None:
+    checkout.install_login_item(running=False)
+    checkout.lock.holder = MANUAL_PID
+    assert update.checkout_stop(checkout.item(), checkout.seams(), checkout.say) == 1
+    assert "isn't the login item's serve" in checkout.text
+    assert "then run make update again" in checkout.text
+    assert checkout.backups == [] and checkout.lock.holder == MANUAL_PID
+    assert not any(call[0] in ("bootout", "bootstrap") for call in checkout.launchctl)
+
+
+def test_checkout_stop_with_the_login_item_off_backs_up(checkout: World) -> None:
+    assert update.checkout_stop(checkout.item(), checkout.seams(), checkout.say) == 0
+    assert len(checkout.backups) == 1 and checkout.lock.holder is None
+
+
+def test_a_failed_checkout_backup_starts_the_login_item_again(checkout: World) -> None:
+    checkout.install_login_item()
+
+    def broken() -> Path | None:
+        raise OSError("disk full")
+
+    checkout.backup = broken  # type: ignore[method-assign]
+    assert update.checkout_stop(checkout.item(), checkout.seams(), checkout.say) == 1
+    assert "the backup failed: disk full" in checkout.text
+    assert checkout.running == OLD
+    assert checkout.lock.holder == AGENT_PID, "the step kept the lock, so serve couldn't start"
+
+
+def test_checkout_start_starts_the_login_item_and_checks_the_version(checkout: World) -> None:
+    checkout.install_login_item()
+    assert update.checkout_stop(checkout.item(), checkout.seams(), checkout.say) == 0
+    checkout.installed = NEW  # what uv sync put in .venv; this step runs on it
+    assert update.checkout_start(checkout.item(), checkout.seams(), checkout.say) == 0, (
+        checkout.text
+    )
+    assert checkout.running == NEW
+    assert f"Check netkeep serve answers at {BASE} with version {NEW}" in checkout.output
+    assert "   done: it answers" in checkout.output
+
+
+def test_checkout_start_with_the_login_item_off_says_to_start_serve(checkout: World) -> None:
+    assert update.checkout_start(checkout.item(), checkout.seams(), checkout.say) == 0
+    assert checkout.running is None
+    assert not any(call[0] == "bootstrap" for call in checkout.launchctl)
+    assert "Start it with: make serve" in checkout.text
+
+
+def test_checkout_start_refuses_while_another_serve_holds_the_lock(checkout: World) -> None:
+    """A serve that answers then isn't one this step started, so it would prove nothing."""
+    checkout.install_login_item()
+    assert update.checkout_stop(checkout.item(), checkout.seams(), checkout.say) == 0
+    checkout.lock.holder = MANUAL_PID
+    assert update.checkout_start(checkout.item(), checkout.seams(), checkout.say) == 1
+    assert "holds the serve lock, so the login item can't start" in checkout.text
+    assert not any(call[0] == "bootstrap" for call in checkout.launchctl)
+
+
+def test_checkout_start_reports_a_serve_that_doesnt_answer(checkout: World) -> None:
+    checkout.install_login_item()
+    assert update.checkout_stop(checkout.item(), checkout.seams(), checkout.say) == 0
+    checkout.serve_answers[OLD] = False
+    assert update.checkout_start(checkout.item(), checkout.seams(), checkout.say) == 1
+    assert "   failed: netkeep serve didn't answer within 90 s" in checkout.text
+
+
+def test_checkout_steps_refuse_a_tool_install(world: World) -> None:
+    world.install_login_item()
+    for step in (update.checkout_stop, update.checkout_start):
+        assert step(world.item(), world.seams(), world.say) == 1
+    assert world.text.count("update it with netkeep update") == 2
+    assert world.running == OLD and world.backups == []
+    assert not any(call[0] in ("bootout", "bootstrap") for call in world.launchctl)
+
+
+def test_checkout_steps_refuse_a_login_item_that_runs_another_netkeep(checkout: World) -> None:
+    """Another checkout's login item: stopping it, then rewriting its plist to this
+    checkout, would take it over."""
+    checkout.install_login_item()
+    here = checkout.tmp / "other-checkout" / ".venv" / "bin" / "netkeep"
+
+    def this_checkout() -> LoginItem:
+        return LoginItem(
+            data=checkout.data,
+            agents_dir=checkout.tmp / "agents",
+            runner=checkout.run,
+            uid=UID,
+            executable=here,
+            macos=True,
+            environ={},
+            lock_held=lambda: checkout.lock.holder is not None,
+            sleep=lambda _s: None,
+        )
+
+    plist = checkout.item().plist_path.read_bytes()
+    for step in (update.checkout_stop, update.checkout_start):
+        assert step(this_checkout(), checkout.seams(), checkout.say) == 1
+    assert checkout.text.count(f"the login item runs {checkout.bin / 'netkeep'}") == 2
+    assert checkout.running == OLD and checkout.backups == []
+    assert checkout.item().plist_path.read_bytes() == plist
+    assert not any(call[0] in ("bootout", "bootstrap") for call in checkout.launchctl)
+
+
+@pytest.mark.parametrize(
+    ("flag", "name"),
+    [("--checkout-stop", "checkout_stop"), ("--checkout-start", "checkout_start")],
+)
+def test_the_cli_runs_the_checkout_steps(
+    flag: str, name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The hidden flags run their step, and nothing of netkeep update's own path."""
+    world = World(tmp_path)
+    ran: list[str] = []
+
+    def step(item: LoginItem, seams: update.Seams, say: Callable[[str], None]) -> int:
+        assert item is sentinel and not seams.tool_install
+        ran.append(name)
+        say(f"ran {name}")
+        return 3
+
+    sentinel = world.item()
+    monkeypatch.setattr("netkeep.services.login_item.LoginItem", lambda: sentinel)
+    monkeypatch.setattr(update, name, step)
+    monkeypatch.setattr(update, "start", lambda *_a, **_k: pytest.fail("ran netkeep update"))
+    result = CliRunner().invoke(cli.app, ["update", flag])
+    assert result.exit_code == 3, result.output
+    assert ran == [name] and f"ran {name}" in result.output
+
+
+def test_check_in_a_checkout_names_make_update(checkout: World) -> None:
+    assert update.check(checkout.seams(), checkout.say) == 0
+    assert "To update, run: make update" in checkout.output

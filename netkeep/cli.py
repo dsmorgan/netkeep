@@ -765,6 +765,16 @@ def update_command(
         bool,
         typer.Option("--rollback", hidden=True, help="The old version's step (run by update)."),
     ] = False,
+    checkout_stop: Annotated[
+        bool,
+        typer.Option(
+            "--checkout-stop", hidden=True, help="make update's step before git (a checkout)."
+        ),
+    ] = False,
+    checkout_start: Annotated[
+        bool,
+        typer.Option("--checkout-start", hidden=True, help="make update's last step (a checkout)."),
+    ] = False,
 ) -> None:
     """Update netkeep in place to the latest release, or to --version.
 
@@ -773,7 +783,7 @@ def update_command(
     the login item and checks that netkeep serve answers with the new version. If the
     install or that check fails before the new version's scheduler started, it
     reinstalls the old version and restores the backup. If the scheduler had started, it
-    stops and explains instead. A checkout updates with git pull and make install."""
+    stops and explains instead. A checkout updates with make update."""
     state = ctx.ensure_object(CliState)
     if state.config is not None:  # the next version's process reads the same config
         os.environ[CONFIG_ENV] = str(state.config.expanduser().resolve())
@@ -824,6 +834,9 @@ def update_command(
             typer.echo(f"error: {exc}", err=True)
             raise typer.Exit(code=1) from exc
         raise typer.Exit(code=code)
+    if checkout_stop or checkout_start:  # make update's steps (#839)
+        step = update_service.checkout_stop if checkout_stop else update_service.checkout_start
+        raise typer.Exit(code=step(login_item.LoginItem(), seams, typer.echo))
     if not seams.tool_install:
         typer.echo(f"error: {update_service.CHECKOUT_REFUSAL}", err=True)
         raise typer.Exit(code=1)

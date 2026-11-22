@@ -63,8 +63,7 @@ To work on netkeep itself, install the checkout prerequisites in the README's [F
 ```sh
 git clone https://github.com/dsmorgan/netkeep.git
 cd netkeep
-make install
-make build-ui
+make setup                 # make install, then make build-ui
 .venv/bin/netkeep serve
 ```
 
@@ -94,7 +93,28 @@ If the login item was off, `netkeep update` installs the new version and leaves 
 
 While an update is in progress, other netkeep commands refuse, so nothing else writes to the data the update backed up. `serve`, the recovery commands the update prints (`restore` and `login-item`), `version`, `--help` and a few read-only status commands still run.
 
-A checkout doesn't update this way: run `git pull`, then `make install`.
+A checkout doesn't update this way: see [Updating a checkout](#updating-a-checkout).
+
+### Updating a checkout
+
+In a checkout on `main`, run:
+
+```sh
+make update
+```
+
+It prints each step and stops at the first one that fails:
+
+1. It checks the checkout, and changes nothing if a check fails: `git`, `uv` and `pnpm` are on your `PATH`, `.venv/bin/netkeep` exists (`make setup` makes it), the branch is `main`, and no tracked file has uncommitted changes. Then it fetches `origin main` and checks that `main` fast-forwards to it. Untracked files are fine.
+2. It stops the login item and backs up the database into `<data>/backups/`, as `netkeep update` does. If you started `netkeep serve` yourself, it refuses: stop that `serve` first.
+3. It fast-forwards `main` to what it fetched.
+4. It runs `uv sync --all-extras --frozen`.
+5. It builds the UI into `frontend/dist`, as `make build-ui` does.
+6. If the login item is on, it starts it and checks that `serve` answers with the checkout's version. `serve` runs the new migrations when it starts. If the login item is off, start netkeep with `make serve`.
+
+With nothing to pull, `make update` still reinstalls, rebuilds and restarts, so `.venv` and the UI always match the checkout.
+
+`make update` never rolls back. When a step fails, it prints the commit the checkout is at and the one it was at, whether the new code has run on the database, and what to run next. Usually that's: fix what failed, then run `make update` again. To go back instead, follow the commands it prints; see [Updating a checkout](troubleshooting.md#updating-a-checkout).
 
 ## 2. Gmail
 

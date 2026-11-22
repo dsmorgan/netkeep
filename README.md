@@ -56,14 +56,15 @@ A checkout also needs the Xcode command-line tools, for `git` (`xcode-select --i
 ```sh
 git clone https://github.com/dsmorgan/netkeep.git
 cd netkeep
-make install                # create .venv and install netkeep
-make build-ui               # build the UI into frontend/dist
+make setup                  # create .venv, install netkeep, and build the UI
 .venv/bin/netkeep serve     # http://127.0.0.1:8000
 ```
 
-In a checkout, run netkeep as `.venv/bin/netkeep`. The wheel and sdist that CI builds ship the UI inside the package, so an install from one needs no Node or pnpm. Without `make build-ui` in a checkout, the page says "The frontend is not built".
+In a checkout, run netkeep as `.venv/bin/netkeep`. The wheel and sdist that CI builds ship the UI inside the package, so an install from one needs no Node or pnpm. Without the UI build (`make setup`, or `make build-ui` alone), the page says "The frontend is not built".
 
-`make install` also installs the developer tools (tests, linters). You don't need them to use netkeep; `uv sync` installs netkeep alone. After a `git pull`, run `make install` and `make build-ui` again, then restart `serve`.
+`make setup` runs `make install` and `make build-ui`. `make install` also installs the developer tools (tests, linters). You don't need them to use netkeep; `uv sync` installs netkeep alone.
+
+To update a checkout, run `make update`. It updates `main` to `origin/main` and puts the new code in service: it stops the login item, backs up the database, pulls, runs `uv sync` and builds the UI, then starts the login item again and checks that `serve` answers. See [Updating a checkout](docs/guide/setup.md#updating-a-checkout).
 
 ## What it does
 

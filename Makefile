@@ -2,10 +2,15 @@
 PY := .venv/bin/python
 UV := uv
 
-.PHONY: install lint fmt typecheck test test-serial test-fast check serve dev build-ui gen-client changelog-draft backup reset chrome clean help
+.PHONY: install setup update lint fmt typecheck test test-serial test-fast check serve dev build-ui gen-client changelog-draft backup reset chrome clean help
 
 install:            ## Create .venv and install the package with dev extras (from uv.lock)
 	$(UV) sync --all-extras
+
+setup: install build-ui   ## First time in a checkout: install, then build the UI
+
+update:             ## Update this checkout to origin/main and restart serve (scripts/update-checkout.sh)
+	scripts/update-checkout.sh
 
 lint:               ## Ruff (lint + format check)
 	$(PY) -m ruff check .

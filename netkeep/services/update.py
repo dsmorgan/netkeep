@@ -34,7 +34,9 @@ phases are frozen and keys a version doesn't know are kept (#705).
 When ``uv tool install`` fails, the new version has never run, so the old process
 reinstalls the old version and executes its ``--rollback``, which has no database to
 restore. netkeep never updates itself silently: ``--check`` only says whether a newer
-release exists. A checkout install is refused: ``git pull`` and ``make install`` update it.
+release exists. A checkout is refused: ``make update`` (``scripts/update-checkout.sh``)
+updates it, and runs :func:`checkout_stop` before its ``git`` step and
+:func:`checkout_start` after it, each on the code the checkout has then.
 
 Everything outside this module goes through :class:`Seams`: the CLI passes the real
 downloads, ``uv``, ``exec``, backup, restore and health check, and tests pass fakes.
@@ -410,7 +412,7 @@ class Seams:
 
 CHECKOUT_REFUSAL: Final = (
     "this netkeep runs from a checkout, not a uv tool install, so netkeep update can't"
-    " replace it. Update a checkout with: git pull, then make install."
+    " replace it. Update a checkout with: make update"
 )
 
 
@@ -487,7 +489,7 @@ def check(seams: Seams, say: Say, *, version: str | None = None) -> int:
         return 1
     if _newer(target, seams.current_version):
         say(f"netkeep {target} is available; this is {seams.current_version}.")
-        say("To update, run: netkeep update")
+        say("To update, run: " + ("netkeep update" if seams.tool_install else "make update"))
     else:
         say(f"netkeep {seams.current_version} is up to date (the latest release is {target}).")
     return 0
@@ -610,9 +612,12 @@ def start(item: LoginItem, seams: Seams, say: Say, *, version: str | None = None
     _exec(seams, "--finish")
 
 
-def _stop_serve(item: LoginItem, seams: Seams, say: Say) -> tuple[bool, Claim]:
+def _stop_serve(
+    item: LoginItem, seams: Seams, say: Say, *, again: str = "netkeep update"
+) -> tuple[bool, Claim]:
     """Refuse while a ``serve`` that isn't the login item's runs; stop the login item;
-    take the serve lock. Whether the login item was on, and the held lock."""
+    take the serve lock. Whether the login item was on, and the held lock. ``again`` is
+    the command a refusal tells you to run once that ``serve`` stopped."""
     status = item.status()
     lock = seams.lock_state()
     if lock.held:
@@ -623,7 +628,7 @@ def _stop_serve(item: LoginItem, seams: Seams, say: Say) -> tuple[bool, Claim]:
             raise UpdateError(
                 f"{who} holds the serve lock, and it isn't the login item's serve. Stop that"
                 " netkeep serve (or wait for the netkeep restore to finish), then run"
-                " netkeep update again."
+                f" {again} again."
             )
     was_on = status.supported and status.enabled and not status.legacy
     if status.supported and status.loaded:
@@ -951,6 +956,92 @@ def _stop_and_explain_rollback(item: LoginItem, say: Say, state: UpdateState, wh
         say(f"The backup from before the update is {state.backup}.")
     say(f"When netkeep works again, delete {update_dir(item.data) / STATE_FILE}.")
     return 1
+
+
+# -- a checkout: make update (#839) ----------------------------------------------------
+#
+# scripts/update-checkout.sh runs git, uv and pnpm itself, so the package starts no new
+# kind of process. It runs `netkeep update --checkout-stop` on the code the checkout has
+# before `git merge`, and `--checkout-start` on the code it has after `uv sync`.
+
+CHECKOUT_AGAIN: Final = "make update"
+TOOL_INSTALL_REFUSAL: Final = (
+    "this netkeep is a uv tool install, not a checkout: update it with netkeep update."
+)
+
+
+def _checkout_refusal(item: LoginItem, seams: Seams) -> str | None:
+    """Why a checkout step can't run here: a uv tool install, or a login item that runs
+    another netkeep (another checkout's), which this step would stop and then rewrite."""
+    if seams.tool_install:
+        return TOOL_INSTALL_REFUSAL
+    status = item.status()
+    if status.supported and status.installed and status.stale:
+        return (
+            f"the login item runs {status.plist_executable}, not this checkout's"
+            f" {item.executable}. Run make update in the checkout it runs. To make it run"
+            " this one, run netkeep login-item on here first."
+        )
+    return None
+
+
+def checkout_stop(item: LoginItem, seams: Seams, say: Say) -> int:
+    """``make update``'s step before it changes the checkout: refuse while a ``serve``
+    that isn't the login item's runs, stop the login item, wait for the serve lock, and
+    back up the database. When the backup fails, start the login item again: nothing
+    changed. The login item's plist stays, so :func:`checkout_start` knows it was on."""
+    refusal = _checkout_refusal(item, seams)
+    if refusal is not None:
+        say(f"error: {refusal}")
+        return 1
+    try:
+        was_on, held = _stop_serve(item, seams, say, again=CHECKOUT_AGAIN)
+    except UpdateError as exc:
+        say(f"   failed: {exc}")
+        return 1
+    try:
+        backup = seams.backup()
+    except Exception as exc:  # any failure stops before a change
+        held.release()
+        say(f"   failed: the backup failed: {exc}")
+        _restart(item, say, was_on)
+        return 1
+    held.release()
+    if backup is None:
+        say("   backup: none, there is no database yet")
+    else:
+        say(f"   backup: {backup}")
+    return 0
+
+
+def checkout_start(item: LoginItem, seams: Seams, say: Say) -> int:
+    """``make update``'s last step, on the updated code: when the login item is on, start
+    it and check that ``serve`` answers with this version; when it's off, say how to start
+    ``serve``. It refuses while something else holds the serve lock, since a ``serve``
+    that answers then isn't one this step started."""
+    refusal = _checkout_refusal(item, seams)
+    if refusal is not None:
+        say(f"error: {refusal}")
+        return 1
+    version = seams.current_version
+    status = item.status()
+    if not (status.supported and status.enabled and not status.legacy):
+        say(f"   done: the checkout has netkeep {version}. The login item is off, so")
+        say("   netkeep serve isn't started. Start it with: make serve")
+        return 0
+    lock = seams.lock_state()
+    if lock.held:
+        who = lock.holder.describe() if lock.holder is not None else "another netkeep process"
+        say(
+            f"   failed: {who} holds the serve lock, so the login item can't start. Stop that"
+            f" netkeep serve, then run {CHECKOUT_AGAIN} again."
+        )
+        return 1
+    failure = _start_and_check(item, seams, say, version)
+    if failure is not None:
+        say(f"   failed: {failure}")
+        return 1
+    return 0
 
 
 def running_from_tool_install(prefix: Path | None = None, module: Path | None = None) -> bool:
