@@ -26,9 +26,9 @@ On **Settings**, under **Sending hours**, choose the days and hours email may go
 4. Under **Steps**, pick a **Template** for each step and a **Delay (days)**. A step's channel comes from its template. A later email step can go in the **Same thread** as an earlier one. A LinkedIn step needs a **Mode**: **Prefill** or **Auto-send** (see below). Use **Add a step** for more.
 5. Choose **Save draft**.
 
-## 4. Arm the mailbox for drafts
+## 4. Move Gmail to Manual
 
-On **Settings**, under **Gmail**, choose **Arm for drafts**. While a mailbox is armed for drafts, every due email step becomes a Gmail draft that you send yourself, and the review's test sends land in your Drafts. [Gmail setup, step 9](../gmail-setup.md#9-arm-the-mailbox-drafts-first-then-send) has the details.
+Move the Gmail switch to **Manual**: in the bar at the top of the **Gmail** page, in the Gmail pill's popover, or on **Settings** under **Automation**. On Manual, every due email step becomes a Gmail draft that you send yourself, and the review's test sends land in your Drafts. [Gmail setup, step 9](../gmail-setup.md#9-move-gmail-to-manual-then-automatic) has the details.
 
 ## 5. Review
 
@@ -44,7 +44,7 @@ A change to a step or its template after you approve it undoes the approval, so 
 
 ## 6. While it runs
 
-- **Arm to send.** After netkeep finds its own test draft in your mailbox, **Arm to send** in Settings lets `send` steps go out on their own, inside your daily cap. The **Campaigns: sending** chip in the header shows while it sends.
+- **Automatic.** After netkeep finds its own test draft in your mailbox, moving the Gmail switch to **Automatic** lets `send` steps go out on their own, inside your daily cap. The **Campaigns: sending** chip in the header shows while it sends.
 - **Replies stop the sequence.** netkeep checks the mailbox for replies; a reply ends that person's enrollment, and **Inbox** shows a badge for it.
 - **Responses from elsewhere.** If someone answers by phone or in person, choose **Record a response** on their row in the campaign's enrollments, or on their contact page. It ends their enrollment as replied or opted out.
 - **Pause and resume.** **Pause** on the campaign's page holds every step; **Resume** picks up again. A step that came due while paused fires at the next chance. **End campaign** stops it for good.

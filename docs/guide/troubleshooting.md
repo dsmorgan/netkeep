@@ -84,8 +84,8 @@ Each warning starts with the protection it belongs to. These are the ones you're
 | What you see | What to do |
 |---|---|
 | "Gmail needs you to sign in again" | Choose **Re-authorize** on the banner, or run `netkeep gmail login`. Email steps wait until you do. |
-| **Arm to send** says "no netkeep test draft was found in the Drafts of … at the last check" | Make a test draft from a campaign's review (**Send a test of step 1**) while the mailbox is armed for drafts, then **Check now**. The arm steps say "netkeep found its own draft." when it's found. |
-| A step's email went out as a draft | The mailbox is armed for drafts only. Send the draft yourself, or **Arm to send**. |
+| The Gmail switch says Automatic isn't available: "no netkeep test draft was found in the Drafts of … at the last check" | Make a test draft from a campaign's review (**Send a test of step 1**) while Gmail is on Manual, then **Check now**. The mailbox's **Steps to Automatic** in Settings say "netkeep found its own draft." when it's found. |
+| A step's email went out as a draft | Gmail is on Manual. Send the draft yourself, or move the Gmail switch to **Automatic**. |
 
 ## netkeep setup stops at a step
 

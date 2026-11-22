@@ -412,7 +412,10 @@ describe('Settings › Automation (#829)', () => {
       ),
     )
 
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent(BLOCKED_REASON)
+    // The same sentence the switch shows, never the server's bare reason (#834).
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      `Automatic isn’t available: ${BLOCKED_REASON}.`,
+    )
     expect(confirm).toBeDisabled()
     fireEvent.click(confirm)
     expect(puts('gmail')).toEqual([])

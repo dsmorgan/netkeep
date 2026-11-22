@@ -162,60 +162,93 @@ describe('GmailSection', () => {
     expect(screen.getByRole('button', { name: 'Connect Gmail' })).toBeEnabled()
   })
 
-  it('arms for drafts only after confirming, then offers to disarm', async () => {
-    let current = status({ mailboxes: [mailbox()] })
-    const armed = mailbox({
-      arm: 'draft',
-      armed_at: '2026-09-27T12:00:00Z',
-      armed_by: 'web (user 1)',
-    })
-    const { calls, queryClient } = renderSection(() => current, {
-      'POST /api/v1/mailboxes/3/arm': () => {
-        current = status({ mailboxes: [armed] })
-        return jsonResponse(armed)
-      },
-    })
-    const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
-    const item = (await screen.findByText('sender@example.com')).closest('li') as HTMLElement
-    expect(within(item).getByText('not armed')).toBeInTheDocument()
-    expect(within(item).queryByRole('button', { name: 'Disarm' })).not.toBeInTheDocument()
-    fireEvent.click(within(item).getByRole('button', { name: 'Arm for drafts' }))
-    const dialog = await screen.findByRole('alertdialog')
-    expect(dialog).toHaveTextContent('send steps included')
-    expect(calls.some((call) => call.path.endsWith('/arm'))).toBe(false)
+  it.each([
+    [null, 'Off', 'Off: netkeep serve makes no drafts and sends nothing from it.'],
+    ['draft', 'Manual', /^Manual since .* by web \(user 1\): every step becomes a draft/],
+    ['send', 'Automatic', /^Automatic since .* by web \(user 1\): send steps go out/],
+  ] as const)(
+    'has no arm buttons on a mailbox at %s: the switch is the one way there (#834)',
+    async (arm, label, text) => {
+      const { calls, queryClient } = renderSection(
+        () =>
+          status({
+            mailboxes: [
+              mailbox({
+                arm,
+                armed_at: arm === null ? null : '2026-09-27T12:00:00Z',
+                armed_by: arm === null ? null : 'web (user 1)',
+              }),
+            ],
+          }),
+        { 'POST /api/v1/mailboxes/3/check': () => jsonResponse(mailbox()) },
+      )
+      const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
+      const item = (await screen.findByText('sender@example.com')).closest('li') as HTMLElement
+      // The mailbox says where it stands in the switch's own words.
+      expect(within(item).getByText(label)).toBeInTheDocument()
+      expect(within(item).getByText(text)).toBeInTheDocument()
+      expect(item).not.toHaveTextContent(/armed/i)
+      // Check now and Disconnect stay; nothing arms, disarms or confirms an arming.
+      const buttons = within(item)
+        .getAllByRole('button')
+        .map((button) => button.textContent)
+      expect(buttons).toEqual(['Check now', 'Disconnect'])
+      expect(screen.queryByRole('button', { name: /arm/i })).toBeNull()
 
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Arm for drafts' }))
-    expect(await screen.findByText('armed: drafts only')).toBeInTheDocument()
-    expect(calls).toContainEqual({
-      method: 'POST',
-      path: '/api/v1/mailboxes/3/arm',
-      body: { mode: 'draft' },
-    })
-    expect(screen.getByText(/by web \(user 1\)/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Disarm' })).toBeEnabled()
-    // The header's poll status changes too: replies are checked now (#401).
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: pollStatusKeys.all })
-  })
+      fireEvent.click(within(item).getByRole('button', { name: 'Check now' }))
+      await waitFor(() =>
+        expect(calls).toContainEqual({
+          method: 'POST',
+          path: '/api/v1/mailboxes/3/check',
+          body: null,
+        }),
+      )
+      // The header's poll status changes too (#401).
+      await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: pollStatusKeys.all }))
+      expect(calls.some((call) => /\/(arm|disarm)$/.test(call.path))).toBe(false)
+    },
+  )
 
-  it('waits for a draft found by its Message-ID before it can arm to send', async () => {
+  it('waits for a draft found by its Message-ID before Automatic is available', async () => {
     renderSection(() =>
       status({
         mailboxes: [mailbox({ arm: 'draft', armed_at: '2026-09-27T12:00:00Z' })],
         arm_steps: [armSteps({ test_campaign_id: 7 })],
       }),
     )
-    const arm = await screen.findByRole('button', { name: 'Arm to send' })
-    expect(arm).toBeDisabled()
-    expect(arm).toHaveAccessibleDescription(
-      'Arm to send is off until netkeep finds one of its own drafts in this mailbox.',
-    )
-    const path = screen.getByRole('region', { name: 'Arm to send' })
+    const path = await screen.findByRole('region', { name: 'Steps to Automatic' })
+    expect(
+      within(path).getByText(
+        'Automatic is unavailable until netkeep finds one of its own drafts in this mailbox.',
+      ),
+    ).toBeInTheDocument()
     expect(within(path).getByText(/Waiting: no draft yet/)).toBeInTheDocument()
     expect(within(path).getByRole('link', { name: 'Send a test' })).toHaveAttribute(
       'href',
       '/campaigns/7',
     )
-    expect(path).toHaveTextContent('Disarm takes all of that back')
+    expect(path).toHaveTextContent('Gmail on Manual. Done.')
+    expect(path).toHaveTextContent('Gmail on Automatic. Not yet: waits for the steps above.')
+    expect(path).toHaveTextContent('Off takes all of that back')
+    expect(path).not.toHaveTextContent(/\b(Arm|Disarm)\b/)
+  })
+
+  it('points at the switch while Gmail is Off', async () => {
+    renderSection(() =>
+      status({
+        mailboxes: [mailbox()],
+        arm_steps: [
+          armSteps({ armed_for_drafts: false, waiting: 'not_armed', next_step: 'arm_drafts' }),
+        ],
+      }),
+    )
+    const path = await screen.findByRole('region', { name: 'Steps to Automatic' })
+    expect(path).toHaveTextContent(
+      'Gmail on Manual. Not yet. Move Gmail to Manual under Automation.',
+    )
+    expect(path).toHaveTextContent(
+      'Waits until Gmail is on Manual: netkeep checks only on Manual or Automatic.',
+    )
   })
 
   it('shows each reason the check waits, and the next step for it', async () => {
@@ -245,12 +278,12 @@ describe('GmailSection', () => {
         return jsonResponse(current.mailboxes[0])
       },
     })
-    const path = await screen.findByRole('region', { name: 'Arm to send' })
+    const path = await screen.findByRole('region', { name: 'Steps to Automatic' })
     const last = new Date('2026-09-28T12:00:00Z').toLocaleString()
     expect(
       within(path).getByText(`Waiting: not found yet. Last checked ${last}.`),
     ).toBeInTheDocument()
-    // One Check now, in the way to arming, not a second one beside Disarm.
+    // One Check now, in the steps to Automatic, not a second one beside Disconnect.
     expect(screen.getAllByRole('button', { name: 'Check now' })).toHaveLength(1)
     fireEvent.click(within(path).getByRole('button', { name: 'Check now' }))
     expect(await within(path).findByText(/A check runs within a minute/)).toBeInTheDocument()
@@ -271,10 +304,9 @@ describe('GmailSection', () => {
         arm_steps: [armSteps({ waiting: 'reauth_required', next_step: 'reauthorize' })],
       }),
     )
-    const path = await screen.findByRole('region', { name: 'Arm to send' })
+    const path = await screen.findByRole('region', { name: 'Steps to Automatic' })
     expect(within(path).getByText(/the mailbox needs you to sign in again/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Re-authorize' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: 'Arm to send' })).toBeDisabled()
   })
 
   it('says when nothing checks because serve is not running', async () => {
@@ -286,62 +318,38 @@ describe('GmailSection', () => {
         ],
       }),
     )
-    const path = await screen.findByRole('region', { name: 'Arm to send' })
+    const path = await screen.findByRole('region', { name: 'Steps to Automatic' })
     expect(within(path).getByText(/netkeep serve isn’t running/)).toBeInTheDocument()
   })
 
-  it('arms to send, a separate step, only after confirming', async () => {
-    const drafts = {
-      arm: 'draft' as const,
-      armed_at: '2026-09-27T12:00:00Z',
-      message_id_verified_at: '2026-09-27T12:10:00Z',
-    }
-    const ready = armSteps({
-      verified_at: '2026-09-27T12:10:00Z',
-      waiting: null,
-      can_arm_send: true,
-      next_step: 'arm_send',
-    })
-    let current = status({ mailboxes: [mailbox(drafts)], arm_steps: [ready] })
-    const { calls } = renderSection(() => current, {
-      'POST /api/v1/mailboxes/3/arm': () => {
-        const sending = mailbox({ ...drafts, arm: 'send', send_armed_at: '2026-09-28T12:00:00Z' })
-        current = status({
-          mailboxes: [sending],
-          arm_steps: [{ ...ready, armed_to_send: true, can_arm_send: false, next_step: null }],
-        })
-        return jsonResponse(sending)
-      },
-    })
+  it('says Automatic is ready once the draft is found, and points at the switch', async () => {
+    renderSection(() =>
+      status({
+        mailboxes: [
+          mailbox({
+            arm: 'draft',
+            armed_at: '2026-09-27T12:00:00Z',
+            message_id_verified_at: '2026-09-27T12:10:00Z',
+          }),
+        ],
+        arm_steps: [
+          armSteps({
+            verified_at: '2026-09-27T12:10:00Z',
+            waiting: null,
+            can_arm_send: true,
+            next_step: 'arm_send',
+          }),
+        ],
+      }),
+    )
     const found = new Date('2026-09-27T12:10:00Z').toLocaleString()
     expect(await screen.findByText(`Found ${found}.`)).toBeInTheDocument()
-    fireEvent.click(await screen.findByRole('button', { name: 'Arm to send' }))
-    const dialog = await screen.findByRole('alertdialog')
-    expect(dialog).toHaveTextContent('with no one pressing Send')
-    expect(calls.some((call) => call.path.endsWith('/arm'))).toBe(false)
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Arm to send' }))
-    expect(await screen.findByText('armed: sending')).toBeInTheDocument()
-    expect(calls).toContainEqual({
-      method: 'POST',
-      path: '/api/v1/mailboxes/3/arm',
-      body: { mode: 'send' },
-    })
-    expect(screen.queryByRole('button', { name: 'Arm to send' })).not.toBeInTheDocument()
-  })
-
-  it('disarms at once', async () => {
-    let current = status({
-      mailboxes: [mailbox({ arm: 'send', armed_at: '2026-09-27T12:00:00Z' })],
-    })
-    const { calls } = renderSection(() => current, {
-      'POST /api/v1/mailboxes/3/disarm': () => {
-        current = status({ mailboxes: [mailbox()] })
-        return jsonResponse(current.mailboxes[0])
-      },
-    })
-    fireEvent.click(await screen.findByRole('button', { name: 'Disarm' }))
-    expect(await screen.findByText('not armed')).toBeInTheDocument()
-    expect(calls).toContainEqual({ method: 'POST', path: '/api/v1/mailboxes/3/disarm', body: null })
+    const path = screen.getByRole('region', { name: 'Steps to Automatic' })
+    expect(path).toHaveTextContent(
+      'Gmail on Automatic. Ready. Move Gmail to Automatic under Automation.',
+    )
+    expect(within(path).queryByText(/unavailable/)).toBeNull()
+    expect(screen.queryByRole('button', { name: /arm/i })).toBeNull()
   })
 
   it('reports the callback’s outcome', async () => {

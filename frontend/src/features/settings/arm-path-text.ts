@@ -1,5 +1,12 @@
-/** The words for the way to arming a mailbox to send (#510). */
+/**
+ * The words for the steps to Gmail Automatic (#510). They name the Gmail switch's
+ * positions (#829), the only control that moves a mailbox there (#834).
+ */
 import type { Mailbox, MailboxArmSteps } from '@/features/mailboxes/api'
+
+/** Where the switch is, said the same way in each step that points at it. */
+export const MOVE_TO_MANUAL = 'Move Gmail to Manual under Automation.'
+export const MOVE_TO_AUTOMATIC = 'Move Gmail to Automatic under Automation.'
 
 function when(value: string): string {
   return new Date(value).toLocaleString()
@@ -9,7 +16,7 @@ function when(value: string): string {
 export function waitingText(steps: MailboxArmSteps): string {
   switch (steps.waiting) {
     case 'not_armed':
-      return 'Waits until you arm the mailbox for drafts. netkeep checks only an armed mailbox.'
+      return `Waits until Gmail is on Manual: netkeep checks only on Manual or Automatic. ${MOVE_TO_MANUAL}`
     case 'reauth_required':
       return 'Waiting: the mailbox needs you to sign in again. Re-authorize it, and the next check runs.'
     case 'no_draft':
@@ -31,12 +38,12 @@ export function waitingText(steps: MailboxArmSteps): string {
 
 export function sendText(steps: MailboxArmSteps): string {
   if (steps.armed_to_send) return 'Done.'
-  if (steps.can_arm_send) return 'Ready. Use Arm to send.'
+  if (steps.can_arm_send) return `Ready. ${MOVE_TO_AUTOMATIC}`
   return 'Not yet: waits for the steps above.'
 }
 
-/** Why Arm to send is off, when it is; null when it can be pressed or isn't shown. */
+/** Why Automatic is unavailable for a mailbox on Manual; null when it is ready, or not on Manual. */
 export function armSendBlocked(mailbox: Mailbox, steps: MailboxArmSteps): string | null {
   if (mailbox.arm !== 'draft' || steps.can_arm_send) return null
-  return 'Arm to send is off until netkeep finds one of its own drafts in this mailbox.'
+  return 'Automatic is unavailable until netkeep finds one of its own drafts in this mailbox.'
 }

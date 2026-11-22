@@ -65,19 +65,24 @@ function useStatusRefresh(): void {
 function LinkedInAnnouncer() {
   const attention = useQuery(attentionQuery)
   // The switch's position, so idle is announced as Manual or Off, as the switch reads.
+  // Held in a ref: a move of the switch alone is read, never spoken.
   const position = useQuery(automationQuery).data?.linkedin.position
+  const positionNow = useRef(position)
   const activity = attention.data?.activity
   const [spoken, setSpoken] = useState('')
   const previous = useRef<ActivityState | null>(null)
 
+  // Before the effect below, so a render that changes both speaks the new position.
+  useEffect(() => {
+    positionNow.current = position
+  }, [position])
+
   useEffect(() => {
     if (activity === undefined) return
     if (previous.current !== null && previous.current !== activity.state) {
-      setSpoken(announcement(activity, position))
+      setSpoken(announcement(activity, positionNow.current))
     }
     previous.current = activity.state
-    // Only a change of activity speaks; the position is read, not watched.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activity])
 
   return (

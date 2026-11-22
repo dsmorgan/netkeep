@@ -371,6 +371,48 @@ describe('the activity indicator (#347)', () => {
     },
   )
 
+  it('stays silent when the switch moves while idle, and speaks the new position next time (#834)', async () => {
+    let current = activity('idle', 'Scheduled LinkedIn runs are off.')
+    let position: 'manual' | 'off' = 'manual'
+    serve(
+      () => current,
+      204,
+      () => automation({ linkedin: { position } }),
+    )
+    const { queryClient } = await renderApp('/exports')
+    const live = await screen.findByTestId('activity-live')
+    await waitFor(() => expect(queryClient.getQueryData(attentionQuery.queryKey)).toBeDefined())
+    await waitFor(() =>
+      expect(
+        queryClient.getQueryData<{ linkedin: { position: string } }>(automationKeys.all)?.linkedin
+          .position,
+      ).toBe('manual'),
+    )
+
+    // Manual to Off: the activity stays idle, so nothing is said.
+    position = 'off'
+    await act(() => queryClient.invalidateQueries({ queryKey: automationKeys.all }))
+    act(() => FakeEventSource.instances.at(-1)?.emit('run.finished', {}))
+    await waitFor(() =>
+      expect(
+        queryClient.getQueryData<{ linkedin: { position: string } }>(automationKeys.all)?.linkedin
+          .position,
+      ).toBe('off'),
+    )
+    await act(() => queryClient.invalidateQueries({ queryKey: attentionQuery.queryKey }))
+    expect(live).toHaveTextContent('')
+
+    // A later change of activity speaks the position the switch reads now.
+    current = activity('running', 'A LinkedIn enrichment run is running.')
+    act(() => FakeEventSource.instances.at(-1)?.emit('run.started', {}))
+    await waitFor(() => expect(live).toHaveTextContent('LinkedIn: running.'))
+    current = activity('idle', 'Scheduled LinkedIn runs are off.')
+    act(() => FakeEventSource.instances.at(-1)?.emit('run.finished', {}))
+    await waitFor(() =>
+      expect(live).toHaveTextContent('LinkedIn: Off. Scheduled LinkedIn runs are off.'),
+    )
+  })
+
   it('announces armed as Automatic, whatever the switch read says', () => {
     expect(announcement(activity('armed', '').activity, 'manual')).toBe('LinkedIn: Automatic')
   })

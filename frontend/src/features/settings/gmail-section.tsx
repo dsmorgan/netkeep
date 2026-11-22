@@ -9,10 +9,8 @@ import { automationKeys } from '@/features/automation/api'
 import { pollStatusKeys } from '@/features/poll-status/api'
 import {
   ARM_LABEL,
-  armMailbox,
   armText,
   checkMailbox,
-  disarmMailbox,
   disconnectMailbox,
   mailboxKeys,
   mailboxStatusQuery,
@@ -20,7 +18,6 @@ import {
   reasonText,
   startAuthorization,
   type Mailbox,
-  type MailboxArm,
 } from '@/features/mailboxes/api'
 
 import { ArmPath } from './arm-path'
@@ -52,20 +49,23 @@ function when(value: string | null): string {
  * Gmail auth (spec 11.5, P3-01): the OAuth client from your own Cloud project,
  * then one authorization on Google's page, guided step by step (#302). The token lives in the Keychain; this
  * page only ever sees the mailbox's address and health.
+ *
+ * Each mailbox shows where it stands on the Gmail switch and the steps to Automatic
+ * (#510), with Check now, Re-authorize and Disconnect. It has no arm buttons (#834):
+ * the Automation card's switch (#829) is the one way to Manual or Automatic.
  */
 export function GmailSection({ outcome }: { outcome: GmailOutcome }) {
   const queryClient = useQueryClient()
   const status = useQuery(mailboxStatusQuery)
   const [editingClient, setEditingClient] = useState(false)
   const [disconnecting, setDisconnecting] = useState<Mailbox | null>(null)
-  const [arming, setArming] = useState<{ mailbox: Mailbox; mode: MailboxArm } | null>(null)
 
-  // Arming, disarming, and disconnecting change what the header's poll status says.
+  // Checking and disconnecting change what the header's poll status says.
   const refresh = () =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey: mailboxKeys.all }),
       queryClient.invalidateQueries({ queryKey: pollStatusKeys.all }),
-      // Arming is the Gmail automation switch's position (#829).
+      // A check or a disconnect can change whether Gmail Automatic is ready (#829).
       queryClient.invalidateQueries({ queryKey: automationKeys.all }),
     ])
 
@@ -81,16 +81,6 @@ export function GmailSection({ outcome }: { outcome: GmailOutcome }) {
       await refresh()
     },
   })
-
-  const arm = useMutation({
-    mutationFn: ({ mailbox, mode }: { mailbox: Mailbox; mode: MailboxArm }) =>
-      armMailbox(mailbox.id, mode),
-    onSuccess: async () => {
-      setArming(null)
-      await refresh()
-    },
-  })
-  const disarm = useMutation({ mutationFn: disarmMailbox, onSettled: refresh })
 
   const live = status.data?.mailboxes.filter((mailbox) => mailbox.status !== 'disabled') ?? []
 
@@ -155,8 +145,7 @@ export function GmailSection({ outcome }: { outcome: GmailOutcome }) {
                 {status.data.mailboxes.map((mailbox) => {
                   const steps = status.data.arm_steps.find((row) => row.mailbox_id === mailbox.id)
                   const blocked = steps === undefined ? null : armSendBlocked(mailbox, steps)
-                  const blockedId = `arm-send-blocked-${mailbox.id}`
-                  // The way to arming offers its own Check now when that is the next step.
+                  // The steps to Automatic offer their own Check now when that is the next step.
                   const pathChecks = blocked !== null && steps?.next_step === 'check_now'
                   return (
                     <li key={mailbox.id} className="space-y-1 rounded-lg border px-3 py-2">
@@ -203,36 +192,6 @@ export function GmailSection({ outcome }: { outcome: GmailOutcome }) {
                               {check.isPending ? 'Checking…' : 'Check now'}
                             </Button>
                           )}
-                          {mailbox.arm === null && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setArming({ mailbox, mode: 'draft' })}
-                            >
-                              Arm for drafts
-                            </Button>
-                          )}
-                          {mailbox.arm === 'draft' && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setArming({ mailbox, mode: 'send' })}
-                              disabled={steps === undefined ? true : !steps.can_arm_send}
-                              aria-describedby={blocked === null ? undefined : blockedId}
-                            >
-                              Arm to send
-                            </Button>
-                          )}
-                          {mailbox.arm !== null && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => disarm.mutate(mailbox.id)}
-                              disabled={disarm.isPending}
-                            >
-                              Disarm
-                            </Button>
-                          )}
                           <Button
                             variant="ghost"
                             size="sm"
@@ -248,18 +207,12 @@ export function GmailSection({ outcome }: { outcome: GmailOutcome }) {
                           steps={steps}
                           onCheckNow={() => check.mutate(mailbox.id)}
                           checking={check.isPending}
-                          blockedId={blockedId}
                         />
                       )}
                     </li>
                   )
                 })}
               </ul>
-            )}
-            {disarm.isError && (
-              <p role="alert" className="text-destructive">
-                {message(disarm.error)}
-              </p>
             )}
             {check.isError && (
               <p role="alert" className="text-destructive">
@@ -296,24 +249,6 @@ export function GmailSection({ outcome }: { outcome: GmailOutcome }) {
         netkeep forgets {disconnecting?.email}’s token and stops using it. Email steps pause.
         Campaigns that sent from it keep their history. To revoke access on Google’s side too,
         remove netkeep from your Google Account’s third-party access page.
-      </ConfirmDialog>
-
-      <ConfirmDialog
-        open={arming !== null}
-        onOpenChange={(open) => {
-          if (!open) setArming(null)
-        }}
-        title={
-          arming?.mode === 'send' ? 'Arm this mailbox to send?' : 'Arm this mailbox for drafts?'
-        }
-        confirmLabel={arming?.mode === 'send' ? 'Arm to send' : 'Arm for drafts'}
-        pending={arm.isPending}
-        error={arm.isError ? message(arm.error) : null}
-        onConfirm={() => (arming === null ? Promise.resolve() : arm.mutateAsync(arming))}
-      >
-        {arming?.mode === 'send'
-          ? `netkeep serve will send campaign email from ${arming.mailbox.email} on its own, with no one pressing Send. Disarm stops it from the next minute.`
-          : `netkeep serve will make each due campaign step a Gmail draft in ${arming?.mailbox.email ?? ''}, send steps included. You send each draft yourself.`}
       </ConfirmDialog>
     </Card>
   )

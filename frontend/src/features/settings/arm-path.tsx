@@ -1,23 +1,22 @@
 import { Button, buttonVariants } from '@/components/ui/button'
 import type { Mailbox, MailboxArmSteps } from '@/features/mailboxes/api'
 
-import { armSendBlocked, sendText, waitingText } from './arm-path-text'
+import { armSendBlocked, MOVE_TO_MANUAL, sendText, waitingText } from './arm-path-text'
 
 interface ArmPathProps {
   mailbox: Mailbox
   steps: MailboxArmSteps
   onCheckNow: () => void
   checking: boolean
-  /** The id of the paragraph that says why Arm to send is off, for its aria-describedby. */
-  blockedId: string
 }
 
 /**
- * The way to arming a mailbox to send (#510): armed for drafts, then netkeep finding
- * one of its own drafts by Message-ID, then a person arming it to send. Each step shows
- * its state, and a blocked Arm to send says why and offers the next step.
+ * The steps to Gmail Automatic for one mailbox (#510): Gmail on Manual, then netkeep
+ * finding one of its own drafts by Message-ID, then a person moving the switch to
+ * Automatic (#829; the switch is the only way there, #834). Each step shows its state,
+ * and while Automatic is unavailable it says why and offers the next step.
  */
-export function ArmPath({ mailbox, steps, onCheckNow, checking, blockedId }: ArmPathProps) {
+export function ArmPath({ mailbox, steps, onCheckNow, checking }: ArmPathProps) {
   const blocked = armSendBlocked(mailbox, steps)
   const found = steps.verified_at !== null
   const waitingOnServe =
@@ -25,13 +24,13 @@ export function ArmPath({ mailbox, steps, onCheckNow, checking, blockedId }: Arm
     !found &&
     (steps.waiting === 'not_checked' || steps.waiting === 'not_found')
   return (
-    <section aria-label="Arm to send" className="space-y-2 rounded-md bg-muted/40 px-3 py-2">
-      <h4 className="text-xs font-medium">Steps to arm to send</h4>
+    <section aria-label="Steps to Automatic" className="space-y-2 rounded-md bg-muted/40 px-3 py-2">
+      <h4 className="text-xs font-medium">Steps to Automatic</h4>
       <ol className="list-decimal space-y-1 pl-5 text-xs">
         <li>
-          <span className="font-medium">Armed for drafts.</span>{' '}
+          <span className="font-medium">Gmail on Manual.</span>{' '}
           <span className="text-muted-foreground">
-            {steps.armed_for_drafts ? 'Done.' : 'Not yet. Use Arm for drafts.'}
+            {steps.armed_for_drafts ? 'Done.' : `Not yet. ${MOVE_TO_MANUAL}`}
           </span>
         </li>
         <li>
@@ -48,15 +47,13 @@ export function ArmPath({ mailbox, steps, onCheckNow, checking, blockedId }: Arm
           )}
         </li>
         <li>
-          <span className="font-medium">Arm to send.</span>{' '}
+          <span className="font-medium">Gmail on Automatic.</span>{' '}
           <span className="text-muted-foreground">{sendText(steps)}</span>
         </li>
       </ol>
       {blocked !== null && (
         <div className="flex flex-wrap items-center gap-2">
-          <p id={blockedId} className="text-xs">
-            {blocked}
-          </p>
+          <p className="text-xs">{blocked}</p>
           {steps.next_step === 'send_test' && (
             <a
               className={buttonVariants({ variant: 'outline', size: 'sm' })}
@@ -78,10 +75,10 @@ export function ArmPath({ mailbox, steps, onCheckNow, checking, blockedId }: Arm
       )}
       <p className="text-xs text-muted-foreground">
         netkeep finds each message again by the Message-ID it sets, so before it sends on its own,
-        it checks that Gmail keeps that Message-ID. Arm to send lets netkeep serve send campaign
-        email from this mailbox with no one pressing Send. Until then, every step is a draft you
-        send yourself. Disarm takes all of that back: from the next minute, netkeep makes no drafts
-        and sends nothing until you arm the mailbox again, starting with drafts.
+        it checks that Gmail keeps that Message-ID. On Automatic, netkeep serve sends campaign email
+        from this mailbox with no one pressing Send. Until then, on Manual, every step is a draft
+        you send yourself. Off takes all of that back: from the next minute, netkeep makes no drafts
+        and sends nothing until you move Gmail to Manual again.
       </p>
     </section>
   )

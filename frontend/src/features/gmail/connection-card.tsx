@@ -31,8 +31,9 @@ function when(value: string | null): string {
 /**
  * The Gmail connection (spec 11.5): whether an OAuth client is stored, which
  * account is connected and in what state, whether `netkeep serve` may use it, and
- * how to connect or reconnect. Setting up, arming and disconnecting stay on Settings;
- * the one action here is **Re-authorize**, the same one the app-wide banner has.
+ * how to connect or reconnect. Setting up and disconnecting stay on Settings, and the
+ * page's automation bar holds the switch (#835); the one action here is
+ * **Re-authorize**, the same one the app-wide banner has.
  *
  * Reads `GET /mailboxes/status`, which asks the Keychain whether a client is
  * stored; a locked Keychain shows as an error here, not as "no client".

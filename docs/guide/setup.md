@@ -153,7 +153,7 @@ On the **LinkedIn** page:
 2. Then start an **Enrichment**, with a small **Max visits** the first time. Enrichment opens each contact's profile, so they may see your visit in **Who viewed your profile**; the page tells you what LinkedIn shows them.
 3. Choose **Check inbox now** under **LinkedIn inbox**. The first inbox poll always runs by hand; scheduled polls wait for it.
 
-When the manual runs look right, choose **Arm scheduled runs** under **Scheduled runs**. From then on, `serve` syncs and enriches on its own, inside your LinkedIn active hours and daily budgets. **Pause schedule** holds it; **Disarm** stops it.
+When the manual runs look right, move the **LinkedIn automation** switch at the top of the page to **Automatic**, and choose how thorough it is. From then on, `serve` syncs and enriches on its own, inside your LinkedIn active hours and daily budgets. **Manual** stops that, and runs start only when you choose **Start run**; **Off** leaves LinkedIn alone.
 
 Every protection and its state is on **Settings**, under **Posture**. "NOT clear" there means a warning needs you; see [Troubleshooting](troubleshooting.md).
 
