@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { automationKeys } from '@/features/automation/api'
 import { navigation } from '@/features/mailboxes/api'
 import { armSteps, mailbox, renderWithBackend, status } from '@/features/mailboxes/test-support'
 import { pollStatusKeys } from '@/features/poll-status/api'
@@ -142,7 +143,7 @@ describe('GmailSection', () => {
 
   it('disconnects only after confirming', async () => {
     let current = status({ mailboxes: [mailbox()] })
-    const { calls } = renderSection(() => current, {
+    const { calls, queryClient } = renderSection(() => current, {
       'POST /api/v1/mailboxes/3/disconnect': () => {
         current = status({
           mailboxes: [mailbox({ status: 'disabled', status_reason: 'disconnected' })],
@@ -155,8 +156,12 @@ describe('GmailSection', () => {
     expect(dialog).toHaveTextContent('forgets sender@example.com’s token')
     expect(calls.some((call) => call.path.endsWith('/disconnect'))).toBe(false)
 
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Disconnect' }))
     expect(await screen.findByText('disconnected')).toBeInTheDocument()
+    // Disconnecting moves the mailbox Off, so the switch reads again (#829).
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: automationKeys.all })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: pollStatusKeys.all })
     expect(screen.getByText(/Connect one in step 7 of the setup guide/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Connect your mailbox/ }))
     expect(screen.getByRole('button', { name: 'Connect Gmail' })).toBeEnabled()
@@ -203,8 +208,10 @@ describe('GmailSection', () => {
           body: null,
         }),
       )
-      // The header's poll status changes too (#401).
+      // The header's poll status changes too (#401), and so may whether Gmail Automatic
+      // is ready (#829).
       await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: pollStatusKeys.all }))
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: automationKeys.all })
       expect(calls.some((call) => /\/(arm|disarm)$/.test(call.path))).toBe(false)
     },
   )
