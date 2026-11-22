@@ -1,6 +1,10 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
+import { automation } from '@/features/automation/test-support'
+import { mailbox } from '@/features/mailboxes/test-support'
+
+import { jsonResponse, mockFetch } from './fetch'
 import { renderApp } from './render'
 
 const EXPECTED_HREFS = [
@@ -201,6 +205,61 @@ describe('app shell', () => {
 
       expect(menu).toHaveAttribute('aria-expanded', 'false')
       expect(menu).not.toHaveFocus()
+    })
+  })
+
+  it('keeps the page title and status pills fixed at the top as the page scrolls (#835)', async () => {
+    await renderApp('/contacts')
+
+    const header = screen.getByTestId('top-bar')
+    expect(header.tagName).toBe('HEADER')
+    expect(header).toHaveClass('sticky', 'top-0', 'z-20')
+    // A glass pane, so what scrolls beneath is blurred behind the title, not read through it.
+    expect(header).toHaveClass('nk-glass')
+    expect(within(header).getByRole('heading', { level: 1 })).toHaveTextContent('Contacts')
+    expect(within(header).getByRole('group', { name: 'System status' })).toBeInTheDocument()
+    // Above the page's cards and banners, below the drawer (z-40) and dialogs (z-50).
+    expect(header.parentElement).toBe(screen.getByTestId('shell-content'))
+  })
+
+  describe('the automation bar (#835)', () => {
+    /** A mailbox that needs signing in again, so the shell's alert banner shows. */
+    function serve() {
+      mockFetch((request) => {
+        const { pathname } = new URL(request.url)
+        if (pathname === '/api/v1/automation') return jsonResponse(automation())
+        if (pathname === '/api/v1/mailboxes') {
+          return jsonResponse([
+            mailbox({ status: 'reauth_required', status_reason: 'invalid_grant' }),
+          ])
+        }
+        return jsonResponse({ detail: 'not in this test' }, 404)
+      })
+    }
+
+    it.each([
+      ['/linkedin', 'LinkedIn automation'],
+      ['/gmail', 'Gmail automation'],
+    ])('opens %s with its bar, first under the header and above the alerts', async (path, name) => {
+      serve()
+      await renderApp(path)
+
+      const bar = await screen.findByRole('region', { name })
+      await within(bar).findByRole('radiogroup', { name })
+      const banner = (await screen.findByText('Gmail needs you to sign in again')).closest(
+        '[role="alert"]',
+      ) as HTMLElement
+      const main = screen.getByRole('main')
+      expect(main.firstElementChild).toBe(bar)
+      expect(bar.compareDocumentPosition(banner) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(screen.getAllByTestId('automation-bar')).toHaveLength(1)
+    })
+
+    it('leaves the other pages without one', async () => {
+      serve()
+      await renderApp('/contacts')
+      await screen.findByText('Gmail needs you to sign in again')
+      expect(screen.queryByTestId('automation-bar')).toBeNull()
     })
   })
 })

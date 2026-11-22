@@ -2,9 +2,9 @@ import { useId } from 'react'
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
-import type { Position } from './api'
 import { AutomationLadder } from './automation-switch'
 import { DepthChoice } from './depth-choice'
+import { gmailLines, LINKEDIN_LINES, sentence } from './lines'
 import {
   useGmailAutomation,
   useLinkedInAutomation,
@@ -12,27 +12,8 @@ import {
   type LinkedInControl,
 } from './use-automation'
 
-const LINKEDIN_LINES: Record<Position, string> = {
-  off: 'Leaves LinkedIn alone',
-  manual: 'Runs when you click Start',
-  automatic: 'Runs on its own, within active hours',
-}
-
-function gmailLines(replyEvery: string): Record<Position, string> {
-  return {
-    off: 'Leaves Gmail alone',
-    manual: 'Writes drafts; you send them',
-    automatic: `Sends within sending hours; checks replies ${replyEvery}`,
-  }
-}
-
-/** The server's reasons come without a full stop; the page shows them as sentences. */
-function sentence(text: string): string {
-  return /[.!?]$/.test(text) ? text : `${text}.`
-}
-
 /** A failed refresh under a switch that still shows its last answer. */
-function StaleError({ text }: { text: string | null }) {
+export function StaleError({ text }: { text: string | null }) {
   if (text === null) return null
   return (
     <p role="status" className="text-xs text-destructive">

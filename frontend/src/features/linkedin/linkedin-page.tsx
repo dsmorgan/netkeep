@@ -27,7 +27,8 @@ function message(error: unknown): string {
  *
  * Each card has an anchor a link can name (#739): `session` (the browser and its
  * session), `connections` (start a run, a connections sync among them), `inbox`,
- * `schedule`, `runs`, `budget`, `heat` and `pins`.
+ * `runs`, `budget`, `heat` and `pins`. `schedule` is the automation bar (#835), which
+ * the app shell renders above this page and its banners.
  */
 export function LinkedInPage() {
   const status = useQuery(statusQuery)
@@ -59,9 +60,7 @@ export function LinkedInPage() {
       {status.isSuccess && <SessionBanner status={status.data} />}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <SectionAnchor id="schedule">
-          <ScheduleCard />
-        </SectionAnchor>
+        <ScheduleCard />
         <SectionAnchor id="session">
           <BrowserCard />
         </SectionAnchor>

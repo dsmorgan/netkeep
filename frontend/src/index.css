@@ -282,6 +282,8 @@
   }
   html {
     @apply font-sans;
+    /* The fixed top bar's height (#835), so scrolled-to sections clear it. */
+    scroll-padding-top: var(--top-bar-height, 0px);
   }
   body {
     @apply bg-background text-sm text-foreground antialiased;
