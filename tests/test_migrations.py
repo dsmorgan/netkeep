@@ -3924,3 +3924,64 @@ def test_0049_downgrades_to_accounts_without_the_switch(migration_engine: Engine
         ).all()
         assert [(r[0], bool(r[1])) for r in armed] == [(1, False), (2, False), (3, True)]
     migrations.upgrade(migration_engine, "0049")
+
+
+# --- the schedule pause keys 0049 couldn't reach (0050, #834) -----------------------------
+
+PAUSED_AT = json.dumps("2026-11-16T23:45:00+00:00")
+
+
+def _armed(connection: Connection) -> list[tuple[int, bool]]:
+    rows = connection.execute(
+        text("SELECT id, scheduled_runs_armed_at IS NOT NULL FROM linkedin_accounts ORDER BY id")
+    ).all()
+    return [(r[0], bool(r[1])) for r in rows]
+
+
+def _seed_past_0049(connection: Connection) -> None:
+    """What a database could hold after running ``main`` between #830 and #833: account 1
+    armed and paused, account 2 armed, account 3 disarmed and paused, and a key for an
+    account that doesn't exist. User 2 has a neighbor key that only looks like one."""
+    _seed_users(connection, 1, 2, 3)
+    _insert_account(connection, id=1, user_id=1, armed=True)
+    _insert_account(connection, id=2, user_id=2, armed=True)
+    _insert_account(connection, id=3, user_id=3, armed=False)
+    _put_setting(connection, 1, "linkedin.schedule.1.paused_at", PAUSED_AT)
+    _put_setting(connection, 3, "linkedin.schedule.3.paused_at", PAUSED_AT)
+    _put_setting(connection, 3, "linkedin.schedule.9.paused_at", PAUSED_AT)  # no account 9
+    _put_setting(connection, 2, "linkedin.schedule.2.pausedXat", "1")
+    _put_setting(connection, 2, "linkedin.heat.2", "1")
+
+
+def test_0050_moves_an_armed_paused_account_to_manual_and_deletes_every_pause_key(
+    migration_engine: Engine,
+) -> None:
+    """Armed with a key: Manual, no key. A key with no account: deleted. Armed with no
+    key: still Automatic. Keys that only look like a pause key stay."""
+    migrations.upgrade(migration_engine, "0049")
+    with migration_engine.begin() as connection:
+        _seed_past_0049(connection)
+    migrations.upgrade(migration_engine, "0050")
+    with migration_engine.begin() as connection:
+        assert _armed(connection) == [(1, False), (2, True), (3, False)]
+        assert _keys(connection, 1) == set()
+        assert _keys(connection, 2) == {"linkedin.schedule.2.pausedXat", "linkedin.heat.2"}
+        assert _keys(connection, 3) == set()
+
+
+def test_0050_downgrades_to_nothing_and_upgrades_again(migration_engine: Engine) -> None:
+    """The downgrade puts nothing back: Manual stays Manual, and no key returns. A key
+    written at 0049 after that (the code of then could) goes on the next upgrade."""
+    migrations.upgrade(migration_engine, "0049")
+    with migration_engine.begin() as connection:
+        _seed_past_0049(connection)
+    migrations.upgrade(migration_engine, "0050")
+    migrations.downgrade(migration_engine, "0049")
+    with migration_engine.begin() as connection:
+        assert _armed(connection) == [(1, False), (2, True), (3, False)]
+        assert _keys(connection, 1) == set()
+        _put_setting(connection, 2, "linkedin.schedule.2.paused_at", PAUSED_AT)
+    migrations.upgrade(migration_engine, "0050")
+    with migration_engine.begin() as connection:
+        assert _armed(connection) == [(1, False), (2, False), (3, False)]
+        assert _keys(connection, 2) == {"linkedin.schedule.2.pausedXat", "linkedin.heat.2"}
