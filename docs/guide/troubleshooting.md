@@ -15,7 +15,7 @@ Still stuck? Open an issue with a support bundle and screenshots: see [Reporting
 | "both ... hold a database; netkeep won't pick one" | Both `.../netkeeper` and `.../netkeep` hold a database, usually after going back to netkeeper by restoring a backup. The message shows when each was last written. Move the one you don't want aside, then start again. If the login item runs netkeep, it retries every 10 seconds and the message is in `<data>/logs/serve.err.log`. |
 | "netkeep can't move netkeeper's data yet" | The one-time move to the new name refused. The message says why; [Upgrading from netkeeper](upgrading-from-netkeeper.md#when-it-refuses) lists each case. |
 | The browser asks you to connect after the upgrade | Run `netkeep open`. The rename changed the cookie's name, and the old one works only until the next release. |
-| "The frontend is not built" | Run `make build-ui`, then reload. Run it again after each `git pull`. |
+| "The frontend is not built" | Run `make build-ui`, then reload. `make update` builds it each time it updates a checkout. |
 | A banner that says the UI requires Chrome | Open <http://127.0.0.1:8000> in Google Chrome. |
 | "Backend unreachable" in the header | `serve` stopped. Start it again: `.venv/bin/netkeep serve`. |
 | `serve` says the address is already in use | Another `serve`, or another program, has port 8000. Stop it, or run `netkeep serve --port 8080`. |
@@ -113,7 +113,7 @@ When the netkeep icon shows a dialog instead of a window, the dialog says what t
 
 | What you see | What happened | What to do |
 |---|---|---|
-| "this netkeep runs from a checkout" | `netkeep update` replaces only an installer or `uv tool install` install. | Run `git pull`, then `make install`. |
+| "this netkeep runs from a checkout" | `netkeep update` replaces only an installer or `uv tool install` install. | Run `make update`; see [Updating a checkout](#updating-a-checkout). |
 | "... holds the serve lock, and it isn't the login item's serve" | You started `netkeep serve` yourself, or a `netkeep restore` is running. | Stop that `serve` (Ctrl+C in its terminal), or wait for the restore, then run `netkeep update` again. |
 | "constraints.txt has SHA-256 ..., but its SHA256SUMS says ..." | A download didn't match its release's checksum. Nothing was installed. | Run it again later. If it keeps happening, [report it](reporting-a-problem.md). |
 | "Rolled back: netkeep X is running again" | The new version failed before its scheduler started, so netkeep put back the version and the database you had. | Look in `<data>/logs/serve.err.log` for why, and [report it](reporting-a-problem.md). |
@@ -130,6 +130,19 @@ When the update stops without rolling back, you have two choices:
 - Go back to the version you had, knowing that whatever the new version sent or recorded since the backup is forgotten, and could be sent again. Run the `uv tool install ...` command it printed, then `netkeep restore <backup>` with the backup it named, then `netkeep login-item on`.
 
 Then delete `<data>/update/state.json`.
+
+### Updating a checkout
+
+`make update` stops at the first step that fails and says where things stand. It never rolls back git.
+
+| What you see | What happened | What to do |
+|---|---|---|
+| "the checkout has uncommitted changes", "this checkout is on ..., not main", "can't fast-forward" | A check before step 2. Nothing was changed. | Commit or discard the changes, run `git switch main`, or move your local commits to a branch, then run `make update` again. |
+| "make update stopped before changing anything" | Step 2 refused: you run `netkeep serve` yourself, or the backup failed. The login item runs again if it was running. | Stop that `serve` (Ctrl+C in its terminal), or fix what the backup said, then run `make update` again. |
+| "the login item runs ..., not this checkout's ..." | The login item runs another checkout's `netkeep`. `make update` won't stop it or point it at this checkout. Nothing was changed. | Run `make update` in the checkout the login item runs. To move the login item to this checkout, run `.venv/bin/netkeep login-item on` here first. |
+| "the checkout didn't change" | `git` refused the fast-forward, for example because an untracked file is in the way. `make update` started the login item again on the code you had. | Do what `git` said, then run `make update` again. |
+| "make update stopped: uv sync ... failed" or "the UI build failed" | The checkout is on the new commit, but `.venv` or the UI may not match it. `serve` is stopped, and nothing has run on the new code, so the database is as it was. | Fix what failed, then run `make update` again. To go back instead, run the `git reset --keep`, `uv sync` and `make build-ui` commands it printed, then start `serve`. |
+| "netkeep serve didn't start on the new code" | The new code's `serve` didn't answer. It may have migrated the database. | Look in `<data>/logs/serve.err.log`, fix it, then run `make update` again. To go back instead, run the commands it printed. They restore the backup from step 2, which forgets whatever netkeep sent or recorded since. |
 
 ## Run at login does nothing
 
