@@ -1942,6 +1942,35 @@ def test_checkout_start_refuses_while_another_serve_holds_the_lock(checkout: Wor
     assert not any(call[0] == "bootstrap" for call in checkout.launchctl)
 
 
+def test_checkout_start_checks_a_login_item_that_started_already(checkout: World) -> None:
+    """The launcher app (#754) started the login item during the update: its serve holds
+    the lock, and this step checks it instead of asking you to stop it."""
+    checkout.install_login_item()
+    assert update.checkout_stop(checkout.item(), checkout.seams(), checkout.say) == 0
+    checkout.installed = NEW
+    checkout.run(["bootstrap", f"gui/{UID}", str(checkout.item().plist_path)])
+    before = len(checkout.launchctl)
+    assert update.checkout_start(checkout.item(), checkout.seams(), checkout.say) == 0, (
+        checkout.text
+    )
+    assert f"the login item's netkeep serve is running already (pid {AGENT_PID})" in checkout.text
+    assert "   done: it answers" in checkout.output
+    assert "Start the login item" not in checkout.output
+    assert not any(call[0] in ("bootout", "bootstrap") for call in checkout.launchctl[before:])
+    assert checkout.running == NEW
+
+
+def test_checkout_start_reports_a_login_item_that_started_but_doesnt_answer(
+    checkout: World,
+) -> None:
+    checkout.install_login_item()
+    assert update.checkout_stop(checkout.item(), checkout.seams(), checkout.say) == 0
+    checkout.serve_answers[OLD] = False
+    checkout.run(["bootstrap", f"gui/{UID}", str(checkout.item().plist_path)])
+    assert update.checkout_start(checkout.item(), checkout.seams(), checkout.say) == 1
+    assert "   failed: netkeep serve didn't answer within 90 s" in checkout.text
+
+
 def test_checkout_start_reports_a_serve_that_doesnt_answer(checkout: World) -> None:
     checkout.install_login_item()
     assert update.checkout_stop(checkout.item(), checkout.seams(), checkout.say) == 0
