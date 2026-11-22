@@ -161,16 +161,14 @@ def test_a_backup_from_an_older_netkeep_is_upgraded_to_head(data: Path) -> None:
         engine.dispose()
 
 
-def test_a_backup_from_before_the_switch_loses_its_schedule_pause(data: Path) -> None:
-    """#834: a backup from before 0049 can hold the schedule pause (#324). The restore runs
-    the migrations, so 0049 maps the armed, paused account to Manual and deletes the key:
-    nothing past 0049 reads one, and nothing restores one."""
+def _paused_armed_backup(data: Path, revision: str) -> Path:
+    """A backup at ``revision`` whose account 1 is armed and holds a schedule pause key, as
+    0048's code could write one, or ``main`` between #830 and #833 at 0049 (#834)."""
     engine = make_engine(database_url(data))
     try:
-        migrations.downgrade(engine, "0048")
+        migrations.downgrade(engine, revision)
     finally:
         engine.dispose()
-    key = "linkedin.schedule.1.paused_at"
     with closing(sqlite3.connect(data / DATABASE_FILENAME)) as connection:
         (user_id,) = connection.execute("SELECT user_id FROM settings_kv LIMIT 1").fetchone()
         connection.execute(
@@ -181,22 +179,41 @@ def test_a_backup_from_before_the_switch_loses_its_schedule_pause(data: Path) ->
         )
         connection.execute(
             "INSERT INTO settings_kv (user_id, key, value, created_at, updated_at)"
-            " VALUES (?, ?, '\"2026-09-20T12:00:00+00:00\"', '2026-09-20', '2026-09-20')",
-            (user_id, key),
+            " VALUES (?, ?, '\"2026-11-16T23:45:00+00:00\"', '2026-11-16', '2026-11-16')",
+            (user_id, PAUSE_KEY),
         )
         connection.commit()
-    saved = _backup_now(data, datetime(2026, 10, 1, tzinfo=UTC))
+    saved = _backup_now(data, datetime(2026, 11, 17, tzinfo=UTC))
     _mark(data, "at head again")
+    return saved
 
-    result = restore_backup(saved, database_url(data), data / "backups")
 
-    assert result.source_revision == "0048"
-    with closing(sqlite3.connect(data / DATABASE_FILENAME)) as connection:
+PAUSE_KEY = "linkedin.schedule.1.paused_at"
+
+
+def _pause_key_and_arming(database: Path) -> tuple[bool, object]:
+    with closing(sqlite3.connect(database)) as connection:
         keys = {row[0] for row in connection.execute("SELECT key FROM settings_kv")}
         (armed,) = connection.execute(
             "SELECT scheduled_runs_armed_at FROM linkedin_accounts WHERE id = 1"
         ).fetchone()
-    assert key not in keys
+    return PAUSE_KEY in keys, armed
+
+
+@pytest.mark.parametrize("revision", ["0048", "0049"])
+def test_a_backup_with_a_schedule_pause_loses_it_on_restore(data: Path, revision: str) -> None:
+    """#834: a backup from before 0049 can hold the schedule pause (#324), and so can one
+    taken at 0049 between #830 and #833, which 0049 doesn't run again for. The restore runs
+    the migrations to head, so 0049 or 0050 moves the armed, paused account to Manual and
+    deletes the key: nothing at head holds one."""
+    saved = _paused_armed_backup(data, revision)
+
+    result = restore_backup(saved, database_url(data), data / "backups")
+
+    assert result.source_revision == revision
+    assert result.revision == migrations.head_revision()
+    has_key, armed = _pause_key_and_arming(data / DATABASE_FILENAME)
+    assert has_key is False
     assert armed is None  # Manual
 
 
