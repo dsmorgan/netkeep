@@ -179,6 +179,23 @@ def test_an_up_to_date_checkout_still_syncs_builds_and_starts(repo: Repo) -> Non
     assert "nothing to pull" in done.stdout
 
 
+def test_a_pull_that_rewrites_the_script_runs_the_old_one_to_the_end(repo: Repo) -> None:
+    """Step 3 replaces this very file. The new one is longer and exits 7 wherever a shell
+    reading on from the old one's offset would land, yet the run finishes as the old
+    script and exits 0. Two things make that so: git writes a new file rather than
+    rewriting this one in place, and the script is one function, parsed whole before it
+    runs. This run would pass on the first alone; the second is for anything that
+    rewrites the file in place."""
+    old = repo.head
+    new = repo.push_commit("scripts/update-checkout.sh", "#!/bin/sh\n" + "exit 7\n" * 4000)
+    done = repo.run()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert repo.head == new
+    assert (repo.checkout / "scripts" / "update-checkout.sh").read_text().endswith("exit 7\n")
+    assert repo.logged == _steps(repo, old, new)
+    assert f"Done: the checkout is at {repo.short(new)}." in done.stdout
+
+
 def test_an_untracked_file_doesnt_block_the_update(repo: Repo) -> None:
     (repo.checkout / "notes.txt").write_text("mine\n")
     new = repo.push_commit()
