@@ -1962,6 +1962,22 @@ def test_checkout_start_restarts_a_login_item_that_started_already(checkout: Wor
     assert checkout.lock.holder == AGENT_PID, "the step kept the lock"
 
 
+def test_checkout_start_restarts_a_login_item_that_started_already_but_the_restart_doesnt_answer(
+    checkout: World,
+) -> None:
+    """The restart on the synced code is checked like any start: a serve that doesn't
+    answer fails the step, even though the one it replaced was running."""
+    checkout.install_login_item()
+    assert update.checkout_stop(checkout.item(), checkout.seams(), checkout.say) == 0
+    checkout.run(["bootstrap", f"gui/{UID}", str(checkout.item().plist_path)])
+    assert checkout.lock.holder == AGENT_PID
+    checkout.installed = NEW
+    checkout.serve_answers[NEW] = False
+    assert update.checkout_start(checkout.item(), checkout.seams(), checkout.say) == 1
+    assert f"started during the update (pid {AGENT_PID})" in checkout.text
+    assert "   failed: netkeep serve didn't answer within 90 s" in checkout.text
+
+
 def test_checkout_start_fails_when_the_started_login_item_wont_stop(checkout: World) -> None:
     checkout.install_login_item()
     assert update.checkout_stop(checkout.item(), checkout.seams(), checkout.say) == 0
