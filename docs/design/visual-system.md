@@ -38,7 +38,11 @@ Tone only what needs the person: the live run (accent, amber while paused), the 
 
 ## Automation switch
 
-The Off, Manual and Automatic switch (#829) is a radio group in two forms, both in `features/automation/automation-switch.tsx`. Settings › Automation uses the three-stop track, with a line under each stop; the status pill popovers and the LinkedIn page use the compact segments. Off is muted (`--muted-foreground`), Manual the accent (`--primary`), Automatic green (`--ok`), and the track fills in the chosen position's color up to its stop. LinkedIn's How thorough choice sits in a flat green tint (`nk-tint nk-tone-ok nk-flat`). The switch adds no tokens of its own.
+The Off, Manual and Automatic switch (#829) is a radio group in two forms, both in `features/automation/automation-switch.tsx`. Settings › Automation uses the three-stop track, with a line under each stop; the status pill popovers use the compact segments, and so does the automation bar (#835), a thin glass pane (`features/automation/automation-bar.tsx`) that the shell renders first under the top bar on the LinkedIn and Gmail pages, above the banners, with the position's line beside the segments. Off is muted (`--muted-foreground`), Manual the accent (`--primary`), Automatic green (`--ok`), and the track fills in the chosen position's color up to its stop. LinkedIn's How thorough choice sits in a flat green tint (`nk-tint nk-tone-ok nk-flat`). The switch adds no tokens of its own.
+
+## Top bar
+
+The top bar, with the page title and the three status pills, is a glass pane fixed at the top of the content column (`sticky top-0 z-20`, #835): the page scrolls under it, blurred. It publishes its height as `--top-bar-height`, which sets `scroll-padding-top`, so a section a link scrolls to lands below it. At phone width the pills wrap onto a second row.
 
 ## Fallbacks and accessibility
 

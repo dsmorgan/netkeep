@@ -1,7 +1,17 @@
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useRouterState } from '@tanstack/react-router'
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from 'react'
 
 import { useAttentionRefresh } from '@/features/attention/api'
 import { useFavicon } from '@/features/attention/use-favicon'
+import { GmailAutomationBar, LinkedInAutomationBar } from '@/features/automation/automation-bar'
 import { ReauthBanner } from '@/features/mailboxes/reauth-banner'
 import { useHashTarget } from '@/lib/use-hash-target'
 
@@ -24,10 +34,22 @@ import { useDocumentTitle } from './use-document-title'
  * `sm` closes it, so `inert` never lingers on a layout with no drawer.
  */
 const SM_UP = '(min-width: 40rem)'
+
+/**
+ * The pages that open with their service's automation bar (#835). The shell renders
+ * it, so it sits first under the top bar, above the banners and the page.
+ */
+const AUTOMATION_BARS: Record<string, ComponentType> = {
+  '/linkedin': LinkedInAutomationBar,
+  '/gmail': GmailAutomationBar,
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const [navOpen, setNavOpen] = useState(false)
   const menuButton = useRef<HTMLButtonElement>(null)
   const navId = useId()
+  const pathname = useRouterState({ select: (state) => state.location.pathname })
+  const AutomationBar = AUTOMATION_BARS[pathname]
   useAttentionRefresh()
   useDocumentTitle()
   useFavicon()
@@ -87,6 +109,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           onToggleNav={() => setNavOpen((open) => !open)}
         />
         <main className="min-w-0 flex-1 p-(--space-page)">
+          {AutomationBar !== undefined && <AutomationBar />}
           <ReauthBanner />
           <BrowserBanner />
           {children}

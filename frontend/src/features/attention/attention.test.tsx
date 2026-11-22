@@ -355,29 +355,19 @@ describe('the activity indicator (#347)', () => {
     ['armed', 'Scheduled LinkedIn runs are armed.'],
     ['idle', 'Scheduled LinkedIn runs are off.'],
   ] as const)(
-    'shows %s with its own icon and the sentence on the LinkedIn page',
+    'leaves %s off the LinkedIn page, where the switch bar says the position (#835)',
     async (state, label) => {
       serve(() => activity(state, label))
       await renderApp('/linkedin')
+      await screen.findByTestId('activity-live')
 
-      const chip = await screen.findByTestId('activity-indicator')
-      expect(chip).toHaveAttribute('data-state', state)
-      expect(chip).toHaveAttribute('title', label)
-      expect(chip.querySelector(`[data-icon="${state}"]`)).not.toBeNull()
-      expect(chip).toHaveTextContent(ACTIVITY_TEXT[state])
-      expect(chip).toHaveTextContent(label)
+      // "LinkedIn: off" over a switch on Manual read as a contradiction; the top
+      // bar's LinkedIn chip, fixed above the page, says what LinkedIn is doing.
+      expect(screen.queryByTestId('activity-indicator')).toBeNull()
+      const main = screen.getByRole('main')
+      expect(main).not.toHaveTextContent(ACTIVITY_TEXT[state])
     },
   )
-
-  it('spins while running, but not under reduced motion', async () => {
-    serve(() => activity('running', 'A LinkedIn inbox check run is running.'))
-    await renderApp('/linkedin')
-
-    const icon = (await screen.findByTestId('activity-indicator')).querySelector(
-      '[data-icon="running"]',
-    )
-    expect(icon).toHaveClass('animate-spin', 'motion-reduce:animate-none')
-  })
 
   it('leaves the top bar: its LinkedIn status chip says it there (#751)', async () => {
     serve(() => activity('armed', 'Scheduled LinkedIn runs are armed.'))
@@ -418,9 +408,9 @@ describe('the activity indicator (#347)', () => {
       'The LinkedIn session is flagged; clear it on the LinkedIn page.',
     )
     serve(() => current)
-    await renderApp('/linkedin')
-    const chip = await screen.findByTestId('activity-indicator')
-    const live = screen.getByTestId('activity-live')
+    const { queryClient } = await renderApp('/linkedin')
+    const live = await screen.findByTestId('activity-live')
+    await waitFor(() => expect(queryClient.getQueryData(attentionQuery.queryKey)).toBeDefined())
 
     current = activity(
       'stopped',
@@ -429,12 +419,10 @@ describe('the activity indicator (#347)', () => {
     act(() => FakeEventSource.instances.at(-1)?.emit('run.finished', {}))
 
     await waitFor(() =>
-      expect(chip).toHaveAttribute(
-        'title',
+      expect(queryClient.getQueryData<Attention>(attentionQuery.queryKey)?.activity.label).toBe(
         'Auto-send is held until you resume it. Other scheduled runs continue.',
       ),
     )
-    expect(chip).toHaveTextContent('LinkedIn: blocked')
     expect(live).toHaveTextContent('')
   })
 
@@ -442,7 +430,7 @@ describe('the activity indicator (#347)', () => {
     serve(() => activity('paused', 'The LinkedIn schedule is paused.'))
     await renderApp('/linkedin')
 
-    await screen.findByTestId('activity-indicator')
+    await screen.findByTestId('automation-bar')
     expect(screen.getAllByTestId('activity-live')).toHaveLength(1)
   })
 })
@@ -494,17 +482,21 @@ describe('the running favicon', () => {
 })
 
 describe('campaign send batches (#547)', () => {
-  it('keeps the batch off the LinkedIn schedule card and the LinkedIn state', async () => {
+  it('keeps the batch off the LinkedIn state', async () => {
     serve(() => activity('paused', 'The LinkedIn schedule is paused.'))
-    await renderApp('/linkedin')
-    const chip = await screen.findByTestId('activity-indicator')
+    const { queryClient } = await renderApp('/linkedin')
+    const live = await screen.findByTestId('activity-live')
+    await waitFor(() => expect(queryClient.getQueryData(attentionQuery.queryKey)).toBeDefined())
 
     act(() => FakeEventSource.instances.at(-1)?.emit('campaign.tick', { sent: 1 }))
 
-    // The top bar's Gmail chip shows it (system-status.test.tsx); the card does not.
+    // The top bar's Gmail chip shows it (system-status.test.tsx); LinkedIn's state,
+    // and what the live region says about it, stay put.
     await act(() => Promise.resolve())
-    expect(chip).toHaveAttribute('data-state', 'paused')
-    expect(chip).toHaveTextContent('LinkedIn: paused')
+    expect(queryClient.getQueryData<Attention>(attentionQuery.queryKey)?.activity.state).toBe(
+      'paused',
+    )
+    expect(live).toHaveTextContent('')
   })
 
   it('swaps the tab icon while a batch shows, and back after', async () => {

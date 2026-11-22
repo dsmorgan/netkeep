@@ -58,10 +58,14 @@ describe('session banner', () => {
 })
 
 describe('scheduled runs, shown plainly', () => {
-  it('shows the automation switch on Manual by default (#829)', async () => {
+  it('says nothing runs on its own on Manual, with no switch of its own (#835)', async () => {
     renderLinkedInPage()
-    const group = within(await screen.findByRole('radiogroup', { name: 'LinkedIn automation' }))
-    expect(group.getByRole('radio', { name: 'Manual' })).toHaveAttribute('aria-checked', 'true')
+    expect(
+      await screen.findByText('Nothing runs on its own while LinkedIn is on Manual.'),
+    ).toBeInTheDocument()
+    // The switch is the shell's automation bar now (app-shell.test.tsx), not this page's.
+    expect(screen.queryByRole('radiogroup', { name: 'LinkedIn automation' })).toBeNull()
+    expect(screen.queryByText(/LinkedIn: off/)).toBeNull()
   })
 })
 
