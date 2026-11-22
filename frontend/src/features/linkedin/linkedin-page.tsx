@@ -60,7 +60,10 @@ export function LinkedInPage() {
       {status.isSuccess && <SessionBanner status={status.data} />}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <ScheduleCard />
+        {/* Its own height, not the Browser card's: off Automatic it has one line. */}
+        <div className="grid lg:self-start">
+          <ScheduleCard />
+        </div>
         <SectionAnchor id="session">
           <BrowserCard />
         </SectionAnchor>
