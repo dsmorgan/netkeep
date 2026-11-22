@@ -567,7 +567,7 @@ def test_the_idle_and_armed_sentences_read_with_the_switch() -> None:
     """The UI announces them after the switch's position ("LinkedIn: Manual", "LinkedIn:
     Off", "LinkedIn: Automatic"), so neither says "armed" or "off" (#834)."""
     assert service.IDLE == "Nothing runs on its own."
-    assert service.ARMED == "LinkedIn runs on its own, within active hours."
+    assert service.ARMED == "Runs on its own, within active hours."
     for label in (service.IDLE, service.ARMED):
         words = label.lower().rstrip(".").replace(",", "").split()
         assert "armed" not in words and "off" not in words, label

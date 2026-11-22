@@ -90,8 +90,8 @@ BREAKER_TRIPPED: Final = (
 
 PAUSED: Final = "The LinkedIn schedule is paused."
 #: The switch on Automatic (#829). The UI's live region reads it after "LinkedIn:
-#: Automatic", so it never says "armed" (#834).
-ARMED: Final = "LinkedIn runs on its own, within active hours."
+#: Automatic", so it never says "armed" or repeats "LinkedIn" (#834).
+ARMED: Final = "Runs on its own, within active hours."
 #: The switch on Manual or Off. The live region reads it after "LinkedIn: Manual" or
 #: "LinkedIn: Off", so it says nothing that reads against either (#834).
 IDLE: Final = "Nothing runs on its own."
