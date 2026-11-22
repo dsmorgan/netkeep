@@ -180,12 +180,8 @@ def test_an_up_to_date_checkout_still_syncs_builds_and_starts(repo: Repo) -> Non
 
 
 def test_a_pull_that_rewrites_the_script_runs_the_old_one_to_the_end(repo: Repo) -> None:
-    """Step 3 replaces this very file. The new one is longer and exits 7 wherever a shell
-    reading on from the old one's offset would land, yet the run finishes as the old
-    script and exits 0. Two things make that so: git writes a new file rather than
-    rewriting this one in place, and the script is one function, parsed whole before it
-    runs. This run would pass on the first alone; the second is for anything that
-    rewrites the file in place."""
+    """A pull that replaces the script doesn't change what this run does: step 3 puts in
+    a longer one that exits 7, and the run still finishes as the old script and exits 0."""
     old = repo.head
     new = repo.push_commit("scripts/update-checkout.sh", "#!/bin/sh\n" + "exit 7\n" * 4000)
     done = repo.run()

@@ -1025,7 +1025,7 @@ def checkout_start(item: LoginItem, seams: Seams, say: Say) -> int:
     it and check that a fresh ``serve`` answers (with this version, which stays the same
     between releases, so the check shows a new ``serve`` started, not which commit it
     runs); when it's off, say how to start ``serve``. A login item that started already
-    is only checked. It refuses while any
+    is restarted, since it may have started on the code from before. It refuses while any
     other process holds the serve lock, since a ``serve`` that answers then isn't the
     login item's."""
     refusal = _checkout_refusal(item, seams)
@@ -1042,9 +1042,16 @@ def checkout_start(item: LoginItem, seams: Seams, say: Say) -> int:
     holder = lock.holder.pid if lock.holder is not None else None
     if lock.held and holder is not None and holder == item.agent_pid():
         # The login item started already, from the launcher app (#754) or at a login
-        # during the update: check it rather than ask you to stop a serve you can't.
-        say(f"   the login item's netkeep serve is running already (pid {holder})")
-        failure = _check_version(item, seams, say, version)
+        # during the update. It may have started on the old commit or a half-done sync,
+        # so restart it on the synced code rather than ask you to stop a serve you can't.
+        say(f"   the login item's netkeep serve started during the update (pid {holder});")
+        say("   restarting it on the updated code")
+        held = _stop_quietly(item, seams, say)
+        if held is None:
+            say(f"   failed: it wouldn't stop. Run {CHECKOUT_AGAIN} again.")
+            return 1
+        held.release()
+        failure = _start_and_check(item, seams, say, version)
     elif lock.held:
         who = lock.holder.describe() if lock.holder is not None else "another netkeep process"
         say(
