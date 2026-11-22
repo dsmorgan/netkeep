@@ -214,6 +214,49 @@ def test_a_staged_change_is_refused(repo: Repo) -> None:
     assert "uncommitted changes" in done.stderr
 
 
+@pytest.mark.parametrize(
+    "pending", ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-apply", "rebase-merge"]
+)
+def test_an_operation_in_progress_is_refused(repo: Repo, pending: str) -> None:
+    """A conflicted merge or rebase that's been resolved but not committed leaves a clean
+    status; the marker in the git folder says it isn't finished."""
+    head = repo.head
+    repo.push_commit()
+    marker = Path(repo.git("rev-parse", "--git-path", pending))
+    marker = marker if marker.is_absolute() else repo.checkout / marker
+    if pending.startswith("rebase-"):
+        marker.mkdir()
+    else:
+        marker.write_text(head + "\n")
+    done = repo.run()
+    _changed_nothing(repo, done, head)
+    assert f"in progress ({pending})" in done.stderr
+
+
+def test_an_operation_in_progress_in_a_worktree_is_refused(repo: Repo) -> None:
+    """A worktree's git folder isn't .git/: --git-path finds the marker there."""
+    worktree = repo.tmp / "worktree"
+    repo.git("branch", "-q", "spare")
+    repo.git("switch", "-q", "spare")
+    repo.git("worktree", "add", "-q", str(worktree), "main")
+    shutil.copytree(repo.checkout / ".venv", worktree / ".venv", symlinks=True)
+    marker = Path(repo.git("rev-parse", "--git-path", "MERGE_HEAD", cwd=worktree))
+    marker = marker if marker.is_absolute() else worktree / marker
+    assert ".git/worktrees/" in str(marker)
+    marker.write_text(repo.git("rev-parse", "HEAD", cwd=worktree) + "\n")
+    done = subprocess.run(
+        [SH or "sh", "scripts/update-checkout.sh"],
+        cwd=worktree,
+        env=repo.env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert done.returncode == 1 and repo.logged == []
+    assert "in progress (MERGE_HEAD)" in done.stderr
+
+
 def test_another_branch_is_refused(repo: Repo) -> None:
     repo.git("switch", "-q", "-c", "feature")
     head = repo.head
