@@ -547,7 +547,7 @@ async def test_arming_goes_draft_then_send_and_disarm_undoes_it(
     )
     refused = await _arm(client, mailbox["id"], "send")
     assert refused.status_code == 409
-    assert "not armed" in refused.json()["detail"]
+    assert "is Off; move Gmail to Manual first" in refused.json()["detail"]
 
     drafts = await _arm(client, mailbox["id"], "draft")
     assert drafts.status_code == 200, drafts.text

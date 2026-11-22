@@ -280,7 +280,7 @@ def _at(value: datetime) -> str:
 
 WAITING_TEXT: Final = {
     MessageIdWait.DISCONNECTED: "the mailbox is disconnected; connect it again first",
-    MessageIdWait.NOT_ARMED: "arm it for drafts first; netkeep checks only an armed mailbox",
+    MessageIdWait.NOT_ARMED: "move Gmail to Manual first; netkeep checks for its drafts only then",
     MessageIdWait.REAUTH_REQUIRED: "waiting: the mailbox needs you to sign in again",
     MessageIdWait.NO_DRAFT: "waiting: no draft yet; send a test from a campaign's review",
     MessageIdWait.TEST_DRAFT_NOT_FOUND: (

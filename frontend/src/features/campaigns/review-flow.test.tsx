@@ -168,7 +168,7 @@ describe('review flow', () => {
               ? jsonResponse(
                   {
                     detail:
-                      'me@sender.example is not armed; arm it for drafts (`gmail arm`) to make the test a draft in your Drafts, or to send (`gmail arm --send`) to send it to you',
+                      'me@sender.example is Off; move Gmail to Manual (`netkeep automation gmail manual`) to make the test a draft in your Drafts, or to Automatic to send it to you',
                   },
                   409,
                 )
@@ -197,7 +197,7 @@ describe('review flow', () => {
     fireEvent.click(sends.getByRole('button', { name: 'Send a test of step 1' }))
     const refusal = await sends.findByRole('alert')
     expect(refusal).toHaveTextContent("Step 1's test was not sent.")
-    expect(refusal).toHaveTextContent('is not armed')
+    expect(refusal).toHaveTextContent('is Off; move Gmail to Manual')
 
     fireEvent.click(sends.getByRole('button', { name: 'Send a test of step 2' }))
     expect(await sends.findByText(/Sent to me@sender.example at/)).toBeVisible()

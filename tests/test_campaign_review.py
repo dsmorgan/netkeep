@@ -1138,7 +1138,9 @@ async def test_a_test_send_is_refused_on_a_disarmed_mailbox(
         f"{s.base}/review/test-send", json={"step_id": s.step_ids[0]}, headers=CSRF
     )
     assert response.status_code == 409
-    assert "is not armed;" in response.json()["detail"]  # the first check
+    detail = response.json()["detail"]  # the first check
+    assert "is Off; move Gmail to Manual (`netkeep automation gmail manual`)" in detail
+    assert "gmail arm" not in detail.replace("automation gmail manual", "")
     assert (s.opened, s.gmail.calls) == ([], [])
     with session_scope(s.factory) as session:
         assert session.scalar(unscoped(select(func.count()).select_from(TestSend))) == 0
