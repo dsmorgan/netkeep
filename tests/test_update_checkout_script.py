@@ -389,6 +389,7 @@ def test_a_failure_after_the_pull_says_where_things_stand(
     assert "the database is\n    as it was before the update" in out
     assert "run make update again" in out
     assert f"git reset --keep {old}" in out
+    assert "login-item on drops a --host or --port" in out
 
 
 def test_a_failed_start_says_how_to_go_back(repo: Repo) -> None:
@@ -411,6 +412,7 @@ def test_a_failed_start_says_how_to_go_back(repo: Repo) -> None:
     lines = [line.strip() for line in out.splitlines()]
     start = lines.index(go_back[0])
     assert lines[start : start + len(go_back)] == go_back
+    assert "login-item off, then on, drops a --host or --port" in lines[start + len(go_back)]
 
 
 def test_a_rerun_after_a_failure_finishes_the_update(repo: Repo) -> None:
