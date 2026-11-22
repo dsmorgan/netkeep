@@ -175,7 +175,6 @@ describe('section anchors (#739)', () => {
           session_flagged_at: null,
           heat_tripped: true,
           armed: true,
-          schedule_paused: false,
           running_run_id: null,
           can_start_runs: true,
         }),

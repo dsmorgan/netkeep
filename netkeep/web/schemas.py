@@ -2175,29 +2175,15 @@ class ScheduleOut(BaseModel):
     ``armed`` is false on every install until a person arms it; while false the
     scheduler still keeps due times, and no scheduled LinkedIn job fires.
     ``scheduler_running`` is whether this process runs a scheduler at all.
-    ``paused`` is whether a person paused the schedule (#324): armed or not, no
-    new scheduled run starts until it is unpaused, and nothing missed is replayed.
-    ``paused_at`` is null when not paused, and for a pause whose stored value
-    could not be read (still ``paused``: it fails closed).
     """
 
     armed: bool
     armed_at: datetime | None
-    paused: bool
-    paused_at: datetime | None
     scheduler_running: bool
     jobs: list[ScheduledJobOut]
     auto_send: AutoSendOutlookOut | None
     """The auto-send job's outlook, whether auto-send is on or not. Null when it could not
     be read: a display, it never stops the schedule's controls."""
-
-
-class ScheduleArmIn(BaseModel):
-    """Arming needs ``confirm: true``: it lets netkeep visit LinkedIn on its own."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    confirm: bool
 
 
 class LinkedInStatusOut(BaseModel):
@@ -2207,7 +2193,6 @@ class LinkedInStatusOut(BaseModel):
     session_flagged_at: datetime | None
     heat_tripped: bool
     armed: bool
-    schedule_paused: bool
     running_run_id: int | None
     can_start_runs: bool
 

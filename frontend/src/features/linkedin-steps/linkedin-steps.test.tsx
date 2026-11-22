@@ -579,7 +579,7 @@ describe('waiting for you', () => {
     })
     const row = await screen.findByRole('listitem', { name: 'Tobias Marrowbone, prefilled' })
     expect(row).toHaveTextContent(
-      "Auto-send typed it but didn't click Send: The LinkedIn schedule is paused, so netkeep sent nothing.",
+      "Auto-send typed it but didn't click Send: The LinkedIn schedule was paused, so netkeep sent nothing.",
     )
   })
 

@@ -377,9 +377,8 @@ about once per process, not on every read. Each value is kept as a short hash of
 def auto_send_hold(session: Session, user: User, account_id: int) -> AutoSendHold | None:
     """The account's auto-send hold, or ``None``. Read-only.
 
-    Any stored hold holds, read or not (fail closed, as
-    :func:`~netkeep.services.linkedin_accounts.schedule_pause_state` does): only
-    :func:`resume_auto_send` lifts one. A value this cannot read (not an object, a
+    Any stored hold holds, read or not (fail closed): only :func:`resume_auto_send` lifts
+    one. A value this cannot read (not an object, a
     reason that isn't text, a ``since`` missing or not a time) is logged and read as a
     bubble left open, since when the value was written."""
     row = session.scalars(

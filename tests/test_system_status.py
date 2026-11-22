@@ -178,7 +178,6 @@ def test_a_check_that_waits_on_its_own_reads_working_and_one_serve_doesnt_run_of
         "due": "ok",
         "idle": "ok",
         "outside_hours": "ok",
-        "paused": "warn",
         "blocked": "warn",
         "off": "off",
         "not_running": "ok",  # #829: the netkeep chip says it; the position leads
@@ -304,10 +303,12 @@ def test_gmail_spins_while_a_campaign_send_batch_runs() -> None:
 
 
 def test_gmail_says_why_the_reply_check_has_no_next_time() -> None:
-    paused = check(state=State.PAUSED, next_at=None, reason="Sending hours are over")
-    chip = gmail(poll=poll(paused))
-    assert face(chip)["text"] == "Gmail · Paused · checked {replies_last}"
-    assert chip.parts[-1].detail == "Checked {replies_last} · paused. Sending hours are over"
+    blocked = check(state=State.BLOCKED, next_at=None, reason="The mailbox needs you")
+    chip = gmail(poll=poll(blocked))
+    assert face(chip)["text"] == "Gmail · Needs attention · checked {replies_last}"
+    assert chip.parts[-1].detail == (
+        "Checked {replies_last} · needs attention. The mailbox needs you"
+    )
     assert "replies_next" not in chip.times
     never = gmail(poll=poll(check(last_at=None)))
     assert face(never)["text"] == "Gmail · Automatic · not checked yet"
@@ -681,28 +682,21 @@ def test_a_client_rolls_netkeep_up_again_with_its_own_parts() -> None:
 # --- what the menu bar needs besides ----------------------------------------------------
 
 
-def test_the_paused_run_and_sending_fields() -> None:
+def test_the_run_and_sending_fields() -> None:
     quiet = service.system_status(reads())
-    assert (quiet.linkedin_paused, quiet.linkedin_run, quiet.campaign_sending) == (
-        False,
-        None,
-        False,
-    )
+    assert (quiet.linkedin_run, quiet.campaign_sending) == (None, False)
     auto = run(kind=SyncRunKind.MESSAGE_SEND, trigger=SyncRunTrigger.SCHEDULED)
     busy = service.system_status(
         reads(
             linkedin=LinkedInRead(None, auto),
-            schedule=ScheduleRead(position=Position.MANUAL, scheduler_running=True, paused=True),
+            schedule=ScheduleRead(position=Position.MANUAL, scheduler_running=True),
             campaign_busy=True,
         )
     )
-    assert busy.linkedin_paused is True
     assert busy.linkedin_run == service.RunInProgress(
         id=9, kind=SyncRunKind.MESSAGE_SEND, label="LinkedIn auto-send", started_at=auto.started_at
     )
     assert busy.campaign_sending is True
-    # A schedule that couldn't be read is not "paused": the menu offers Pause.
-    assert service.system_status(reads(schedule=FAILED)).linkedin_paused is False
 
 
 def test_a_send_batch_shows_for_fifteen_seconds_after_the_tick_that_sent() -> None:

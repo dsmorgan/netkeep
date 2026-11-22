@@ -23,6 +23,7 @@ from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import Any, cast
 
+import factories
 import pytest
 from campaign_fakes import NOW
 from inbox_fakes import record_poll
@@ -100,7 +101,6 @@ from netkeep.services.linkedin_accounts import (
     arm_scheduled_runs,
     disarm_scheduled_runs,
     ensure_account,
-    pause_schedule,
 )
 from netkeep.services.linkedin_session import flag_session
 from netkeep.services.linkedin_steps import (
@@ -1421,13 +1421,12 @@ def _last_key_does(a: Auto, act: Callable[[Session, User], Any]) -> None:
     ("act", "why"),
     [
         (lambda s, u: disarm_scheduled_runs(s, u), "scheduled runs are disarmed"),
-        (lambda s, u: pause_schedule(s, u, now=NOW), "the schedule is paused"),
         # #598: the Settings page's switch, read again right before the click. The run
         # started with auto-send on; a gate that kept those settings would click Send.
         (_page_auto_send(False), "auto-send is off"),
     ],
 )
-async def test_disarming_pausing_or_turning_auto_send_off_after_the_last_key_stops_the_click(
+async def test_disarming_or_turning_auto_send_off_after_the_last_key_stops_the_click(
     lane: Lane, act: Callable[[Session, User], Any], why: str
 ) -> None:
     a = Auto(lane)
@@ -1576,24 +1575,26 @@ def test_a_hot_account_claims_nothing(lane: Lane) -> None:
     assert lane.runs() == []
 
 
-@pytest.mark.parametrize("state", ["disarmed", "paused"])
-async def test_the_handler_checks_arming_and_the_pause_itself(lane: Lane, state: str) -> None:
+async def test_a_legacy_pause_key_after_the_last_key_stops_nothing(lane: Lane) -> None:
+    """#834: the gates before the click no longer read the pause, so a key left in the
+    database is not a stop: the click happens as it would without one."""
+    a = Auto(lane)
+    _last_key_does(a, lambda s, u: factories.write_legacy_pause(s, u, ensure_account(s, u).id))
+    await a.execute()
+    message = a.message()
+    assert message is not None and message.send_clicked_at is not None
+    assert a.site.sent == [message.body_rendered]
+
+
+async def test_the_handler_checks_arming_itself(lane: Lane) -> None:
     lane.enroll(contact=dict(CONTACT))
-    if state == "disarmed":
-        lane.write(lambda s, u: disarm_scheduled_runs(s, u))
-    else:
-        lane.write(lambda s, u: pause_schedule(s, u, now=NOW))
+    lane.write(lambda s, u: disarm_scheduled_runs(s, u))
     account = lane.read(lambda s, u: ensure_account(s, u).id)
     ctx = scheduler.JobContext(lane.user_id, account, scheduler.JobKind.AUTO_SEND, NOW, False)
     handler = scheduled_runs._auto_send_handler(
         lane.factory, cast(Any, None), cast(Any, _NoTasks()), AUTO, clock=lambda: NOW
     )
-    expected = (
-        scheduler.JobOutcome.DISARMED_AFTER_GATE
-        if state == "disarmed"
-        else scheduler.JobOutcome.PAUSED_AFTER_GATE
-    )
-    assert await handler(ctx) is expected
+    assert await handler(ctx) is scheduler.JobOutcome.DISARMED_AFTER_GATE
     assert lane.runs() == []
 
 
@@ -2347,8 +2348,8 @@ def test_the_close_constants_are_pinned() -> None:
     ids=["text", "list", "null", "no-since", "bad-since", "reason-not-text"],
 )
 def test_an_unreadable_hold_still_holds(lane: Lane, stored: Any) -> None:
-    """#708: a stored hold this cannot read holds (fail closed, as the schedule pause
-    does), and never raises: only a resume lifts it."""
+    """#708: a stored hold this cannot read holds (fail closed), and never raises: only a
+    resume lifts it."""
     account = lane.read(lambda s, u: ensure_account(s, u).id)
     lane.write(lambda s, u: set_setting(s, u, linkedin_steps._hold_key(account), stored))
     hold = lane.read(lambda s, u: linkedin_steps.auto_send_hold(s, u, account))
@@ -3120,8 +3121,8 @@ def test_the_opened_in_front_note_is_not_part_of_the_not_sent_reason() -> None:
     from netkeep.services import runs
     from netkeep.web.api.linkedin_steps import _not_sent_reason
 
-    notes = f"not sent: the schedule is paused {runs.OPENED_IN_FRONT_NOTE}"
-    assert _not_sent_reason(notes) == "the schedule is paused"
+    notes = f"not sent: scheduled runs are disarmed {runs.OPENED_IN_FRONT_NOTE}"
+    assert _not_sent_reason(notes) == "scheduled runs are disarmed"
 
 
 # --- #343: the Settings page's values reach auto-send ---------------------------------
@@ -3200,20 +3201,19 @@ def _prefill_steps(session: Session, user: User) -> None:
     ("precondition", "outcome"),
     [
         (lambda s, u: disarm_scheduled_runs(s, u), scheduler.JobOutcome.DISARMED_AFTER_GATE),
-        (lambda s, u: pause_schedule(s, u, now=NOW), scheduler.JobOutcome.PAUSED_AFTER_GATE),
         (_prefill_steps, scheduler.JobOutcome.NOTHING_TO_SEND),
         (_spend_auto_budget, scheduler.JobOutcome.NOTHING_TO_SEND),
         (_heat_up, scheduler.JobOutcome.NOTHING_TO_SEND),
         (_hold, scheduler.JobOutcome.NOTHING_TO_SEND),
     ],
-    ids=["disarmed", "paused", "prefill-step", "budget-spent", "hot", "held"],
+    ids=["disarmed", "prefill-step", "budget-spent", "hot", "held"],
 )
 async def test_with_the_page_switch_on_every_precondition_still_holds(
     lane: Lane,
     precondition: Callable[[Session, User], Any],
     outcome: scheduler.JobOutcome,
 ) -> None:
-    """The switch turns on the flag and nothing else: arming, the pause, the step's mode,
+    """The switch turns on the flag and nothing else: arming, the step's mode,
     the li_messages_auto budget, heat and the hold each still stop the fire."""
     lane.enroll(contact=dict(CONTACT))
     lane.write(lambda s, u: record_poll(s, u, NOW - timedelta(minutes=1)))

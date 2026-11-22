@@ -5,11 +5,10 @@ position and moves it, and adds nothing that decides a run or a send.
 
 **LinkedIn** (:class:`~netkeep.models.LinkedInAccount`):
 
-- Automatic: armed (``scheduled_runs_armed_at``), and not paused. ``scheduled_depth``
+- Automatic: armed (``scheduled_runs_armed_at``). ``scheduled_depth``
   says how much the schedule runs: ``quick`` (the incremental sync and the inbox poll)
   or ``full`` (also the full sync and enrichment; the scheduler's gate reads it).
-- Manual: disarmed. Runs start only when a person starts them. A legacy pause (#324)
-  reads as Manual too: it fires nothing on a schedule.
+- Manual: disarmed. Runs start only when a person starts them.
 - Off: disarmed, with ``automation_off_at`` set. Moving to Off also cancels a run
   already going, as a person's Cancel does; moving to Manual lets it finish.
 
@@ -42,8 +41,6 @@ from netkeep.services.linkedin_accounts import (
     disarm_scheduled_runs,
     ensure_account,
     find_account,
-    schedule_paused,
-    unpause_schedule,
 )
 from netkeep.services.settings_kv import get_setting, set_setting
 
@@ -103,9 +100,7 @@ def linkedin_state(session: Session, user: User) -> LinkedInAutomation:
         return LinkedInAutomation(Position.MANUAL, ScheduleDepth.FULL, None)
     if account.automation_off_at is not None:
         position = Position.OFF
-    elif account.scheduled_runs_armed_at is not None and not schedule_paused(
-        session, user, account.id
-    ):
+    elif account.scheduled_runs_armed_at is not None:
         position = Position.AUTOMATIC
     else:
         position = Position.MANUAL
@@ -140,10 +135,6 @@ def set_linkedin(
     changed = False
     if account.scheduled_depth is not new_depth:
         account.scheduled_depth = new_depth
-        changed = True
-    if schedule_paused(session, user, account.id):
-        # Pause is gone (#829): the switch's position says everything it did.
-        unpause_schedule(session, user)
         changed = True
     if position is Position.AUTOMATIC:
         changed = changed or account.scheduled_runs_armed_at is None

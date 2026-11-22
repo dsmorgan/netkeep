@@ -16,7 +16,6 @@ export type ActivityState = Attention['activity']['state']
 export const ACTIVITY_TEXT: Record<ActivityState, string> = {
   running: 'LinkedIn: running',
   stopped: 'LinkedIn: blocked',
-  paused: 'LinkedIn: paused',
   armed: 'LinkedIn: Automatic',
   idle: 'LinkedIn: not on Automatic',
 }

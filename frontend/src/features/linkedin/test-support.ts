@@ -25,7 +25,6 @@ export const STATUS_CLEAR: LinkedInStatus = {
   session_flagged_at: null,
   heat_tripped: false,
   armed: false,
-  schedule_paused: false,
   running_run_id: null,
   can_start_runs: true,
 }
@@ -114,8 +113,6 @@ export function autoSendOutlook(overrides: Partial<Outlook> = {}): Outlook {
 export const SCHEDULE_DISARMED: Schedule = {
   armed: false,
   armed_at: null,
-  paused: false,
-  paused_at: null,
   scheduler_running: true,
   jobs: [
     {

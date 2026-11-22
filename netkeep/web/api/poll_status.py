@@ -6,7 +6,7 @@ What the app header's status and the campaign page's "replies checked" line read
 See :mod:`netkeep.services.poll_status` for where each time comes from.
 
 Read-only and per-user. It never starts a check: no Gmail call, no browser, no
-write. A check that cannot run (``netkeep serve`` not running, disarmed, paused,
+write. A check that cannot run (``netkeep serve`` not running, disarmed,
 outside active hours, the session flagged, Gmail not connected, not built yet)
 answers its state and a reason instead of a time.
 

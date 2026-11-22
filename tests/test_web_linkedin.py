@@ -136,7 +136,6 @@ async def test_budget_heat_and_status_read_what_posture_reads(
         "session_flagged_at": None,
         "heat_tripped": False,
         "armed": False,
-        "schedule_paused": False,
         "running_run_id": None,
         "can_start_runs": False,  # this app was not started by `netkeep serve`
     }
@@ -306,9 +305,9 @@ async def test_a_rebinding_request_is_refused_before_it_reaches_a_route(
         transport=httpx.ASGITransport(app=running_app), base_url="http://evil.example:8000"
     )
     async with evil:
-        arm = await evil.post(
-            "/api/v1/linkedin/schedule/arm",
-            json={"confirm": True},
+        arm = await evil.put(
+            "/api/v1/automation/linkedin",
+            json={"position": "automatic", "confirm": True},
             headers={**HEADERS, "Origin": "http://evil.example:8000"},
         )
         read = await evil.get("/api/v1/linkedin/runs")

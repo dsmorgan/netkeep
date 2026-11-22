@@ -42,7 +42,6 @@ export function everyText(minutes: number): string {
 export const STATE_TEXT: Record<Exclude<CheckState, 'scheduled'>, string> = {
   due: 'due soon',
   idle: 'nothing to check',
-  paused: 'paused',
   outside_hours: 'outside active hours',
   blocked: 'needs attention',
   off: 'off',
@@ -53,7 +52,7 @@ export const STATE_TEXT: Record<Exclude<CheckState, 'scheduled'>, string> = {
 
 /**
  * One check in a line: "checked 3 min ago · next in 7 min", "next 14:20",
- * "checked 2 h ago · paused". Only a `scheduled` check shows a next time.
+ * "checked 2 h ago · off". Only a `scheduled` check shows a next time.
  */
 export function checkSummary(check: PollCheck, now: number): string {
   const parts: string[] = []

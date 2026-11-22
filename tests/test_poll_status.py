@@ -43,7 +43,6 @@ from netkeep.services.campaign_sender import DRAFTS_POLL_EVERY, GmailSender
 from netkeep.services.linkedin_accounts import (
     arm_scheduled_runs,
     ensure_account,
-    pause_schedule,
 )
 from netkeep.services.linkedin_session import flag_session
 from netkeep.services.scheduler import (
@@ -646,16 +645,18 @@ def test_linkedin_quick_checks_leave_out_the_full_upkeep_kinds(world: World) -> 
     _no_times(checks)
 
 
-def test_linkedin_paused_says_so(world: World) -> None:
+def test_a_legacy_pause_key_leaves_linkedin_scheduled(world: World) -> None:
+    """#834: the pause is gone, so a key left in the database changes no check."""
     for session, user in world.write():
         _arm_linkedin(session, user, kinds=(JobKind.ENRICH,))
-        pause_schedule(session, user, now=NOW)
+    before = world.read()["linkedin_enrich"]
+    for session, user in world.write():
+        factories.write_legacy_pause(session, user, ensure_account(session, user).id)
 
     enrich = world.read()["linkedin_enrich"]
 
-    assert enrich.state is S.PAUSED
-    assert enrich.next_at is None
-    assert enrich.reason == "The LinkedIn schedule is paused"
+    assert enrich.state is S.SCHEDULED
+    assert enrich == before
 
 
 def test_linkedin_flagged_session_blocks(world: World) -> None:

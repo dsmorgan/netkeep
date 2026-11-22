@@ -5,12 +5,7 @@ fire to a handler; this module is the handler ``netkeep serve`` registers
 for each kind with a runner (``SERVED_SCHEDULES``: the two connections syncs
 and enrichment). A handler:
 
-1. records nothing while the account's schedule is paused (#324; the
-   scheduler's gate already skipped the fire, so this only closes the moment
-   between that gate and the handler, and answers
-   :attr:`~netkeep.services.scheduler.JobOutcome.PAUSED_AFTER_GATE` so the fire counts as
-   skipped, not run), and otherwise records a ``scheduled``
-   run through :func:`netkeep.services.runs.create_run`,
+1. records a ``scheduled`` run through :func:`netkeep.services.runs.create_run`,
    which refuses on a disarmed account -- the scheduler's arm gate already
    skipped the fire, so reaching this refusal means something bypassed that
    gate, and it is logged as an error, nothing runs, and the answer is ``DISARMED_AFTER_GATE``;
@@ -85,7 +80,6 @@ from netkeep.services import runs, ui_settings
 from netkeep.services.events import EventBus
 from netkeep.services.linkedin_accounts import (
     find_account,
-    schedule_paused,
     scheduled_runs_armed,
 )
 from netkeep.services.linkedin_steps import (
@@ -254,10 +248,6 @@ async def _submit_or_refuse(
         return None
 
 
-class _SchedulePaused(Exception):
-    """The schedule was paused between the scheduler's gate and the handler (#324)."""
-
-
 def _handler(
     factory: sessionmaker[Session],
     executor: runs.RunExecutor,
@@ -288,9 +278,6 @@ def _handler(
             if user is None:
                 log.error("scheduled %s: no user %d", run_kind.value, ctx.user_id)
                 return None
-            if schedule_paused(session, user, ctx.account_id):
-                # Paused between the scheduler's gate and here (#324): nothing new starts.
-                raise _SchedulePaused
             return runs.create_run(
                 session, user, run_kind, trigger=SyncRunTrigger.SCHEDULED, now=clock()
             ).id
@@ -323,9 +310,6 @@ def _handler(
             run_id = await off_loop(record, ctx)
             if run_id is None:
                 return None
-        except _SchedulePaused:
-            log.info("scheduled %s not started: the schedule is paused", run_kind.value)
-            return JobOutcome.PAUSED_AFTER_GATE
         except runs.QuickChecksOnly:
             # #829: moved to quick checks between the scheduler's gate and here.
             log.info(
@@ -427,7 +411,6 @@ AUTO_SEND_OFF_WORDS: Final = "auto-send is off"
 class FireStop(enum.Enum):
     """Why the auto-send handler stops before its claim (:func:`auto_send_fire_check`)."""
 
-    PAUSED = "paused"
     DISARMED = "disarmed"
     HELD = "held"
     SPACING = "spacing"
@@ -444,12 +427,10 @@ class FireCheck:
 def auto_send_fire_check(
     session: Session, user: User, account_id: int, *, clock: Callable[[], datetime]
 ) -> FireCheck:
-    """The auto-send handler's own checks before its claim, in its order: the pause, the
-    arming, the hold, then the spacing after the last ``message_send`` run. ``clock`` is
+    """The auto-send handler's own checks before its claim, in its order: the arming,
+    the hold, then the spacing after the last ``message_send`` run. ``clock`` is
     read once, only when the spacing is checked; the handler claims at that time.
     Read-only: the handler and the auto-send outlook both run it."""
-    if schedule_paused(session, user, account_id):
-        return FireCheck(FireStop.PAUSED)
     if not scheduled_runs_armed(session, user, account_id):
         return FireCheck(FireStop.DISARMED)
     if auto_send_hold(session, user, account_id) is not None:
@@ -488,8 +469,6 @@ def _auto_send_handler(
             if user is None:
                 return "no such user"
             check = auto_send_fire_check(session, user, ctx.account_id, clock=clock)
-            if check.stop is FireStop.PAUSED:
-                raise _SchedulePaused
             if check.stop is FireStop.DISARMED:
                 raise runs.ScheduledRunsDisarmed("scheduled runs are disarmed")
             if check.stop is FireStop.HELD:
@@ -523,10 +502,6 @@ def _auto_send_handler(
             return JobOutcome.RETRY_LATER
         try:
             claimed = await off_loop(claim, ctx)
-        except _SchedulePaused:
-            log.info("scheduled auto-send not started: the schedule is paused")
-            await note(ctx, reason=JobOutcome.PAUSED_AFTER_GATE.value)
-            return JobOutcome.PAUSED_AFTER_GATE
         except runs.ScheduledRunsDisarmed:
             log.error("scheduled auto-send reached a disarmed account past the arm gate")
             await note(ctx, reason=JobOutcome.DISARMED_AFTER_GATE.value)

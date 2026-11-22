@@ -129,10 +129,9 @@ type Upcoming =
  * runs, from the scheduler's persisted due times (`GET /linkedin/schedule`), with the
  * auto-send check among them while auto-send is on.
  *
- * Unarmed, no LinkedIn run fires however soon a due time is, so the card says that
- * instead of listing times that will not happen. Paused (#324), it says that instead,
- * with the control to unpause; armed and running, it offers the pause. Each source has
- * its own failure line, so a broken schedule never hides the sends.
+ * Unarmed, no LinkedIn run fires however soon a due time is, so the card lists none of
+ * the times that will not happen. Each source has its own failure line, so a broken
+ * schedule never hides the sends.
  */
 export function ComingUpCard() {
   const fires = useQuery(nextFiresQuery)
@@ -153,8 +152,8 @@ export function ComingUpCard() {
   }
 
   const plan = schedule.data
-  // Jobs fire only while the schedule is armed and not paused.
-  const firing = plan !== undefined && plan.armed && !plan.paused
+  // Jobs fire only while the schedule is armed.
+  const firing = plan !== undefined && plan.armed
   // At quick checks the kinds the schedule marks skipped (the full sync, enrichment)
   // don't fire when due (#829, #834).
   const quick = automation.data?.linkedin.depth === 'quick'

@@ -39,8 +39,6 @@ from netkeep.services.linkedin_accounts import (
     ensure_account,
     full_upkeep,
     linkedin_off,
-    pause_schedule,
-    schedule_paused,
     scheduled_runs_armed,
 )
 from netkeep.services.scheduler import JobKind
@@ -89,13 +87,14 @@ def test_linkedin_without_an_account_is_manual_at_full_depth(writer: Session, us
     )
 
 
-def test_linkedin_armed_is_automatic_and_armed_and_paused_is_manual(
-    writer: Session, user: User
-) -> None:
+def test_a_legacy_pause_key_moves_no_position(writer: Session, user: User) -> None:
+    """#834: nothing reads the pause key any more. Written by hand, as a database could
+    hold one, it leaves Automatic Automatic and Manual Manual."""
+    account = ensure_account(writer, user)
+    factories.write_legacy_pause(writer, user, account.id)
+    assert automation.linkedin_state(writer, user).position is Position.MANUAL
     arm_scheduled_runs(writer, user, now=NOW)
     assert automation.linkedin_state(writer, user).position is Position.AUTOMATIC
-    pause_schedule(writer, user, now=NOW)
-    assert automation.linkedin_state(writer, user).position is Position.MANUAL
 
 
 # --- LinkedIn: moving the switch ---------------------------------------------------------
@@ -184,18 +183,6 @@ def test_arming_the_old_way_takes_linkedin_out_of_off(writer: Session, user: Use
     arm_scheduled_runs(writer, user, now=NOW)
     assert automation.linkedin_state(writer, user).position is Position.AUTOMATIC
     assert not linkedin_off(writer, user)
-
-
-def test_any_move_clears_a_legacy_pause(writer: Session, user: User) -> None:
-    arm_scheduled_runs(writer, user, now=NOW)
-    pause_schedule(writer, user, now=NOW)
-    account = _account(writer, user)
-    with pytest.raises(automation.ConfirmRequired):  # Manual to Automatic does more
-        automation.set_linkedin(writer, user, Position.AUTOMATIC, confirm=False, now=NOW)
-    assert schedule_paused(writer, user, account.id)
-    automation.set_linkedin(writer, user, Position.MANUAL, confirm=False, now=NOW)
-    assert not schedule_paused(writer, user, account.id)
-    assert account.scheduled_runs_armed_at is None
 
 
 def test_the_switch_never_turns_on_linkedin_auto_send(writer: Session, user: User) -> None:
@@ -500,19 +487,6 @@ async def test_put_needs_the_csrf_header(running_app: FastAPI, client: httpx.Asy
         assert automation.linkedin_state(session, user).position is Position.MANUAL
 
 
-async def test_the_old_arm_endpoint_takes_linkedin_out_of_off(
-    running_app: FastAPI, client: httpx.AsyncClient
-) -> None:
-    off = await client.put("/api/v1/automation/linkedin", json={"position": "off"}, headers=CSRF)
-    assert off.json()["linkedin"]["position"] == "off"
-    armed = await client.post("/api/v1/linkedin/schedule/arm", json={"confirm": True}, headers=CSRF)
-    assert armed.status_code == 200 and armed.json()["armed"] is True
-    switch = (await client.get("/api/v1/automation")).json()["linkedin"]
-    assert switch["position"] == "automatic"
-    for session, user in _local(running_app):
-        assert not linkedin_off(session, user)
-
-
 async def test_put_gmail_automatic_is_409_with_the_reason_until_ready(
     running_app: FastAPI, client: httpx.AsyncClient
 ) -> None:
@@ -545,23 +519,23 @@ async def test_put_gmail_automatic_is_409_with_the_reason_until_ready(
     assert off.status_code == 200 and off.json()["gmail"]["position"] == "off"
 
 
-@pytest.mark.parametrize("path", ["disarm", "pause"])
-@pytest.mark.parametrize(
-    ("start", "end"), [("automatic", "manual"), ("manual", "manual"), ("off", "off")]
-)
-async def test_the_old_stop_endpoints_never_do_more(
-    running_app: FastAPI, client: httpx.AsyncClient, path: str, start: str, end: str
+@pytest.mark.parametrize("path", ["arm", "disarm", "pause", "unpause"])
+@pytest.mark.parametrize("start", ["automatic", "manual", "off"])
+async def test_the_old_schedule_endpoints_are_gone(
+    running_app: FastAPI, client: httpx.AsyncClient, path: str, start: str
 ) -> None:
-    """#829 review: a stop is the left of the current position and Manual."""
+    """#834: ``POST /linkedin/schedule/{arm,disarm,pause,unpause}`` are gone; the switch is
+    ``PUT /automation/linkedin``. A call answers 404 or 405 and moves nothing."""
     moved = await client.put(
         "/api/v1/automation/linkedin", json={"position": start, "confirm": True}, headers=CSRF
     )
     assert moved.status_code == 200, moved.text
-    stopped = await client.post(f"/api/v1/linkedin/schedule/{path}", headers=CSRF)
-    assert stopped.status_code == 200, stopped.text
-    assert stopped.json()["armed"] is False
+    gone = await client.post(
+        f"/api/v1/linkedin/schedule/{path}", json={"confirm": True}, headers=CSRF
+    )
+    assert gone.status_code in (404, 405), gone.text
     switch = (await client.get("/api/v1/automation")).json()["linkedin"]
-    assert switch["position"] == end
+    assert switch["position"] == start
 
 
 def test_stop_linkedin_from_off_changes_nothing(writer: Session, user: User) -> None:
@@ -569,56 +543,3 @@ def test_stop_linkedin_from_off_changes_nothing(writer: Session, user: User) -> 
     later = NOW + timedelta(hours=1)
     state = automation.stop_linkedin(writer, user, now=later)
     assert (state.position, state.changed_at) == (Position.OFF, NOW)
-
-
-@pytest.mark.parametrize("start", ["armed", "off"])
-async def test_unpausing_a_legacy_pause_never_does_more_and_dates_the_switch(
-    running_app: FastAPI, client: httpx.AsyncClient, start: str
-) -> None:
-    """A pause left from before 0049 reads as Manual. Unpausing deletes it and stays
-    Manual (disarmed, not Automatic again); from Off it stays Off. Either way it's dated."""
-    for session, user in _local(running_app):
-        if start == "off":
-            automation.set_linkedin(session, user, Position.OFF, confirm=False, now=NOW)
-        else:
-            arm_scheduled_runs(session, user, now=NOW)
-        pause_schedule(session, user, now=NOW)
-        _account(session, user).automation_changed_at = None
-    response = await client.post("/api/v1/linkedin/schedule/unpause", headers=CSRF)
-    assert response.status_code == 200, response.text
-    assert response.json()["armed"] is False
-    for session, user in _local(running_app):
-        account = _account(session, user)
-        assert not schedule_paused(session, user, account.id)
-        assert account.scheduled_runs_armed_at is None
-        assert account.automation_changed_at is not None
-        expected = Position.OFF if start == "off" else Position.MANUAL
-        assert automation.linkedin_state(session, user).position is expected
-
-
-async def test_the_old_arm_endpoint_keeps_the_depth(
-    running_app: FastAPI, client: httpx.AsyncClient
-) -> None:
-    quick = await client.put(
-        "/api/v1/automation/linkedin", json={"position": "manual", "depth": "quick"}, headers=CSRF
-    )
-    assert quick.status_code == 200, quick.text
-    armed = await client.post("/api/v1/linkedin/schedule/arm", json={"confirm": True}, headers=CSRF)
-    assert armed.status_code == 200, armed.text
-    switch = (await client.get("/api/v1/automation")).json()["linkedin"]
-    assert (switch["position"], switch["depth"]) == ("automatic", "quick")
-
-
-async def test_unpause_without_a_pause_leaves_automatic_alone(
-    running_app: FastAPI, client: httpx.AsyncClient
-) -> None:
-    moved = await client.put(
-        "/api/v1/automation/linkedin",
-        json={"position": "automatic", "confirm": True},
-        headers=CSRF,
-    )
-    assert moved.status_code == 200, moved.text
-    response = await client.post("/api/v1/linkedin/schedule/unpause", headers=CSRF)
-    assert response.status_code == 200 and response.json()["armed"] is True
-    switch = (await client.get("/api/v1/automation")).json()["linkedin"]
-    assert switch["position"] == "automatic"

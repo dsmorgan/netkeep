@@ -347,12 +347,11 @@ describe('the activity indicator (#347)', () => {
     expect(ACTIVITY_TEXT).toEqual({
       running: 'LinkedIn: running',
       stopped: 'LinkedIn: blocked',
-      paused: 'LinkedIn: paused',
       armed: 'LinkedIn: Automatic',
       idle: 'LinkedIn: not on Automatic',
     })
-    expect(announcement(activity('paused', 'The LinkedIn schedule is paused.').activity)).toBe(
-      'LinkedIn: paused. The LinkedIn schedule is paused.',
+    expect(announcement(activity('stopped', 'LinkedIn heat is high.').activity)).toBe(
+      'LinkedIn: blocked. LinkedIn heat is high.',
     )
   })
 
@@ -468,7 +467,6 @@ describe('the activity indicator (#347)', () => {
   it.each([
     ['running', 'A LinkedIn enrichment run is running.'],
     ['stopped', 'The LinkedIn session is flagged; clear it on the LinkedIn page.'],
-    ['paused', 'The LinkedIn schedule is paused.'],
     ['armed', 'Scheduled LinkedIn runs are armed.'],
     ['idle', 'Scheduled LinkedIn runs are off.'],
   ] as const)(
@@ -545,7 +543,7 @@ describe('the activity indicator (#347)', () => {
   })
 
   it('has one live region on the LinkedIn page, beside the top bar’s chip', async () => {
-    serve(() => activity('paused', 'The LinkedIn schedule is paused.'))
+    serve(() => activity('armed', 'LinkedIn runs on its own, within active hours.'))
     await renderApp('/linkedin')
 
     await screen.findByTestId('automation-bar')
@@ -601,7 +599,7 @@ describe('the running favicon', () => {
 
 describe('campaign send batches (#547)', () => {
   it('keeps the batch off the LinkedIn state', async () => {
-    serve(() => activity('paused', 'The LinkedIn schedule is paused.'))
+    serve(() => activity('armed', 'LinkedIn runs on its own, within active hours.'))
     const { queryClient } = await renderApp('/linkedin')
     const live = await screen.findByTestId('activity-live')
     await waitFor(() => expect(queryClient.getQueryData(attentionQuery.queryKey)).toBeDefined())
@@ -612,7 +610,7 @@ describe('campaign send batches (#547)', () => {
     // and what the live region says about it, stay put.
     await act(() => Promise.resolve())
     expect(queryClient.getQueryData<Attention>(attentionQuery.queryKey)?.activity.state).toBe(
-      'paused',
+      'armed',
     )
     expect(live).toHaveTextContent('')
   })

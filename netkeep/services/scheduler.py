@@ -115,16 +115,6 @@ handler that could not reach the browser answers
 :attr:`JobOutcome.RETRY_LATER`, and :func:`park_retry` parks one retry 20 to 50
 minutes out (spec 9.9).
 
-**Paused (#324).** A person can pause an armed schedule without disarming it
-(``netkeep linkedin schedule pause``, ``POST /linkedin/schedule/pause``): a due
-fire is then skipped as ``"paused"``, the same way as ``"disarmed"``, and a run
-already going is not stopped. Because a skipped fire still advances the cadence,
-unpausing owes nothing: no missed fire is replayed, and each kind next fires at
-its own stored due time, at most one interval away (a first-setup kind within
-:data:`FIRST_SETUP_RETRY`). The pause is a ``settings_kv`` key, so it survives a
-restart; a restart while paused still goes through the cold path's one catch-up,
-which the gate then skips like any other fire.
-
 **Depth (#829).** Armed, the schedule runs at the account's depth
 (``linkedin_accounts.scheduled_depth``): at ``quick`` a due fire of a
 :data:`FULL_UPKEEP_KINDS` kind (the full sync, enrichment) is skipped as
@@ -173,7 +163,7 @@ from netkeep.models import JsonValue, SyncRunKind, User
 from netkeep.models.base import utcnow
 from netkeep.services import heat as heat_service
 from netkeep.services import route_breaker, runs
-from netkeep.services.linkedin_accounts import full_upkeep, schedule_paused, scheduled_runs_armed
+from netkeep.services.linkedin_accounts import full_upkeep, scheduled_runs_armed
 from netkeep.services.linkedin_session import session_flag
 from netkeep.services.settings_kv import get_setting, set_setting
 
@@ -219,14 +209,11 @@ class JobOutcome(enum.Enum):
     page's answers, so it could not age anyone): offer it again
     :data:`NOT_DONE_RETRY` later instead of a whole interval out."""
 
-    PAUSED_AFTER_GATE = "paused_after_gate"
-    """The handler started nothing: the schedule was paused after the gate let the
-    fire through (#324). The fire counts as skipped, not run, so a first-setup
-    kind keeps its standing and is offered again :data:`FIRST_SETUP_RETRY` later,
-    as a fire the gate skipped would be. Its value is the fire's skip reason."""
-
     DISARMED_AFTER_GATE = "disarmed_after_gate"
-    """The same, for an account found disarmed after the gate let the fire through."""
+    """The handler started nothing: the account was found disarmed after the gate let
+    the fire through. The fire counts as skipped, not run, so a first-setup kind keeps
+    its standing and is offered again :data:`FIRST_SETUP_RETRY` later, as a fire the
+    gate skipped would be. Its value is the fire's skip reason."""
 
     QUICK_CHECKS_AFTER_GATE = "quick_checks_after_gate"
     """The same, for a full-upkeep kind whose account moved to quick checks after the gate
@@ -260,7 +247,6 @@ class JobOutcome(enum.Enum):
 #: The outcomes that say the handler started nothing: the fire was skipped, not run.
 SKIPPED_AFTER_GATE: Final = frozenset(
     {
-        JobOutcome.PAUSED_AFTER_GATE,
         JobOutcome.DISARMED_AFTER_GATE,
         JobOutcome.QUICK_CHECKS_AFTER_GATE,
         JobOutcome.NOTHING_TO_WATCH,
@@ -689,7 +675,7 @@ _LAST_FIRE_PREFIX: Final = "scheduler.last_fire"
 class LastFire:
     """How a kind's last fire ended: when, the run it started, or why it started none.
 
-    ``reason`` is the gate's skip reason (``"heat"``, ``"paused"`` ...) or the handler's
+    ``reason`` is the gate's skip reason (``"heat"``, ``"disarmed"`` ...) or the handler's
     own fixed words. Kept next to the due times in ``settings_kv``, so ``netkeep linkedin
     schedule status`` (another process) reads it too. Only the auto-send kind writes one."""
 
@@ -1234,10 +1220,6 @@ def gate_skip_reason(
         # Quick checks only (#829): skipped like a disarmed fire, so the cadence moves
         # on and a move to full upkeep owes no backlog of runs.
         return "quick_checks"
-    if schedule_paused(session, user, account_id):
-        # A person paused the schedule (#324): skipped like a disarmed fire,
-        # so the cadence moves on and unpausing owes no backlog of runs.
-        return "paused"
     if session_flag(session, user) is not None:
         # A checkpoint or a login wall: the run would refuse anyway (spec 9.7),
         # so no run is recorded and nothing is attached (#175 review, F3).
@@ -1318,9 +1300,7 @@ async def poll_and_fire(
     ``"answer_lost_breaker"``. An enrichment fire whose Contact info breaker is
     tripped (#424 -- three enrichment runs in a row ended ``answer_lost``) is
     skipped as ``"contact_info_breaker"``. Those checks are unconditional, with no
-    "disabled" escape hatch. While a person has paused the account's schedule
-    (#324, ``linkedin_accounts.schedule_paused``; no escape hatch either) the
-    fire is skipped as ``"paused"``, armed or not. Either way the cadence still
+    "disabled" escape hatch. Either way the cadence still
     advances, so the scheduler does not spin retrying the same fire on every
     heartbeat, and a skipped fire has not *run*: a ``run_on_first_setup`` kind
     keeps its first-setup standing and is offered again
@@ -1333,9 +1313,9 @@ async def poll_and_fire(
     :data:`RETRY_MAX_MINUTES` after ``clock()`` (spec 9.9), unless the next
     due time is already sooner. One that answers :attr:`JobOutcome.NOT_DONE` (#200)
     is offered again :data:`NOT_DONE_RETRY` after ``clock()``, the same way.
-    One that answers :attr:`JobOutcome.PAUSED_AFTER_GATE` or
-    :attr:`JobOutcome.DISARMED_AFTER_GATE` (#324: it found the schedule paused, or
-    the account disarmed, after this gate passed, and started nothing) has its fire
+    One that answers one of :data:`SKIPPED_AFTER_GATE` (such as
+    :attr:`JobOutcome.DISARMED_AFTER_GATE`: it found the account disarmed after this
+    gate passed, and started nothing) has its fire
     counted as skipped, not run: the result is not ``fired``, its
     ``skipped_reason`` is the outcome's value, and a first-setup kind that had never
     run keeps that standing and is offered again :data:`FIRST_SETUP_RETRY` after
@@ -1538,8 +1518,8 @@ async def poll_and_fire(
                 active_start=active_start,
                 active_end=active_end,
             )
-    elif skipped_reason in ("disarmed", "paused", "quick_checks") or quiet:
-        # Every poll of a disarmed or paused account, or of a full-upkeep kind at quick
+    elif skipped_reason in ("disarmed", "quick_checks") or quiet:
+        # Every poll of a disarmed account, or of a full-upkeep kind at quick
         # checks, lands here; it is the expected state.
         log.debug(
             "scheduler: %s for account %d not fired: %s", kind.value, account_id, skipped_reason

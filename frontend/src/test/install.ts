@@ -26,7 +26,6 @@ export function linkedinStatus(overrides: Record<string, unknown> = {}) {
     session_flagged_at: null,
     heat_tripped: false,
     armed: true,
-    schedule_paused: false,
     running_run_id: null,
     can_start_runs: true,
     ...overrides,
@@ -51,8 +50,6 @@ export function quiet(): Record<string, unknown> {
     '/api/v1/linkedin/schedule': {
       armed: true,
       armed_at: '2026-09-20T12:00:00Z',
-      paused: false,
-      paused_at: null,
       scheduler_running: true,
       jobs: [],
     },

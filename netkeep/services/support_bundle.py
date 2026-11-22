@@ -59,7 +59,6 @@ from netkeep.services import route_breaker, runs, scheduler, ui_settings
 from netkeep.services.linkedin_accounts import (
     account_id_for,
     find_account,
-    schedule_pause_state,
 )
 
 log = logging.getLogger(__name__)
@@ -97,7 +96,7 @@ _STANDARD_INCLUDES: Final = (
     " without attaching to it",
     "Settings, with where each value comes from (default, config.toml, Settings page)",
     "Posture, from the stored state (no browser check)",
-    "Breakers and the LinkedIn schedule: armed, paused, due times, last fires",
+    "Breakers and the LinkedIn schedule: armed, due times, last fires",
     "Recent runs: kind, status, timings, counts and stop reasons",
     "The database's migration revision",
 )
@@ -372,7 +371,6 @@ def _breakers(session: Session, user: User, account_id: int) -> list[dict[str, A
 
 def _jobs(session: Session, user: User, account_id: int) -> dict[str, Any]:
     account = find_account(session, user)
-    pause = schedule_pause_state(session, user, account_id)
     kinds: dict[str, Any] = {}
     for kind in scheduler.JobKind:
         last = scheduler.last_fire(session, user, account_id, kind)
@@ -384,8 +382,6 @@ def _jobs(session: Session, user: User, account_id: int) -> dict[str, Any]:
         }
     return {
         "armed_at": None if account is None else _when(account.scheduled_runs_armed_at),
-        "paused": pause.paused,
-        "paused_at": _when(pause.paused_at),
         "kinds": kinds,
     }
 
@@ -596,7 +592,7 @@ _DESCRIPTIONS: Final = {
     "settings.json": "every setting the bundle allows, its value and where it comes from",
     "posture.txt": "the protections report, from stored state (no browser check)",
     "breakers.json": "the streak breakers: counts, thresholds, tripped or not",
-    "jobs.json": "the LinkedIn schedule: armed, paused, each kind's due time and last fire",
+    "jobs.json": "the LinkedIn schedule: armed, each kind's due time and last fire",
     "runs.json": "recent runs: kind, status, timings, counts, stop reasons",
     "database.json": "the database backend and migration revision",
     "logs/netkeep.log": "the log file's records for the chosen days",

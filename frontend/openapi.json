@@ -88,7 +88,6 @@
         "enum": [
           "running",
           "stopped",
-          "paused",
           "armed",
           "idle"
         ],
@@ -2590,7 +2589,6 @@
           "scheduled",
           "due",
           "idle",
-          "paused",
           "outside_hours",
           "blocked",
           "off",
@@ -9496,10 +9494,6 @@
             ],
             "title": "Running Run Id"
           },
-          "schedule_paused": {
-            "title": "Schedule Paused",
-            "type": "boolean"
-          },
           "session_flag": {
             "anyOf": [
               {
@@ -9529,7 +9523,6 @@
           "session_flagged_at",
           "heat_tripped",
           "armed",
-          "schedule_paused",
           "running_run_id",
           "can_start_runs"
         ],
@@ -13923,21 +13916,6 @@
         "title": "SavedViewPatch",
         "type": "object"
       },
-      "ScheduleArmIn": {
-        "additionalProperties": false,
-        "description": "Arming needs ``confirm: true``: it lets netkeep visit LinkedIn on its own.",
-        "properties": {
-          "confirm": {
-            "title": "Confirm",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "confirm"
-        ],
-        "title": "ScheduleArmIn",
-        "type": "object"
-      },
       "ScheduleDepth": {
         "description": "How much an armed LinkedIn schedule runs (#829, \"How thorough\").",
         "enum": [
@@ -13948,7 +13926,7 @@
         "type": "string"
       },
       "ScheduleOut": {
-        "description": "Whether scheduled runs may fire, and when each kind is next due.\n\n``armed`` is false on every install until a person arms it; while false the\nscheduler still keeps due times, and no scheduled LinkedIn job fires.\n``scheduler_running`` is whether this process runs a scheduler at all.\n``paused`` is whether a person paused the schedule (#324): armed or not, no\nnew scheduled run starts until it is unpaused, and nothing missed is replayed.\n``paused_at`` is null when not paused, and for a pause whose stored value\ncould not be read (still ``paused``: it fails closed).",
+        "description": "Whether scheduled runs may fire, and when each kind is next due.\n\n``armed`` is false on every install until a person arms it; while false the\nscheduler still keeps due times, and no scheduled LinkedIn job fires.\n``scheduler_running`` is whether this process runs a scheduler at all.",
         "properties": {
           "armed": {
             "title": "Armed",
@@ -13983,22 +13961,6 @@
             "title": "Jobs",
             "type": "array"
           },
-          "paused": {
-            "title": "Paused",
-            "type": "boolean"
-          },
-          "paused_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Paused At"
-          },
           "scheduler_running": {
             "title": "Scheduler Running",
             "type": "boolean"
@@ -14007,8 +13969,6 @@
         "required": [
           "armed",
           "armed_at",
-          "paused",
-          "paused_at",
           "scheduler_running",
           "jobs",
           "auto_send"
@@ -15501,10 +15461,6 @@
           "linkedin": {
             "$ref": "#/components/schemas/StatusChipOut"
           },
-          "linkedin_paused": {
-            "title": "Linkedin Paused",
-            "type": "boolean"
-          },
           "linkedin_run": {
             "anyOf": [
               {
@@ -15535,7 +15491,6 @@
           "gmail",
           "linkedin",
           "netkeep",
-          "linkedin_paused",
           "linkedin_run",
           "campaign_sending",
           "update_available"
@@ -24663,85 +24618,6 @@
         ]
       }
     },
-    "/api/v1/linkedin/schedule/arm": {
-      "post": {
-        "description": "Let scheduled LinkedIn runs fire. Needs ``confirm: true``; a person's act only.",
-        "operationId": "arm_linkedin_schedule",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ScheduleArmIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ScheduleOut"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "confirm was not true"
-          }
-        },
-        "summary": "Arm Schedule",
-        "tags": [
-          "linkedin"
-        ]
-      }
-    },
-    "/api/v1/linkedin/schedule/disarm": {
-      "post": {
-        "description": "Deprecated (#829): ``PUT /automation/linkedin`` with ``manual``. Stops scheduled\nLinkedIn runs from firing; a run already going is not cancelled. From Off it stays\nOff: a stop never does more.",
-        "operationId": "disarm_linkedin_schedule",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ScheduleOut"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Disarm Schedule",
-        "tags": [
-          "linkedin"
-        ]
-      }
-    },
-    "/api/v1/linkedin/schedule/pause": {
-      "post": {
-        "description": "Deprecated (#829): pause is gone, and this moves LinkedIn to Manual, which does its\njob: no scheduled run starts, and it survives a restart. A run already going is not\nstopped (cancel does that). From Off it stays Off.",
-        "operationId": "pause_linkedin_schedule",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ScheduleOut"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Pause Linkedin Schedule",
-        "tags": [
-          "linkedin"
-        ]
-      }
-    },
     "/api/v1/linkedin/schedule/reset-breaker": {
       "post": {
         "description": "Reset the tripped LinkedIn breakers (#583): ``netkeep linkedin schedule\nreset-breaker``, so scheduled connections, enrichment, and inbox runs may fire again\nwhen due. Like the command, it clears all five breakers at once.\n\nNeeds ``confirm: true`` and the keys of the tripped breaker rows the person was shown\n(``tripped``). With none tripped, or a different set tripped now, it refuses with\n``409`` and writes nothing. A count below its threshold skips nothing, so it is not a\nreason to reset here; the command still clears one.",
@@ -24775,28 +24651,6 @@
           }
         },
         "summary": "Reset Linkedin Breaker",
-        "tags": [
-          "linkedin"
-        ]
-      }
-    },
-    "/api/v1/linkedin/schedule/unpause": {
-      "post": {
-        "description": "Deprecated (#829): deletes a pause left from before migration 0049, if any, and\nnever does more. A paused account reads as Manual, so it stays Manual (disarmed, not\nAutomatic again), and Off stays Off. Migration 0049 deleted every pause, nothing\nwrites one since, and no page calls this after #832; the switch is\n``PUT /automation/linkedin``.",
-        "operationId": "unpause_linkedin_schedule",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ScheduleOut"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Unpause Linkedin Schedule",
         "tags": [
           "linkedin"
         ]

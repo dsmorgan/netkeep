@@ -94,7 +94,6 @@ class Wait(enum.StrEnum):
     AUTO_SEND_OFF = "auto_send_off"
     NOT_SCHEDULED = "not_scheduled"
     DISARMED = "disarmed"
-    PAUSED = "paused"
     SESSION_FLAGGED = "session_flagged"
     HEAT = "heat"
     HELD = "held"
@@ -131,7 +130,6 @@ REFUSALS: Final[dict[str, Wait]] = {
 #: :data:`REFUSALS`.
 GATE: Final[dict[str, Wait]] = {
     "disarmed": Wait.DISARMED,
-    "paused": Wait.PAUSED,
     "session_flagged": Wait.SESSION_FLAGGED,
     "heat": Wait.HEAT,
 }
@@ -224,8 +222,6 @@ def outlook(session: Session, user: User, *, now: datetime, settings: Settings) 
 
     # 3. The handler's own checks.
     check = auto_send_fire_check(session, user, account_id, clock=lambda: at)
-    if check.stop is FireStop.PAUSED:
-        return waits(Wait.PAUSED)
     if check.stop is FireStop.DISARMED:
         return waits(Wait.DISARMED)
     if check.stop is FireStop.HELD:
@@ -367,7 +363,6 @@ WORDS: Final[dict[Wait, str]] = {
         "the auto-send check isn't scheduled yet; `netkeep serve` schedules it when it starts"
     ),
     Wait.DISARMED: "scheduled runs are disarmed, so the check sends nothing",
-    Wait.PAUSED: "the schedule is paused, so the check sends nothing",
     Wait.SESSION_FLAGGED: (
         "the LinkedIn session is flagged (a checkpoint or a login wall), so nothing runs"
         " until it's cleared"
@@ -393,15 +388,19 @@ WORDS: Final[dict[Wait, str]] = {
     Wait.INBOX_STALE: "the LinkedIn inbox hasn't been read recently",
 }
 
+#: A last fire stored before #829 removed the schedule pause can still say it met one.
+LEGACY_PAUSED_WORDS: Final = "the schedule was paused"
+
 #: The last fire's stored reasons that are codes, in plain words. The handler's own
 #: reasons are already words, and a claim's refusal codes read well enough spaced out.
 _LAST_REASONS: Final[dict[str, str]] = {
     "disarmed": WORDS[Wait.DISARMED],
-    "paused": WORDS[Wait.PAUSED],
     "session_flagged": WORDS[Wait.SESSION_FLAGGED],
     "heat": WORDS[Wait.HEAT],
-    "paused_after_gate": WORDS[Wait.PAUSED],
     "disarmed_after_gate": WORDS[Wait.DISARMED],
+    # Stored before #829; nothing stores these now.
+    "paused": LEGACY_PAUSED_WORDS,
+    "paused_after_gate": LEGACY_PAUSED_WORDS,
 }
 
 
