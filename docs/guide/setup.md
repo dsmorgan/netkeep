@@ -105,7 +105,7 @@ make update
 
 It prints each step and stops at the first one that fails:
 
-1. It checks the checkout, and changes nothing if a check fails: `git`, `uv` and `pnpm` are on your `PATH`, `.venv/bin/netkeep` exists (`make setup` makes it), the branch is `main`, and no tracked file has uncommitted changes. Then it fetches `origin main` and checks that `main` fast-forwards to it. Untracked files are fine.
+1. It checks the checkout, and changes nothing if a check fails: `git`, `uv` and `pnpm` are on your `PATH`, `.venv/bin/netkeep` exists (`make setup` makes it), the branch is `main`, no merge, cherry-pick, revert or rebase is in progress, and no tracked file has uncommitted changes. Then it fetches `origin main` and checks that `main` fast-forwards to it. Untracked files are fine.
 2. It stops the login item and backs up the database into `<data>/backups/`, as `netkeep update` does. If you started `netkeep serve` yourself, it refuses: stop that `serve` first.
 3. It fast-forwards `main` to what it fetched.
 4. It runs `uv sync --all-extras --frozen`.

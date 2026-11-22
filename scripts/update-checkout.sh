@@ -4,8 +4,9 @@
 # serve took by hand, in order, and stops at the first that fails.
 #
 #   1. Check the checkout: git, uv and pnpm on PATH, .venv/bin/netkeep there, branch
-#      main, no uncommitted changes to tracked files, then fetch origin main and check
-#      main fast-forwards to it. A failed check changes nothing.
+#      main, no merge, cherry-pick, revert or rebase in progress, no uncommitted changes
+#      to tracked files, then fetch origin main and check main fast-forwards to it. A
+#      failed check changes nothing.
 #   2. `netkeep update --checkout-stop`, on the code the checkout has now: it refuses
 #      while you run serve yourself, stops the login item, and backs up the database.
 #   3. Fast-forward main to what step 1 fetched.
@@ -93,6 +94,10 @@ main() {
     || die "HEAD isn't on a branch. Run git switch main, then make update."
   [ "$branch" = main ] \
     || die "this checkout is on $branch, not main. Run git switch main, then make update."
+  for pending in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD rebase-apply rebase-merge; do
+    [ ! -e "$(git rev-parse --git-path "$pending")" ] \
+      || die "a git merge, cherry-pick, revert or rebase is in progress ($pending). Finish or abort it, then run make update."
+  done
   [ -z "$(git status --porcelain --untracked-files=no)" ] \
     || die "the checkout has uncommitted changes (git status). Commit or discard them, then run make update."
   git fetch --quiet origin main || die "git fetch origin main failed. Nothing was changed."

@@ -137,7 +137,7 @@ Then delete `<data>/update/state.json`.
 
 | What you see | What happened | What to do |
 |---|---|---|
-| "the checkout has uncommitted changes", "this checkout is on ..., not main", "can't fast-forward" | A check before step 2. Nothing was changed. | Commit or discard the changes, run `git switch main`, or move your local commits to a branch, then run `make update` again. |
+| "the checkout has uncommitted changes", "this checkout is on ..., not main", "a git merge, cherry-pick, revert or rebase is in progress", "can't fast-forward" | A check before step 2. Nothing was changed. | Commit or discard the changes, run `git switch main`, finish or abort the operation (`git merge --abort`, `git rebase --abort`), or move your local commits to a branch, then run `make update` again. |
 | "make update stopped before changing anything" | Step 2 refused: you run `netkeep serve` yourself, or the backup failed. The login item runs again if it was running. | Stop that `serve` (Ctrl+C in its terminal), or fix what the backup said, then run `make update` again. |
 | "the login item runs ..., not this checkout's ..." | The login item runs another checkout's `netkeep`. `make update` won't stop it or point it at this checkout. Nothing was changed. | Run `make update` in the checkout the login item runs. To move the login item to this checkout, run `.venv/bin/netkeep login-item on` here first. |
 | "the checkout didn't change" | `git` refused the fast-forward, for example because an untracked file is in the way. `make update` started the login item again on the code you had. | Do what `git` said, then run `make update` again. |
