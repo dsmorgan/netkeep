@@ -780,6 +780,12 @@ def _start_and_check(item: LoginItem, seams: Seams, say: Say, version: str) -> s
         item.enable(keep_arguments=True)
     except LoginItemError as exc:
         return f"the login item didn't start: {exc}"
+    return _check_version(item, seams, say, version)
+
+
+def _check_version(item: LoginItem, seams: Seams, say: Say, version: str) -> str | None:
+    """Wait for the login item's ``serve`` to answer with ``version``. ``None`` when it
+    does, else what went wrong."""
     host, port = item.serve_address()
     base = seams.base_url(host, port)
     say(f"Check netkeep serve answers at {base} with version {version}")
@@ -1017,8 +1023,9 @@ def checkout_stop(item: LoginItem, seams: Seams, say: Say) -> int:
 def checkout_start(item: LoginItem, seams: Seams, say: Say) -> int:
     """``make update``'s last step, on the updated code: when the login item is on, start
     it and check that ``serve`` answers with this version; when it's off, say how to start
-    ``serve``. It refuses while something else holds the serve lock, since a ``serve``
-    that answers then isn't one this step started."""
+    ``serve``. A login item that started already is only checked. It refuses while any
+    other process holds the serve lock, since a ``serve`` that answers then isn't the
+    login item's."""
     refusal = _checkout_refusal(item, seams)
     if refusal is not None:
         say(f"error: {refusal}")
@@ -1030,14 +1037,21 @@ def checkout_start(item: LoginItem, seams: Seams, say: Say) -> int:
         say("   netkeep serve isn't started. Start it with: make serve")
         return 0
     lock = seams.lock_state()
-    if lock.held:
+    holder = lock.holder.pid if lock.holder is not None else None
+    if lock.held and holder is not None and holder == item.agent_pid():
+        # The login item started already, from the launcher app (#754) or at a login
+        # during the update: check it rather than ask you to stop a serve you can't.
+        say(f"   the login item's netkeep serve is running already (pid {holder})")
+        failure = _check_version(item, seams, say, version)
+    elif lock.held:
         who = lock.holder.describe() if lock.holder is not None else "another netkeep process"
         say(
             f"   failed: {who} holds the serve lock, so the login item can't start. Stop that"
             f" netkeep serve, then run {CHECKOUT_AGAIN} again."
         )
         return 1
-    failure = _start_and_check(item, seams, say, version)
+    else:
+        failure = _start_and_check(item, seams, say, version)
     if failure is not None:
         say(f"   failed: {failure}")
         return 1
