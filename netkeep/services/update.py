@@ -1022,8 +1022,10 @@ def checkout_stop(item: LoginItem, seams: Seams, say: Say) -> int:
 
 def checkout_start(item: LoginItem, seams: Seams, say: Say) -> int:
     """``make update``'s last step, on the updated code: when the login item is on, start
-    it and check that ``serve`` answers with this version; when it's off, say how to start
-    ``serve``. A login item that started already is only checked. It refuses while any
+    it and check that a fresh ``serve`` answers (with this version, which stays the same
+    between releases, so the check shows a new ``serve`` started, not which commit it
+    runs); when it's off, say how to start ``serve``. A login item that started already
+    is only checked. It refuses while any
     other process holds the serve lock, since a ``serve`` that answers then isn't the
     login item's."""
     refusal = _checkout_refusal(item, seams)

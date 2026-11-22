@@ -60,6 +60,8 @@ Until the move succeeds, every command but `netkeep migrate`, `version` and `ope
 
 3. **Update.** In your checkout: `git pull`, `make install`, `make build-ui`.
 
+   Don't use `make update` here: it starts `serve` at the end, which migrates before you've seen the plan in step 4.
+
 4. **See the plan.** It prints each step, and changes nothing:
 
    ```sh
