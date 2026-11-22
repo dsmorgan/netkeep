@@ -411,6 +411,14 @@ async def test_arming_takes_confirm_and_the_client_header(
             "enrich",
             "inbox",
         ]
+        # Quick checks skip the full sync and enrichment (#829); the page reads it here
+        # rather than keeping its own copy of the list (#834).
+        assert {job["kind"]: job["skipped_on_quick"] for job in state["jobs"]} == {
+            "connections_incremental": False,
+            "connections_full": True,
+            "enrich": True,
+            "inbox": False,
+        }
         armed = await client.post(
             "/api/v1/linkedin/schedule/arm", json={"confirm": True}, headers=HEADERS
         )

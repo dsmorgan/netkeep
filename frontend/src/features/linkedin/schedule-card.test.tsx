@@ -73,6 +73,36 @@ describe('ScheduleCard (#829, #835)', () => {
     expect(screen.queryByText(/Nothing runs on its own/)).toBeNull()
   })
 
+  it('follows the schedule’s skipped_on_quick flag, not a list of its own (#834)', async () => {
+    renderCard({
+      'GET /api/v1/automation': () =>
+        jsonResponse(automation({ linkedin: { position: 'automatic', depth: 'quick' } })),
+      'GET /api/v1/linkedin/schedule': () =>
+        jsonResponse({
+          ...SCHEDULE_ARMED,
+          jobs: [
+            // Flipped from today's kinds on purpose: the card must read the flag.
+            {
+              kind: 'enrich',
+              interval_hours: 6,
+              next_due: '2026-09-23T14:00:00Z',
+              skipped_on_quick: false,
+            },
+            {
+              kind: 'connections_incremental',
+              interval_hours: 24,
+              next_due: '2026-09-24T08:00:00Z',
+              skipped_on_quick: true,
+            },
+          ],
+        }),
+    })
+    const list = within(await screen.findByRole('list', { name: 'Next runs' }))
+    const items = list.getAllByRole('listitem').map((item) => item.textContent)
+    expect(items[0]).toMatch(/^Enrichment: every 6h, next due /)
+    expect(items[1]).toBe('Incremental connections sync: not on quick checks')
+  })
+
   it('lists every kind’s due time on Automatic with the weekly full sync', async () => {
     renderCard({
       'GET /api/v1/automation': () =>

@@ -2113,6 +2113,10 @@ class ScheduledJobOut(BaseModel):
     kind: str
     interval_hours: float
     next_due: datetime | None
+    skipped_on_quick: bool
+    """True for a kind the schedule skips at Quick checks (``scheduler.FULL_UPKEEP_KINDS``:
+    the full sync and enrichment, #829): it fires only with the weekly full sync. Whether
+    the account is at Quick checks now is ``GET /automation``'s ``linkedin.depth`` (#834)."""
 
 
 class LastFireOut(BaseModel):

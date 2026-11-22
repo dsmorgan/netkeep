@@ -107,7 +107,7 @@ from netkeep.services.linkedin_session import (
     session_flag,
 )
 from netkeep.services.scheduled_runs import seed_served_schedule, submit_run
-from netkeep.services.scheduler import SERVED_SCHEDULES, stored_due
+from netkeep.services.scheduler import FULL_UPKEEP_KINDS, SERVED_SCHEDULES, stored_due
 from netkeep.services.visit_budget import todays_visits
 from netkeep.web.deps import (
     CurrentUser,
@@ -656,6 +656,7 @@ def _schedule_out(request: Request, session: SessionDep, user: User) -> Schedule
                 kind=kind.value,
                 interval_hours=schedule.interval.total_seconds() / 3600,
                 next_due=stored_due(session, user, account_id, kind),
+                skipped_on_quick=kind in FULL_UPKEEP_KINDS,
             )
             for kind, schedule in SERVED_SCHEDULES.items()
         ],

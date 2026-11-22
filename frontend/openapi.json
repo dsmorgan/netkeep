@@ -14037,12 +14037,17 @@
               }
             ],
             "title": "Next Due"
+          },
+          "skipped_on_quick": {
+            "title": "Skipped On Quick",
+            "type": "boolean"
           }
         },
         "required": [
           "kind",
           "interval_hours",
-          "next_due"
+          "next_due",
+          "skipped_on_quick"
         ],
         "title": "ScheduledJobOut",
         "type": "object"
