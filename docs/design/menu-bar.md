@@ -25,7 +25,7 @@ This note holds the mechanics behind [ADR 0014](../adr/0014-menu-bar-status-app.
 |---|---|
 | Open netkeep | `netkeep open` (the launcher's path, below) |
 | Check replies now | `POST /poll-status/gmail-replies/check-now` |
-| Pause / Resume LinkedIn scheduled runs | `POST /linkedin/schedule/pause`, `/unpause` |
+| Pause LinkedIn scheduled runs: a move to Manual (#829; ADR 0014's amendment) | `POST /linkedin/schedule/pause` |
 | Update to X.Y.Z | `netkeep update`, detached, after a confirmation |
 | Quit netkeep | `LoginItem.stop()`, then the menu bar exits, after a confirmation |
 

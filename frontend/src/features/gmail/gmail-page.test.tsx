@@ -217,7 +217,7 @@ describe('Gmail page', () => {
     expect(await screen.findByText(/No Gmail account is connected yet/)).toBeInTheDocument()
   })
 
-  it('shows the account, the client, and how it is armed', async () => {
+  it('shows the account, the client, and its Gmail position', async () => {
     renderPage({
       mailboxes: status({
         mailboxes: [mailbox({ email: 'sender@example.com', arm: 'draft', armed_at: NOW })],
@@ -228,7 +228,10 @@ describe('Gmail page', () => {
     expect(screen.getByText('configured')).toBeInTheDocument()
     expect(screen.getByText('1234-fake.apps.googleusercontent.com')).toBeInTheDocument()
     expect(screen.getByText('connected')).toBeInTheDocument()
-    expect(screen.getByText('armed: drafts only')).toBeInTheDocument()
+    expect(screen.getByText('Manual')).toBeInTheDocument()
+    expect(
+      screen.getByText(/^Manual since .*: every step becomes a draft you send yourself\.$/),
+    ).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Re-authorize' })).not.toBeInTheDocument()
   })
 

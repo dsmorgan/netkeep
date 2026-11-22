@@ -495,11 +495,11 @@ def _campaign(session: Session, user: User) -> _Raw:
 
 def _arm_schedule(session: Session, user: User) -> _Raw:
     if scheduled_runs_armed(session, user, account_id_for(session, user)):
-        return _Raw(StepState.DONE, "Scheduled LinkedIn runs are armed.")
+        return _Raw(StepState.DONE, "LinkedIn automation is on Automatic.")
     return _Raw(
         StepState.TODO,
-        "After a supervised run, arm scheduled runs on the LinkedIn page so they fire on"
-        " their own.",
+        "After a supervised run, move LinkedIn automation to Automatic on the LinkedIn"
+        " page so scheduled runs fire on their own.",
     )
 
 

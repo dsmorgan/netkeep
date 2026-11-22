@@ -6,8 +6,8 @@
  * one requirement: each step approved once, after paging through its rendered
  * messages (a step whose template uses `{{ personal_line }}` has each message
  * approved on its own instead), lint, a test per email step to your own
- * mailbox (a draft in your Drafts while Gmail is armed for drafts, a message sent
- * to you once it is armed to send). The guard summary is one line of who will start
+ * mailbox (a draft in your Drafts while Gmail is on Manual, a message sent to
+ * you once it is on Automatic). The guard summary is one line of who will start
  * and who is skipped, with each skipped contact on demand; it gates nothing, since the
  * guards apply again when each step fires (#346). Activation asks first, with the
  * scheduled start (#338), and a `409` shows what is still missing.
@@ -534,10 +534,10 @@ function TestSendSection({
       <p className="text-sm text-muted-foreground">
         Each email step goes once to your own address, {to}, with a [Test] subject, filled in with
         your own details from Settings, About you, never a contact&apos;s. It never goes to a
-        contact and counts toward no cap. Arm Gmail in Settings first. Armed for drafts, the test is
-        a draft in your Drafts, and netkeep never sends it. Armed to send, it&apos;s sent to you. A
-        reply you send from your own mailbox isn&apos;t counted; to test reply detection, reply from
-        a different Gmail account.
+        contact and counts toward no cap. Move Gmail to Manual first, on the Gmail page or under
+        Settings, Automation. On Manual, the test is a draft in your Drafts, and netkeep never sends
+        it. On Automatic, it&apos;s sent to you. A reply you send from your own mailbox isn&apos;t
+        counted; to test reply detection, reply from a different Gmail account.
       </p>
       {emailSteps.length === 0 ? (
         <p className="text-sm text-muted-foreground">No email steps, so no test send is needed.</p>

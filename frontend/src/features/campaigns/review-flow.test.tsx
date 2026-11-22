@@ -188,7 +188,9 @@ describe('review flow', () => {
     const sends = section('Test sends')
     expect(sends.getByText(/your own address, me@sender.example/)).toBeVisible()
     expect(sends.getByText(/never goes to a contact/)).toBeVisible()
-    expect(sends.getByText(/Armed for drafts, the test is a draft in your Drafts/)).toBeVisible()
+    expect(sends.getByText(/Move Gmail to Manual first/)).toBeVisible()
+    expect(sends.getByText(/On Manual, the test is a draft in your Drafts/)).toBeVisible()
+    expect(sends.queryByText(/Arm Gmail/)).toBeNull()
     expect(sends.queryByText(/must be armed for send/)).toBeNull()
     expect(sends.getByText(/reply from a different Gmail account/)).toBeVisible()
 

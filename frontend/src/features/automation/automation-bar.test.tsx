@@ -227,6 +227,41 @@ describe('the Gmail automation bar (#835)', () => {
     expect(puts()).toEqual([])
   })
 
+  it('says why in the dialog when a fresh read makes Automatic unavailable while it’s open (#834)', async () => {
+    let count = 0
+    let release: (response: Response) => void = () => {}
+    const { puts } = renderBar('gmail', undefined, {
+      'GET /api/v1/automation': () => {
+        count += 1
+        if (count === 1) return jsonResponse(automation())
+        // The read the dialog asks for: held, then the mailbox is no longer ready.
+        return new Promise<Response>((resolve) => {
+          release = resolve
+        })
+      },
+    })
+    fireEvent.click((await group('Gmail automation')).getByRole('radio', { name: 'Automatic' }))
+    const dialog = await screen.findByRole('alertdialog')
+    const confirm = within(dialog).getByRole('button', { name: 'Turn on Automatic' })
+    await waitFor(() => expect(count).toBe(2))
+    expect(confirm).toBeDisabled()
+
+    act(() =>
+      release(
+        jsonResponse(
+          automation({ gmail: { automatic_ready: false, blocked_reason: BLOCKED_REASON } }),
+        ),
+      ),
+    )
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      `Automatic isn’t available: ${BLOCKED_REASON}.`,
+    )
+    expect(confirm).toBeDisabled()
+    fireEvent.click(confirm)
+    expect(puts()).toEqual([])
+  })
+
   it('says “Automatic isn’t available yet.” once when the server gives no reason', async () => {
     renderBar('gmail', automation({ gmail: { automatic_ready: false, blocked_reason: null } }))
     const stop = (await group('Gmail automation')).getByRole('radio', { name: 'Automatic' })
