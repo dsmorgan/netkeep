@@ -112,6 +112,8 @@ It prints each step and stops at the first one that fails:
 5. It builds the UI into `frontend/dist`, as `make build-ui` does.
 6. If the login item is on, it starts it and checks that a fresh `serve` answers. The version number stays the same between releases, so the check shows that a new `serve` started, not which commit it runs. `serve` runs the new migrations when it starts. If the login item started during the update (from the launcher app, for example), it only checks it. If the login item is off, start netkeep with `make serve`.
 
+Don't start `serve` while `make update` runs.
+
 With nothing to pull, `make update` still reinstalls, rebuilds and restarts, so `.venv` and the UI always match the checkout.
 
 `make update` never rolls back. When a step fails, it prints the commit the checkout is at and the one it was at, whether the new code has run on the database, and what to run next. Usually that's: fix what failed, then run `make update` again. To go back instead, follow the commands it prints; see [Updating a checkout](troubleshooting.md#updating-a-checkout).
