@@ -431,6 +431,60 @@ def test_the_keychain_and_config_overrides_follow_the_agent(
     assert env["NETKEEP_CONFIG"] == "/c/config.toml"
 
 
+SETTINGS = {"NETKEEP_KEYCHAIN_SERVICE": "mine", "NETKEEP_CONFIG": "/c/config.toml"}
+
+
+def _plist_env(item: LoginItem) -> dict[str, object]:
+    env = read_plist(item)["EnvironmentVariables"]
+    assert isinstance(env, dict)
+    return env
+
+
+def test_a_kept_rewrite_keeps_the_plists_keychain_and_config(
+    launchctl: FakeLaunchctl, tmp_path: Path, data: Path
+) -> None:
+    """``netkeep update`` and ``make update`` restart the agent from a shell that may not
+    export them (#839): the agent keeps reading the Keychain service and config it had."""
+    make(launchctl, tmp_path, data, environ=SETTINGS).enable()
+    item = make(launchctl, tmp_path, data)
+    item.enable(keep_arguments=True)
+    env = _plist_env(item)
+    assert env["NETKEEP_KEYCHAIN_SERVICE"] == "mine"
+    assert env["NETKEEP_CONFIG"] == "/c/config.toml"
+
+
+def test_a_kept_rewrite_lets_this_shells_settings_win(
+    launchctl: FakeLaunchctl, tmp_path: Path, data: Path
+) -> None:
+    make(launchctl, tmp_path, data, environ=SETTINGS).enable()
+    item = make(launchctl, tmp_path, data, environ={"NETKEEP_CONFIG": "/d/other.toml"})
+    item.enable(keep_arguments=True)
+    env = _plist_env(item)
+    assert env["NETKEEP_CONFIG"] == "/d/other.toml"
+    assert env["NETKEEP_KEYCHAIN_SERVICE"] == "mine"
+
+
+def test_a_kept_rewrite_adds_no_setting_the_plist_lacked(
+    launchctl: FakeLaunchctl, tmp_path: Path, data: Path
+) -> None:
+    make(launchctl, tmp_path, data).enable()
+    item = make(launchctl, tmp_path, data)
+    item.enable(keep_arguments=True)
+    env = _plist_env(item)
+    assert "NETKEEP_KEYCHAIN_SERVICE" not in env and "NETKEEP_CONFIG" not in env
+
+
+def test_a_rewrite_that_doesnt_keep_drops_the_plists_settings(
+    launchctl: FakeLaunchctl, tmp_path: Path, data: Path
+) -> None:
+    """``netkeep login-item on`` writes what this process says, as before."""
+    make(launchctl, tmp_path, data, environ=SETTINGS).enable()
+    item = make(launchctl, tmp_path, data)
+    item.enable()
+    env = _plist_env(item)
+    assert "NETKEEP_KEYCHAIN_SERVICE" not in env and "NETKEEP_CONFIG" not in env
+
+
 def test_off_macos_nothing_runs_and_the_reason_is_given(
     launchctl: FakeLaunchctl, tmp_path: Path, data: Path
 ) -> None:
