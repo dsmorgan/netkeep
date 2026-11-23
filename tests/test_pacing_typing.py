@@ -659,10 +659,12 @@ def test_an_empty_body_is_an_empty_plan() -> None:
 
 # --- clusters whose end depends on the text before them (#411) ----------------------
 
-# A Unicode 17 linker between two consonants. From regex 2026.9.29 on, the linker
-# joins the consonant after it only when a consonant comes before it, so the middle
-# cluster changes with its context: in U+0915 U+1CF5 U+0915 it is U+1CF5 U+0915, yet
-# U+1CF5 U+0915 alone is two clusters. Before that release, each is a cluster alone.
+# A Unicode 17 linker between two consonants. Where its cluster ends has changed between
+# regex releases. 2026.9.29 joined the linker to the consonant after it only when a
+# consonant came before it, so U+1CF5 U+0915 alone was two clusters. 2026.11.9 splits the
+# pair in each context here. 2026.11.15 fixed its issue 636 (GB9c), so U+1CF5 U+0915 is
+# one cluster alone and in each context here. The tests below hold under any release:
+# a step types exactly what that release segments as one cluster.
 _CONTEXT_DEPENDENT = {
     "vedic_jihvamuliya": "\u0915\u1cf5\u0915",  # ka, U+1CF5, ka
     "vedic_upadhmaniya": "\u0915\u1cf6\u0915",  # ka, U+1CF6, ka
@@ -689,8 +691,8 @@ def test_a_linker_between_consonants_is_typed_as_the_text_segments_it(cluster: s
         plan = typing_plan(text, random.Random(seed))
         assert "".join(step.chunk for step in plan) == text
         _assert_typed_as_segmented(text, plan)
-    # The middle step is whatever segmenting the whole text makes it, under either
-    # regex release: U+1CF5 then U+0915, or the one cluster U+1CF5 U+0915.
+    # The middle step is whatever segmenting the whole text makes it, under any regex
+    # release: U+1CF5 then U+0915, or the one cluster U+1CF5 U+0915.
     found = list(_GRAPHEMES.finditer(text))
     for match in found:
         step = TypeStep(
@@ -699,18 +701,27 @@ def test_a_linker_between_consonants_is_typed_as_the_text_segments_it(cluster: s
         assert step.chunk == match.group()
 
 
+def _one_step(chunk: str, line: str = "", offset: int = 0) -> bool:
+    """Whether ``TypeStep`` takes ``chunk`` as one step, alone or at ``offset`` in ``line``;
+    a refusal must be the one-cluster rule's."""
+    try:
+        TypeStep(chunk=chunk, delay_before_s=0.1, newline=False, line=line, offset=offset)
+    except ValueError as exc:
+        assert "exactly one grapheme cluster" in str(exc)
+        return False
+    return True
+
+
 @pytest.mark.parametrize("cluster", _CONTEXT_DEPENDENT.values(), ids=_CONTEXT_DEPENDENT.keys())
 def test_a_context_dependent_cluster_is_one_step_only_in_its_context(cluster: str) -> None:
+    """The linker and the consonant after it are one step exactly where this regex release
+    segments them as one cluster: on their own, after the consonant before them, and after
+    a space. Each case is asserted under every release, never skipped (#845)."""
     tail = cluster[1:]  # the linker and the consonant after it
-    if len(_GRAPHEMES.findall(cluster)) != 2:
-        pytest.skip("this regex release has no context-dependent cluster here")
-    # Under a release that joins them in context, the pair is one step there...
-    TypeStep(chunk=tail, delay_before_s=0.1, newline=False, line=cluster, offset=1)
-    # ...but on its own line it is two clusters, and no step types two.
-    with pytest.raises(ValueError, match="exactly one grapheme cluster"):
-        TypeStep(chunk=tail, delay_before_s=0.1, newline=False)
-    with pytest.raises(ValueError, match="exactly one grapheme cluster"):
-        TypeStep(chunk=tail, delay_before_s=0.1, newline=False, line=" " + tail, offset=1)
+    alone = _GRAPHEMES.findall(tail) == [tail]
+    assert _one_step(tail) is alone
+    for line in (cluster, " " + tail):
+        assert _one_step(tail, line=line, offset=1) is (_GRAPHEMES.findall(line)[1:] == [tail])
 
 
 @pytest.mark.parametrize(
