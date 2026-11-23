@@ -51,7 +51,7 @@ An installed netkeep needs no Xcode tools, Homebrew, Node or git. To remove it, 
 
 ### From a checkout, for development
 
-A checkout also needs the Xcode command-line tools, for `git` (`xcode-select --install`), [uv](https://docs.astral.sh/uv/), and Node.js 22.12 or later with pnpm 10, to build the UI. With Node installed, `corepack enable` gives you the pnpm version the project pins.
+A checkout also needs the Xcode command-line tools, for `git` (`xcode-select --install`), [uv](https://docs.astral.sh/uv/), and Node.js 22.22.2 or later with pnpm 10, to build the UI (jsdom 31, which the UI tests use, needs it). With Node installed, `corepack enable` gives you the pnpm version the project pins.
 
 ```sh
 git clone https://github.com/dsmorgan/netkeep.git
